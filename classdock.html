@@ -670,6 +670,13 @@
         <label class="settings-check" id="settingSubwayRememberWrap"><input type="checkbox" id="settingSubwayRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
         <div class="settings-row"><span id="settingSubwayStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingSubwayTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingSubwayClear" type="button">키 지우기</button></span></div>
       </div>
+      <div class="settings-group-title">버스 실시간</div>
+      <p class="settings-hint">지도 문서의 <b>🚌 제주 버스</b>는 국토교통부 국가대중교통정보센터(TAGO) 자료를 씁니다. 공공데이터포털에서 <b>TAGO 버스노선정보</b>와 <b>TAGO 버스위치정보</b> 두 가지를 활용신청한 뒤 받은 인증키(일반 인증키)를 넣어 주세요. 인코딩·디코딩 키 어느 쪽이든 됩니다. 한 노선을 30초에 한 번씩만 물어봅니다.</p>
+      <div class="map-search-settings" id="settingTagoKeyWrap">
+        <label class="settings-row"><span>공공데이터포털 인증키<small>키는 HTML·브라우저 설정·작업공간에 저장하지 않고 ClassDock 로컬 런처에만 전달합니다.</small></span><input type="password" id="settingTagoKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="공공데이터포털 인증키"></label>
+        <label class="settings-check" id="settingTagoRememberWrap"><input type="checkbox" id="settingTagoRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
+        <div class="settings-row"><span id="settingTagoStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingTagoTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingTagoClear" type="button">키 지우기</button></span></div>
+      </div>
       <div class="settings-save-folder" id="settingSaveFolderWrap">
         <div class="settings-save-folder-copy"><strong>자동 저장 폴더</strong><small id="settingSaveFolderPath" aria-live="polite">저장 위치 확인 중…</small><span>위치 변경은 즉시 적용되며 기존 파일은 이동하지 않습니다.</span></div>
         <div class="settings-save-folder-actions"><button class="btn" id="settingSaveFolderOpen" type="button">현재 폴더 보기</button><button class="btn" id="settingSaveFolderChange" type="button">위치 변경</button></div>

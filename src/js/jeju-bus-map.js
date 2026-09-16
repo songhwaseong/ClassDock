@@ -9,7 +9,7 @@ const MNJejuBusMap = (() => {
     toggle.disabled=true;toggle.title=t("ClassDock EXE에서 인터넷 연결 후 사용할 수 있어요.");toolRow.appendChild(toggle);
     const panel=el("section","map-jeju-bus-panel");panel.hidden=true;panel.setAttribute("aria-label",t("제주 버스"));
     const heading=el("div","map-jeju-bus-heading"), close=button("닫기");
-    heading.append(el("strong","","제주 버스 · 시범"),close);
+    heading.append(el("strong","","제주 버스"),close);
     const form=el("form","map-jeju-bus-search"), input=el("input","map-input");
     input.placeholder=t("노선번호 (예: 201)");input.setAttribute("aria-label",t("버스 노선번호"));input.maxLength=12;
     try {input.value=localStorage.getItem("mapJejuBusKeyword") || "201";}catch(_){input.value="201";}
@@ -22,7 +22,7 @@ const MNJejuBusMap = (() => {
     start.disabled=true;fit.disabled=true;refresh.disabled=true;actions.append(start,fit,refresh);
     const status=el("p","map-jeju-bus-status");status.setAttribute("role","status");status.setAttribute("aria-live","polite");
     const note=el("p","map-jeju-bus-note","위치는 지연될 수 있으며, 갱신 사이에는 마지막 위치를 표시합니다.");
-    const source=el("a","","출처: 제주 버스정보시스템");source.href="https://bus.jeju.go.kr/";source.target="_blank";source.rel="noopener noreferrer";
+    const source=el("a","","출처: 국가대중교통정보센터(TAGO)");source.href="https://www.tago.go.kr/";source.target="_blank";source.rel="noopener noreferrer";
     const catalogRow=el("div","map-jeju-bus-catalog-info"),catalogText=el("span","");
     const catalogRefresh=button("목록 최신화","map-jeju-bus-catalog-refresh"),catalogCancel=button("최신화 취소");
     catalogRefresh.disabled=true;catalogCancel.hidden=true;catalogRow.append(catalogText,catalogRefresh,catalogCancel);
@@ -47,6 +47,10 @@ const MNJejuBusMap = (() => {
     const routeColor=()=>active && /급행|리무진/.test(active.type)?"#c0392b":active && /간선/.test(active.type)?"#176bc0":active && /관광/.test(active.type)?"#986b00":"#087f8c";
     const clock=stamp=>new Date(stamp).toLocaleTimeString([], {hour12:false});
     const setStatus=text=>{if(status.textContent!==text)status.textContent=text;};
+    // 키·한도 문제는 기다려도 풀리지 않으므로 '다시 시도하는 중'이라고 하지 않고 할 일을 알려 준다.
+    const failureText=(error,fallback)=>t(error && error.message==="bus-key-required"?"설정의 '버스 실시간'에 공공데이터포털 인증키를 넣어 주세요."
+      :error && error.message==="bus-key-invalid"?"인증키가 이 조회에 쓰일 수 없어요. 공공데이터포털에서 TAGO 버스노선정보·버스위치정보 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요."
+      :error && error.message==="bus-quota"?"오늘 조회 한도를 다 썼어요. 내일 다시 이용해 주세요.":fallback);
     const stopFrame=()=>{cancelAnimationFrame(frame);frame=0;};
     function clear(){markers.clear();vehicles.clearLayers();routesLayer.clearLayers();map.removeLayer(vehicles);map.removeLayer(routesLayer);}
     function cancelPoll(){if(pollAbort)pollAbort.abort();pollAbort=null;polling=false;}
@@ -104,7 +108,7 @@ const MNJejuBusMap = (() => {
         if(controller.signal.aborted || gen!==generation)return;
         delayed=true;failures=Math.min(failures+1,2);
         nextPoll=Math.max(nextPoll,Date.now()+(error.retryAfterMs || 0));
-        setStatus(t("버스 정보를 받지 못했어요. 다시 시도하는 중이에요."));
+        setStatus(failureText(error,"버스 정보를 받지 못했어요. 다시 시도하는 중이에요."));
       }finally{
         if(pollAbort===controller){pollAbort=null;polling=false;nextPoll=Math.max(nextPoll,Date.now()+30000*2**failures);}
       }
@@ -116,12 +120,14 @@ const MNJejuBusMap = (() => {
       stations=[];shape=null;start.disabled=true;refresh.disabled=!choice;
       if(!choice)return;
       preview.textContent=t("정류장 목록을 받는 중…");
-      const result=await Promise.allSettled([MNJejuBusApi.request("route",choice.id,{signal:controller.signal,refresh:force}),
-        MNJejuBusApi.request("shape",choice.id,{signal:controller.signal,refresh:force})]);
+      // TAGO 에는 도로를 따라 그린 노선 경로가 없다. 그래서 shape 는 비워 두고 이동은 옮겨 놓기로만 보인다
+      // (정류장 사이를 곧게 잇는 선으로 보간하면 건물·바다를 가로지른다).
+      let failure=null;
+      try{stations=await MNJejuBusApi.request("route",choice.id,{signal:controller.signal,refresh:force});}
+      catch(error){failure=error;stations=[];}
       if(destroyed || controller.signal.aborted || seq!==selectionGeneration)return;
-      stations=result[0].status==="fulfilled"?result[0].value:[];
-      shape=result[1].status==="fulfilled"?MNJejuBusLive.prepareShape(result[1].value):null;
-      preview.textContent=choice.from+" → "+choice.to+"\n"+(stations.length?stations.map(s=>s.name).join(" → "):t("정류장 정보를 받지 못했어요. 노선을 새로고침해 주세요."));
+      preview.textContent=choice.from+" → "+choice.to+"\n"+(stations.length?stations.map(s=>s.name).join(" → ")
+        :failure?failureText(failure,"정류장 정보를 받지 못했어요. 노선을 새로고침해 주세요."):t("정류장 정보가 없어요."));
       start.disabled=false;
     }
     async function searchRoutes(event){
@@ -143,11 +149,11 @@ const MNJejuBusMap = (() => {
         select.disabled=!result.length;
         try{localStorage.setItem("mapJejuBusKeyword",value);}catch(_){}
         if(result.length)await loadSelection();else preview.textContent=t("검색된 노선이 없어요.");
-      }catch(error){if(!controller.signal.aborted)setStatus(t("노선을 받지 못했어요. 잠시 후 다시 검색해 주세요."));}
+      }catch(error){if(!controller.signal.aborted){const text=failureText(error,"노선을 받지 못했어요. 잠시 후 다시 검색해 주세요.");setStatus(text);preview.textContent=text;}}
       finally{if(seq===searchGeneration)search.disabled=false;}
     }
-    // 노선 목록. 제주 사이트에는 전체 목록 조회가 없으므로 앱에 넣어 둔 목록을 기본으로 쓰고,
-    // 사용자가 [목록 최신화]를 누르면 런처가 번호를 하나씩 물어 만든 목록으로 갈아 끼운다.
+    // 노선 목록. 앱에 넣어 둔 목록을 기본으로 쓰고, 사용자가 [목록 최신화]를 누르면
+    // 런처가 TAGO 에서 받아 만든 목록으로 갈아 끼운다.
     function renderCatalog(){
       const placeholder=el("option","","노선 목록에서 고르기");placeholder.value="";
       const nodes=[placeholder];
@@ -181,7 +187,8 @@ const MNJejuBusMap = (() => {
       }
       catalogNote=job.state==="cancelled"?t("최신화를 멈췄어요. 예전 목록을 그대로 씁니다.")
         :job.state!=="failed"?""
-        :job.error==="bus-refused"?t("사이트가 요청을 거절해 멈췄어요. 예전 목록을 그대로 씁니다.")
+        :job.error==="bus-key-required" || job.error==="bus-key-invalid"?t("공공데이터포털 인증키가 없거나 맞지 않아요. 예전 목록을 그대로 씁니다.")
+        :job.error==="bus-quota"?t("오늘 조회 한도를 다 썼어요. 예전 목록을 그대로 씁니다.")
         :job.error==="bus-catalog-too-few"?t("찾은 번호가 너무 적어 예전 목록을 그대로 씁니다.")
         :t("노선 목록을 받지 못했어요. 예전 목록을 그대로 씁니다.");
       renderCatalog();
@@ -206,13 +213,12 @@ const MNJejuBusMap = (() => {
     }
     async function startCatalogRefresh(){
       if(typeof confirmDialog!=="function")return;
-      // 묻는 번호 개수는 런처가 정한다(상태 응답의 total). 한 번에 0.4초 남짓 걸린다.
-      let total=1999;
+      // 묻는 횟수의 기본 몫은 런처가 정한다(상태 응답의 total). 결과가 여러 쪽이면 몇 번 더 묻는다.
+      let total=10;
       try{const job=await MNJejuBusApi.catalogJob("status",{signal:capability.signal});if(job.total)total=job.total;}catch(_){}
       if(destroyed)return;
-      const minutes=Math.max(1,Math.round(total*0.4/60));
-      const ok=await confirmDialog(t("제주 사이트에 노선번호를 하나씩 물어 목록을 새로 만듭니다.")
-        +"\n\n"+t("약")+" "+minutes+t("분 걸리고, 요청을")+" "+total+t("번 보냅니다. 도중에 멈출 수 있어요."),t("목록 최신화"),t("취소"));
+      const ok=await confirmDialog(t("TAGO에서 제주 노선 목록을 받아 새로 만듭니다.")
+        +"\n\n"+t("오늘 조회 한도에서 요청을 약")+" "+total+t("번 씁니다. 도중에 멈출 수 있어요."),t("목록 최신화"),t("취소"));
       if(!ok || destroyed)return;
       catalogRefresh.disabled=true;catalogNote="";
       try{
@@ -246,6 +252,8 @@ const MNJejuBusMap = (() => {
       generation++;state=MNJejuBusLive.create();active=choice;on=true;failures=0;delayed=false;nextPoll=0;needsFit=true;
       vehicles.addTo(map);routesLayer.addTo(map);
       if(shape)routesLayer.addLayer(L.polyline(shape.segments,{pane:"mapJejuBusRoutePane",color:routeColor(),weight:3,opacity:0.5,interactive:false}));
+      // 도로 경로가 없으니 정류장 순서만 점선으로 잇는다. 실제 도로가 아니라는 뜻으로 옅게 그린다.
+      else if(stations.length>1)routesLayer.addLayer(L.polyline(stations.map(s=>s.at),{pane:"mapJejuBusRoutePane",color:routeColor(),weight:2,opacity:0.35,dashArray:"4 6",interactive:false}));
       for(const station of stations){const tip=el("span","",station.name);routesLayer.addLayer(L.circleMarker(station.at,{pane:"mapJejuBusRoutePane",radius:3,color:routeColor(),weight:1,fillOpacity:0.7}).bindTooltip(tip));}
       fit.disabled=false;toggle.title=t("제주 버스 표시 끄기");toggle.setAttribute("aria-pressed","true");toggle.classList.add("is-on");fitRoute();poll();
     });
@@ -270,7 +278,7 @@ const MNJejuBusMap = (() => {
     }).catch(()=>{});
     const controller={
       freeze(){frozen++;stopFrame();return ()=>{frozen=Math.max(0,frozen-1);nextPoll=0;tick();};},
-      captureNote(){return on && state.fetchedAt?t("제주 버스 위치")+" · "+t("마지막 수신")+" "+new Date(state.fetchedAt).toLocaleString()+" · bus.jeju.go.kr":"";},
+      captureNote(){return on && state.fetchedAt?t("제주 버스 위치")+" · "+t("마지막 수신")+" "+new Date(state.fetchedAt).toLocaleString()+" · TAGO":"";},
       destroy(){destroyed=true;stopLive();clearInterval(timer);capability.abort();if(searchAbort)searchAbort.abort();if(detailAbort)detailAbort.abort();
         document.removeEventListener("visibilitychange",tick);map.off("zoomend",paint);panel.remove();toggle.remove();pane.remove();routePane.remove();}
     };

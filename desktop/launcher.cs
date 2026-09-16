@@ -984,6 +984,7 @@ class ClassDockLauncher
             if (path.StartsWith("/exchange-rate-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/subway-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/jeju-bus-catalog", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/tago-key", StringComparison.Ordinal)) return true;
         }
         if (method == "GET")
         {
@@ -1024,9 +1025,11 @@ class ClassDockLauncher
             if (path == "/can-proxy-jeju-bus" || path.StartsWith("/jeju-bus-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
+            if (path == "/tago-key-status") return true;
         }
         if (method == "DELETE" && (path == "/map-search-key" || path == "/exchange-rate-key")) return true;
         if (method == "DELETE" && path == "/subway-key") return true;
+        if (method == "DELETE" && path == "/tago-key") return true;
         return false;
     }
 
@@ -3353,16 +3356,59 @@ class ClassDockLauncher
                     int question = path.IndexOf('?');
                     string kind = (question < 0 ? path : path.Substring(0, question)).Substring("/jeju-bus-".Length);
                     string value = (QueryValue(path, kind == "routes" ? "keyword" : "routeId") ?? "").Trim();
-                    if (!(kind == "routes" || kind == "route" || kind == "shape" || kind == "position") || !ValidJejuBusValue(kind, value))
+                    if (!(kind == "routes" || kind == "route" || kind == "position") || !ValidJejuBusValue(kind, value))
                     { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
-                    byte[] result; DateTime fetchedAt; bool stale; int retry;
-                    if (TryJejuBus(kind, value, QueryValue(path, "refresh") == "1", out result, out fetchedAt, out stale, out retry))
+                    byte[] result; DateTime fetchedAt; bool stale; int retry; string busError;
+                    if (TryJejuBus(kind, value, QueryValue(path, "refresh") == "1", out result, out fetchedAt, out stale, out retry, out busError))
                         WriteResponse(stream, "200 OK", "application/json; charset=utf-8", result,
                             "X-ClassDock-Bus-Fetched-At: " + fetchedAt.ToString("o", CultureInfo.InvariantCulture) + "\r\n"
                             + "X-ClassDock-Bus-Stale: " + (stale ? "1" : "0") + "\r\n"
                             + (stale ? "Retry-After: " + retry.ToString(CultureInfo.InvariantCulture) + "\r\n" : ""));
-                    else WriteResponse(stream, "503 Service Unavailable", "text/plain", Encoding.UTF8.GetBytes("bus-fetch-failed"),
-                        "Retry-After: " + retry.ToString(CultureInfo.InvariantCulture) + "\r\n");
+                    else
+                    {
+                        int bar = busError.IndexOf('|');
+                        string busUpstream = bar < 0 ? "" : new string(busError.Substring(bar + 1).Where(c => c >= ' ' && c < 127).ToArray());
+                        if (bar >= 0) busError = busError.Substring(0, bar);
+                        WriteResponse(stream,
+                        busError == "bus-key-required" || busError == "bus-key-invalid" ? "428 Precondition Required"
+                            : busError == "bus-quota" ? "429 Too Many Requests" : "503 Service Unavailable",
+                        "text/plain", Encoding.UTF8.GetBytes(busError),
+                        "Retry-After: " + retry.ToString(CultureInfo.InvariantCulture) + "\r\n"
+                        + (busUpstream.Length > 0 ? "X-ClassDock-Bus-Upstream: " + busUpstream + "\r\n" : ""));
+                    }
+                }
+                else if (method == "GET" && path == "/tago-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(TagoKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/tago-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string tagoKeyError;
+                    bool tagoKeySaved = TrySetTagoKey(Encoding.UTF8.GetString(body ?? new byte[0]),
+                        QueryValue(path, "remember") == "1", out tagoKeyError);
+                    WriteResponse(stream, tagoKeySaved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(tagoKeySaved ? "ok" : tagoKeyError));
+                }
+                else if (method == "DELETE" && path == "/tago-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool tagoKeyCleared = ClearTagoKey();
+                    WriteResponse(stream, tagoKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(tagoKeyCleared ? "ok" : "tago-key-clear-failed"));
                 }
                 else if (method == "GET" && path == "/can-proxy-subway")
                 {
@@ -5240,13 +5286,26 @@ class ClassDockLauncher
         return false;
     }
 
-    // 제주 사이트 시범 연결. 원격 URL을 입력받지 않고 네 가지 조회만 허용한다.
+    /* 제주 버스 = TAGO(국토교통부 국가대중교통정보센터, 공공데이터포털). 원격 URL을 입력받지 않고 세 가지 조회만 허용한다.
+       이 API 는 오류도 HTTP 200 에 본문 resultCode 로 알린다(00 정상 · 03 자료 없음 · 22 한도 초과 · 20/30/31/32 키 문제).
+       키가 틀리면 게이트웨이가 _type=json 을 무시하고 XML 이나 401 을 주기도 하므로 그것도 키 문제로 읽는다. */
+    const string TagoBase = "https://apis.data.go.kr/1613000/";
+    const string TagoJejuCityFallback = "39";
     class JejuBusCacheEntry
     {
         public byte[] Data;
         public DateTime FetchedAt;
         public DateTime RetryAt;
         public DateTime UsedAt;
+        public string Error = "";
+        public string Upstream = "";
+    }
+    class TagoException : Exception
+    {
+        public readonly string Reason;
+        public readonly string Upstream;   // 진단용: "HTTP 403 - 30" 처럼 TAGO 가 준 그대로
+        public TagoException(string reason) : this(reason, "") { }
+        public TagoException(string reason, string upstream) : base(reason) { Reason = reason; Upstream = upstream ?? ""; }
     }
     static readonly object JejuBusCacheLock = new object();
     static readonly Dictionary<string, JejuBusCacheEntry> JejuBusCache = new Dictionary<string, JejuBusCacheEntry>();
@@ -5254,19 +5313,22 @@ class ClassDockLauncher
 
     static bool ValidJejuBusValue(string kind, string value)
     {
-        if (String.IsNullOrEmpty(value) || value.Length > 12) return false;
-        return value.All(c => (c >= '0' && c <= '9') || (kind == "routes" && c == '-')) && value.Any(c => c >= '0' && c <= '9');
+        if (String.IsNullOrEmpty(value)) return false;
+        if (kind == "routes")
+            return value.Length <= 12 && value.All(c => (c >= '0' && c <= '9') || c == '-') && value.Any(c => c >= '0' && c <= '9');
+        return value.Length <= 30 && value.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
     }
-    static bool TryJejuBus(string kind, string value, bool refresh, out byte[] data, out DateTime fetchedAt, out bool stale, out int retry)
+    static bool TryJejuBus(string kind, string value, bool refresh, out byte[] data, out DateTime fetchedAt, out bool stale, out int retry, out string error)
     {
-        data = null; fetchedAt = DateTime.MinValue; stale = false; retry = 30;
-        string endpoint;
+        data = null; fetchedAt = DateTime.MinValue; stale = false; retry = 30; error = "bus-fetch-failed";
+        string key = CurrentTagoKey();
+        if (key.Length == 0) { error = "bus-key-required"; return false; }
+        string service, operation, query;
         switch (kind)
         {
-            case "routes": endpoint = "searchSimpleLineListByLineNum"; break;
-            case "route": endpoint = "getLineInfoByLineId"; break;
-            case "shape": endpoint = "getLinkInfoByLineId"; break;
-            case "position": endpoint = "getRealTimeBusPositionByLineId"; break;
+            case "routes": service = "BusRouteInfoInqireService"; operation = "getRouteNoList"; query = "routeNo=" + Uri.EscapeDataString(value) + "&numOfRows=300"; break;
+            case "route": service = "BusRouteInfoInqireService"; operation = "getRouteAcctoThrghSttnList"; query = "routeId=" + Uri.EscapeDataString(value) + "&numOfRows=1000"; break;
+            case "position": service = "BusLcInfoInqireService"; operation = "getRouteAcctoBusLcList"; query = "routeId=" + Uri.EscapeDataString(value) + "&numOfRows=300"; break;
             default: return false;
         }
         string cacheKey = kind + ":" + value;
@@ -5296,19 +5358,21 @@ class ClassDockLauncher
                 try
                 {
                     int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
-                    byte[] received = JejuBusPost(endpoint, (kind == "routes" ? "keyword=" : "lineId=") + Uri.EscapeDataString(value), max);
-                    var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = max;
-                    object parsed = parser.DeserializeObject(Encoding.UTF8.GetString(received));
-                    var obj = parsed as Dictionary<string, object>;
-                    bool valid = kind == "route" ? obj != null && obj.ContainsKey("stationInfoList") && obj["stationInfoList"] is object[]
-                        : parsed is object[] || (kind != "shape" && obj != null && obj.ContainsKey(kind == "routes" ? "routeId" : "vhId"));
-                    if (!valid) throw new IOException("bus-invalid-data");
-                    entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue;
+                    byte[] received = TagoGet(service, operation, query, key, max);
+                    entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue; entry.Error = ""; entry.Upstream = "";
                     data = entry.Data; fetchedAt = entry.FetchedAt; return true;
                 }
-                catch (WebException error)
+                catch (TagoException failure)
                 {
-                    using (var response = error.Response as HttpWebResponse)
+                    entry.Error = failure.Reason; entry.Upstream = failure.Upstream;
+                    // 한도는 자정에야 풀리므로 오래 기다린다. 키 문제는 설정에서 고치면 캐시가 비워진다.
+                    retry = failure.Reason == "bus-quota" ? 1800 : failure.Reason == "bus-key-invalid" ? 60 : 30;
+                    entry.RetryAt = DateTime.UtcNow.AddSeconds(retry);
+                }
+                catch (WebException failure)
+                {
+                    entry.Error = "bus-fetch-failed"; entry.Upstream = failure.Status.ToString();
+                    using (var response = failure.Response as HttpWebResponse)
                     {
                         if (response != null)
                         {
@@ -5324,42 +5388,288 @@ class ClassDockLauncher
                     }
                     entry.RetryAt = DateTime.UtcNow.AddSeconds(retry);
                 }
-                catch { entry.RetryAt = DateTime.UtcNow.AddSeconds(retry); }
+                catch { entry.Error = "bus-fetch-failed"; entry.RetryAt = DateTime.UtcNow.AddSeconds(retry); }
             }
             retry = Math.Max(1, (int)Math.Ceiling((entry.RetryAt - DateTime.UtcNow).TotalSeconds));
-            if (entry.Data != null && kind == "position" && DateTime.UtcNow < entry.FetchedAt.AddSeconds(120))
+            error = String.IsNullOrEmpty(entry.Error) ? "bus-fetch-failed" : entry.Error;
+            string upstreamNote = entry.Upstream;
+            // 키·한도 문제는 낡은 위치로 덮지 않는다 — 기다려도 풀리지 않는 일이라 화면이 까닭을 알려야 한다.
+            if (error == "bus-fetch-failed" && entry.Data != null && kind == "position" && DateTime.UtcNow < entry.FetchedAt.AddSeconds(120))
             { data = entry.Data; fetchedAt = entry.FetchedAt; stale = true; return true; }
+            if (upstreamNote.Length > 0) error += "|" + upstreamNote;
             return false;
         }
     }
-    static byte[] JejuBusPost(string endpoint, string body, int max)
+
+    // 공공데이터포털은 '인코딩 키'(%가 든 것)와 '디코딩 키'를 함께 준다. 어느 쪽을 넣어도 되게 한다.
+    static string TagoKeyParameter(string key)
+    {
+        return key.IndexOf('%') >= 0 ? key : Uri.EscapeDataString(key);
+    }
+    // TAGO 한 번 묻기. 정상(00)·자료 없음(03)이면 원문을 돌려주고, 그 밖에는 TagoException 을 던진다.
+    static byte[] TagoGet(string service, string operation, string query, string key, int max)
+    {
+        return TagoGetRaw(service, operation, "cityCode=" + TagoJejuCity(key) + "&" + query, key, max);
+    }
+    static byte[] TagoGetRaw(string service, string operation, string query, string key, int max)
     {
         try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
-        byte[] payload = Encoding.UTF8.GetBytes(body);
-        HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://bus.jeju.go.kr/data/search/" + endpoint);
-        request.Method = "POST"; request.ContentType = "application/x-www-form-urlencoded";
+        string url = TagoBase + service + "/" + operation + "?serviceKey=" + TagoKeyParameter(key) + "&_type=json&" + query;
+        HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = "GET";
         request.UserAgent = "ClassDock/1.0 (local classroom app)"; request.Accept = "application/json";
         request.AllowAutoRedirect = false; request.Timeout = 12000; request.ReadWriteTimeout = 12000;
-        request.ContentLength = payload.Length;
-        using (Stream output = request.GetRequestStream()) output.Write(payload, 0, payload.Length);
-        using (WebResponse response = request.GetResponse())
-        using (Stream input = response.GetResponseStream())
-        using (MemoryStream output = new MemoryStream())
+        byte[] received;
+        try
         {
-            byte[] buffer = new byte[8192]; int count;
-            while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
-            { if (output.Length + count > max) throw new IOException("bus-too-large"); output.Write(buffer, 0, count); }
-            return output.ToArray();
+            using (WebResponse response = request.GetResponse())
+            using (Stream input = response.GetResponseStream())
+            using (MemoryStream output = new MemoryStream())
+            {
+                byte[] buffer = new byte[8192]; int count;
+                while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
+                { if (output.Length + count > max) throw new IOException("bus-too-large"); output.Write(buffer, 0, count); }
+                received = output.ToArray();
+            }
         }
+        catch (WebException failure)
+        {
+            var response = failure.Response as HttpWebResponse;
+            int code = response == null ? 0 : (int)response.StatusCode;
+            if (code != 401 && code != 403 && code != 429) throw;
+            // 거절 본문에 까닭 코드가 있으면 그것을 따른다(한도 초과가 403 으로 올 수도 있다).
+            string reason = "";
+            try
+            {
+                using (Stream input = response.GetResponseStream())
+                using (MemoryStream output = new MemoryStream())
+                {
+                    byte[] buffer = new byte[8192]; int count;
+                    while ((count = input.Read(buffer, 0, buffer.Length)) > 0 && output.Length < 64 * 1024) output.Write(buffer, 0, count);
+                    reason = TagoResultCode(output.ToArray());
+                }
+            }
+            catch { }
+            finally { response.Close(); }
+            string upstream = "HTTP " + code.ToString(CultureInfo.InvariantCulture) + (reason.Length > 0 ? " - " + reason : "");
+            if (reason == "22" || code == 429) throw new TagoException("bus-quota", upstream);
+            throw new TagoException("bus-key-invalid", upstream);
+        }
+        string code2 = TagoResultCode(received);
+        if (code2 == "00" || code2 == "03") return received;
+        string upstream2 = "HTTP 200 - " + (code2.Length > 0 ? code2 : "?");
+        if (code2 == "22") throw new TagoException("bus-quota", upstream2);
+        if (code2 == "20" || code2 == "30" || code2 == "31" || code2 == "32") throw new TagoException("bus-key-invalid", upstream2);
+        throw new TagoException("bus-invalid-data", upstream2);
+    }
+    // JSON 이면 response.header.resultCode, 게이트웨이 XML 오류면 returnReasonCode 를 읽는다.
+    static string TagoResultCode(byte[] data)
+    {
+        string text = Encoding.UTF8.GetString(data ?? new byte[0]).Trim();
+        if (text.StartsWith("{", StringComparison.Ordinal))
+        {
+            try
+            {
+                var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = Math.Max(text.Length, 1024);
+                var root = parser.DeserializeObject(text) as Dictionary<string, object>;
+                object value;
+                var response = root != null && root.TryGetValue("response", out value) ? value as Dictionary<string, object> : null;
+                var header = response != null && response.TryGetValue("header", out value) ? value as Dictionary<string, object> : null;
+                // 게이트웨이 오류 모양: {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{"returnReasonCode":"30",…}}} (2026-09 실측, HTTP 403 과 함께 옴)
+                var gateway = root != null && root.TryGetValue("OpenAPI_ServiceResponse", out value) ? value as Dictionary<string, object> : null;
+                var gatewayHeader = gateway != null && gateway.TryGetValue("cmmMsgHeader", out value) ? value as Dictionary<string, object> : null;
+                if (gatewayHeader != null && gatewayHeader.TryGetValue("returnReasonCode", out value) && value != null)
+                    return Convert.ToString(value, CultureInfo.InvariantCulture).Trim();
+                if (header != null && header.TryGetValue("resultCode", out value) && value != null)
+                {
+                    string code = Convert.ToString(value, CultureInfo.InvariantCulture).Trim();
+                    // 00 인데 body 가 없으면 쓸 수 없는 응답이다.
+                    if (code == "00" && !response.ContainsKey("body")) return "";
+                    return code;
+                }
+            }
+            catch { }
+            return "";
+        }
+        var match = System.Text.RegularExpressions.Regex.Match(text, "<(?:returnReasonCode|resultCode)>\\s*(\\d+)\\s*<");
+        if (match.Success) return match.Groups[1].Value;
+        if (text.IndexOf("SERVICE_KEY", StringComparison.OrdinalIgnoreCase) >= 0) return "30";
+        return "";
     }
 
-    // 노선 목록 최신화. 제주 사이트에는 전체 목록 조회가 없고 번호가 정확히 같아야만 찾아 주므로 번호를 하나씩 묻는다.
-    // 사용자가 버튼을 눌렀을 때만, 한 번에 하나만, 요청 사이를 띄워 돈다. 검색 캐시(100개 상한)는 거치지 않는다 —
-    // 900번을 캐시로 돌리면 지금 보고 있는 노선 캐시까지 밀려난다. 결과가 너무 적으면 예전 목록을 그대로 둔다.
+    // 제주 도시코드. 처음 쓸 때 TAGO 도시 목록에서 이름으로 찾고, 못 찾으면 알려진 값(39)을 쓴다.
+    static readonly object TagoCityLock = new object();
+    static string TagoJejuCityCode = "";
+    static string TagoJejuCity(string key)
+    {
+        lock (TagoCityLock)
+        {
+            if (TagoJejuCityCode.Length > 0) return TagoJejuCityCode;
+            string found = "";
+            try
+            {
+                byte[] body = TagoGetRaw("BusRouteInfoInqireService", "getCtyCodeList", "numOfRows=300", key, 1024 * 1024);
+                var parser = new System.Web.Script.Serialization.JavaScriptSerializer();
+                foreach (var row in TagoItems(parser.DeserializeObject(Encoding.UTF8.GetString(body))))
+                {
+                    if (JejuBusField(row, "cityname").IndexOf("제주", StringComparison.Ordinal) < 0) continue;
+                    string code = JejuBusField(row, "citycode");
+                    if (code.Length > 0 && code.Length <= 9 && code.All(c => c >= '0' && c <= '9')) { found = code; break; }
+                }
+            }
+            catch (TagoException failure)
+            {
+                // 키·한도 문제는 도시코드와 상관없이 본 조회에서도 똑같이 난다 — 그대로 알린다.
+                if (failure.Reason != "bus-invalid-data") throw;
+            }
+            catch (WebException) { return TagoJejuCityFallback; }   // 연결 문제면 기억하지 않고 다음에 다시 찾는다
+            TagoJejuCityCode = found.Length > 0 ? found : TagoJejuCityFallback;
+            return TagoJejuCityCode;
+        }
+    }
+    static List<Dictionary<string, object>> TagoItems(object parsed)
+    {
+        var list = new List<Dictionary<string, object>>();
+        object value;
+        var root = parsed as Dictionary<string, object>;
+        var response = root != null && root.TryGetValue("response", out value) ? value as Dictionary<string, object> : null;
+        var body = response != null && response.TryGetValue("body", out value) ? value as Dictionary<string, object> : null;
+        var items = body != null && body.TryGetValue("items", out value) ? value as Dictionary<string, object> : null;
+        if (items == null || !items.TryGetValue("item", out value) || value == null) return list;
+        var many = value as object[];
+        if (many != null) { foreach (object item in many) { var row = item as Dictionary<string, object>; if (row != null) list.Add(row); } }
+        else { var one = value as Dictionary<string, object>; if (one != null) list.Add(one); }
+        return list;
+    }
+    static int TagoTotalCount(object parsed)
+    {
+        object value;
+        var root = parsed as Dictionary<string, object>;
+        var response = root != null && root.TryGetValue("response", out value) ? value as Dictionary<string, object> : null;
+        var body = response != null && response.TryGetValue("body", out value) ? value as Dictionary<string, object> : null;
+        int total;
+        return body != null && body.TryGetValue("totalCount", out value) && value != null
+            && Int32.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out total) ? total : 0;
+    }
+
+    // TAGO 인증키. 지하철 키와 같은 규칙 — 키 문자열은 런처에만 두고 브라우저에는 보유 여부만 알린다.
+    static readonly object TagoKeyLock = new object();
+    static readonly byte[] TagoKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.TagoKey.v1");
+    static readonly string TagoKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "tago-key.bin");
+    static bool TagoKeyLoaded;
+    static string TagoKey = "";
+
+    static bool ValidTagoKey(string value)
+    {
+        string key = (value ?? "").Trim();
+        if (key.Length < 16 || key.Length > 256) return false;
+        foreach (char ch in key)
+            if (!(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
+                || ch == '+' || ch == '/' || ch == '=' || ch == '%' || ch == '-' || ch == '_'))
+                return false;
+        return true;
+    }
+    static string CurrentTagoKey()
+    {
+        lock (TagoKeyLock)
+        {
+            if (!TagoKeyLoaded)
+            {
+                TagoKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(TagoKeyFile))
+                    {
+                        byte[] plain = ProtectedData.Unprotect(File.ReadAllBytes(TagoKeyFile), TagoKeyEntropy, DataProtectionScope.CurrentUser);
+                        string key = Encoding.UTF8.GetString(plain).Trim();
+                        if (ValidTagoKey(key)) TagoKey = key;
+                    }
+                }
+                catch { TagoKey = ""; }
+            }
+            return TagoKey;
+        }
+    }
+    static bool TagoKeyRemembered()
+    {
+        try { return File.Exists(TagoKeyFile) && CurrentTagoKey().Length > 0; }
+        catch { return false; }
+    }
+    static string TagoKeyStatusJson()
+    {
+        return "{\"hasKey\":" + (CurrentTagoKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (TagoKeyRemembered() ? "true" : "false")
+            + ",\"persistentSupported\":true}";
+    }
+    static bool SaveProtectedTagoKey(string key)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(TagoKeyFile));
+            byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), TagoKeyEntropy, DataProtectionScope.CurrentUser);
+            string temp = TagoKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            File.WriteAllBytes(temp, encrypted);
+            if (File.Exists(TagoKeyFile)) File.Delete(TagoKeyFile);
+            File.Move(temp, TagoKeyFile);
+            return true;
+        }
+        catch { return false; }
+    }
+    // 키가 바뀌면 그 키로 받은 것·그 키로 난 오류를 남기지 않는다.
+    static void ClearJejuBusCache()
+    {
+        lock (JejuBusCacheLock) JejuBusCache.Clear();
+    }
+    static bool ClearTagoKey()
+    {
+        lock (TagoKeyLock)
+        {
+            TagoKeyLoaded = true;
+            TagoKey = "";
+            try { if (File.Exists(TagoKeyFile)) File.Delete(TagoKeyFile); }
+            catch { return false; }
+        }
+        ClearJejuBusCache();
+        return true;
+    }
+    static bool TrySetTagoKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "tago-key-invalid";
+        if (!ValidTagoKey(key)) return false;
+        // 시험 조회는 제주 201번 노선 검색. 자료 없음(03)도 키는 멀쩡하다는 뜻이다.
+        // 버스위치정보는 따로 활용신청하는 API 라, 노선 검색만 통과하고 위치에서 막히면 지도 화면이 '키가 맞지 않아요'로 알린다.
+        try { TagoGet("BusRouteInfoInqireService", "getRouteNoList", "routeNo=201&numOfRows=1", key, 1024 * 1024); }
+        catch (TagoException failure) { error = failure.Reason == "bus-quota" ? "tago-quota" : failure.Reason == "bus-key-invalid" ? "tago-key-invalid" : "tago-failed"; return false; }
+        catch { error = "tago-failed"; return false; }
+        string previous = CurrentTagoKey();
+        lock (TagoKeyLock)
+        {
+            if (remember)
+            {
+                if (!SaveProtectedTagoKey(key)) { TagoKey = previous; error = "tago-key-save-failed"; return false; }
+            }
+            else
+            {
+                try { if (File.Exists(TagoKeyFile)) File.Delete(TagoKeyFile); }
+                catch { TagoKey = previous; error = "tago-key-save-failed"; return false; }
+            }
+            TagoKeyLoaded = true;
+            TagoKey = key;
+        }
+        ClearJejuBusCache();
+        error = "";
+        return true;
+    }
+
+    // 노선 목록 최신화. 사용자가 버튼을 눌렀을 때만, 한 번에 하나만 돈다. 조회 캐시(100개 상한)는 거치지 않는다.
+    // TAGO 는 번호 없이 물으면 도시 전체 노선을 주는 경우가 있어 먼저 그렇게 묻고, 모자라면 1~9 로 나눠 묻는다
+    // (번호 검색은 그 숫자가 들어간 노선을 모두 준다). 하루 조회 한도를 쓰므로 묻는 횟수를 세어 보인다.
+    // 결과가 너무 적으면 예전 목록을 그대로 둔다.
     static readonly string JejuBusCatalogFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "jeju-bus-routes.json");
-    // 2026-09 확인 범위: 101~1113번이 쓰이고 1200번 위로는 없었다. 개편 여유를 두고 1499번까지 묻는다.
-    const int JejuBusCatalogFirst = 1, JejuBusCatalogLast = 1499, JejuBusCatalogGapMs = 300;
+    const int JejuBusCatalogSteps = 10, JejuBusCatalogMaxPages = 5, JejuBusCatalogGapMs = 300;
     static readonly object JejuBusCatalogLock = new object();
     static string JejuBusCatalogState = "idle"; // idle · running · done · failed · cancelled
     static string JejuBusCatalogError = "";
@@ -5374,7 +5684,7 @@ class ClassDockLauncher
             status["state"] = JejuBusCatalogState; status["error"] = JejuBusCatalogError;
             status["done"] = JejuBusCatalogDone; status["found"] = JejuBusCatalogFound;
         }
-        status["total"] = JejuBusCatalogLast - JejuBusCatalogFirst + 1;
+        status["total"] = JejuBusCatalogSteps;
         return new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(status);
     }
     static bool StartJejuBusCatalog(int minimum)
@@ -5388,7 +5698,8 @@ class ClassDockLauncher
         Thread worker = new Thread(delegate()
         {
             try { RunJejuBusCatalog(minimum); }
-            catch { FinishJejuBusCatalog("failed", "bus-catalog-failed"); }
+            catch (TagoException failure) { FinishJejuBusCatalog("failed", failure.Reason == "bus-invalid-data" ? "bus-fetch-failed" : failure.Reason); }
+            catch { FinishJejuBusCatalog("failed", "bus-fetch-failed"); }
         });
         worker.IsBackground = true; worker.Start();
         return true;
@@ -5402,64 +5713,85 @@ class ClassDockLauncher
         object value;
         return row.TryGetValue(key, out value) && value != null ? Convert.ToString(value, CultureInfo.InvariantCulture).Trim() : "";
     }
-    // 번호 하나를 묻는다. 노선이 없으면 null, 받지 못하면 예외.
-    static object[] JejuBusCatalogEntry(string number)
+    // 번호 조건 하나(빈 문자열 = 조건 없음)로 여러 쪽을 받아 모은다. 취소되면 false.
+    static bool CollectJejuBusCatalog(string routeNo, string key, Dictionary<string, object[]> routes)
     {
-        const int max = 5 * 1024 * 1024;
-        var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = max;
-        object parsed = parser.DeserializeObject(Encoding.UTF8.GetString(JejuBusPost("searchSimpleLineListByLineNum", "keyword=" + number, max)));
-        object[] rows = parsed as object[];
-        var single = parsed as Dictionary<string, object>;
-        if (rows == null && single != null && single.ContainsKey("routeId")) rows = new object[] { single };
-        if (rows == null) throw new IOException("bus-invalid-data");
-        string from = "", to = ""; int count = 0;
-        foreach (object item in rows)
+        const int max = 5 * 1024 * 1024, rows = 1000;
+        for (int page = 1; page <= JejuBusCatalogMaxPages; page++)
         {
-            var row = item as Dictionary<string, object>;
-            if (row == null || JejuBusField(row, "routeNum") != number) continue;
-            if (count == 0) { from = JejuBusField(row, "orgtNm"); to = JejuBusField(row, "dstNm"); }
-            count++;
+            lock (JejuBusCatalogLock) { if (JejuBusCatalogCancel) return false; }
+            string query = (routeNo.Length > 0 ? "routeNo=" + routeNo + "&" : "") + "numOfRows=" + rows;
+            query += "&pageNo=" + page.ToString(CultureInfo.InvariantCulture);
+            byte[] body = null;
+            for (int attempt = 0; attempt < 3 && body == null; attempt++)
+            {
+                if (attempt > 0) Thread.Sleep(3000);
+                try { body = TagoGet("BusRouteInfoInqireService", "getRouteNoList", query, key, max); }
+                catch (TagoException failure) { if (failure.Reason != "bus-invalid-data" || attempt == 2) throw; }
+                catch (WebException failure)
+                {
+                    var response = failure.Response as HttpWebResponse;
+                    int code = response == null ? 0 : (int)response.StatusCode;
+                    if (response != null) response.Close();
+                    if (code == 403 || code == 503) throw new TagoException("bus-refused");
+                    if (attempt == 2) throw;
+                }
+            }
+            var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = max;
+            object parsed = parser.DeserializeObject(Encoding.UTF8.GetString(body));
+            var items = TagoItems(parsed);
+            foreach (var row in items)
+            {
+                string number = JejuBusField(row, "routeno");
+                if (number.Length == 0 || number.Length > 12 || !number.All(c => (c >= '0' && c <= '9') || c == '-')) continue;
+                object[] known;
+                if (routes.TryGetValue(number, out known)) known[3] = (int)known[3] + 1;
+                else routes[number] = new object[] { number, JejuBusField(row, "startnodenm"), JejuBusField(row, "endnodenm"), 1 };
+            }
+            lock (JejuBusCatalogLock) { JejuBusCatalogFound = routes.Count; }
+            Thread.Sleep(JejuBusCatalogGapMs);
+            if (items.Count < rows || page * rows >= TagoTotalCount(parsed)) break;
         }
-        return count > 0 ? new object[] { number, from, to, count } : null;
+        return true;
     }
     static void RunJejuBusCatalog(int minimum)
     {
-        var routes = new List<object>();
-        for (int number = JejuBusCatalogFirst; number <= JejuBusCatalogLast; number++)
+        string key = CurrentTagoKey();
+        if (key.Length == 0) { FinishJejuBusCatalog("failed", "bus-key-required"); return; }
+        // 같은 노선 ID 가 여러 번호 조건에 겹쳐 나오므로(21 은 1·2 둘 다에 걸림) 세부 노선 수는 조건 하나에서만 센다.
+        var all = new Dictionary<string, object[]>();
+        try { if (!CollectJejuBusCatalog("", key, all)) { FinishJejuBusCatalog("cancelled", ""); return; } }
+        catch (TagoException failure)
         {
-            string key = number.ToString(CultureInfo.InvariantCulture);
-            object[] found = null; bool received = false;
-            for (int attempt = 0; attempt < 3 && !received; attempt++)
-            {
-                lock (JejuBusCatalogLock) { if (JejuBusCatalogCancel) { JejuBusCatalogState = "cancelled"; return; } }
-                if (attempt > 0) Thread.Sleep(3000);
-                try { found = JejuBusCatalogEntry(key); received = true; }
-                catch (WebException error)
-                {
-                    var response = error.Response as HttpWebResponse;
-                    int code = response == null ? 0 : (int)response.StatusCode;
-                    if (response != null) response.Close();
-                    // 사이트가 거절하면 더 두드리지 않고 멈춘다.
-                    if (code == 403 || code == 429 || code == 503) { FinishJejuBusCatalog("failed", "bus-refused"); return; }
-                }
-                catch { }
-            }
-            if (!received) { FinishJejuBusCatalog("failed", "bus-fetch-failed"); return; }
-            if (found != null) routes.Add(found);
-            lock (JejuBusCatalogLock) { JejuBusCatalogDone = number - JejuBusCatalogFirst + 1; JejuBusCatalogFound = routes.Count; }
-            Thread.Sleep(JejuBusCatalogGapMs);
+            // 번호 없는 조회를 받아 주지 않는 경우다 — 나눠 묻기로 넘어간다.
+            if (failure.Reason != "bus-invalid-data") throw;
+            all.Clear();
         }
-        if (routes.Count < minimum) { FinishJejuBusCatalog("failed", "bus-catalog-too-few"); return; }
+        lock (JejuBusCatalogLock) { JejuBusCatalogDone = 1; }
+        var result = all;
+        if (all.Count < minimum)
+        {
+            result = new Dictionary<string, object[]>();
+            for (int digit = 1; digit <= 9; digit++)
+            {
+                var part = new Dictionary<string, object[]>();
+                if (!CollectJejuBusCatalog(digit.ToString(CultureInfo.InvariantCulture), key, part)) { FinishJejuBusCatalog("cancelled", ""); return; }
+                foreach (var pair in part) if (!result.ContainsKey(pair.Key)) result[pair.Key] = pair.Value;
+                lock (JejuBusCatalogLock) { JejuBusCatalogDone = 1 + digit; JejuBusCatalogFound = result.Count; }
+            }
+        }
+        if (result.Count < minimum) { FinishJejuBusCatalog("failed", "bus-catalog-too-few"); return; }
         var body = new Dictionary<string, object>();
         body["updatedAt"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
-        body["source"] = "bus.jeju.go.kr";
-        body["routes"] = routes;
+        body["source"] = "tago";
+        body["routes"] = result.Values.ToList();
         byte[] bytes = Encoding.UTF8.GetBytes(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(body));
         Directory.CreateDirectory(Path.GetDirectoryName(JejuBusCatalogFile));
         string temp = JejuBusCatalogFile + ".tmp";
         File.WriteAllBytes(temp, bytes);
         if (File.Exists(JejuBusCatalogFile)) File.Replace(temp, JejuBusCatalogFile, null);
         else File.Move(temp, JejuBusCatalogFile);
+        lock (JejuBusCatalogLock) { JejuBusCatalogDone = JejuBusCatalogSteps; }
         FinishJejuBusCatalog("done", "");
     }
 

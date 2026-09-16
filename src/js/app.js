@@ -1231,6 +1231,78 @@ function wire(){
     } catch(_){ setSubwayStatus("인증키를 지우지 못했습니다.", "bad"); syncSubwayFields(); }
   });
   refreshSubwayKeyStatus();
+
+  /* ── 버스 실시간(TAGO, 공공데이터포털 인증키) ── 지하철 키와 같은 규칙이다. */
+  const tagoKeyInput = byId("settingTagoKey");
+  const tagoRemember = byId("settingTagoRemember");
+  const tagoRememberWrap = byId("settingTagoRememberWrap");
+  const tagoStatusText = byId("settingTagoStatus");
+  const tagoTest = byId("settingTagoTest");
+  const tagoClear = byId("settingTagoClear");
+  let tagoKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const setTagoStatus = (text, kind) => {
+    tagoStatusText.textContent = typeof window.t === "function" ? window.t(text) : text;
+    tagoStatusText.classList.toggle("ok", kind === "ok");
+    tagoStatusText.classList.toggle("bad", kind === "bad");
+  };
+  const syncTagoFields = () => {
+    const available = tagoKeyStatus.available;
+    tagoKeyInput.disabled = !available;
+    tagoTest.disabled = !available;
+    tagoClear.disabled = !available || !tagoKeyStatus.hasKey;
+    tagoRemember.disabled = !available || !tagoKeyStatus.persistentSupported;
+    tagoRememberWrap.hidden = !tagoKeyStatus.persistentSupported;
+    tagoRemember.checked = !!tagoKeyStatus.remembered;
+    tagoKeyInput.placeholder = tagoKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "인증키 입력";
+  };
+  const refreshTagoKeyStatus = async (message, kind) => {
+    tagoKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    try {
+      const response = await fetch("/tago-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      tagoKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      if (message) setTagoStatus(message, kind);
+      else if (tagoKeyStatus.hasKey) setTagoStatus(tagoKeyStatus.remembered
+        ? "버스 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "버스 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setTagoStatus("인증키가 없어 지도의 '제주 버스'를 쓸 수 없습니다.", "");
+    } catch(_){ setTagoStatus("버스 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncTagoFields();
+  };
+  tagoTest.addEventListener("click", async () => {
+    const key = tagoKeyInput.value.trim();
+    if (!key){ setTagoStatus("저장할 공공데이터포털 인증키를 입력해 주세요.", "bad"); tagoKeyInput.focus(); return; }
+    tagoTest.disabled = true; tagoClear.disabled = true;
+    setTagoStatus("TAGO 연결을 시험하는 중…", "");
+    try {
+      const response = await fetch("/tago-key?remember=" + (tagoRemember.checked ? "1" : "0"), {
+        method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+        body:key, cache:"no-store"
+      });
+      if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+      tagoKeyInput.value = "";
+      await refreshTagoKeyStatus("TAGO 연결에 성공했고 키를 저장했습니다.", "ok");
+    } catch(error){
+      const reason = error && error.message;
+      setTagoStatus(reason === "tago-key-save-failed" ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
+        : reason === "tago-quota" ? "오늘 조회 한도를 다 쓴 키입니다. 내일 다시 시험해 주세요."
+        : reason === "tago-failed" ? "TAGO에 연결하지 못했습니다. 인터넷 연결을 확인하고 다시 시험해 주세요."
+        : "인증키를 확인하지 못했습니다. 공공데이터포털에서 TAGO 버스노선정보를 활용신청한 키인지 확인해 주세요. 신청 직후에는 반영까지 시간이 걸릴 수 있습니다.", "bad");
+      syncTagoFields();
+    }
+  });
+  tagoClear.addEventListener("click", async () => {
+    tagoClear.disabled = true;
+    try {
+      const response = await fetch("/tago-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      tagoKeyInput.value = "";
+      await refreshTagoKeyStatus("버스 인증키를 지웠습니다.", "ok");
+    } catch(_){ setTagoStatus("인증키를 지우지 못했습니다.", "bad"); syncTagoFields(); }
+  });
+  refreshTagoKeyStatus();
   const setSettingsTab = (name) => {
     document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
       const on = tab.dataset.settingsTab === name;

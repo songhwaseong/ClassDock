@@ -33,7 +33,6 @@ function harness(){
     request(kind,value,options){requests.push({kind,value,options});
     if(kind==="routes")return Promise.resolve([{id:"1",number:"201",from:"A",to:"B",type:"간선"},{id:"2",number:"201",from:"B",to:"A",type:"간선"}]);
     if(kind==="route")return Promise.resolve([{id:"s",name:"stop",at:[33.3,126.5]}]);
-    if(kind==="shape")return Promise.resolve([[33.3,126.5],[33.301,126.5]]);
     const task=deferred();pending.push({task,request:requests.at(-1)});return task.promise;}};
   const confirms=[];let confirmAnswer=true;
   const context={console,Date:Clock,Map,Set,AbortController,Promise,MNJejuBusApi:fakeApi,MNJejuBusLive:live,L,document:doc,
@@ -53,7 +52,7 @@ function harness(){
     answerConfirm(value){confirmAnswer=value;},
     tick(ms=1000){now+=ms;for(const fn of intervals)fn();},now:()=>now};
 }
-const body=(id,at,x=126.5)=>api.positions([{vhId:1,plateNo:"bus",localY:33.3,localX:x,currStationId:1,currStationNm:"stop"}],id,at);
+const body=(id,at,x=126.5)=>api.positions({response:{header:{resultCode:"00"},body:{items:{item:{vehicleno:"bus",gpslati:33.3,gpslong:x,nodeid:"s1",nodenm:"stop"}}}}},id,at);
 test("노선 변경 후 늦은 응답을 무시하고 지도를 닫으면 요청·타이머를 정리한다",async()=>{
   const h=harness();await flush();assert.equal(h.button.disabled,false);
   await h.form.fire("submit");h.start.click();assert.equal(h.pending.length,1);const old=h.pending[0];
@@ -82,13 +81,20 @@ test("숨긴 지도는 요청을 중지하고 복귀 시 갱신하며 캡처 고
   const resume=h.controller.freeze();h.pending.at(-1).task.resolve(body("1",h.now()));await flush();assert.equal(h.groups[0].items.length,0);
   h.tick(60000);assert.equal(h.pending.length,count+1);resume();assert.equal(h.pending.length,count+2);
   h.pending.at(-1).task.resolve(body("1",h.now()));await flush();assert.equal(h.groups[0].items.length,1);
-  assert.match(h.controller.captureNote(),/bus.jeju.go.kr/);h.controller.destroy();
+  assert.match(h.controller.captureNote(),/TAGO/);h.controller.destroy();
 });
 test("서버 실패는 운행 차량 없음과 구분하고 재시도 간격을 지킨다",async()=>{
   const h=harness();await h.form.fire("submit");h.tick();h.start.click();
   const error=new Error("failed");error.retryAfterMs=120000;h.pending[0].task.reject(error);await flush();
   h.tick(31000);assert.equal(h.pending.length,1);assert.match(h.status.textContent,/받지 못/);
   h.tick(90000);assert.equal(h.pending.length,2);h.controller.destroy();
+});
+test("인증키가 없으면 다시 시도한다고 하지 않고 설정을 안내한다",async()=>{
+  const h=harness();await h.form.fire("submit");h.start.click();
+  h.pending[0].task.reject(new Error("bus-key-required"));await flush();
+  assert.match(h.status.textContent,/버스 실시간/);assert.doesNotMatch(h.status.textContent,/다시 시도/);
+  assert.equal(h.requests.some(r=>r.kind==="shape"),false);
+  h.controller.destroy();
 });
 test("노선 목록에서 고르면 번호를 채워 검색하고, 최신화는 확인을 받은 뒤에만 시작한다",async()=>{
   const h=harness();await flush();
@@ -124,9 +130,15 @@ test("최신화가 실패하거나 멈추면 예전 목록을 그대로 둔다",
 test("API 어댑터는 런처 캐시 시각과 Retry-After를 보존한다",async()=>{
   const original=global.fetch;let requested;
   try{
-    global.fetch=async(url,options)=>{requested={url,options};return {ok:true,headers:new Headers({"X-ClassDock-Bus-Fetched-At":"2026-09-12T03:34:16.000Z","X-ClassDock-Bus-Stale":"1","Retry-After":"120"}),json:async()=>[]};};
-    const result=await api.request("position","1");assert.equal(result.fetchedAt,Date.parse("2026-09-12T03:34:16Z"));assert.equal(result.stale,true);assert.equal(result.retryAfterMs,120000);
-    assert.equal(requested.url,"/jeju-bus-position?routeId=1");assert.equal(requested.options.cache,"no-store");
+    global.fetch=async(url,options)=>{requested={url,options};return {ok:true,headers:new Headers({"X-ClassDock-Bus-Fetched-At":"2026-09-12T03:34:16.000Z","X-ClassDock-Bus-Stale":"1","Retry-After":"120"}),json:async()=>({response:{header:{resultCode:"00"},body:{items:""}}})};};
+    const result=await api.request("position","JJB405320111");assert.equal(result.fetchedAt,Date.parse("2026-09-12T03:34:16Z"));assert.equal(result.stale,true);assert.equal(result.retryAfterMs,120000);
+    assert.equal(requested.url,"/jeju-bus-position?routeId=JJB405320111");assert.equal(requested.options.cache,"no-store");
     await assert.rejects(()=>api.request("position","https://example.com"));
+    await assert.rejects(()=>api.request("shape","JJB1"));
+    // 키가 없으면 런처가 428 과 까닭을 준다 — 그 까닭을 그대로 오류 이름으로 넘긴다.
+    global.fetch=async()=>({ok:false,status:428,headers:new Headers({"Retry-After":"30"}),text:async()=>"bus-key-required"});
+    await assert.rejects(()=>api.request("position","JJB1"),error=>error.message==="bus-key-required" && error.retryAfterMs===30000);
+    global.fetch=async()=>({ok:false,status:503,headers:new Headers(),text:async()=>"<html>"});
+    await assert.rejects(()=>api.request("route","JJB1"),/bus-fetch-failed/);
   }finally{global.fetch=original;}
 });
