@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="240" viewBox="0 0 560 240">
+  <rect width="560" height="240" rx="20" fill="#0f172a"/>
+  <text x="140" y="42" fill="#94a3b8" font-family="Arial, sans-serif" font-size="17" text-anchor="middle">현재 메모</text>
+  <text x="420" y="42" fill="#94a3b8" font-family="Arial, sans-serif" font-size="17" text-anchor="middle">추천 PDF 페이지</text>
+
+  <rect x="88" y="68" width="104" height="104" rx="18" fill="#172033" stroke="#334155" stroke-width="2"/>
+  <g transform="translate(108 88) scale(2.7)" fill="none" stroke="#dbe7f5" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 3h14v18H5z"/>
+    <path d="M8 8h8M8 12h8M8 16h5"/>
+  </g>
+
+  <rect x="368" y="68" width="104" height="104" rx="18" fill="#172033" stroke="#334155" stroke-width="2"/>
+  <g transform="translate(388 88) scale(2.7)" fill="none" stroke="#dbe7f5" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7 6V4h12v15h-2"/>
+    <rect x="5" y="6" width="12" height="15" rx="1.5"/>
+    <path d="M8 10h6M8 14h6M8 18h4"/>
+  </g>
+
+  <text x="140" y="207" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">한 장 문서</text>
+  <text x="420" y="207" fill="#cbd5e1" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">겹친 여러 페이지</text>
+</svg>
