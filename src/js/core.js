@@ -123,6 +123,35 @@
     return result(null, "알 수 없는 인코딩", "알 수 없음", { uncertain:true });
   }
 
+  // 표 파일(CSV·TSV·TXT)을 바이트 모양에 맞는 인코딩으로 푼다. 엑셀의 "CSV(쉼표로 분리)"는 CP949 로
+  // 저장되므로 UTF-8 로만 읽으면 첫 줄 열 이름부터 깨져 "열이 필요합니다"로 보인다. BOM 은 떼어 낸다.
+  function decodeTextAuto(value) {
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value || 0);
+    const info = detectTextEncoding(bytes);
+    try { return new TextDecoder((info && info.encoding) || "utf-8").decode(bytes); }
+    catch(_) { return new TextDecoder("utf-8").decode(bytes); }
+  }
+  async function readTextFileAuto(file) {
+    return decodeTextAuto(new Uint8Array(await file.arrayBuffer()));
+  }
+
+  // "양식 받기"로 내려주는 CSV. 엑셀이 한글을 UTF-8 로 알아보도록 BOM 을 붙이고 줄 끝은 CRLF 로 둔다.
+  function tableTemplateCsv(rows) {
+    const cell = (value) => {
+      const text = String(value == null ? "" : value);
+      return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+    };
+    return "﻿" + (rows || []).map(row => (row || []).map(cell).join(",")).join("\r\n") + "\r\n";
+  }
+
+  // 필요한 열을 못 찾았을 때 "파일에서 찾은 열"로 보여 줄 짧은 목록. 빈 열 이름은 빼고 길면 줄인다.
+  function describeFoundColumns(headers, limit=8) {
+    const names = (headers || []).map(value => String(value == null ? "" : value).replace(/^﻿/, "").trim()).filter(Boolean);
+    if (!names.length) return "";
+    const shown = names.slice(0, limit).map(name => name.length > 20 ? name.slice(0, 20) + "…" : name);
+    return shown.join(", ") + (names.length > limit ? " 외 " + (names.length - limit) + "개" : "");
+  }
+
   function resolveRuntimeOutputPath(ownerPath, outputPath, logicalRoot="", bundled=false) {
     const normalize = (value) => String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/");
     const dirname = (value) => { const path = normalize(value), index = path.lastIndexOf("/"); return index >= 0 ? path.slice(0, index) : ""; };
@@ -4612,7 +4641,7 @@
 
   return {
     decodeWorkspace, encodeWorkspace, escapeAttr, escapeHtml, inlineMarkdown, indexWorkspacePathsByFolder,
-    detectCsvDelimiter, detectTextEncoding, indexCsvRows, parseCsvRecord,
+    detectCsvDelimiter, detectTextEncoding, decodeTextAuto, readTextFileAuto, tableTemplateCsv, describeFoundColumns, indexCsvRows, parseCsvRecord,
     fingerprintBytes, formatZipOpenSummary, inferPythonLocalImportRoots, inferPythonProjectRunContext, isExternalRef, markdownToHtml, latexToMathML, sanitizeHtml, htmlTagAllowed, htmlAttrAllowed, htmlSanitizeUrl, htmlSanitizeStyle, normalizeWorkspacePath,
     pythonRelativePathLiterals, pythonRunScopeIncludesPath, resolveProjectRelativePath, resolveRuntimeOutputPath, resolveSiblingPath, safeArchivePath, safeLink,
     windowsAbsolutePathLiterals, windowsAbsolutePathTouchesFolder,

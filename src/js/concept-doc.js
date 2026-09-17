@@ -452,7 +452,7 @@ function conceptGraphFromRows(rows){
   const mode = fromAt >= 0 && toAt >= 0 ? "edges" : "nodes";
   // 개념 표에서는 제목 열이 그 줄의 카드고, 따로 있는 '상위' 열이 그 카드의 부모다.
   const baseAt = mode === "edges" ? fromAt : titleAt, parentAt = mode === "edges" ? -1 : (fromAt !== titleAt ? fromAt : -1);
-  if (baseAt < 0) throw new Error("concept-table-columns");
+  if (baseAt < 0) throw Object.assign(new Error("concept-table-columns"), { headers:rows[0] || [] });
   const weightAt = find("weight"), weightEdgeIds = [];
   const typeAt = find("type"), labelAt = find("label"), categoryAt = find("category"), descriptionAt = find("description"), colorAt = find("color");
   const fallbackRelation = mode === "edges" ? conceptDefaultRelation(rows[0][fromAt], rows[0][toAt]) : "include";
@@ -626,10 +626,20 @@ async function saveConceptDoc(doc){
    부서 이름이 깨지지 않는다(판정기는 코어의 것을 그대로 쓴다). */
 async function conceptTableText(file){
   try {
-    if (typeof detectTextEncoding !== "function") throw new Error("no-detector");
-    const bytes = new Uint8Array(await file.arrayBuffer()), info = detectTextEncoding(bytes);
-    return new TextDecoder((info && info.encoding) || "utf-8").decode(bytes);
+    if (typeof readTextFileAuto !== "function") throw new Error("no-detector");
+    return await readTextFileAuto(file);
   } catch(_){ return await file.text(); }
+}
+/* '양식 받기' — 관계 표 모양 그대로 채워 다시 들이면 되는 CSV. 열 이름은 CONCEPT_TABLE_COLUMNS 의
+   첫 이름만 쓰므로 들이기 규칙과 어긋나지 않는다. */
+function conceptTableTemplateRows(){
+  const C = CONCEPT_TABLE_COLUMNS;
+  return [
+    [C.from[0], C.type[0], C.to[0], C.label[0], C.category[0], C.description[0], C.color[0]],
+    ["식물", "포함", "잎", "", "생물", "광합성을 하는 생물", "초록"],
+    ["잎", "원인", "산소", "만든다", "생물", "빛으로 양분을 만든다", ""],
+    ["산소", "관련", "호흡", "", "생물", "", "파랑"]
+  ];
 }
 /* 엑셀은 연대표가 쓰는 ExcelJS 묶음과 시트 읽기·네임스페이스 교정을 그대로 빌린다. 사진은 읽지
    않으므로(카드 사진은 손으로 넣는다) 첫 시트의 글자만 표로 만들어 돌려준다. */
@@ -1292,7 +1302,7 @@ function mountConceptEditor(doc){
     const body = document.createElement("div"); body.className = "concept-io-form";
     body.innerHTML = '<section class="concept-io-block"><h3>표에서 가져오기</h3>'
       + '<p>CSV·엑셀(.xlsx)의 첫 시트를 읽습니다. 첫 줄의 열 이름에서 <b>개념·출발·상위</b>와 <b>대상·도착·하위</b>를 알아보고, 관계·연결선·분류·설명·색 열이 있으면 함께 씁니다. 대상 열이 없는 표는 한 줄이 카드 하나입니다.</p>'
-      + '<div class="concept-io-actions"><button type="button" class="ci-file primary">표 파일 고르기</button><button type="button" class="ci-csv">관계 CSV 저장</button></div></section>'
+      + '<div class="concept-io-actions"><button type="button" class="ci-file primary">표 파일 고르기</button><button type="button" class="ci-template">양식 받기</button><button type="button" class="ci-csv">관계 CSV 저장</button></div></section>'
       + '<section class="concept-io-block"><h3>개요 글</h3>'
       + '<p>들여쓰기 한 단계가 <b>상위 → 하위</b> 한 단계입니다. 한 줄은 <code>제목 | 설명 | 분류</code>로 적을 수 있고, 글머리 기호와 번호는 알아서 뗍니다.</p>'
       + '<textarea class="ci-outline" rows="10" spellcheck="false"></textarea>'
@@ -1335,6 +1345,11 @@ function mountConceptEditor(doc){
       if (typeof toast === "function") toast(parts[0], 3200);
     };
     body.querySelector(".ci-file").onclick = () => fileInput.click();
+    body.querySelector(".ci-template").onclick = () => {
+      if (typeof tableTemplateCsv !== "function") return;
+      conceptDownload("관계도 표 양식.csv", new Blob([tableTemplateCsv(conceptTableTemplateRows())], { type:"text/csv;charset=utf-8" }));
+      say("양식을 내려받았어요. 예시 줄을 지우고 채운 뒤 [표 파일 고르기]로 들이세요.");
+    };
     fileInput.onchange = async () => {
       const file = fileInput.files && fileInput.files[0]; fileInput.value = ""; if (!file) return;
       const isSheet = /\.xlsx$/i.test(String(file.name || ""));
@@ -1342,7 +1357,8 @@ function mountConceptEditor(doc){
       try { await apply(conceptGraphFromRows(await conceptRowsFromFile(file)), isSheet ? "엑셀 시트" : "표"); }
       catch(error){
         const code = error && error.message;
-        say(code === "concept-table-columns" ? "‘개념(또는 출발·상위)’ 열을 찾지 못했어요. 첫 줄에 열 이름을 적어 주세요."
+        const found = code === "concept-table-columns" && typeof describeFoundColumns === "function" ? describeFoundColumns(error.headers) : "";
+        say(code === "concept-table-columns" ? "‘개념(또는 출발·상위)’ 열을 찾지 못했어요. 첫 줄에 열 이름을 적어 주세요." + (found ? ` (파일에서 찾은 열: ${found}) [양식 받기]로 모양을 확인하세요.` : " [양식 받기]로 모양을 확인하세요.")
           : code === "concept-xlsx-runtime" ? "엑셀을 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요."
           : code === "concept-table-empty" ? "읽을 내용이 없어요. 첫 줄은 열 이름, 둘째 줄부터 내용이어야 해요."
           : "표를 읽지 못했어요.", true);
@@ -1405,5 +1421,5 @@ if (typeof module !== "undefined" && module.exports){
   module.exports = { CONCEPT_DOC_TYPE, CONCEPT_DOC_VERSION, CONCEPT_RELATIONS, CONCEPT_PRESENT_ANIMATIONS, CONCEPT_LAYOUTS, CONCEPT_LAYOUT_SPACING, conceptNormalizeNode, conceptNormalizeEdge, conceptNormalizePresentation,
     conceptDocEmpty, conceptDocParse, conceptDocSerialize, conceptSearchText, conceptNodeConnections, conceptAutoLayout, conceptClusterGroups, conceptAutoPresentationOrder, conceptClampZoom, conceptFitZoom, conceptZoomPan, conceptClampPan, conceptZoomScrollWithOffset, conceptDragCoordinate, conceptCanvasSize, conceptScratchFileName, conceptDefaultTitle,
     CONCEPT_TABLE_COLUMNS, CONCEPT_TREE_RELATIONS, conceptHeaderKey, conceptMatchKey, conceptRelationId, conceptColorId, conceptDefaultRelation, conceptCsvDelimiter, conceptCsvRows, conceptCsvCell,
-    conceptGraphFromRows, conceptOutlineParse, conceptGraphToOutline, conceptGraphToCsv, conceptMergeGraph };
+    conceptGraphFromRows, conceptTableTemplateRows, conceptOutlineParse, conceptGraphToOutline, conceptGraphToCsv, conceptMergeGraph };
 }

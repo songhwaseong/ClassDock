@@ -429,6 +429,17 @@ function timelineExportHeaders(purpose, includePhoto){
   return headers;
 }
 
+/* '양식 받기' — 내보내기와 같은 열 이름에 예시 두 줄. 그대로 채워 [표 들이기]로 다시 읽힌다. */
+function timelineTemplateRows(purpose){
+  const trip = timelinePurpose(purpose) === "trip";
+  const examples = trip
+    ? [["2026-05-01", "2026-05-01", "공항 출발", "이동", "김포공항", "서울 강서구 하늘길 111", "", "오전 9시 비행기", "파랑"],
+      ["2026-05-02", "", "성산일출봉", "관광", "성산일출봉", "제주 서귀포시 성산읍 성산리 1", "", "일출 보기", ""]]
+    : [["1392", "", "조선 건국", "정치", "", "", "", "이성계가 조선을 세움", "파랑"],
+      ["1443", "1446", "한글 창제와 반포", "문화", "경복궁", "서울 종로구 사직로 161", "", "", "초록"]];
+  return [timelineExportHeaders(purpose, false), ...examples];
+}
+
 function timelineEventsToCsv(events, purpose){
   const lines = [timelineExportHeaders(purpose, false)];
   for (const row of timelineSortedEvents(events)){
@@ -549,7 +560,7 @@ function timelineEventsFromRows(rows){
   const imageAt = find(["이미지 파일명", "이미지파일명", "이미지 파일", "이미지", "사진 파일명", "사진파일명", "사진 파일", "사진", "image filename", "image file", "image", "photo filename", "photo file", "photo"]);
   const descAt = find(["설명", "내용", "메모", "description", "note"]);
   const colorAt = find(["색", "색상", "color"]);
-  if (startAt < 0 || titleAt < 0) throw new Error("csv-columns");
+  if (startAt < 0 || titleAt < 0) throw Object.assign(new Error("csv-columns"), { headers:rows[0] });
   const events = [];
   const rowIndexes = [];
   let skipped = 0;
@@ -871,7 +882,8 @@ function mountTimelineEditor(doc){
   exportPanel.className = "timeline-export-panel";
   const csvOutBtn = timelineButton("CSV", "사건 목록을 UTF-8 CSV로 저장", "timeline-export-option");
   const xlsxOutBtn = timelineButton("Excel (.xlsx)", "사진을 포함한 사건 목록을 Excel 파일로 저장", "timeline-export-option");
-  exportPanel.append(csvOutBtn, xlsxOutBtn);
+  const templateBtn = timelineButton("빈 양식 (CSV)", "[표 들이기]에 쓸 열 이름과 예시가 든 CSV 받기", "timeline-export-option timeline-template");
+  exportPanel.append(csvOutBtn, xlsxOutBtn, templateBtn);
   exportMenu.append(exportSummary, exportPanel);
   const presentBtn = timelineButton("▶ 발표", "사건을 하나씩 크게 보여주기");
   const printBtn = timelineButton("🖨 인쇄", "세로 목록으로 인쇄하거나 PDF로 저장");
@@ -1094,6 +1106,13 @@ function mountTimelineEditor(doc){
   }
 
   const serialize = () => timelineDocSerialize(model);
+  const downloadTemplate = () => {
+    if (typeof tableTemplateCsv !== "function") return;
+    const name = timelineT(tripMode() ? "여행 일정 표 양식" : "연대표 표 양식") + ".csv";
+    timelineDownload(name, new Blob([tableTemplateCsv(timelineTemplateRows(model.purpose))], { type:"text/csv;charset=utf-8" }));
+    exportMenu.open = false;
+  };
+  templateBtn.addEventListener("click", downloadTemplate);
   const snapshot = () => timelineSnapshot(model);
   const touch = () => {
     if (typeof markDocumentDirty === "function"){
@@ -1737,7 +1756,7 @@ function mountTimelineEditor(doc){
     const oldLabel = csvInBtn.textContent;
     if (isSheet){ csvInBtn.disabled = true; csvInBtn.textContent = timelineT("엑셀 읽는 중…"); }
     try {
-      const result = isSheet ? await timelineEventsFromXlsx(file) : timelineEventsFromCsv(await file.text());
+      const result = isSheet ? await timelineEventsFromXlsx(file) : timelineEventsFromCsv(typeof readTextFileAuto === "function" ? await readTextFileAuto(file) : await file.text());
       const room = Math.max(0, TIMELINE_MAX_EVENTS - model.events.length);
       const added = result.events.slice(0, room);
       if (!added.length) throw new Error("event-limit");
@@ -1768,11 +1787,14 @@ function mountTimelineEditor(doc){
       if (typeof toast === "function") toast(parts.join(" · "), imageRefs || attached ? 5200 : 3600);
     } catch(error){
       const code = error && error.message;
+      const found = code === "csv-columns" && typeof describeFoundColumns === "function" ? describeFoundColumns(error.headers) : "";
       const message = code === "csv-columns" ? timelineTf("{source}에 ‘시작’과 ‘제목’ 열이 필요합니다.", { source })
+          + (found ? " " + timelineTf("(찾은 열: {columns})", { columns:found }) : "")
         : code === "event-limit" ? timelineT(tripMode() ? "여행 일정에는 항목을 최대 1,000개까지 넣을 수 있어요." : "연대표에는 사건을 최대 1,000개까지 넣을 수 있어요.")
         : code === "xlsx-runtime" ? timelineT("엑셀을 읽을 준비가 안 됐어요. 잠시 뒤 다시 시도해 주세요.")
         : timelineTf(tripMode() ? "{source}에서 일정을 읽지 못했어요." : "{source}에서 사건을 읽지 못했어요.", { source });
-      if (typeof toast === "function") toast(message, 3200, { type:"error" });
+      const templateAction = code === "csv-columns" ? { label:timelineT("양식 받기"), onClick:downloadTemplate } : null;
+      if (typeof toast === "function") toast(message, 3200, templateAction ? { type:"error", action:templateAction } : { type:"error" });
     } finally {
       csvInBtn.disabled = false; csvInBtn.textContent = oldLabel;
     }
@@ -1959,7 +1981,7 @@ if (typeof module !== "undefined" && module.exports){
     timelineSnapshot, timelineSnapshotEqual, timelineSnapshotModel,
     timelineEventsFromRows, timelineCellText, timelineSheetRows, timelineSheetImageRows, timelineNormalizeXlsxNamespaces, timelineEventsFromXlsx,
     timelineSortedEvents, timelineCanMoveEvent, timelineMoveEvent, timelineLayoutEntries, timelineOverviewEntries,
-    timelineEventsToCsv, timelineEventsToXlsx, timelineEventsFromCsv,
+    timelineEventsToCsv, timelineEventsToXlsx, timelineEventsFromCsv, timelineTemplateRows,
     timelineImageMatchName, timelineImageFileLookup, timelineFindImageFile,
     timelinePhotoTotalChars, timelineScratchFileName, timelineDefaultTitle
   };

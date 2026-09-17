@@ -2141,6 +2141,12 @@
     "발표할 사건이 없습니다.": "There are no events to present.",
     "연대표 문서(.timeline)를 읽지 못해 텍스트로 열었어요.": "Couldn't read the timeline document, so it was opened as text.",
     "{source}에 ‘시작’과 ‘제목’ 열이 필요합니다.": "The {source} needs Start and Title columns.",
+    "(찾은 열: {columns})": "(columns found: {columns})",
+    "양식 받기": "Get template",
+    "빈 양식 (CSV)": "Blank template (CSV)",
+    "[표 들이기]에 쓸 열 이름과 예시가 든 CSV 받기": "Download a CSV with the column names and examples for [Import table]",
+    "연대표 표 양식": "Timeline table template",
+    "여행 일정 표 양식": "Itinerary table template",
     "연대표에는 사건을 최대 1,000개까지 넣을 수 있어요.": "A timeline can contain up to 1,000 events.",
     "{source}에서 사건을 읽지 못했어요.": "Couldn't read events from the {source}.",
     "엑셀 시트": "Excel sheet",
@@ -2407,6 +2413,12 @@
     "지역별 표시 개수": "Pins per region",
     "아직 표시가 없습니다 — 표시를 찍으면 지역마다 개수로 칠해요.": "No pins yet — add pins and each region is shaded by its count.",
     "값으로 쓸 숫자 열을 찾지 못했어요.": "Couldn't find a numeric column to use as values.",
+    "지역 이름 열과 숫자 열이 함께 있어야 해요 — [양식 받기]로 모양을 확인하세요.":
+      "The table needs a region-name column and a numeric column — use [Get template] to see the layout.",
+    "지금 고른 기준(시도·시군구·읍면동)에 맞는 예시 CSV 받기": "Download a sample CSV for the selected level (province, district, or neighborhood)",
+    "색칠 지도 양식(시도)": "Choropleth template (provinces)",
+    "색칠 지도 양식(시군구)": "Choropleth template (districts)",
+    "색칠 지도 양식(읍면동)": "Choropleth template (neighborhoods)",
     "표를 붙여 넣거나 파일을 골라 주세요.": "Paste a table or choose a file.",
     "행정경계 자료를 불러오지 못했어요.": "Couldn't load the boundary data.",
     "파일을 읽지 못했어요.": "Couldn't read the file.",
@@ -2675,8 +2687,13 @@
       "Timeline table or Excel support isn't ready yet. Try again in a moment.",
     "연대표 표에서 장소나 주소가 있는 항목을 찾지 못했습니다.":
       "No timeline items with a place or address were found.",
-    "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다.":
-      "The first row needs map latitude/longitude or address columns, or timeline Start and Title columns.",
+    "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다. [표 양식]으로 모양을 확인하세요.":
+      "The first row needs map latitude/longitude or address columns, or timeline Start and Title columns. Use [Table template] to see the layout.",
+    "표에서 필요한 열을 찾지 못했어요.": "Couldn't find the required columns in the table.",
+    "표 양식": "Table template",
+    "[자료 들이기]에 쓸 CSV 양식 받기 — 이름·위도·경도 또는 주소 열이 필요합니다(연대표 표도 읽습니다)":
+      "Download a CSV template for [Import data] — needs Name plus Latitude/Longitude or Address columns (timeline tables also work)",
+    "지도 표시 양식": "Map pins template",
     "표에서 사용할 수 있는 표시를 찾지 못했습니다.": "No usable pins were found in the table.",
     "지도 자료에서 사용할 수 있는 표시·경로·영역을 찾지 못했습니다.": "No usable pins, routes, or areas were found in the map data.",
     "CSV에서 사용할 수 있는 표시를 찾지 못했습니다.": "No usable pins were found in the CSV.",

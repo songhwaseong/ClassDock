@@ -690,7 +690,7 @@ function mapMarkersFromCsv(text){
   const phoneAt = find(["전화번호", "전화", "연락처", "phone", "tel"]);
   const regionAt = find(["시도", "광역시도", "region"]);
   const districtAt = find(["시군구", "구", "district"]);
-  if ((latAt < 0 || lngAt < 0) && addressAt < 0) throw new Error("csv-columns");
+  if ((latAt < 0 || lngAt < 0) && addressAt < 0) throw Object.assign(new Error("csv-columns"), { headers:rows[0] });
   const markers = [];
   const pending = [];
   let skipped = 0;
@@ -748,6 +748,12 @@ function mapMarkersToMemoRows(markers){
       Number(marker.lat).toFixed(6), Number(marker.lng).toFixed(6)]);
   }
   return rows;
+}
+/* '표 양식' — 내보내기와 같은 열 이름에 예시 두 줄. 둘째 줄처럼 좌표를 비우면 주소로 찾는다. */
+function mapMarkersTemplateRows(){
+  return [mapMarkersToRows([])[0],
+    ["경복궁", "37.579617", "126.977041", "조선의 법궁", "빨강", "서울 종로구 사직로 161", "", "서울특별시", "종로구"],
+    ["남산서울타워", "", "", "위도·경도를 비우면 주소로 위치를 찾아요", "파랑", "서울 용산구 남산공원길 105", "", "", ""]];
 }
 function mapMarkersToCsv(markers){
   const rows = mapMarkersToRows(markers);
@@ -2881,6 +2887,14 @@ function mapChoroRowsFromText(text){
   }
   return mapCsvRows(source).map(cells => cells.map(cell => String(cell).trim()));
 }
+// 색칠 지도 '양식 받기' — 이름 칸(여러 개면 이어 붙임)과 숫자 값 칸 하나. 기준(시도·시군구·읍면동)마다 모양이 다르다.
+function mapChoroTemplateRows(level){
+  if (level === "emd") return [["시도", "시군구", "읍면동", "인구(명)"],
+    ["서울특별시", "종로구", "청운효자동", "11500"], ["서울특별시", "종로구", "사직동", "9100"]];
+  if (level === "sgg") return [["시도", "시군구", "인구(명)"],
+    ["서울특별시", "종로구", "139000"], ["부산광역시", "중구", "40000"], ["경기도", "수원시", "1190000"]];
+  return [["지역", "인구(명)"], ["서울특별시", "9386034"], ["부산광역시", "3266598"], ["제주특별자치도", "670000"]];
+}
 function mapChoroTable(rows){
   const clean = (Array.isArray(rows) ? rows : []).map(cells => (Array.isArray(cells) ? cells : []).map(cell => String(cell == null ? "" : cell).trim()))
     .filter(cells => cells.some(Boolean));
@@ -3083,6 +3097,7 @@ function openMapChoropleth(model, hooks){
         '<textarea class="map-choro-paste" rows="7" spellcheck="false" placeholder="엑셀에서 지역 이름과 값 열을 함께 복사해 붙여 넣으세요.\n예)\n지역\t인구\n서울특별시\t9,386,034\n부산광역시\t3,266,598"></textarea>' +
         '<div class="map-choro-row">' +
           '<button class="btn map-choro-file" type="button">CSV·엑셀 파일 고르기</button>' +
+          '<button class="btn map-choro-template" type="button" title="지금 고른 기준(시도·시군구·읍면동)에 맞는 예시 CSV 받기">양식 받기</button>' +
           '<label class="map-nearby-field"><span>값 열</span><select class="map-select map-choro-column"></select></label>' +
         '</div>' +
       '</div>' +
@@ -3272,7 +3287,10 @@ function openMapChoropleth(model, hooks){
     }
     const column = Number(columnSelect.value);
     if (!table.rows.length || !columnSelect.options.length){
-      note.textContent = paste.value.trim() ? mapT("값으로 쓸 숫자 열을 찾지 못했어요.") : mapT("표를 붙여 넣거나 파일을 골라 주세요.");
+      const found = typeof describeFoundColumns === "function" ? describeFoundColumns(table.header.length ? table.header : mapChoroRowsFromText(paste.value)[0]) : "";
+      note.textContent = !paste.value.trim() ? mapT("표를 붙여 넣거나 파일을 골라 주세요.")
+        : mapT("값으로 쓸 숫자 열을 찾지 못했어요.") + (found ? " " + mapTf("(찾은 열: {columns})", { columns:found }) : "")
+          + " " + mapT("지역 이름 열과 숫자 열이 함께 있어야 해요 — [양식 받기]로 모양을 확인하세요.");
       applyBtn.disabled = true;
       return;
     }
@@ -3306,6 +3324,12 @@ function openMapChoropleth(model, hooks){
   for (const radio of modal.querySelectorAll('input[name="mapChoroSource"]')) radio.addEventListener("change", render);
 
   $(".map-choro-file").addEventListener("click", () => { fileInput.value = ""; fileInput.click(); });
+  $(".map-choro-template").addEventListener("click", () => {
+    if (typeof tableTemplateCsv !== "function") return;
+    const level = levelSelect.value === "sgg" || levelSelect.value === "emd" ? levelSelect.value : "sido";
+    const name = mapT(level === "emd" ? "색칠 지도 양식(읍면동)" : level === "sgg" ? "색칠 지도 양식(시군구)" : "색칠 지도 양식(시도)") + ".csv";
+    mapDownloadText(tableTemplateCsv(mapChoroTemplateRows(level)), name, "text/csv;charset=utf-8");
+  });
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files && fileInput.files[0];
     if (!file) return;
@@ -3322,7 +3346,7 @@ function openMapChoropleth(model, hooks){
         paste.value = rows.map(cells => (cells || []).map(cell => String(cell == null ? "" : cell).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
       } else {
         if (file.size > 5 * 1024 * 1024) throw new Error("csv-too-large");
-        paste.value = await file.text();
+        paste.value = typeof readTextFileAuto === "function" ? await readTextFileAuto(file) : await file.text();
       }
       modal.querySelector('input[value="table"]').checked = true;
       parsePaste();
@@ -4551,6 +4575,11 @@ async function mountMapEditor(doc){
   csvImportBtn.type = "button"; csvImportBtn.className = "map-btn map-csv-import map-toolvis-csv-import";
   csvImportBtn.textContent = "자료 들이기";
   csvImportBtn.title = "CSV·Excel·GeoJSON·GPX·KML에서 표시·경로·영역 추가 — 지도 형식은 API 키 없이 읽습니다";
+  // 양식은 들이기와 한 짝이라 도구 숨김 설정도 같은 칸(map-toolvis-csv-import)을 따른다.
+  const csvTemplateBtn = document.createElement("button");
+  csvTemplateBtn.type = "button"; csvTemplateBtn.className = "map-btn map-csv-template map-toolvis-csv-import";
+  csvTemplateBtn.textContent = "표 양식";
+  csvTemplateBtn.title = "[자료 들이기]에 쓸 CSV 양식 받기 — 이름·위도·경도 또는 주소 열이 필요합니다(연대표 표도 읽습니다)";
   const csvExportBtn = document.createElement("button");
   csvExportBtn.type = "button"; csvExportBtn.className = "map-btn map-csv-export map-toolvis-csv-export";
   csvExportBtn.textContent = "CSV 내보내기"; csvExportBtn.title = "지도 표시를 Excel에서 열 수 있는 CSV로 저장";
@@ -4677,7 +4706,7 @@ async function mountMapEditor(doc){
 
   bar.append(titleInput, searchWrap, toolsToggleBtn, undoBtn, redoBtn, saveBtn, coord, status);
   toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, clusterBtn, routeBtn, driveBtn, listBtn,
-    presentBtn, nearbyBtn, regionBtn, choroBtn, imageBtn, imageClearBtn, csvImportBtn, csvExportBtn, csvMemoBtn, clearItemsBtn,
+    presentBtn, nearbyBtn, regionBtn, choroBtn, imageBtn, imageClearBtn, csvImportBtn, csvTemplateBtn, csvExportBtn, csvMemoBtn, clearItemsBtn,
     geoExportBtn, boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
 
   const stage = document.createElement("div");
@@ -7103,7 +7132,7 @@ async function mountMapEditor(doc){
       if (!isSheet && file.size > 5 * 1024 * 1024) throw new Error("csv-too-large");
       let imported;
       let timelineOptions = null;
-      const csvText = isSheet ? "" : await file.text();
+      const csvText = isSheet ? "" : typeof readTextFileAuto === "function" ? await readTextFileAuto(file) : await file.text();
       const isTimeline = !isGeoFile && (isSheet || mapCsvLooksLikeTimeline(csvText));
       if (isGeoFile){
         imported = extension === "gpx" ? mapGpxImport(csvText)
@@ -7186,11 +7215,15 @@ async function mountMapEditor(doc){
         : code === "timeline-no-places"
         ? "연대표 표에서 장소나 주소가 있는 항목을 찾지 못했습니다."
         : code === "csv-columns"
-        ? "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다."
+        ? "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다. [표 양식]으로 모양을 확인하세요."
         : code === "geo-no-items" || code === "geojson-features" || (error && error.name === "SyntaxError")
         ? "지도 자료에서 사용할 수 있는 표시·경로·영역을 찾지 못했습니다."
         : "표에서 사용할 수 있는 표시를 찾지 못했습니다.";
-      setStatus(mapT(message));
+      const found = code === "csv-columns" && typeof describeFoundColumns === "function" ? describeFoundColumns(error.headers) : "";
+      setStatus(mapT(message) + (found ? " " + mapTf("(찾은 열: {columns})", { columns:found }) : ""));
+      if (code === "csv-columns" && typeof toast === "function"){
+        toast(mapT("표에서 필요한 열을 찾지 못했어요."), 4000, { type:"error", action:{ label:mapT("양식 받기"), onClick:downloadMarkersTemplate } });
+      }
     } finally {
       if (!geocodingActive){
         csvInput.disabled = false;
@@ -7198,6 +7231,11 @@ async function mountMapEditor(doc){
       }
     }
   });
+  const downloadMarkersTemplate = () => {
+    if (typeof tableTemplateCsv !== "function") return;
+    mapDownloadText(tableTemplateCsv(mapMarkersTemplateRows()), mapT("지도 표시 양식") + ".csv", "text/csv;charset=utf-8");
+  };
+  csvTemplateBtn.addEventListener("click", downloadMarkersTemplate);
   csvExportBtn.addEventListener("click", () => {
     if (!model.markers.length){ setStatus(mapT("내보낼 표시가 없습니다.")); return; }
     mapDownloadText(mapMarkersToCsv(model.markers), mapSafeDownloadName(model.title) + "_표시.csv", "text/csv;charset=utf-8");
@@ -8324,7 +8362,7 @@ if (typeof module !== "undefined" && module.exports){
     mapClampLat, mapClampLng, mapScratchFileName, mapDocDefaultTitle,
     mapDistanceMeters, mapLineLengthMeters, mapPolygonAreaSquareMeters,
     mapCsvLooksLikeTimeline, mapTimelineEventsToPending,
-    mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows,
+    mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows, mapMarkersTemplateRows,
     mapGeoJsonImport, mapGeoJsonExport, mapGpxImport, mapGpxExport, mapKmlImport, mapKmlExport,
     mapPointInPolygon, mapMarkersInArea, mapClusterPixelGroups, mapKakaoRoadviewUrl,
     MAP_GEO_IMPORT_MAX_ITEMS,

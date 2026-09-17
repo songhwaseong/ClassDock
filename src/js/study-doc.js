@@ -66,8 +66,14 @@ function studyCardsFromCsv(text){
   const rows = studyCsvRows(text); if (!rows.length) return [];
   const head = rows.shift().map(value => value.trim().toLowerCase()), index = names => head.findIndex(value => names.includes(value));
   const q = index(["질문", "앞면", "단어", "question", "front"]), a = index(["정답", "뒷면", "뜻", "answer", "back"]), n = index(["설명", "해설", "note"]), t = index(["태그", "tags"]), y = index(["유형", "type"]);
-  if (q < 0 || a < 0) throw new Error("csv-columns");
+  if (q < 0 || a < 0) throw Object.assign(new Error("csv-columns"), { headers:head });
   return rows.map(values => studyNormalizeCard({ front:values[q], back:values[a], note:n >= 0 ? values[n] : "", tags:t >= 0 ? values[t] : "", type:y >= 0 && /빈칸|cloze/i.test(values[y]) ? "cloze" : "qa" })).filter(card => card.front);
+}
+/* 'CSV 양식 받기' — 내보내기와 같은 열 이름에 문답·빈칸 예시 한 줄씩. */
+function studyTemplateRows(){
+  return [["질문", "정답", "설명", "태그", "유형"],
+    ["대한민국의 수도는?", "서울", "", "사회", "문답"],
+    ["물은 {{100}}도에서 끓는다", "100", "1기압 기준", "과학", "빈칸"]];
 }
 function studySearchText(model){ return [model.title, ...(model.cards || []).flatMap(card => [card.front, card.back, card.note, card.tags])].filter(Boolean).join("\n"); }
 function studyDefaultTitle(name){ return String(name || "").replace(/\.study$/i, "") || "암기 카드"; }
@@ -208,14 +214,24 @@ function mountStudyEditor(doc){
     csvInput.value = "";
     if (!file) return;
     try {
-      const cards = studyCardsFromCsv(await file.text());
+      const cards = studyCardsFromCsv(typeof readTextFileAuto === "function" ? await readTextFileAuto(file) : await file.text());
       if (model.cards.length + cards.length > STUDY_MAX_CARDS) throw new Error("study-limit");
       model.cards.push(...cards);
       history.commit();
       touch();
       render();
       if (typeof toast === "function") toast(`카드 ${cards.length}장을 가져왔어요.`, 2800);
-    } catch(error){ if (typeof toast === "function") toast(error.message === "csv-columns" ? "CSV에 ‘질문’과 ‘정답’ 열이 필요해요." : "CSV를 읽지 못했어요.", 3500, { type:"error" }); }
+    } catch(error){
+      if (typeof toast === "function"){
+        if (error.message !== "csv-columns"){ toast("CSV를 읽지 못했어요.", 3500, { type:"error" }); return; }
+        const found = typeof describeFoundColumns === "function" ? describeFoundColumns(error.headers) : "";
+        toast("CSV에 ‘질문’과 ‘정답’ 열이 필요해요." + (found ? ` (찾은 열: ${found})` : ""), 3500, { type:"error", action:{ label:"양식 받기", onClick:() => exportTemplate() } });
+      }
+    }
+  };
+  const exportTemplate = () => {
+    if (typeof tableTemplateCsv !== "function") return;
+    studyDownload("암기 카드 양식.csv", new Blob([tableTemplateCsv(studyTemplateRows())], { type:"text/csv;charset=utf-8" }));
   };
   const exportCsv = () => studyDownload((model.title || "암기 카드").replace(/[\\/:*?"<>|]+/g, "_") + ".csv", new Blob(["\uFEFF" + studyCardsToCsv(model.cards)], { type:"text/csv;charset=utf-8" }));
   // ⋯ 는 공용 메뉴 모듈에 맡긴다 — 자리 잡기·바깥 클릭·Esc 를 다시 짜지 않으려고(context-menu.js).
@@ -226,6 +242,7 @@ function mountStudyEditor(doc){
     MNContextMenu.open(rect.right - 190, rect.bottom + 6, [
       { label:"CSV 들이기", title:"질문·정답 표 가져오기", icon:"table", action:() => csvInput.click() },
       { label:"CSV 내보내기", title:"카드 목록을 CSV로 저장", icon:"save", action:exportCsv },
+      { label:"CSV 양식 받기", title:"질문·정답·설명·태그·유형 열과 예시가 든 빈 양식", icon:"file", action:exportTemplate },
       { separator:true },
       { label:"순서 섞기", title:"학습을 시작할 때 카드 차례를 무작위로 섞는다", icon:"shuffle", active:shuffleOn,
         action:() => { shuffleOn = !shuffleOn; moreBtn.classList.toggle("study-on", shuffleOn); } }
@@ -243,6 +260,6 @@ function mountStudyEditor(doc){
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = { STUDY_DOC_TYPE, STUDY_DOC_VERSION, studyNormalizeCard, studyDocEmpty, studyDocParse, studyDocSerialize,
-    studyClozeParts, studyToday, studyAddDays, studyRateCard, studyFilterCards, studyShuffle, studyCardsToCsv, studyCardsFromCsv,
+    studyClozeParts, studyToday, studyAddDays, studyRateCard, studyFilterCards, studyShuffle, studyCardsToCsv, studyCardsFromCsv, studyTemplateRows,
     studySearchText, studyDefaultTitle, studyScratchFileName };
 }

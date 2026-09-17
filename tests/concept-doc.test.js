@@ -201,6 +201,7 @@ test("표·개요 창은 도구막대와 화면에 연결된다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/concept-doc.js"), "utf8"), styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
   assert.match(source, /conceptButton\("표·개요"/); assert.match(source, /tableBtn\.onclick = openTableOutlineDialog/);
   assert.match(source, /bar\.append\([^)]*tableBtn/); assert.match(source, /conceptRowsFromFile/); assert.match(source, /MNLazy\.tryNeed\("exceljs"\)/);
-  assert.match(source, /detectTextEncoding/);                     // 한글 엑셀 CSV(CP949)를 깨지 않고 읽는다
+  assert.match(source, /readTextFileAuto/);                       // 한글 엑셀 CSV(CP949)를 깨지 않고 읽는다
+  assert.match(source, /class="ci-template"/);                    // 양식 받기
   assert.match(styles, /\.concept-io-form\{/); assert.match(styles, /\.concept-io-status\.is-error/);
 });
