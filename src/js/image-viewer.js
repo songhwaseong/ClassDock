@@ -407,7 +407,7 @@ function renderImage(file, host){
 function setupImageEditor(file, host, img, ownerDoc=null){
   const state = {
     img, rotation: 0, flipX: false, flipY: false, zoom: null,
-    cropMode: false, cropRect: null, cropRatio: null, dragStart: null, output: null,
+    cropMode: false, cropRect: null, cropRatio: null, cropShape: "rect", dragStart: null, output: null,
     adjust: { brightness:100, contrast:100, saturate:100, sharpen:0, denoise:0 },
     // 표시(주석): 출력 캔버스 픽셀 좌표로 저장 — 저장 시 renderForDisplay 가 함께 굽는다.
     shapes: [], annTool: null, annColor: "#ef4444", annWidth: 4, annDraft: null,
@@ -595,6 +595,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     applyCropBtn.hidden = !state.cropMode;
     cropRatioWrap.hidden = !state.cropMode;
     cropBox.classList.toggle("ratio-locked", !!state.cropRatio);
+    cropBox.classList.toggle("circle-crop", state.cropShape === "circle");
   };
   const setAnnToolOff = () => {
     if (!state.annTool) return;
@@ -616,9 +617,16 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   const applyCropBtn = mkBtn("적용", "선택한 영역으로 자르기", async () => {
     if (!state.cropRect){ toast("자를 영역을 먼저 드래그하세요.", 1800); return; }
     const crop = state.cropRect;
-    const c = renderEditedImage(state, crop);
+    const circular = state.cropShape === "circle";
+    // 원 밖의 표시·모자이크도 제거하려면 완성된 편집본을 함께 잘라야 한다.
+    // 적용 전 표시와 보정은 히스토리에 남아 한 번에 되돌릴 수 있다.
+    const c = circular ? cropImageCanvas(renderForDisplay(state), crop, "circle") : renderEditedImage(state, crop);
     const next = await imageFromDataUrl(c.toDataURL("image/png"));
-    shiftShapes(-Math.max(0, Math.floor(crop.x)), -Math.max(0, Math.floor(crop.y)));   // 표시 좌표를 잘린 기준으로 이동
+    if (circular){
+      state.shapes = []; state.annDraft = null; state.annSelected = null; state.annMove = null;
+      state.adjust = { ...ADJUST_NEUTRAL };
+      syncAdjustUI();
+    } else shiftShapes(-Math.max(0, Math.floor(crop.x)), -Math.max(0, Math.floor(crop.y)));   // 표시 좌표를 잘린 기준으로 이동
     state.img = next; state.rotation = 0; state.flipX = false; state.flipY = false; state.cropRect = null; state.cropMode = false;
     cropBtn.classList.remove("active"); stage.classList.remove("crop-mode");
     syncCropUi();
@@ -636,19 +644,26 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     state.cropRect = (w >= 4 && h >= 4) ? { x: c.x, y: c.y, w, h } : c;
     updateCropBox();
   };
-  const mkRatio = (label, val) => {
-    const b = mkBtn(label, "자르기 비율 " + label, () => {
+  const mkRatio = (label, val, shape="rect") => {
+    const title = shape === "circle" ? "원형 자르기 — 원 밖은 투명하게, PNG로 저장" : "자르기 비율 " + label;
+    const b = mkBtn(label, title, () => {
       state.cropRatio = val;
-      ratioBtns.forEach(x => x.classList.toggle("active", x === b));
+      state.cropShape = shape;
+      ratioBtns.forEach(x => {
+        x.classList.toggle("active", x === b);
+        x.setAttribute("aria-pressed", String(x === b));
+      });
       syncCropUi();
       refitCropToRatio();
     });
+    b.setAttribute("aria-pressed", "false");
     ratioBtns.push(b);
     return b;
   };
   const freeRatioBtn = mkRatio("자유", null);
-  cropRatioWrap.append(freeRatioBtn, mkRatio("1:1", 1), mkRatio("4:3", 4 / 3), mkRatio("16:9", 16 / 9));
+  cropRatioWrap.append(freeRatioBtn, mkRatio("1:1", 1), mkRatio("4:3", 4 / 3), mkRatio("16:9", 16 / 9), mkRatio("원형", 1, "circle"));
   freeRatioBtn.classList.add("active");
+  freeRatioBtn.setAttribute("aria-pressed", "true");
   const dimsLabel = document.createElement("span"); dimsLabel.className = "img-dims img-tool-dims"; dimsLabel.title = "현재 이미지 픽셀 크기";
   // 원본과 같은 형식으로 저장하는 버튼에 .run-save 를 단다 — 이 클래스를 기준으로 Ctrl+S(app.js)와
   // 저장 위치 배지·"원본/사본" 글자 바꾸기(updateOriginalSaveBadge)가 다른 편집기와 똑같이 걸린다.
@@ -1256,12 +1271,24 @@ function renderEditedImage(state, crop){
   ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
   ctx.restore();
   if (!crop) return full;
+  return cropImageCanvas(full, crop, state.cropShape);
+}
+
+// 적용·메모·OCR이 같은 픽셀 범위와 투명 마스크를 사용한다.
+function cropImageCanvas(full, crop, shape="rect"){
   const x = Math.max(0, Math.floor(crop.x)), y = Math.max(0, Math.floor(crop.y));
-  const cw = Math.max(1, Math.min(full.width - x, Math.floor(crop.w)));
-  const ch = Math.max(1, Math.min(full.height - y, Math.floor(crop.h)));
+  let cw = Math.max(1, Math.min(full.width - x, Math.floor(crop.w)));
+  let ch = Math.max(1, Math.min(full.height - y, Math.floor(crop.h)));
+  if (shape === "circle") cw = ch = Math.min(cw, ch);
   const out = document.createElement("canvas");
   out.width = cw; out.height = ch;
-  out.getContext("2d").drawImage(full, x, y, cw, ch, 0, 0, cw, ch);
+  const ctx = out.getContext("2d");
+  if (shape === "circle"){
+    ctx.beginPath();
+    ctx.arc(cw / 2, ch / 2, cw / 2, 0, Math.PI * 2);
+    ctx.clip();
+  }
+  ctx.drawImage(full, x, y, cw, ch, 0, 0, cw, ch);
   return out;
 }
 
@@ -1481,11 +1508,7 @@ function sendImageToMemo(state, file){
   let cv = full;
   const crop = state.cropRect;
   if (crop && crop.w >= 4 && crop.h >= 4){
-    const x = Math.max(0, Math.floor(crop.x)), y = Math.max(0, Math.floor(crop.y));
-    const w = Math.max(1, Math.min(full.width - x, Math.round(crop.w)));
-    const h = Math.max(1, Math.min(full.height - y, Math.round(crop.h)));
-    cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    cv.getContext("2d").drawImage(full, x, y, w, h, 0, 0, w, h);
+    cv = cropImageCanvas(full, crop, state.cropShape);
   }
   const partial = cv !== full;
   cv.toBlob((blob) => {
@@ -1513,11 +1536,7 @@ async function extractImageText(state){
   let cv = full;
   const crop = state.cropRect;
   if (crop && crop.w >= 4 && crop.h >= 4){                 // 자르기 영역이 있으면 그 부분만 인식
-    const x = Math.max(0, Math.floor(crop.x)), y = Math.max(0, Math.floor(crop.y));
-    const w = Math.max(1, Math.min(full.width - x, Math.round(crop.w)));
-    const h = Math.max(1, Math.min(full.height - y, Math.round(crop.h)));
-    cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    cv.getContext("2d").drawImage(full, x, y, w, h, 0, 0, w, h);
+    cv = cropImageCanvas(full, crop, state.cropShape);
   }
   _imgOcrRunning = true;
   showLoading("글자 인식 중… (이 컴퓨터 안에서만 처리돼요)");

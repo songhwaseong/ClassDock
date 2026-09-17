@@ -363,6 +363,7 @@
     "아주 크게 (125%)": "Extra large (125%)",
     "라이트 모드 배경": "Light mode background",
     "라이트 모드 본 화면 배경": "Light mode main background",
+    "너무 어두운 색이라 흐린 글자가 잘 안 보일 수 있어요.": "This color is quite dark, so faint text may be hard to read.",
     "기본 쿨 그레이": "Default cool gray",
     "웜 크림": "Warm cream",
     "민트": "Mint",
@@ -381,6 +382,51 @@
     "검색 기록을 지웠어요.": "Cleared the search history.",
     "(비어 있음)": "(empty)",
     "지도 검색": "Map search",
+    // 설정 '연결' 탭(인터넷 서비스 인증키)
+    "연결": "Connections",
+    "인터넷 서비스 인증키는 ClassDock 로컬 런처에만 전달하고 HTML·브라우저 설정·작업공간에는 저장하지 않습니다. '암호화하여 기억'을 끄면 ClassDock을 종료할 때 키가 사라집니다.":
+      "Service keys are sent only to the local ClassDock launcher and are never stored in HTML, browser settings, or workspaces. With 'Remember encrypted' off, a key disappears when ClassDock exits.",
+    "확인 중": "Checking",
+    "인증키 없음": "No key",
+    "키 등록됨": "Key saved",
+    "EXE에서만": "EXE only",
+    "카카오 · 인증키 없음": "Kakao · no key",
+    "Admin 키는 입력하지 마세요.": "Do not enter an Admin key.",
+    "인증키 입력": "Enter key",
+    "수출입은행 인증키": "Korea Eximbank key",
+    "서울 열린데이터광장 인증키": "Seoul Open Data Plaza key",
+    "지하철 실시간": "Live subway",
+    // 환율 인증키 상태
+    "수출입은행 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다.": "The Korea Eximbank key is stored encrypted for this Windows user.",
+    "수출입은행 인증키를 이번 실행 동안 기억하고 있습니다.": "The Korea Eximbank key is kept for this session only.",
+    "인증키가 없어 ECB 참고환율만 볼 수 있습니다.": "Without a key, only ECB reference rates are available.",
+    "환율 키 설정은 ClassDock.exe에서 사용할 수 있습니다.": "Exchange rate key settings are available in ClassDock.exe.",
+    "저장할 수출입은행 인증키를 입력해 주세요.": "Enter the Korea Eximbank key to save.",
+    "수출입은행 연결을 시험하는 중…": "Testing the Korea Eximbank connection…",
+    "수출입은행 연결에 성공했고 키를 저장했습니다.": "Connected to Korea Eximbank and saved the key.",
+    "오늘 조회 한도(1,000회)를 다 써서 확인하지 못했습니다. 내일 다시 시도해 주세요.":
+      "Could not verify because today's quota (1,000 requests) is used up. Try again tomorrow.",
+    "인증키를 확인하지 못했습니다. 수출입은행에서 발급받은 인증키인지 확인해 주세요.":
+      "The key could not be verified. Make sure it is a key issued by Korea Eximbank.",
+    "수출입은행 인증키를 지웠습니다.": "Removed the Korea Eximbank key.",
+    "인증키를 지우지 못했습니다.": "Could not remove the key.",
+    // 지하철 인증키 상태
+    "지하철 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다.": "The subway key is stored encrypted for this Windows user.",
+    "지하철 인증키를 이번 실행 동안 기억하고 있습니다.": "The subway key is kept for this session only.",
+    "인증키가 없어 지도의 '실시간 열차'를 쓸 수 없습니다.": "Without a key, 'Live trains' on the map is unavailable.",
+    "지하철 키 설정은 ClassDock.exe에서 사용할 수 있습니다.": "Subway key settings are available in ClassDock.exe.",
+    "저장할 서울 열린데이터광장 인증키를 입력해 주세요.": "Enter the Seoul Open Data Plaza key to save.",
+    "서울 열린데이터광장 연결을 시험하는 중…": "Testing the Seoul Open Data Plaza connection…",
+    "서울 열린데이터광장 연결에 성공했고 키를 저장했습니다.": "Connected to Seoul Open Data Plaza and saved the key.",
+    "인증키를 확인하지 못했습니다. 서울 열린데이터광장에서 발급받은 지하철 인증키인지 확인해 주세요.":
+      "The key could not be verified. Make sure it is a subway key issued by Seoul Open Data Plaza.",
+    "지하철 인증키를 지웠습니다.": "Removed the subway key.",
+    "키가 없어도 ECB 참고환율로 바로 씁니다. 한국수출입은행 오픈 API 인증키(무료)를 넣으면 고시환율(매매기준율·송금 보낼 때·받을 때)까지 볼 수 있습니다. 하루 조회 한도는 1,000회입니다.":
+      "Works right away with ECB reference rates, no key needed. Add a free Korea Eximbank Open API key to also see official rates (base, remittance sent, remittance received). The daily limit is 1,000 requests.",
+    "지도 문서의 '실시간 열차'에 필요합니다. 서울 열린데이터광장에서 무료로 발급받으며 하루 1,000회까지 조회할 수 있어, 한 번에 한 노선만 15초마다 물어봅니다.":
+      "Needed for 'Live trains' in map documents. Get a free key from Seoul Open Data Plaza; it allows 1,000 requests a day, so only one line is polled every 15 seconds.",
+    "지도 문서의 '제주 버스'에 필요합니다. 공공데이터포털에서 TAGO 버스노선정보와 TAGO 버스위치정보를 둘 다 활용신청한 뒤 받은 일반 인증키를 넣어 주세요(인코딩·디코딩 키 모두 됨). 한 노선을 30초마다 물어봅니다.":
+      "Needed for 'Jeju buses' in map documents. On data.go.kr, apply for both TAGO bus route and TAGO bus location information, then enter the general service key (encoded or decoded both work). One route is polled every 30 seconds.",
     "검색 공급자": "Search provider",
     "카카오는 국내 상세주소·건물 검색에 유리하며 개인 REST API 키가 필요합니다.":
       "Kakao is better for detailed Korean addresses and buildings and requires your own REST API key.",
@@ -1381,6 +1427,8 @@
     "자르기": "Crop",
     "자르기 영역 선택": "Select crop area",
     "선택한 영역으로 자르기": "Crop to the selected area",
+    "원형": "Circle",
+    "원형 자르기 — 원 밖은 투명하게, PNG로 저장": "Circular crop — transparent outside the circle; save as PNG",
     "자유": "Free",
     "✏️ 표시": "✏️ Annotate",
     "표시": "Annotate",

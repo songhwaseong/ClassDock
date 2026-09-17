@@ -153,9 +153,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html[data-theme="light"][data-light-background="mint"]{--bg:#edf7f2;--workspace-bg:#edf7f2}
   html[data-theme="light"][data-light-background="lavender"]{--bg:#f4f1fa;--workspace-bg:#f4f1fa}
   html[data-theme="light"][data-light-background="sky"]{--bg:#edf6fb;--workspace-bg:#edf6fb}
+  /* 직접 고른 색 — --light-custom-bg 는 theme.js·설정 창이 <html> 인라인으로 얹는다. 편집기 칸 색은 프리셋처럼 손으로 정할 수 없어 섞어서 만든다. */
+  html[data-theme="light"][data-light-background="custom"]{--bg:var(--light-custom-bg,#eef2f7);--workspace-bg:var(--light-custom-bg,#eef2f7)}
   html[data-theme="light"][data-light-background="warm"] .office.python-editor-doc{background:#f6f1e8;--code-bg:#fffcf5;--code-gutter:#eee5d5;--code-panel:#fffcf5;--code-panel-head:#eee5d5;--code-border:#ded2bd;--code-hover:#f8f0e4}
   html[data-theme="light"][data-light-background="mint"] .office.python-editor-doc{background:#edf7f2;--code-bg:#f9fdfb;--code-gutter:#e2f0e8;--code-panel:#f9fdfb;--code-panel-head:#e2f0e8;--code-border:#cde0d4;--code-hover:#edf7f2}
   html[data-theme="light"][data-light-background="lavender"] .office.python-editor-doc{background:#f4f1fa;--code-bg:#fbfaff;--code-gutter:#ebe6f4;--code-panel:#fbfaff;--code-panel-head:#ebe6f4;--code-border:#d9d0e9;--code-hover:#f2eef9}
+  html[data-theme="light"][data-light-background="custom"] .office.python-editor-doc{background:var(--workspace-bg);--code-bg:color-mix(in srgb,var(--workspace-bg) 30%,#fff);--code-gutter:color-mix(in srgb,var(--workspace-bg) 94%,#000);--code-panel:color-mix(in srgb,var(--workspace-bg) 30%,#fff);--code-panel-head:color-mix(in srgb,var(--workspace-bg) 94%,#000);--code-border:color-mix(in srgb,var(--workspace-bg) 85%,#000);--code-hover:var(--workspace-bg)}
   html[data-theme="light"][data-light-background="sky"] .office.python-editor-doc{background:#edf6fb;--code-bg:#f9fcff;--code-gutter:#e2eef6;--code-panel:#f9fcff;--code-panel-head:#e2eef6;--code-border:#cbdde8;--code-hover:#edf6fb}
   /* 문서 원본의 종이색·이미지·슬라이드는 보존하고, 그 바깥 작업 공간만 프리셋 색으로 통일한다. */
   html[data-theme="light"][data-light-background]:not([data-light-background="cool"]) .viewer,
@@ -223,7 +226,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .ui-symbol{display:inline-flex;align-items:center;justify-content:center;width:1em;height:1em;vertical-align:-.13em}
   .ui-symbol .ui-icon{width:1em;height:1em;vertical-align:0}
   .welcome-step-ico .ui-icon{width:19px;height:19px}
-  .welcome-steps b{display:block;font-size:14px;margin-bottom:2px;color:var(--ink)}
+  /* 제목만 한 줄로 — 설명(small) 속 굵은 글자까지 block 이면 문장이 조각나 여러 줄로 흩어진다. */
+  .welcome-steps li>div>b{display:block;font-size:14px;margin-bottom:2px;color:var(--ink)}
+  .welcome-steps small b{color:var(--ink)}
   .welcome-steps small{color:var(--muted);font-size:12.5px;line-height:1.5}
   .welcome-safe{margin:16px 0 0;padding:9px 12px;background:var(--panel);border:1px solid var(--border);
     border-radius:8px;font-size:12.5px;color:var(--muted)}
@@ -350,6 +355,11 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .light-background-choice[data-light-background="mint"]{background:#edf7f2}
   .light-background-choice[data-light-background="lavender"]{background:#f4f1fa}
   .light-background-choice[data-light-background="sky"]{background:#edf6fb}
+  .light-background-custom{width:28px;height:24px;border-radius:6px}
+  .light-background-custom[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
+  .light-background-setting{flex-wrap:wrap}
+  .light-background-warn{flex:1 0 100%;margin:4px 0 0;color:var(--danger);font-size:11.5px;text-align:right}
+  .light-background-warn[hidden]{display:none}
   .light-background-choice[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 26%,transparent)}
   /* 상시 유틸리티(검색·분할·더보기·집중·설정·도움말·테마)를 한 그룹으로 묶어 문서 도구와 시각적으로 구분 */
   .header-util{display:inline-flex;align-items:center;gap:2px;min-width:0;padding-left:7px;margin-left:2px;
@@ -2582,9 +2592,31 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-search-settings .settings-row small{color:var(--muted);font-size:11.5px;line-height:1.45;font-weight:400}
   .settings-row .map-search-key-input{width:min(270px,46%)}
   .settings-inline-actions{display:flex;flex:none;gap:6px}
-  #settingMapSearchStatus{font-size:12px;color:var(--muted)}
-  #settingMapSearchStatus.ok{color:var(--accent)}
-  #settingMapSearchStatus.bad{color:var(--danger)}
+  .conn-status{font-size:12px;color:var(--muted)}
+  .conn-status.ok{color:var(--accent)}
+  .conn-status.bad{color:var(--danger)}
+  /* 설정 '연결' 탭 — 서비스 하나가 접힌 한 줄(이름 + 상태 배지), 펼치면 키 입력 */
+  .conn-intro{padding-top:4px;margin-bottom:10px}
+  .conn-list{display:flex;flex-direction:column;gap:6px}
+  .conn-item{border:1px solid var(--border);border-radius:9px;background:var(--panel)}
+  .conn-item>summary{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;cursor:pointer;list-style:none;font-size:13px;font-weight:600;user-select:none}
+  .conn-item>summary::-webkit-details-marker{display:none}
+  .conn-item>summary::after{content:"";flex:0 0 auto;width:6px;height:6px;margin:0 2px 2px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(-45deg);transition:transform .12s}
+  .conn-item[open]>summary::after{transform:rotate(45deg)}
+  .conn-item>summary:hover{background:var(--panel-hover)}
+  .conn-item>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .conn-name{flex:1;min-width:0}
+  .conn-badge{padding:2px 9px;border-radius:999px;background:var(--panel-2);color:var(--muted);font-size:11.5px;font-weight:600;white-space:nowrap}
+  .conn-badge[data-kind="ok"]{background:color-mix(in srgb,var(--accent) 13%,var(--panel));color:var(--accent)}
+  .conn-badge[data-kind="bad"]{background:color-mix(in srgb,var(--danger) 10%,var(--panel));color:var(--danger)}
+  .conn-item .conn-body{margin:0 12px 4px;padding:0;border:none;border-top:1px solid var(--border);border-radius:0;background:none}
+  .conn-item .conn-body>.map-search-settings{margin:0;padding:0;border:none;border-radius:0;background:none}
+  .conn-body .settings-row>span:first-child{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .conn-body .settings-row small{color:var(--muted);font-size:11.5px;line-height:1.45;font-weight:400}
+  .conn-body .settings-row #settingMapSearchProvider{width:auto;min-width:190px}
+  .conn-body .settings-row .map-search-key-input{flex:0 0 auto}
+  .conn-hint{margin:0;padding:10px 0 8px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px;line-height:1.5}
+  .conn-body .settings-row:last-child{border-bottom:none}
   @media (max-width:560px){.map-search-settings .settings-row{align-items:stretch;flex-direction:column}.settings-row .map-search-key-input{width:100%}.settings-inline-actions{justify-content:flex-end}}
   @media (max-width:480px){
     .settings-tool-scope-tabs{flex-wrap:nowrap;overflow-x:auto;padding-bottom:6px}
@@ -5928,6 +5960,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     max-width:100%;max-height:calc(100vh - 190px);cursor:zoom-in}
   .img-crop-box{position:absolute;z-index:9;border:2px solid #facc15;background:rgba(250,204,21,.16);
     box-shadow:0 0 0 9999px rgba(15,23,42,.28);pointer-events:auto;cursor:move;touch-action:none}
+  .img-crop-box.circle-crop{border-radius:50%}
   .img-crop-handle{position:absolute;width:14px;height:14px;margin:-8px;background:#facc15;border:2px solid #fff;
     border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4);touch-action:none}
   .img-crop-handle.dir-nw{left:0;top:0;cursor:nwse-resize}

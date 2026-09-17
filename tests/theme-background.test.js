@@ -8,12 +8,13 @@ const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
 
-function loadTheme(values){
+function loadTheme(values, styleProps){
   const attrs = new Map();
   const context = {
     localStorage:{ getItem:key => values[key] ?? null },
     matchMedia:() => ({ matches:false }),
-    document:{ documentElement:{ setAttribute:(key, value) => attrs.set(key, value) } }
+    document:{ documentElement:{ setAttribute:(key, value) => attrs.set(key, value),
+      style:{ setProperty:(key, value) => styleProps && styleProps.set(key, value) } } }
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(root, "src/js/theme.js"), "utf8"), context);
@@ -29,6 +30,31 @@ test("저장한 라이트 배경 프리셋을 초기 테마와 함께 즉시 적
 test("잘못된 라이트 배경 프리셋은 기본 쿨 그레이로 정규화한다", () => {
   const attrs = loadTheme({ theme:"light", lightBackground:"neon" });
   assert.equal(attrs.get("data-light-background"), "cool");
+});
+
+test("직접 고른 라이트 배경색은 CSS 변수로 첫 화면부터 얹는다", () => {
+  const style = new Map();
+  const attrs = loadTheme({ theme:"light", lightBackground:"custom", lightBackgroundColor:"#FFE4E1" }, style);
+  assert.equal(attrs.get("data-light-background"), "custom");
+  assert.equal(style.get("--light-custom-bg"), "#ffe4e1");
+});
+
+test("직접 고른 색이 없거나 망가졌으면 기본 쿨 그레이로 돌린다", () => {
+  for (const color of [null, "red", "#12345"]){
+    const style = new Map();
+    const attrs = loadTheme({ theme:"light", lightBackground:"custom", lightBackgroundColor:color }, style);
+    assert.equal(attrs.get("data-light-background"), "cool");
+    assert.equal(style.has("--light-custom-bg"), false);
+  }
+});
+
+test("설정 창에 라이트 배경 색 고르개와 custom CSS 규칙이 있다", () => {
+  const html = fs.readFileSync(path.join(root, "classdock.html"), "utf8");
+  const css = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
+  assert.match(html, /<input type="color" id="settingLightBackgroundCustom"/);
+  assert.match(html, /id="settingLightBackgroundWarn"/);
+  assert.match(css, /\[data-light-background="custom"\]\{--bg:var\(--light-custom-bg/);
+  assert.match(css, /\[data-light-background="custom"\] \.office\.python-editor-doc\{/);
 });
 
 test("라이트 모드 배경 설정은 메모 색과 분리된 본 화면 전용 UI·CSS를 가진다", () => {

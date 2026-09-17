@@ -968,6 +968,26 @@ function wire(){
     byId("settingJavaCheckOnAutoSave").disabled = !byId("settingAutoSave").checked;
   };
   byId("settingAutoSave").addEventListener("change", syncJavaAutoCheckSetting);
+  /* 설정 '연결' 탭은 서비스마다 한 줄로 접혀 있다 — 펼치지 않아도 키가 들어 있는지 보이도록
+     줄 오른쪽 배지를 각 서비스의 sync…Fields 에서 함께 고친다. 언어를 바꾸면 마지막 글을 다시 번역한다. */
+  const connBadgeState = new Map();
+  const paintConnBadge = (el) => {
+    const { text, kind } = connBadgeState.get(el);
+    el.textContent = typeof window.t === "function" ? window.t(text) : text;
+    el.dataset.kind = kind || "";
+  };
+  const setConnBadge = (id, text, kind) => {
+    const el = byId(id);
+    if (!el) return;
+    connBadgeState.set(el, { text, kind });
+    paintConnBadge(el);
+  };
+  const connKeyBadge = (id, status, missingText) => {
+    if (!status.available) setConnBadge(id, "EXE에서만", "bad");
+    else if (status.hasKey) setConnBadge(id, "키 등록됨", "ok");
+    else setConnBadge(id, missingText || "인증키 없음", "");
+  };
+  window.addEventListener("mni18nchange", () => connBadgeState.forEach((_, el) => paintConnBadge(el)));
   const mapSearchProviderInput = byId("settingMapSearchProvider");
   const mapSearchKeyWrap = byId("settingMapSearchKeyWrap");
   const mapSearchKeyInput = byId("settingMapSearchKey");
@@ -993,7 +1013,8 @@ function wire(){
   const syncMapSearchFields = () => {
     const kakao = mapSearchProviderInput.value === "kakao";
     mapSearchKeyWrap.hidden = !kakao;
-    if (!kakao) return;
+    if (!kakao){ setConnBadge("settingMapSearchBadge", "OpenStreetMap", ""); return; }
+    connKeyBadge("settingMapSearchBadge", mapSearchKeyStatus, "카카오 · 인증키 없음");
     const available = mapSearchKeyStatus.available;
     mapSearchKeyInput.disabled = !available;
     mapSearchTest.disabled = !available;
@@ -1096,6 +1117,7 @@ function wire(){
   };
   const syncExchangeRateFields = () => {
     const available = exchangeRateKeyStatus.available;
+    connKeyBadge("settingExchangeRateBadge", exchangeRateKeyStatus, "ECB 참고환율");
     exchangeRateKeyInput.disabled = !available;
     exchangeRateTest.disabled = !available;
     exchangeRateClear.disabled = !available || !exchangeRateKeyStatus.hasKey;
@@ -1176,6 +1198,7 @@ function wire(){
   };
   const syncSubwayFields = () => {
     const available = subwayKeyStatus.available;
+    connKeyBadge("settingSubwayBadge", subwayKeyStatus);
     subwayKeyInput.disabled = !available;
     subwayTest.disabled = !available;
     subwayClear.disabled = !available || !subwayKeyStatus.hasKey;
@@ -1247,6 +1270,7 @@ function wire(){
   };
   const syncTagoFields = () => {
     const available = tagoKeyStatus.available;
+    connKeyBadge("settingTagoBadge", tagoKeyStatus);
     tagoKeyInput.disabled = !available;
     tagoTest.disabled = !available;
     tagoClear.disabled = !available || !tagoKeyStatus.hasKey;
@@ -1314,23 +1338,61 @@ function wire(){
       if (!sec.hidden) sec.scrollTop = 0;     // 긴 탭에서 스크롤한 뒤 넘어와도 항상 맨 위부터
     });
   };
-  const LIGHT_BACKGROUND_VALUES = new Set(["cool", "warm", "mint", "lavender", "sky"]);
+  // "custom" 은 색 고르개로 고른 색(lightBackgroundColor 에 따로 저장, theme.js 가 첫 화면에 얹는다).
+  const LIGHT_BACKGROUND_VALUES = new Set(["cool", "warm", "mint", "lavender", "sky", "custom"]);
+  const LIGHT_BACKGROUND_DEFAULT_COLOR = "#eef2f7";
   let lightBackgroundDraft = "cool";
+  let lightBackgroundColorDraft = LIGHT_BACKGROUND_DEFAULT_COLOR;
   const normalizeLightBackground = (value) => LIGHT_BACKGROUND_VALUES.has(value) ? value : "cool";
   const currentLightBackground = () => normalizeLightBackground(document.documentElement.getAttribute("data-light-background"));
+  const currentLightBackgroundColor = () => {
+    let saved = "";
+    try { saved = localStorage.getItem("lightBackgroundColor") || ""; } catch(_){}
+    return normalizeHexColor(saved) || LIGHT_BACKGROUND_DEFAULT_COLOR;
+  };
   const lightBackgroundButtons = [...document.querySelectorAll(".light-background-choice[data-light-background]")];
-  const syncLightBackgroundButtons = () => lightBackgroundButtons.forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.lightBackground === lightBackgroundDraft));
-  });
-  const applyLightBackground = (value) => {
-    const next = normalizeLightBackground(value);
-    document.documentElement.setAttribute("data-light-background", next);
-    try { localStorage.setItem("lightBackground", next); } catch(_){}
+  const lightBackgroundCustom = byId("settingLightBackgroundCustom");
+  const lightBackgroundWarn = byId("settingLightBackgroundWarn");
+  const syncLightBackgroundButtons = () => {
+    lightBackgroundButtons.forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.lightBackground === lightBackgroundDraft));
+    });
+    const custom = lightBackgroundDraft === "custom";
+    if (lightBackgroundCustom){
+      lightBackgroundCustom.setAttribute("aria-pressed", String(custom));
+      if (lightBackgroundCustom.value !== lightBackgroundColorDraft) lightBackgroundCustom.value = lightBackgroundColorDraft;
+    }
+    // 본문 글자는 검정이라 웬만해선 읽히지만 흐린 회색(--muted) 안내 글이 먼저 묻힌다 — 그 기준으로 알린다.
+    if (lightBackgroundWarn) lightBackgroundWarn.hidden = !(custom && colorContrastRatio(lightBackgroundColorDraft, "#64748b") < 3);
+  };
+  const applyLightBackground = (value, color) => {
+    const hex = normalizeHexColor(color);
+    let next = normalizeLightBackground(value);
+    if (next === "custom" && !hex) next = "cool";
+    const root = document.documentElement;
+    root.setAttribute("data-light-background", next);
+    if (next === "custom") root.style.setProperty("--light-custom-bg", hex);
+    else root.style.removeProperty("--light-custom-bg");
+    try {
+      localStorage.setItem("lightBackground", next);
+      // 프리셋으로 돌아가도 고른 색은 남겨 두어, 다음에 설정을 열면 색 고르개가 그 색부터 보여 준다.
+      if (hex) localStorage.setItem("lightBackgroundColor", hex);
+    } catch(_){}
   };
   lightBackgroundButtons.forEach((button) => button.addEventListener("click", () => {
     lightBackgroundDraft = normalizeLightBackground(button.dataset.lightBackground);
     syncLightBackgroundButtons();
   }));
+  if (lightBackgroundCustom){
+    const pickCustom = () => {
+      lightBackgroundDraft = "custom";
+      lightBackgroundColorDraft = normalizeHexColor(lightBackgroundCustom.value) || LIGHT_BACKGROUND_DEFAULT_COLOR;
+      syncLightBackgroundButtons();
+    };
+    lightBackgroundCustom.addEventListener("input", pickCustom);
+    // 색은 그대로 두고 고르개만 닫아도(이전에 고른 색을 다시 쓰기) '직접 고른 색'으로 바뀌게 한다.
+    lightBackgroundCustom.addEventListener("change", pickCustom);
+  }
   // 새 화이트보드의 기본 배경색. 프리셋 목록(BOARD_BG_PRESETS) 하나로 버튼을 만들어 팔레트를
   // 설정 화면과 보드 도구막대에 이중으로 적어 두지 않는다.
   let boardBgDraft = BOARD_BG_DEFAULT;
@@ -1675,6 +1737,7 @@ function wire(){
   byId("settingsOpen").onclick = () => {
     setSettingsTab("general");
     lightBackgroundDraft = currentLightBackground();
+    lightBackgroundColorDraft = currentLightBackgroundColor();
     syncLightBackgroundButtons();
     byId("settingUiScale").value = String(currentUiScale());
     byId("settingPdfZoom").value = String(defaultPdfZoom());
@@ -1755,7 +1818,7 @@ function wire(){
       return;
     }
     const previousPerformance = appSettings.performance;
-    applyLightBackground(lightBackgroundDraft);
+    applyLightBackground(lightBackgroundDraft, lightBackgroundColorDraft);
     saveAppSettings({
       uiScale: Number(byId("settingUiScale").value), pdfZoom: Number(byId("settingPdfZoom").value),
       performance: byId("settingPerformance").value, autoRestore: byId("settingAutoRestore").checked,

@@ -630,6 +630,7 @@
       <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-tab="general">일반</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="document">문서</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="tools">도구</button>
+      <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="connect">연결</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="pet">펫</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="screensaver">대기 화면</button>
       <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="shortcut">단축키</button>
@@ -644,39 +645,12 @@
         <button type="button" class="light-background-choice" data-light-background="mint" title="민트" aria-label="민트"></button>
         <button type="button" class="light-background-choice" data-light-background="lavender" title="라벤더" aria-label="라벤더"></button>
         <button type="button" class="light-background-choice" data-light-background="sky" title="스카이" aria-label="스카이"></button>
-      </div></div>
+        <input type="color" id="settingLightBackgroundCustom" class="wb-color-input light-background-custom" value="#eef2f7" title="배경색 직접 고르기" aria-label="배경색 직접 고르기" aria-pressed="false">
+      </div><small id="settingLightBackgroundWarn" class="light-background-warn" hidden>너무 어두운 색이라 흐린 글자가 잘 안 보일 수 있어요.</small></div>
       <label class="settings-check"><input type="checkbox" id="settingAutoRestore"><span>시작할 때 최근 작업공간 자동 복원</span></label>
       <label class="settings-check"><input type="checkbox" id="settingAutoOpenFirstFile"><span>폴더·압축을 열 때 첫 파일 자동으로 열기<small>꺼 두면 사이드바만 펼쳐지고, 볼 파일을 직접 고를 때까지 아무 문서도 열지 않습니다.</small></span></label>
       <label class="settings-check"><input type="checkbox" id="settingSearchHistory"><span>최근 검색어 기억 — 찾기·검색창에 지난 검색어를 보여줍니다<small>이 컴퓨터 안에만 구획별로 12개까지 남기고, '바꿀 내용'은 기억하지 않습니다. 여러 사람이 함께 쓰는 컴퓨터라면 끄는 것을 권합니다.</small></span></label>
       <div class="settings-row"><span>검색 기록 <span id="settingSearchHistoryCount" class="settings-inline-count" aria-live="polite"></span></span><button class="btn" id="settingSearchHistoryClear" type="button">검색 기록 지우기</button></div>
-      <div class="settings-group-title">지도 검색</div>
-      <label class="settings-row"><span>검색 공급자<small>카카오는 국내 상세주소·건물 검색에 유리하며 개인 REST API 키가 필요합니다.</small></span><select id="settingMapSearchProvider" class="pw-input"><option value="osm">OpenStreetMap — 키 없음</option><option value="kakao">카카오 — 개인 API 키</option></select></label>
-      <div class="map-search-settings" id="settingMapSearchKeyWrap" hidden>
-        <label class="settings-row"><span>카카오 REST API 키<small>키는 HTML·브라우저 설정·작업공간에 저장하지 않고 ClassDock 로컬 런처에만 전달합니다. Admin 키는 입력하지 마세요.</small></span><input type="password" id="settingMapSearchKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="REST API 키 입력" aria-label="카카오 REST API 키"></label>
-        <label class="settings-check" id="settingMapSearchRememberWrap"><input type="checkbox" id="settingMapSearchRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
-        <div class="settings-row"><span id="settingMapSearchStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingMapSearchTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingMapSearchClear" type="button">키 지우기</button></span></div>
-      </div>
-      <div class="settings-group-title">환율</div>
-      <p class="settings-hint">환율 창(Ctrl+K → 환율)은 인증키 없이도 ECB 참고환율로 바로 씁니다. 아래 인증키를 넣으면 한국수출입은행 <b>고시환율</b>(매매기준율·송금 보낼 때·받을 때)까지 볼 수 있습니다. 인증키는 한국수출입은행 홈페이지의 오픈 API 안내에서 무료로 발급받습니다.</p>
-      <div class="map-search-settings" id="settingExchangeRateKeyWrap">
-        <label class="settings-row"><span>수출입은행 인증키<small>키는 HTML·브라우저 설정·작업공간에 저장하지 않고 ClassDock 로컬 런처에만 전달합니다. 하루 조회 한도는 1,000회입니다.</small></span><input type="password" id="settingExchangeRateKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="수출입은행 인증키"></label>
-        <label class="settings-check" id="settingExchangeRateRememberWrap"><input type="checkbox" id="settingExchangeRateRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
-        <div class="settings-row"><span id="settingExchangeRateStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingExchangeRateTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingExchangeRateClear" type="button">키 지우기</button></span></div>
-      </div>
-      <div class="settings-group-title">지하철 실시간</div>
-      <p class="settings-hint">지도 문서의 <b>🚇 실시간 열차</b>는 서울 열린데이터광장 인증키가 필요합니다. 홈페이지에서 무료로 발급받으며, 하루 조회 한도는 1,000회입니다 — 한 번에 한 노선만, 15초에 한 번씩만 물어봅니다. 이 API는 https를 지원하지 않아 ClassDock 런처가 대신 받아 옵니다.</p>
-      <div class="map-search-settings" id="settingSubwayKeyWrap">
-        <label class="settings-row"><span>서울 열린데이터광장 인증키<small>키는 HTML·브라우저 설정·작업공간에 저장하지 않고 ClassDock 로컬 런처에만 전달합니다.</small></span><input type="password" id="settingSubwayKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="서울 열린데이터광장 인증키"></label>
-        <label class="settings-check" id="settingSubwayRememberWrap"><input type="checkbox" id="settingSubwayRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
-        <div class="settings-row"><span id="settingSubwayStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingSubwayTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingSubwayClear" type="button">키 지우기</button></span></div>
-      </div>
-      <div class="settings-group-title">버스 실시간</div>
-      <p class="settings-hint">지도 문서의 <b>🚌 제주 버스</b>는 국토교통부 국가대중교통정보센터(TAGO) 자료를 씁니다. 공공데이터포털에서 <b>TAGO 버스노선정보</b>와 <b>TAGO 버스위치정보</b> 두 가지를 활용신청한 뒤 받은 인증키(일반 인증키)를 넣어 주세요. 인코딩·디코딩 키 어느 쪽이든 됩니다. 한 노선을 30초에 한 번씩만 물어봅니다.</p>
-      <div class="map-search-settings" id="settingTagoKeyWrap">
-        <label class="settings-row"><span>공공데이터포털 인증키<small>키는 HTML·브라우저 설정·작업공간에 저장하지 않고 ClassDock 로컬 런처에만 전달합니다.</small></span><input type="password" id="settingTagoKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="공공데이터포털 인증키"></label>
-        <label class="settings-check" id="settingTagoRememberWrap"><input type="checkbox" id="settingTagoRemember"><span>이 Windows 사용자 계정에 암호화하여 기억<small>끄면 ClassDock을 종료할 때 키가 사라집니다.</small></span></label>
-        <div class="settings-row"><span id="settingTagoStatus" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingTagoTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingTagoClear" type="button">키 지우기</button></span></div>
-      </div>
       <div class="settings-save-folder" id="settingSaveFolderWrap">
         <div class="settings-save-folder-copy"><strong>자동 저장 폴더</strong><small id="settingSaveFolderPath" aria-live="polite">저장 위치 확인 중…</small><span>위치 변경은 즉시 적용되며 기존 파일은 이동하지 않습니다.</span></div>
         <div class="settings-save-folder-actions"><button class="btn" id="settingSaveFolderOpen" type="button">현재 폴더 보기</button><button class="btn" id="settingSaveFolderChange" type="button">위치 변경</button></div>
@@ -684,6 +658,50 @@
       <div class="settings-save-folder" id="settingAppModeWrap" hidden>
         <div class="settings-save-folder-copy"><strong>앱 모드 — 탭·주소창 없는 창</strong><small id="settingAppModeHint" aria-live="polite">화면을 넓게 쓰도록 브라우저 탭과 주소창 없이 엽니다.</small><span>체크는 <b>다음 실행부터</b> 적용됩니다. 지금 바로 보려면 오른쪽 버튼을 누르세요.</span></div>
         <div class="settings-save-folder-actions"><label class="settings-check"><input type="checkbox" id="settingAppMode"><span>앱 모드로 열기</span></label><button class="btn" id="settingAppModeNow" type="button">지금 앱 모드로 열기</button></div>
+      </div>
+    </div>
+
+    <div class="settings-section" data-settings-panel="connect" role="tabpanel" hidden>
+      <p class="settings-hint conn-intro">인터넷 서비스 인증키는 ClassDock 로컬 런처에만 전달하고 HTML·브라우저 설정·작업공간에는 저장하지 않습니다. '암호화하여 기억'을 끄면 ClassDock을 종료할 때 키가 사라집니다.</p>
+      <div class="conn-list">
+        <details class="conn-item" name="settings-conn" data-conn="MapSearch">
+          <summary><span class="conn-name">지도 검색</span><span class="conn-badge" id="settingMapSearchBadge" aria-live="polite">OpenStreetMap</span></summary>
+          <div class="conn-body">
+            <label class="settings-row"><span>검색 공급자<small>카카오는 국내 상세주소·건물 검색에 유리하며 개인 REST API 키가 필요합니다.</small></span><select id="settingMapSearchProvider" class="pw-input"><option value="osm">OpenStreetMap — 키 없음</option><option value="kakao">카카오 — 개인 API 키</option></select></label>
+            <div class="map-search-settings" id="settingMapSearchKeyWrap" hidden>
+              <label class="settings-row"><span>카카오 REST API 키<small>Admin 키는 입력하지 마세요.</small></span><input type="password" id="settingMapSearchKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="REST API 키 입력" aria-label="카카오 REST API 키"></label>
+              <label class="settings-check" id="settingMapSearchRememberWrap"><input type="checkbox" id="settingMapSearchRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+              <div class="settings-row"><span id="settingMapSearchStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingMapSearchTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingMapSearchClear" type="button">키 지우기</button></span></div>
+            </div>
+          </div>
+        </details>
+        <details class="conn-item" name="settings-conn" data-conn="ExchangeRate">
+          <summary><span class="conn-name">환율</span><span class="conn-badge" id="settingExchangeRateBadge" aria-live="polite">확인 중</span></summary>
+          <div class="conn-body map-search-settings" id="settingExchangeRateKeyWrap">
+            <p class="conn-hint">키가 없어도 ECB 참고환율로 바로 씁니다. 한국수출입은행 오픈 API 인증키(무료)를 넣으면 고시환율(매매기준율·송금 보낼 때·받을 때)까지 볼 수 있습니다. 하루 조회 한도는 1,000회입니다.</p>
+            <label class="settings-row"><span>수출입은행 인증키</span><input type="password" id="settingExchangeRateKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="수출입은행 인증키"></label>
+            <label class="settings-check" id="settingExchangeRateRememberWrap"><input type="checkbox" id="settingExchangeRateRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+            <div class="settings-row"><span id="settingExchangeRateStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingExchangeRateTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingExchangeRateClear" type="button">키 지우기</button></span></div>
+          </div>
+        </details>
+        <details class="conn-item" name="settings-conn" data-conn="Subway">
+          <summary><span class="conn-name">지하철 실시간</span><span class="conn-badge" id="settingSubwayBadge" aria-live="polite">확인 중</span></summary>
+          <div class="conn-body map-search-settings" id="settingSubwayKeyWrap">
+            <p class="conn-hint">지도 문서의 '실시간 열차'에 필요합니다. 서울 열린데이터광장에서 무료로 발급받으며 하루 1,000회까지 조회할 수 있어, 한 번에 한 노선만 15초마다 물어봅니다.</p>
+            <label class="settings-row"><span>서울 열린데이터광장 인증키</span><input type="password" id="settingSubwayKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="서울 열린데이터광장 인증키"></label>
+            <label class="settings-check" id="settingSubwayRememberWrap"><input type="checkbox" id="settingSubwayRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+            <div class="settings-row"><span id="settingSubwayStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingSubwayTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingSubwayClear" type="button">키 지우기</button></span></div>
+          </div>
+        </details>
+        <details class="conn-item" name="settings-conn" data-conn="Tago">
+          <summary><span class="conn-name">버스 실시간</span><span class="conn-badge" id="settingTagoBadge" aria-live="polite">확인 중</span></summary>
+          <div class="conn-body map-search-settings" id="settingTagoKeyWrap">
+            <p class="conn-hint">지도 문서의 '제주 버스'에 필요합니다. 공공데이터포털에서 TAGO 버스노선정보와 TAGO 버스위치정보를 둘 다 활용신청한 뒤 받은 일반 인증키를 넣어 주세요(인코딩·디코딩 키 모두 됨). 한 노선을 30초마다 물어봅니다.</p>
+            <label class="settings-row"><span>공공데이터포털 인증키</span><input type="password" id="settingTagoKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="공공데이터포털 인증키"></label>
+            <label class="settings-check" id="settingTagoRememberWrap"><input type="checkbox" id="settingTagoRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+            <div class="settings-row"><span id="settingTagoStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingTagoTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingTagoClear" type="button">키 지우기</button></span></div>
+          </div>
+        </details>
       </div>
     </div>
 
