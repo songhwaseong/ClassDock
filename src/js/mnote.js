@@ -384,7 +384,7 @@ function mountMnoteEditor(doc){
   const redoBtn = document.createElement("button");
   redoBtn.type = "button"; redoBtn.textContent = "↷"; redoBtn.title = "다시 실행 (Ctrl+Y)";
   undoBtn.addEventListener("click", () => { if (history) history.undo(); });
-  redoBtn.addEventListener("click", () => { if (history) history.redo(); });
+  redoBtn.addEventListener("click", () => { if (history){ history.flush(); history.redo(); } });
   historyGroup.append(undoBtn, redoBtn);
   const updateHistoryButtons = () => {
     undoBtn.disabled = !(history && history.canUndo());
@@ -530,6 +530,25 @@ function mountMnoteEditor(doc){
     return shell;
   }
 
+  function growTextArea(area){
+    area.style.height = "auto";
+    area.style.height = area.scrollHeight + "px";
+  }
+
+  // 버튼·히스토리의 포커스 복원은 화면을 움직이지 않는다. Tab/Enter 이동은 기본 스크롤을 쓴다.
+  function focusTableCell(cell, preventScroll = false){
+    const top = list.scrollTop, left = list.scrollLeft;
+    const tableScroll = cell.closest(".mnote-table-scroll");
+    const tableLeft = tableScroll ? tableScroll.scrollLeft : 0;
+    cell.focus({ preventScroll });
+    const range = document.createRange(); range.selectNodeContents(cell); range.collapse(false);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    if (preventScroll){
+      if (tableScroll) tableScroll.scrollLeft = tableLeft;
+      list.scrollTop = top; list.scrollLeft = left;
+    }
+  }
+
   /* ---- 글 블록 ---- */
   function renderText(block){
     const shell = blockShell(block);
@@ -539,7 +558,7 @@ function mountMnoteEditor(doc){
     area.rows = 3;
     area.placeholder = "내용을 입력하세요. 이미지는 붙여넣을 수 있어요.";
     area.spellcheck = false;
-    const autoGrow = () => { area.style.height = "auto"; area.style.height = area.scrollHeight + "px"; };
+    const autoGrow = () => growTextArea(area);
     area.addEventListener("focus", () => { activeBlockId = block.id; });
     area.addEventListener("input", () => { block.text = area.value; autoGrow(); touch(); });
     area.addEventListener("paste", async (event) => {
@@ -562,7 +581,6 @@ function mountMnoteEditor(doc){
     } else {
       shell.append(blockTools(block), area);
     }
-    requestAnimationFrame(autoGrow);
     return shell;
   }
 
@@ -585,8 +603,11 @@ function mountMnoteEditor(doc){
     tools.prepend(size);
     const pic = document.createElement("div");
     pic.className = "mnote-image-picture";
-    const img = document.createElement("img");
-    img.src = block.src; img.alt = block.name || "그림";
+    // 같은 이미지는 디코딩된 노드를 이어 써서 재렌더 중 높이가 잠시 사라지지 않게 한다.
+    const previousImg = list.querySelector(`[data-block-id="${block.id}"] .mnote-image-picture img`);
+    const img = previousImg && previousImg.getAttribute("src") === block.src ? previousImg : document.createElement("img");
+    if (img !== previousImg) img.src = block.src;
+    img.alt = block.name || "그림";
     pic.appendChild(img);
     const caption = document.createElement("input");
     caption.className = "mnote-caption";
@@ -605,13 +626,11 @@ function mountMnoteEditor(doc){
     let focusR = 0, focusC = 0;
     const cols = () => (block.rows[0] ? block.rows[0].length : 0);
     const host = () => list.querySelector(`[data-block-id="${block.id}"]`);
-    const focusCell = (r, c) => {
+    const focusCell = (r, c, preventScroll = false) => {
       const node = host(); if (!node) return;
       const cell = node.querySelector(`.mnote-table-cell[data-r="${r}"][data-c="${c}"]`);
       if (!cell) return;
-      cell.focus();
-      const range = document.createRange(); range.selectNodeContents(cell); range.collapse(false);
-      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      focusTableCell(cell, preventScroll);
     };
     const commit = change => {
       if (history) history.flush();
@@ -652,10 +671,10 @@ function mountMnoteEditor(doc){
     headerBtn.setAttribute("aria-pressed", String(block.header));
     tableTools.append(
       headerBtn,
-      ttBtn("＋행", "현재 행 아래에 추가", () => { const r = focusR; addRow(r + 1); focusCell(Math.min(block.rows.length - 1, r + 1), focusC); }),
-      ttBtn("－행", "현재 행 삭제", () => { const r = focusR; delRow(r); focusCell(Math.min(block.rows.length - 1, r), Math.min(cols() - 1, focusC)); }),
-      ttBtn("＋열", "현재 열 오른쪽에 추가", () => { const c = focusC; addCol(c + 1); focusCell(focusR, Math.min(cols() - 1, c + 1)); }),
-      ttBtn("－열", "현재 열 삭제", () => { const c = focusC; delCol(c); focusCell(Math.min(block.rows.length - 1, focusR), Math.min(cols() - 1, c)); })
+      ttBtn("＋행", "현재 행 아래에 추가", () => { const r = focusR; addRow(r + 1); focusCell(Math.min(block.rows.length - 1, r + 1), focusC, true); }),
+      ttBtn("－행", "현재 행 삭제", () => { const r = focusR; delRow(r); focusCell(Math.min(block.rows.length - 1, r), Math.min(cols() - 1, focusC), true); }),
+      ttBtn("＋열", "현재 열 오른쪽에 추가", () => { const c = focusC; addCol(c + 1); focusCell(focusR, Math.min(cols() - 1, c + 1), true); }),
+      ttBtn("－열", "현재 열 삭제", () => { const c = focusC; delCol(c); focusCell(Math.min(block.rows.length - 1, focusR), Math.min(cols() - 1, c), true); })
     );
     // 표를 바깥으로 꺼내기 — 메모창 표와 같은 공용 모듈을 쓴다(문서 전체 HTML/MD 내보내기와는 별개).
     const outTools = document.createElement("div");
@@ -733,11 +752,23 @@ function mountMnoteEditor(doc){
   }
 
   function renderBlocks(){
+    const top = list.scrollTop, left = list.scrollLeft;
+    const initial = !list.childElementCount;
+    const tablePositions = new Map([...list.querySelectorAll(".mnote-table-scroll")]
+      .map(scroll => [scroll.closest(".mnote-block").dataset.blockId, scroll.scrollLeft]));
     list.replaceChildren(...mnote.blocks.map(block =>
       block.type === "image" ? renderImage(block)
         : block.type === "table" ? renderTable(block)
         : renderText(block)
     ));
+    // 글 높이가 확정되기 전에 스크롤을 복원하면 줄어든 높이에 맞춰 위치가 잘린다.
+    list.querySelectorAll("textarea.mnote-text").forEach(growTextArea);
+    list.querySelectorAll(".mnote-table-scroll").forEach(scroll => {
+      scroll.scrollLeft = tablePositions.get(scroll.closest(".mnote-block").dataset.blockId) || 0;
+    });
+    list.scrollTop = top; list.scrollLeft = left;
+    // 첫 마운트는 비활성 탭일 수 있으므로 표시된 다음 프레임에도 글 높이를 계산한다.
+    if (initial) requestAnimationFrame(() => list.querySelectorAll("textarea.mnote-text").forEach(growTextArea));
   }
 
   // 검색 결과 클릭 → 일치 텍스트가 있는 블록으로 스크롤
@@ -761,11 +792,23 @@ function mountMnoteEditor(doc){
     apply: (snapshot) => {
       let restored;
       try { restored = mnoteHistoryState(snapshot, imageSources); } catch(_){ return; }
+      const focusedCell = root.contains(document.activeElement)
+        ? document.activeElement.closest(".mnote-table-cell") : null;
+      const focusedBlock = focusedCell && focusedCell.closest(".mnote-block");
       mnote.title = restored.title;
       mnote.blocks = restored.blocks;
       mnote.updatedAt = restored.updatedAt;
       titleInput.value = mnote.title;
       renderBlocks();
+      if (focusedBlock){
+        const block = mnote.blocks.find(item => item.id === focusedBlock.dataset.blockId && item.type === "table");
+        if (block){
+          const r = Math.min(Number(focusedCell.dataset.r), block.rows.length - 1);
+          const c = Math.min(Number(focusedCell.dataset.c), block.rows[r].length - 1);
+          const cell = list.querySelector(`[data-block-id="${block.id}"] .mnote-table-cell[data-r="${r}"][data-c="${c}"]`);
+          if (cell) focusTableCell(cell, true);
+        }
+      }
       const dirty = mnoteSerialize(mnote) !== doc.savedText;
       if (typeof markDocumentDirty === "function") markDocumentDirty(doc, dirty);
       setStatus(dirty ? "● 저장 안 됨" : "");
@@ -773,7 +816,8 @@ function mountMnoteEditor(doc){
     onChange: updateHistoryButtons
   });
 
-  // Ctrl+Z / Ctrl+Y — 텍스트 입력 중에는 브라우저 기본 undo 를 그대로 둔다(스프레드시트와 동일 규약).
+  // 표 셀에서는 입력과 행·열 변경을 같은 문서 히스토리로 되돌린다.
+  // 그 밖의 입력창은 브라우저 기본 undo 를 유지한다.
   const onHistoryKey = (e) => {
     if (typeof state !== "undefined" && state !== doc) return;   // 활성 문서일 때만
     if (e.defaultPrevented || e.isComposing) return;
@@ -783,9 +827,11 @@ function mountMnoteEditor(doc){
     const redo = key === "y" || (key === "z" && e.shiftKey);
     if (!undo && !redo) return;
     const target = e.target;
-    if (target && target.closest && target.closest('input,textarea,select,[contenteditable="true"]')) return;
+    const tableCell = target && target.closest && target.closest(".mnote-table-cell");
+    const ownTableCell = tableCell && root.contains(tableCell);
+    if (!ownTableCell && target && target.closest && target.closest('input,textarea,select,[contenteditable="true"]')) return;
     e.preventDefault(); e.stopPropagation();
-    if (redo) history.redo(); else history.undo();
+    if (redo){ history.flush(); history.redo(); } else history.undo();
   };
   document.addEventListener("keydown", onHistoryKey, true);
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];

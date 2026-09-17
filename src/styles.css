@@ -955,7 +955,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   }
   /* ===== .mnote 블록 문서 편집기 ===== */
   .mnote-doc{display:flex;flex-direction:column;height:100%;min-height:0}
-  .mnote-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--panel)}
+  .mnote-bar{display:flex;flex-shrink:0;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--panel)}
   .mnote-title{flex:1 1 200px;min-width:120px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
     padding:6px 10px;font:600 15px/1.3 inherit}
   .mnote-insert{display:flex;gap:6px;flex-wrap:wrap}
@@ -973,18 +973,19 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     padding:6px 9px;font:inherit;font-size:11.5px;cursor:pointer}
   .mnote-export button:hover{background:var(--panel-hover);color:var(--ink);border-color:var(--accent)}
   .mnote-status{color:var(--muted);font-size:11px;min-width:56px}
-  .mnote-blocks{flex:1 1 auto;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;
+  .mnote-blocks{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-anchor:none;padding:16px;display:flex;flex-direction:column;gap:12px;
     width:100%;max-width:920px;margin:0 auto;box-sizing:border-box}
-  .mnote-block{border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
+  /* 블록 높이는 내용대로 유지하고, 긴 문서는 .mnote-blocks 전체에서 스크롤한다. */
+  .mnote-block{flex:0 0 auto;min-width:0;border:1px solid var(--border);border-radius:10px;background:var(--panel);overflow:hidden}
   .mnote-block-tools{display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:4px 6px;
     border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);background:color-mix(in srgb,var(--panel) 70%,transparent)}
   .mnote-block-tools button,.mnote-block-tools select{border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--muted);
     padding:4px 7px;font:inherit;font-size:10.5px;cursor:pointer}
   .mnote-block-tools button:hover,.mnote-block-tools select:hover{background:var(--panel-hover);color:var(--ink)}
   .mnote-block-tools button.danger{color:var(--danger)}
-  .mnote-text{display:block;width:100%;min-height:44px;resize:none;border:0;outline:0;padding:10px 12px;background:transparent;color:var(--ink);
+  textarea.mnote-text{display:block;width:100%;min-height:44px;resize:none;border:0;outline:0;padding:10px 12px;background:transparent;color:var(--ink);
     font:14px/1.7 "Malgun Gothic",-apple-system,system-ui,"Segoe UI",sans-serif}
-  .mnote-text::placeholder{color:var(--muted)}
+  textarea.mnote-text::placeholder{color:var(--muted)}
   .mnote-image-picture{display:grid;place-items:center;padding:10px;background:repeating-conic-gradient(#e2e8f0 0 25%,#f8fafc 0 50%) 50%/16px 16px}
   [data-theme="dark"] .mnote-image-picture{background:repeating-conic-gradient(#1e293b 0 25%,#334155 0 50%) 50%/16px 16px}
   .mnote-image-picture img{display:block;max-width:100%;object-fit:contain}
