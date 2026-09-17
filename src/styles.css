@@ -3612,6 +3612,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .xlsx-export button:disabled{opacity:.5;cursor:default}
   .xlsx-export-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .xlsx-export-btns[hidden]{display:none}
+  .xlsx-mode-note{flex:1 1 420px;min-width:0;font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+  .xlsx-mode-label{color:var(--ink);margin-right:8px}
   .xlsx-export.editing{justify-content:space-between;margin-bottom:8px;padding:0 2px}
   .xlsx-edit-title{font-size:13px;color:var(--ink);letter-spacing:-.01em}
   .xlsx-view-options{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 10px;
@@ -3918,6 +3920,10 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   [data-theme="dark"] .xlsx-sheet{background:#0f172a;box-shadow:0 4px 18px rgba(0,0,0,.28)}
   [data-theme="dark"] .xlsx-sheet td,[data-theme="dark"] .xlsx-sheet th{border-color:#334155;color:#e2e8f0;background:#111827}
   [data-theme="dark"] .xlsx-sheet tr:nth-child(even) td{background:#0f172a}
+  /* 원본 채우기/조건부 서식 위의 글자 대비만 화면에서 보정한다. */
+  [data-theme="dark"] .xlsx-sheet td[data-mrow]{color:var(--xlsx-dark-text,#e2e8f0)!important}
+  [data-theme="dark"] .xlsx-sheet td[data-mrow].sheet-selected,
+  [data-theme="dark"] .xlsx-sheet td[data-mrow].sheet-anchor{color:var(--xlsx-dark-selected-text,#e2e8f0)!important}
   [data-theme="dark"] .xlsx-sheet:not(.selectable-sheet) tr:first-child td{background:#1e293b;color:#f8fafc}
   [data-theme="dark"] .selectable-sheet .sheet-col-head,
   [data-theme="dark"] .selectable-sheet .sheet-row-head,

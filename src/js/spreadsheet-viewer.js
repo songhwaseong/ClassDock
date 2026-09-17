@@ -1,5 +1,34 @@
 "use strict";
 
+// 화면에서만 사용하는 다크모드 글자색. 원본 모델/인쇄/저장 서식은 바꾸지 않는다.
+function spreadsheetDarkTextColor(foreground, background){
+  const parse = value => {
+    const text = String(value || "").trim();
+    if (/^#[0-9a-f]{6}$/i.test(text)) return [1, 3, 5].map(i => parseInt(text.slice(i, i + 2), 16));
+    const rgb = text.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i);
+    return rgb ? rgb.slice(1).map(Number) : null;
+  };
+  const luminance = rgb => rgb.map(value => {
+    const s = value / 255;
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  }).reduce((sum, value, i) => sum + value * [0.2126, 0.7152, 0.0722][i], 0);
+  const bg = luminance(parse(background) || [30, 41, 59]);
+  const contrast = rgb => {
+    const fg = luminance(rgb);
+    return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+  };
+  let rgb = parse(foreground) || [226, 232, 240];
+  if (contrast(rgb) < 4.5){
+    const target = contrast([255, 255, 255]) >= contrast([0, 0, 0]) ? 255 : 0;
+    const original = rgb;
+    for (let step = 1; step <= 20; step++){
+      rgb = original.map(value => Math.round(value + (target - value) * step / 20));
+      if (contrast(rgb) >= 4.5) break;
+    }
+  }
+  return "#" + rgb.map(value => value.toString(16).padStart(2, "0")).join("");
+}
+
 /* 한컴 한셀(HCell) 등 비표준 생성기는 sharedStrings/styles 에 mc:AlternateContent 로
    한컴 전용 확장(hs:)을 끼워넣는데, SheetJS 가 이를 만나면 데이터 시트를 통째로 비워버린다.
    → AlternateContent 를 표준 호환 버전(mc:Fallback)만 남기고 한컴 확장(mc:Choice)은 제거한다.
@@ -1848,10 +1877,22 @@ async function renderXlsx(file, host, doc){
   const editTitle = document.createElement("strong"); editTitle.className = "xlsx-edit-title"; editTitle.textContent = "편집 도구";
   const editToggle = document.createElement("button"); editToggle.type = "button"; editToggle.className = "xlsx-editmode-btn";
   editToggle.title = "셀 편집·정렬·필터 모드 (저장 시 서식 보존)";
+  const modeNote = document.createElement("span"); modeNote.className = "xlsx-mode-note";
+  modeNote.setAttribute("role", "status");
+  const modeLabel = document.createElement("strong"); modeLabel.className = "xlsx-mode-label";
+  const modeDescription = document.createElement("span");
+  modeNote.append(modeLabel, modeDescription);
   const syncEditToggle = () => {
     editToggle.textContent = imageProtectedWorkbook ? "셀 이미지 · 읽기 전용" : (editMode ? "읽기 전용" : "표 편집·정렬");
     editToggle.title = imageProtectedWorkbook ? "셀 이미지를 손실 없이 보존하기 위해 이 파일은 읽기 전용으로 엽니다."
-      : (editMode ? "편집을 마치고 읽기 전용으로 전환" : "셀 편집·정렬·필터 모드로 전환");
+      : (editMode ? "수정한 값은 유지하고 서식을 단순하게 표시하는 읽기 전용으로 전환 (파일 저장은 별도)"
+        : "원본 서식을 불러와 셀 편집·정렬·필터 모드로 전환 · 큰 파일은 시간이 걸릴 수 있어요");
+    modeLabel.textContent = editMode ? "편집 모드 · 서식 표시" : "읽기 전용 · 빠른 보기";
+    modeDescription.textContent = imageProtectedWorkbook
+      ? "셀 이미지 보존을 위해 편집이 제한됩니다. 색·글꼴 등 일부 서식은 단순하게 표시합니다."
+      : (editMode
+        ? "색·글꼴·정렬을 표시합니다. ‘읽기 전용’으로 돌아가면 단순한 표로 보이며, 수정한 값은 유지됩니다."
+        : "값 중심으로 서식을 단순하게 표시합니다. 원본 서식은 ‘표 편집·정렬’에서 확인하세요. 큰 파일은 전환에 시간이 걸릴 수 있습니다.");
     editToggle.classList.toggle("active", editMode);
     editTitle.hidden = !editMode;
     if (viewOptions) viewOptions.hidden = !editMode;
@@ -1862,7 +1903,7 @@ async function renderXlsx(file, host, doc){
   }
   syncEditToggle();
   editToggle.addEventListener("click", () => { editMode = !editMode; syncEditToggle(); rerender(); });
-  exp.append(editTitle, editToggle, expBtns);
+  exp.append(editTitle, editToggle, expBtns, modeNote);
 
   const editBar = document.createElement("div"); editBar.className = "xlsx-editbar"; editBar.hidden = true;
   // 수식 입력줄(활성 셀 참조 + 값/수식 편집) — 편집 모드에서만 표시
@@ -2356,6 +2397,10 @@ async function renderXlsx(file, host, doc){
     return h && /^[0-9a-fA-F]{6}$/.test(h) ? ("#" + h) : null;
   };
   const cssToArgb = (hex) => "FF" + String(hex).replace(/^#/, "").toUpperCase();
+  const syncCellDarkColors = td => {
+    td.style.setProperty("--xlsx-dark-text", spreadsheetDarkTextColor(td.style.color, td.style.backgroundColor));
+    td.style.setProperty("--xlsx-dark-selected-text", spreadsheetDarkTextColor(td.style.color, "#252e49"));
+  };
   // 모델 셀의 style(fill/border/font/alignment) → <td> 인라인 스타일로 반영(편집·보기 공통 렌더)
   const applyCellStyleToTd = (td, s) => {
     const st = (s && s.style) || {};
@@ -2416,6 +2461,7 @@ async function renderXlsx(file, host, doc){
     td.style.whiteSpace = a.wrapText ? "normal" : "";
     td.classList.toggle("xlsx-wrap", !!a.wrapText);
     td.classList.toggle("xlsx-has-dv", !!(s && s.dv && s.dv.values && s.dv.values.length));   // 목록 유효성 → ▼ 표시
+    syncCellDarkColors(td);
   };
   const markStyle = (name, r, c) => {
     anyDirty = true;
@@ -2861,6 +2907,7 @@ async function renderXlsx(file, host, doc){
         }
       }
     }
+    syncCellDarkColors(td);
   };
   // 화면에 이미 그려진 셀들에 base 서식 + 조건부 서식을 다시 입힌다(값 편집 후 라이브 갱신).
   const refreshCondFormat = () => {
@@ -3642,6 +3689,7 @@ async function renderXlsx(file, host, doc){
       if(spec && !cell.style.backgroundColor){
         cell.style.backgroundColor=r===spec.range.s.r?"#dbeafe":(r-spec.range.s.r)%2?"var(--xlsx-frozen-bg,#fff)":"#eff6ff";
       }
+      syncCellDarkColors(cell);
     });
     table.querySelectorAll("td[data-mcol],th.sheet-col-head").forEach(cell=>{
       const c=Number(cell.dataset.mcol ?? cell.dataset.col);
@@ -3931,10 +3979,11 @@ async function renderXlsx(file, host, doc){
   };
   const tableFromModel = (model, editable, options={}) => {
     const cols = model.length ? model[0].length : 1;
-    const head = editState.headerFrozen ? 1 : 0;
+    const styled = !options.plain;   // 읽기 전용은 최초 열기처럼 단순한 표, 인쇄는 원본 서식 유지
+    const head = styled && editState.headerFrozen ? 1 : 0;
     const rowIndexes = options.rowIndexes || matchingModelRows(model, editable);
     const { covered, spanAt } = mergeRenderInfo();
-    const condPrepared = prepCondRules(model);   // 조건부 서식 규칙 + 범위 통계(렌더 1회 계산)
+    const condPrepared = styled ? prepCondRules(model) : [];   // 조건부 서식 규칙 + 범위 통계(렌더 1회 계산)
     const table = document.createElement("table"), body = document.createElement("tbody");
     const spacer = (height, where) => {
       if (!(height > 0)) return;
@@ -3953,8 +4002,8 @@ async function renderXlsx(file, host, doc){
         const td = document.createElement("td");
         td.dataset.mrow = String(r); td.dataset.mcol = String(c);
         td.textContent = dispCell(s);
-        if (typeof s.v === "number") td.classList.add("num");
-        applyCellStyleToTd(td, s);                       // 채우기·테두리 서식 반영
+        if (styled && typeof s.v === "number") td.classList.add("num");
+        if (styled) applyCellStyleToTd(td, s);                       // 채우기·테두리 서식 반영
         if (condPrepared.length) applyCondOverlayToTd(td, r, c, s, condPrepared);   // 조건부 서식 오버레이
         const sp = spanAt.get(key);
         if (editable){
@@ -4015,7 +4064,7 @@ async function renderXlsx(file, host, doc){
       const visible = rowIndexes.slice(windowState.start, windowState.start + windowState.count);
       const topBefore = sheet.scrollTop, leftBefore = sheet.scrollLeft;
       const table = tableFromModel(model, editable, {
-        rowIndexes:visible, topHeight:windowState.topHeight, bottomHeight:windowState.bottomHeight
+        plain:!editable, rowIndexes:visible, topHeight:windowState.topHeight, bottomHeight:windowState.bottomHeight
       });
       sheet.replaceChildren(table);
       enhanceSpreadsheetSelection(sheet, name, {
@@ -4025,7 +4074,7 @@ async function renderXlsx(file, host, doc){
         isCellEmpty:modelNavigationCellEmpty(model)
       });
       if (editable){ bindEditableTable(table, name); decorateFilterHeads(); }
-      applyWorksheetView(name);
+      if (editable) applyWorksheetView(name);
       sheet.scrollTop = topBefore; sheet.scrollLeft = leftBefore;
     };
     const onScroll = () => {
@@ -4362,10 +4411,10 @@ async function renderXlsx(file, host, doc){
     clearSpreadsheetImages();
     formulaBar.hidden = true;
     clearVirtualEditor();
-    if (exModels[name]){                          // 편집한 적 있으면 모델 값으로(편집 반영). 서식 표시는 유지, 색/병합은 보기에선 단순화.
+    if (exModels[name]){                          // 최신 값과 병합은 유지하되 최초 열기와 같은 단순한 표로 표시.
       maybeRecalc(name);
       if (shouldVirtualize(name)){ renderVirtualModel(name, false); return; }
-      sheet.replaceChildren(tableFromModel(spreadsheetDataModel(exModels[name]), false));
+      sheet.replaceChildren(tableFromModel(spreadsheetDataModel(exModels[name]), false, { plain:true }));
     } else {
       sheet.innerHTML = XLSX.utils.sheet_to_html(wb.Sheets[name], { editable: false });
     }
@@ -4376,7 +4425,6 @@ async function renderXlsx(file, host, doc){
     });
     decorateSpreadsheetSourceLayout(name);
     renderSpreadsheetImages(name);
-    if(exModels[name])applyWorksheetView(name);
   };
 
   const renderEditable = (name, options={}) => {
@@ -6460,7 +6508,7 @@ async function renderXlsx(file, host, doc){
     expBtns.hidden = editMode;   // 읽기 전용에서는 항상 표시 — 편집분·CSV 변환본은 exportSheetOf 가 모델 값으로 내보냄
     editBar.hidden = !editMode;
     if (editMode){
-      sheet.textContent = "편집기를 준비하는 중…";
+      sheet.textContent = "원본 서식과 편집 데이터를 불러오는 중… 큰 파일은 시간이 걸릴 수 있습니다.";
       const model = await exModelFor(currentSheet);
       if (!model){
         toast(spreadsheetEditFailureMessage(
@@ -6485,6 +6533,7 @@ async function renderXlsx(file, host, doc){
 
 if (typeof module === "object" && module.exports){
   module.exports = {
+    spreadsheetDarkTextColor,
     adjustSpreadsheetMergesAfterColumnInsert,
     adjustSpreadsheetMergesAfterColumnDelete,
     adjustSpreadsheetMergesAfterRowDelete,

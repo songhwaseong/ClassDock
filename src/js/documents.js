@@ -3796,7 +3796,7 @@ function renderSidebar(){
       cl.title = node.type === "group" ? "묶음 전체 닫기" : "닫기";
       cl.onclick = async (e) => {
         e.stopPropagation();
-        if (node.type === "group") await closeGroup(node.nodeId, { forgetWorkspace: true });
+        if (node.type === "group") await closeGroup(node.nodeId, { forgetWorkspace: true, confirm: true });
         else if (!workspaceDetachDocFromActive(doc)) await requestCloseDoc(doc.id, { forgetWorkspace: true });
       };
       item.append(cl);
@@ -4061,7 +4061,23 @@ async function closeGroup(nodeId, options={}){
   // 문서를 고르지 않은 상태(activeId=0)는 그대로 유지한다. 이 그룹 안의 활성 문서가 실제로
   // 닫힐 때만 남은 문서로 이동해야, 빈 화면에서 그룹 하나를 정리했다고 첫 파일이 멋대로 열리지 않는다.
   const activeWasInGroup = childDocs.some(d => d.id === activeId);
-  if (childDocs.some(d => d.kind === "pdf" && d.elements && d.elements.length)){
+  if (options.confirm){
+    // 사이드바 ✕ 로 최상위 폴더·ZIP 을 닫을 때 — 열어 둔 탭까지 한꺼번에 닫히므로 한 번 묻는다.
+    // PDF 서명 경고·저장 안 한 수정도 이 한 창에 모아, 확인창이 연달아 뜨지 않게 한다.
+    const what = group.kind === "zip" ? "압축 파일" : "폴더";
+    const lines = [`'${group.name}' ${what}을(를) 닫을까요?`];
+    const tabCount = childDocs.filter(d => tabOrder.includes(d.id) && workspaceHasDoc(d)).length;
+    if (tabCount) lines.push(`열어 둔 탭 ${tabCount}개도 함께 닫힙니다.`);
+    const unsaved = childDocs.filter(d => documentCloseConfirmMessages(d).length
+      || (d.kind === "pdf" && d.elements && d.elements.length));
+    if (unsaved.length){
+      const names = unsaved.slice(0, 5).map(d => "· " + d.name);
+      if (unsaved.length > 5) names.push(`· 외 ${unsaved.length - 5}개`);
+      lines.push("", "저장하지 않은 편집이 있는 파일:", ...names);
+    }
+    if (typeof confirmDialog !== "function" || !await confirmDialog(lines.join("\n"), "닫기", "취소")) return;
+    if (!navNodes.includes(group)) return;   // 묻는 사이 다른 경로로 이미 닫혔다
+  } else if (childDocs.some(d => d.kind === "pdf" && d.elements && d.elements.length)){
     if (typeof confirmDialog !== "function"
       || !await confirmDialog(`'${group.name}' 안에 추가한 서명/텍스트가 있는 PDF가 있습니다. 닫을까요?`, "닫기", "취소")) return;
   }
