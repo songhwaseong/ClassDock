@@ -56,3 +56,28 @@ test("최상위 ZIP 닫기(✕)는 확인창을 거친다", async ({ page }) => 
 
   expect(errors).toEqual([]);
 });
+
+test("안에 파일이 없는 빈 폴더는 묻지 않고 바로 닫는다", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await boot(page);
+
+  await page.locator("#fileInput").setInputFiles({ name: "메모.txt", mimeType: "text/plain", buffer: Buffer.from("안녕") });
+  const rows = page.locator("#sbList .sb-item");
+  await expect(rows.filter({ hasText: "메모.txt" })).toHaveCount(1, { timeout: 20_000 });
+
+  await page.evaluate(() => {
+    const root = makeGroup("folder", "빈폴더", null);
+    makeGroup("folder", "하위", root.nodeId);
+    renderSidebar();
+  });
+  const root = rows.filter({ hasText: "빈폴더" });
+  await expect(root).toHaveCount(1);
+
+  await root.locator(".sb-close").click();
+  await expect(root).toHaveCount(0);
+  await expect(page.locator("#confirmModal")).toBeHidden();
+  await expect(rows.filter({ hasText: "메모.txt" })).toHaveCount(1);
+
+  expect(errors).toEqual([]);
+});

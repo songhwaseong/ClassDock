@@ -4061,8 +4061,9 @@ async function closeGroup(nodeId, options={}){
   // 문서를 고르지 않은 상태(activeId=0)는 그대로 유지한다. 이 그룹 안의 활성 문서가 실제로
   // 닫힐 때만 남은 문서로 이동해야, 빈 화면에서 그룹 하나를 정리했다고 첫 파일이 멋대로 열리지 않는다.
   const activeWasInGroup = childDocs.some(d => d.id === activeId);
-  if (options.confirm){
+  if (options.confirm && childDocs.length){
     // 사이드바 ✕ 로 최상위 폴더·ZIP 을 닫을 때 — 열어 둔 탭까지 한꺼번에 닫히므로 한 번 묻는다.
+    // 안에 파일이 하나도 없는 빈 폴더는 잃을 것이 없으니 묻지 않고 바로 닫는다.
     // PDF 서명 경고·저장 안 한 수정도 이 한 창에 모아, 확인창이 연달아 뜨지 않게 한다.
     const what = group.kind === "zip" ? "압축 파일" : "폴더";
     const lines = [`'${group.name}' ${what}을(를) 닫을까요?`];
