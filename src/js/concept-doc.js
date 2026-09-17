@@ -666,7 +666,7 @@ function conceptDownload(name, blob){ MNDownload.saveBlob(blob, name); }
 
 function conceptButton(label, title, className){ const button = document.createElement("button"); button.type = "button"; button.className = className || "concept-btn"; button.textContent = label; if (title) button.title = title; return button; }
 function conceptModal(titleText, body){
-  const modal = document.createElement("div"); modal.className = "concept-modal"; const card = document.createElement("div"); card.className = "concept-modal-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+  const modal = document.createElement("div"); modal.className = "concept-modal"; const card = document.createElement("div"); card.className = "concept-modal-card movable-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
   const head = document.createElement("header"), title = document.createElement("h2"), close = conceptButton("×", "닫기", "concept-modal-x"); title.textContent = titleText; head.append(title, close); card.append(head, body); modal.appendChild(card); document.body.appendChild(modal);
   const dispose = () => modal.remove(); close.addEventListener("click", dispose); modal.addEventListener("pointerdown", event => { if (event.target === modal) dispose(); }); modal.addEventListener("keydown", event => { if (event.key === "Escape"){ event.preventDefault(); dispose(); } });
   return { modal, card, dispose };

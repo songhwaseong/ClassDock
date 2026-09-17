@@ -66,6 +66,54 @@ const MAP_MARKER_COLORS = [
   { id:"slate",  label:"검정", hex:"#334155" }
 ];
 
+/* 지도 위에 떠 있는 칸(반경 보기·제주 버스)을 제목줄로 끌어 지도 안에서 옮긴다.
+   화면 좌표(fixed)로 띄우지 않는 까닭: 반경 칸은 접으면 폭이 줄어야 하고, 칸은 지도(무대)와 함께 움직여야 한다.
+   그래서 크기는 건드리지 않고 무대 기준 left/top 만 바꾸며, 무대·칸 크기가 바뀌면 무대 안으로 다시 넣는다. */
+function mapMakePanelMovable(panel, handle, stage, doc){
+  if (!panel || !handle || !stage) return;
+  handle.classList.add("map-panel-drag");
+  let pos = null;
+  const place = () => {
+    if (!pos || panel.hidden) return;
+    const left = Math.max(0, Math.min(pos.left, stage.clientWidth - panel.offsetWidth));
+    const top = Math.max(0, Math.min(pos.top, stage.clientHeight - panel.offsetHeight));
+    panel.style.left = left + "px"; panel.style.top = top + "px";
+    panel.style.right = "auto"; panel.style.bottom = "auto";
+  };
+  handle.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || event.target.closest("button, input, select, textarea, a, label")) return;
+    event.preventDefault();
+    const stageRect = stage.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();
+    const dx = event.clientX - panelRect.left, dy = event.clientY - panelRect.top;
+    const originX = stageRect.left + stage.clientLeft, originY = stageRect.top + stage.clientTop;
+    const pointerId = event.pointerId;
+    try { handle.setPointerCapture(pointerId); } catch(_){}
+    panel.classList.add("is-dragging");
+    const move = ev => {
+      if (ev.pointerId !== pointerId) return;
+      pos = { left: ev.clientX - dx - originX, top: ev.clientY - dy - originY };
+      place();
+    };
+    const end = ev => {
+      if (ev.pointerId !== pointerId) return;
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      panel.classList.remove("is-dragging");
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  });
+  if (typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver(() => place());
+  ro.observe(stage); ro.observe(panel);
+  if (doc){
+    if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+    doc.cleanupFns.push(() => ro.disconnect());
+  }
+}
+
 /* 표시를 새로 찍을 때 그 자리의 주소를 이름에 채울지. 지도 문서마다가 아니라 사람마다의 습관이라
    .map 파일이 아닌 이 브라우저에 남긴다(지도 고르기 창의 마지막 위치와 같은 자리). */
 const MAP_AUTO_ADDRESS_KEY = "mn.mapAutoAddress";
@@ -5432,7 +5480,8 @@ async function mountMapEditor(doc){
     doc.cleanupFns.push(() => { if (subwayOn) subwayStop(); });
   }
 
-  const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow, doc, t:mapT }) : null;
+  const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
 
   /* ── 되돌리기 ──
      내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이
@@ -6281,6 +6330,7 @@ async function mountMapEditor(doc){
   L.DomEvent.disableClickPropagation(radiusPanel);
   L.DomEvent.disableScrollPropagation(radiusPanel);
   radiusPanel.addEventListener("keydown", event => event.stopPropagation());
+  mapMakePanelMovable(radiusPanel, radiusPanel.querySelector(".map-radius-head"), stage, doc);
   mapTranslate(radiusPanel);
   const radiusFold = radiusPanel.querySelector(".map-radius-fold");
   const radiusContent = radiusPanel.querySelector(".map-radius-content");

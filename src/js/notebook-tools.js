@@ -572,7 +572,7 @@ function nbBuildShortcutSheet(ownerDoc){
   const overlay = document.createElement("div");
   overlay.className = "nbv-help-overlay"; overlay.hidden = true;
   overlay.setAttribute("role", "dialog"); overlay.setAttribute("aria-modal", "true"); overlay.setAttribute("aria-label", "키보드 단축키");
-  const panel = document.createElement("div"); panel.className = "nbv-help-panel";
+  const panel = document.createElement("div"); panel.className = "nbv-help-panel movable-card";
   const head = document.createElement("div"); head.className = "nbv-help-head";
   const title = document.createElement("strong"); title.textContent = "키보드 단축키";
   const close = document.createElement("button"); close.type = "button"; close.className = "nbv-help-close"; close.textContent = "×"; close.title = "닫기 (Esc)";

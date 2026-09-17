@@ -1,7 +1,7 @@
 "use strict";
 /* 지도에만 속하는 실시간 층. .map 모델과 사용자 마커를 수정하지 않는다. */
 const MNJejuBusMap = (() => {
-  function mount({map,stage,toolRow,doc,t = value=>value}){
+  function mount({map,stage,toolRow,doc,t = value=>value,movePanel = null}){
     const el=(tag,cls,label)=>{const node=document.createElement(tag);node.className=cls;if(label)node.textContent=t(label);return node;};
     const button=(label,cls="")=>{const node=el("button","map-btn "+cls,label);node.type="button";return node;};
     const toggle=button("🚌 제주 버스","map-toolvis-jeju-bus");
@@ -29,6 +29,7 @@ const MNJejuBusMap = (() => {
     // 목록 최신화 줄은 노선 목록 바로 밑에 둔다. 패널 맨 아래로 내리면 접힌 부분에 숨어 보이지 않는다.
     panel.append(heading,form,catalogRow,select,preview,actions,status,note,source);stage.appendChild(panel);
     L.DomEvent.disableClickPropagation(panel);L.DomEvent.disableScrollPropagation(panel);
+    if(typeof movePanel==="function")movePanel(panel,heading);
     const pane=map.createPane("mapJejuBusPane");pane.style.zIndex="640";
     const routePane=map.createPane("mapJejuBusRoutePane");routePane.style.zIndex="370";
     const vehicles=L.layerGroup(),routesLayer=L.layerGroup(),markers=new Map();

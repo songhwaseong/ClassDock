@@ -1319,7 +1319,7 @@ function promptCsvHeaderChoice(firstRow, guessHasHeader){
     overlay.className = "csv-header-ask";
     const sample = (firstRow || []).slice(0, 8).map(v => String(v == null ? "" : v)).join("  ·  ") || "(빈 줄)";
     overlay.innerHTML =
-      '<div class="csv-header-card" role="dialog" aria-modal="true">' +
+      '<div class="csv-header-card movable-card" role="dialog" aria-modal="true">' +
       '<strong>첫 줄을 머리글로 쓸까요?</strong>' +
       '<div class="csv-header-sample">첫 줄: ' + escapeChartText(sample) + '</div>' +
       '<div class="csv-header-hint">' + (guessHasHeader ? "컬럼명처럼 보여요." : "실제 데이터처럼 보여요.") + ' 원하는 쪽을 고르세요.</div>' +
@@ -2945,10 +2945,20 @@ async function renderXlsx(file, host, doc){
   };
   const rangeA1 = (rg) => encodeSpreadsheetCell(rg.s.r, rg.s.c) + ":" + encodeSpreadsheetCell(rg.e.r, rg.e.c);
   // 규칙 관리 모달: 현재 시트 규칙 목록 + 개별 삭제
+  // 피벗·조건부 서식 창은 제목줄을 끌어 옮기고 가장자리로 크기를 바꾼다(차트 창처럼 표를 보면서 쓰는 창이다).
+  const floatXlsxDialog = (modal, headSelector, storageKey, min) => {
+    const head = modal.querySelector(headSelector);
+    modal.__float = head && typeof makeFloatingPanel === "function" ? makeFloatingPanel(modal, head, { storageKey, min }) : null;
+    if (modal.__float) modal.__float.clampOnOpen();
+  };
+  const removeXlsxDialog = (modal) => {
+    if (modal.__float) modal.__float.destroy();
+    modal.remove();
+  };
   let condModal = null;
   let condModalKeydown = null;
   const closeCondModal = () => {
-    if (condModal){ condModal.remove(); condModal = null; }
+    if (condModal){ removeXlsxDialog(condModal); condModal = null; }
     if (condModalKeydown){
       document.removeEventListener("keydown", condModalKeydown, true);
       condModalKeydown = null;
@@ -2975,6 +2985,7 @@ async function renderXlsx(file, host, doc){
       '<div class="xlsx-cond-list">' + rowsHtml + '</div>' +
       '<div class="xlsx-cond-foot"><button data-a="clear">전체 삭제</button><button data-a="close2">닫기</button></div>';
     document.body.appendChild(modal); condModal = modal;
+    floatXlsxDialog(modal, ".xlsx-cond-head", "classdock-xlsx:cond-rect:v1", { w:320, h:180 });
     condModalKeydown = (event) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -3339,7 +3350,7 @@ async function renderXlsx(file, host, doc){
   let pivotModal = null;
   let pivotModalKeydown = null;
   const closePivotModal = () => {
-    if (pivotModal){ pivotModal.remove(); pivotModal = null; }
+    if (pivotModal){ removeXlsxDialog(pivotModal); pivotModal = null; }
     if (pivotModalKeydown){
       document.removeEventListener("keydown", pivotModalKeydown, true);
       pivotModalKeydown = null;
@@ -3369,6 +3380,7 @@ async function renderXlsx(file, host, doc){
       '<div class="xlsx-pivot-actions"><button data-a="make" class="primary">새 시트로 만들기</button><button data-a="close2">닫기</button></div>';
     document.body.appendChild(modal);
     pivotModal = modal;
+    floatXlsxDialog(modal, ".xlsx-pivot-head", "classdock-xlsx:pivot-rect:v1", { w:340, h:240 });
     pivotModalKeydown = (event) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -4563,7 +4575,7 @@ async function renderXlsx(file, host, doc){
   const openFunctionManager = () => {
     closeFunctionManager();
     const modal=document.createElement("div");modal.className="xlsx-function-overlay";
-    modal.innerHTML='<form class="xlsx-function-dialog" role="dialog" aria-modal="true" aria-labelledby="xlsx-function-title">'+
+    modal.innerHTML='<form class="xlsx-function-dialog movable-card" role="dialog" aria-modal="true" aria-labelledby="xlsx-function-title">'+
       '<div class="xlsx-cond-head"><strong id="xlsx-function-title">내 함수 관리</strong><button type="button" data-a="close" aria-label="닫기">✕</button></div>'+
       '<p>함수를 등록하면 통합 문서에서 이름으로 호출할 수 있습니다. XLSX를 저장하면 함수도 함께 저장됩니다.</p>'+
       '<label>등록된 함수<select data-f="list" size="4" aria-label="등록된 함수"></select></label>'+

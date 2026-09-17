@@ -115,7 +115,7 @@ function studyButton(label, title, className, icon, labelCls){
   return button;
 }
 function studyModal(titleText, body){
-  const modal = document.createElement("div"); modal.className = "study-modal"; const card = document.createElement("div"); card.className = "study-modal-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+  const modal = document.createElement("div"); modal.className = "study-modal"; const card = document.createElement("div"); card.className = "study-modal-card movable-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
   const head = document.createElement("header"), h = document.createElement("h2"), close = studyButton("", "닫기", "study-modal-x", "close"); h.textContent = titleText; head.append(h, close); card.append(head, body); modal.appendChild(card); document.body.appendChild(modal);
   const dispose = () => modal.remove(); close.onclick = dispose; modal.addEventListener("pointerdown", event => { if (event.target === modal) dispose(); }); modal.addEventListener("keydown", event => { if (event.key === "Escape"){ event.preventDefault(); dispose(); } }); return { modal, dispose };
 }

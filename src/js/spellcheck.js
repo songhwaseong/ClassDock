@@ -357,8 +357,12 @@ const MNKoreanSpellcheck = (() => {
     nav.append(prev, next, recheck, ignore, alwaysIgnore, reset);
     root.append(head, scope, empty, issue, nav);
     document.body.appendChild(root);
+    // 본문 아래쪽을 가리기 쉬운 자리라 제목줄을 끌어 옮기고 가장자리로 크기를 바꾼다(위치·크기 저장).
+    const float = typeof window !== "undefined" && typeof window.makeFloatingPanel === "function"
+      ? window.makeFloatingPanel(root, head, { storageKey:"classdock-spellcheck:rect:v1", min:{ w:280, h:180 } })
+      : null;
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(root);
-    panel = { root, title, count, close, scope, empty, issue, category, original, message, snippet, suggestions,
+    panel = { root, float, title, count, close, scope, empty, issue, category, original, message, snippet, suggestions,
       prev, next, recheck, ignore, alwaysIgnore, reset };
 
     close.addEventListener("click", closePanel);
@@ -526,6 +530,7 @@ const MNKoreanSpellcheck = (() => {
         activeIndex = ruleIssues.length ? Math.min(Math.max(activeIndex, 0), ruleIssues.length - 1) : -1;
         const ui = ensurePanel();
         ui.root.hidden = false;
+        if (ui.float) ui.float.clampOnOpen();
         button.setAttribute("aria-pressed", "true");
         renderPanel();
         if (focusFirst && ruleIssues.length) controller.focusIssue(ruleIssues[activeIndex]);

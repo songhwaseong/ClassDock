@@ -2816,9 +2816,11 @@ function makeCardMovable(card){
     try { return window.matchMedia("(max-width:640px)").matches; }
     catch(_){ return window.innerWidth <= 640; }
   };
+  // .modal 이 아닌 덮개(관계도·암기장·노트북 단축키 등)는 hidden 이 덮개에 걸리므로 실제로 그려졌는지도 본다
+  const overlayOf = () => card.closest(".modal") || (card.parentElement !== document.body ? card.parentElement : null);
   const modalIsVisible = () => {
     const modal = card.closest(".modal");
-    return !!card.isConnected && !card.hidden && (!modal || !modal.hidden);
+    return !!card.isConnected && !card.hidden && (!modal || !modal.hidden) && card.getClientRects().length > 0;
   };
   // 카드를 화면 좌표에 고정한다(이동·좌/상단 리사이즈의 전제: flex 가운데 정렬을 끊어야 한다)
   const pinCard = (rect) => {
@@ -2858,7 +2860,7 @@ function makeCardMovable(card){
   card.__clampMovableModal = clampCard;
   // 핸들 레이어는 모달 오버레이의 자식으로 둔다 → 동적 모달이 통째로 제거될 때 핸들도 같이 사라진다
   edgeResize = attachEdgeResize(card, {
-    host: () => card.closest(".modal") || document.body,
+    host: () => overlayOf() || document.body,
     enabled: () => modalIsVisible() && !compactLayout(),
     min: () => ({ w: minWidth(), h: MIN_H }),
     onStart: () => {
@@ -2908,19 +2910,21 @@ function makeCardMovable(card){
   if (typeof MutationObserver !== "undefined"){
     const vis = new MutationObserver(() => requestAnimationFrame(syncHandles));
     vis.observe(card, { attributes: true, attributeFilter: ["hidden", "class", "style"] });
-    const parentModal = card.closest(".modal");
+    const parentModal = overlayOf();
     if (parentModal) vis.observe(parentModal, { attributes: true, attributeFilter: ["hidden", "class", "style"] });
   }
   requestAnimationFrame(syncHandles);
 }
+// .modal-card 가 아닌 창도 모양은 그대로 두고 옮기기·크기 조절만 받으려면 movable-card 를 붙인다.
+const MOVABLE_CARD_SELECTOR = ".modal-card, .movable-card";
 function setupMovableModals(){
-  document.querySelectorAll(".modal-card").forEach(makeCardMovable);
+  document.querySelectorAll(MOVABLE_CARD_SELECTOR).forEach(makeCardMovable);
   if (typeof MutationObserver === "undefined") return;
   const mo = new MutationObserver((muts) => {
     muts.forEach(m => m.addedNodes && m.addedNodes.forEach(n => {
       if (n.nodeType !== 1) return;
-      if (n.classList && n.classList.contains("modal-card")) makeCardMovable(n);
-      if (n.querySelectorAll) n.querySelectorAll(".modal-card").forEach(makeCardMovable);
+      if (n.matches && n.matches(MOVABLE_CARD_SELECTOR)) makeCardMovable(n);
+      if (n.querySelectorAll) n.querySelectorAll(MOVABLE_CARD_SELECTOR).forEach(makeCardMovable);
     }));
     muts.forEach(m => {
       if (m.type !== "attributes" || m.attributeName !== "hidden") return;

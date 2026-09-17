@@ -5640,6 +5640,18 @@ function renderWhiteboard(doc, host){
   bgPanel.append(bgHead, bgColorTitle, bgChoices, bgCustomRow, patternTitle, patternChoices, patternDetails,
     imageTitle, imageActions, imageDetails, bgHint);
   stage.appendChild(bgPanel);
+  // 도구상자·집중 도구 창처럼 제목줄을 끌어 옮기고 가장자리로 크기를 조절한다(위치·크기는 저장된다).
+  const floatingBounds = () => {
+    const box = typeof byId === "function" ? byId("content") : null;
+    return box ? box.getBoundingClientRect() : null;
+  };
+  const bgFloat = typeof makeFloatingPanel === "function" ? makeFloatingPanel(bgPanel, bgHead, {
+    storageKey: "classdock-whiteboard:bg-rect:v1",
+    min: { w:260, h:200 },
+    bounds: floatingBounds,
+    host: () => document.fullscreenElement || document.body,
+    zIndex: () => 61
+  }) : null;
 
   // ----- 변환 패널(선택한 도형을 옮기고·돌리고·뒤집고·닮음 복사) -----
   let transformToolBtn = null;
@@ -5699,6 +5711,13 @@ function renderWhiteboard(doc, host){
   transformActions.appendChild(transformApplyBtn);
   transformPanel.append(transformHead, transformKinds, transformAxisRow, transformFields, transformPivotRow, transformKeepRow, transformHint, transformActions);
   stage.appendChild(transformPanel);
+  const transformFloat = typeof makeFloatingPanel === "function" ? makeFloatingPanel(transformPanel, transformHead, {
+    storageKey: "classdock-whiteboard:transform-rect:v1",
+    min: { w:260, h:180 },
+    bounds: floatingBounds,
+    host: () => document.fullscreenElement || document.body,
+    zIndex: () => 61
+  }) : null;
   syncTransformPanel = () => {
     for (const id in transformKindBtns){
       const active = id === transformState.kind;
@@ -5734,7 +5753,7 @@ function renderWhiteboard(doc, host){
     const open = force == null ? transformPanel.hidden : !!force;
     transformPanel.hidden = !open;
     if (transformToolBtn){ transformToolBtn.classList.toggle("active", open); transformToolBtn.setAttribute("aria-expanded", open ? "true" : "false"); }
-    if (open){ toggleFocusPanel(false); syncTransformPanel(); }
+    if (open){ toggleFocusPanel(false); syncTransformPanel(); if (transformFloat) transformFloat.clampOnOpen(); }
     else transformPickPivot = false;
     redraw();
   }
@@ -5752,7 +5771,7 @@ function renderWhiteboard(doc, host){
     bgPanel.hidden = !open;
     bgToggleBtn.classList.toggle("active", open);
     bgToggleBtn.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open){ toggleFocusPanel(false); requestAnimationFrame(() => { if (bgCustom.isConnected) bgCustom.focus({ preventScroll:true }); }); }
+    if (open){ toggleFocusPanel(false); if (bgFloat) bgFloat.clampOnOpen(); requestAnimationFrame(() => { if (bgCustom.isConnected) bgCustom.focus({ preventScroll:true }); }); }
   }
   const syncBackgroundChoices = () => {
     bgToggleDot.style.background = wb.bg;
@@ -6150,6 +6169,11 @@ function renderWhiteboard(doc, host){
     if (bgPanel.hidden) return;
     const target = e.target;
     if (bgPanel.contains(target) || bgToggleBtn.contains(target)) return;
+    // 크기 조절 띠는 body 에 따로 붙어 있어 창 밖으로 잡힌다 — 창 테두리 바로 곁이면 닫지 않는다.
+    if (target && target.closest && target.closest(".edge-resize-handle")){
+      const r = bgPanel.getBoundingClientRect();
+      if (e.clientX >= r.left - 10 && e.clientX <= r.right + 10 && e.clientY >= r.top - 10 && e.clientY <= r.bottom + 10) return;
+    }
     toggleBackgroundPanel(false);
   };
   document.addEventListener("pointerdown", onPointerDownOutside, true);
@@ -6165,7 +6189,7 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){

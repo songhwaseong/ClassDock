@@ -1503,7 +1503,7 @@ function mountTimelineEditor(doc){
     const tripTypes = trip ? '<datalist id="timeline-trip-types"><option value="이동"><option value="관광"><option value="식사"><option value="숙박"></datalist>' : "";
     const modal = document.createElement("div");
     modal.className = "modal timeline-event-modal";
-    modal.innerHTML = '<div class="timeline-modal-card" role="dialog" aria-modal="true">' +
+    modal.innerHTML = '<div class="timeline-modal-card movable-card" role="dialog" aria-modal="true">' +
       '<header><h2></h2><button type="button" class="timeline-modal-x" aria-label="닫기">×</button></header>' +
       '<div class="timeline-form-grid">' +
         '<label class="timeline-field timeline-field-wide"><span>' + timelineT("제목") + '</span><input class="timeline-form-title" type="text" maxlength="120"></label>' +
