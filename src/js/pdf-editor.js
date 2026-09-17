@@ -722,13 +722,16 @@ async function pdfPageFindData(doc, p){
   const page = await doc.pdfjsDoc.getPage(p.pageNum);
   const vp = page.getViewport({ scale: p.scale });               // 레이아웃과 동일한 배율(회전 포함)
   const tc = await page.getTextContent();
+  const styles = tc.styles || {};
   let str = "", items = [];
   for (const it of tc.items){
     const s = (it && it.str) || "";
     if (s){
       const t = mulMatrix(vp.transform, it.transform);
       const h = Math.hypot(t[2], t[3]) || Math.abs(t[3]) || 10;
-      items.push({ off: str.length, len: s.length, x: t[4], y: t[5] - h, w: (it.width || 0) * p.scale, h });
+      const st = styles[it.fontName];
+      items.push({ off: str.length, len: s.length, x: t[4], y: t[5] - h, w: (it.width || 0) * p.scale, h,
+        str: s, font: (st && st.fontFamily) || "sans-serif" });
       str += s;
     }
     str += " ";                                                  // 조각 사이 공백(검색·줄바꿈 보정)
@@ -736,12 +739,31 @@ async function pdfPageFindData(doc, p){
   if (typeof page.cleanup === "function") page.cleanup();
   return { str, items };
 }
+/* 조각 안에서 앞쪽 n글자가 차지하는 폭의 비율. 글자 수로 나누면 숫자·공백(좁음)과 한글(넓음)이
+   섞인 줄에서 칠하는 자리가 밀리므로("체험"을 찾으면 "험학"이 칠해짐) 캔버스로 실제 폭을 잰다.
+   PDF 글꼴 자체는 못 쓰니 같은 계열 글꼴로 비율만 얻고, 전체 폭은 PDF 가 준 it.w 에 맞춘다. */
+let _pdfFindMeasureCtx = null;
+function pdfFindPrefixFraction(it, n){
+  if (n <= 0) return 0;
+  if (n >= it.len) return 1;
+  if (typeof it.str === "string" && it.str.length === it.len){
+    try {
+      if (!_pdfFindMeasureCtx) _pdfFindMeasureCtx = document.createElement("canvas").getContext("2d");
+      const ctx = _pdfFindMeasureCtx;
+      ctx.font = "100px sans-serif";                        // 아래 글꼴 이름이 잘못돼 무시돼도 이 값이 남게
+      if (it.font) ctx.font = "100px " + it.font;
+      const total = ctx.measureText(it.str).width;
+      if (total > 0) return Math.min(1, ctx.measureText(it.str.slice(0, n)).width / total);
+    } catch(e){}
+  }
+  return n / it.len;   // 글자가 없는 조각(OCR 단어 등)은 글자 수 비율
+}
 function rectsForRange(items, ms, me){
   const out = [];
   for (const it of items){
     const a = Math.max(ms, it.off), b = Math.min(me, it.off + it.len);
     if (a >= b || it.len <= 0) continue;
-    const f0 = (a - it.off) / it.len, f1 = (b - it.off) / it.len;
+    const f0 = pdfFindPrefixFraction(it, a - it.off), f1 = pdfFindPrefixFraction(it, b - it.off);
     out.push({ x: it.x + it.w * f0, y: it.y, w: it.w * (f1 - f0), h: it.h });
   }
   return out;

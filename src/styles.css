@@ -5577,7 +5577,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .code-host-light .code-input{color:var(--code-text)}
   /* ===== 줄바꿈(자동 개행) 보기 =====
      겹쳐 그리는 층은 전부 "줄 번호 × 줄높이"로 자리를 잡아, 줄이 접히면 글자와 어긋난다. 줄바꿈을 켜는 동안은
-     그 층들을 내리고 textarea 글자를 직접 보여 준다(가벼운 편집기와 같은 방식). 찾기는 네이티브 선택으로 보인다. */
+     그 층들을 내리고 textarea 글자를 직접 보여 준다(가벼운 편집기와 같은 방식). 찾기 강조만 따로 잰 자리에 그린다. */
   .code-host-edit.is-wrapped .code-input{white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;
     color:var(--code-text);padding-right:18px}
   .code-host-edit.is-wrapped .code-pre,
@@ -5588,11 +5588,11 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .code-host-edit.is-wrapped .code-def-layer,
   .code-host-edit.is-wrapped .err-lines,
   .code-host-edit.is-wrapped .trace-line,
-  .code-host-edit.is-wrapped .jump-line,
   .code-host-edit.is-wrapped .cell-band,
   .code-host-edit.is-wrapped .cell-div-layer,
-  .code-host-edit.is-wrapped .col-overlay,
-  .code-host-edit.is-wrapped .lite-hit-layer{display:none}
+  .code-host-edit.is-wrapped .col-overlay{display:none}
+  /* 찾기 강조와 줄 이동 띠(.jump-line)는 줄바꿈 중에도 살린다 — 줄 번호가 아니라 접힌 실제 자리(measureWrappedRange)를 재서 그린다. */
+  .code-host-edit.is-wrapped .find-hi-layer.find-hi-main{display:block}
   /* 가벼운 편집기의 찾기 바 — 편집 영역 위에 떠 있는 작은 오버레이(읽기전용 .ro-find 재사용) */
   .code-edit .lite-find{position:absolute;top:8px;right:16px;left:auto;z-index:6;margin:0;
     width:min(360px,calc(100% - 32px));padding:6px 8px;box-sizing:border-box;background:var(--panel);

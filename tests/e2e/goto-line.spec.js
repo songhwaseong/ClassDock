@@ -138,3 +138,65 @@ test.describe("줄 번호로 이동", () => {
     await expect(page.locator(".code-edit.code-practice")).toHaveCount(1);   // 연습도 계속된다
   });
 });
+
+/* 줄바꿈 보기: 긴 줄이 여러 줄로 접히면 "줄 번호 × 줄높이"는 실제 자리보다 한참 위를 가리킨다.
+   맨 아래 짧은 줄(61줄)로 가면 그 줄이 화면 안에 있어야 한다 — 마커 글자의 실제 자리를 따로 재서 본다. */
+const WRAPPED = Array.from({ length: 60 }, (_, i) => ("줄" + i + " 가나다라마바사 ").repeat(40)).join("\n") + "\nGOTO_MARK 끝줄\n";
+for (const [label, repeat, mode] of [["일반 편집기", 1, "edit"], ["가벼운 편집기(대용량)", 45, "light"], ["읽기 전용 보기", 1, "view"]]){
+  test("줄바꿈 보기에서도 " + label + "의 줄 이동이 그 줄을 보여 준다", async ({ page }) => {
+    const body = Array.from({ length: repeat }, () => WRAPPED).join("");
+    const target = WRAPPED.split("\n").length - 1;       // 첫 GOTO_MARK 줄(1-based)
+    await page.addInitScript(() => { try { localStorage.setItem("mn.textWrap", "1"); localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+    await collapseSidebar(page);
+    await page.goto("/");
+    await page.locator("#fileInput").setInputFiles({ name: "wrap.txt", mimeType: "text/plain", buffer: Buffer.from(body, "utf8") });
+    await expect(page.locator("#activeFileName")).toHaveText("wrap.txt");
+    if (mode === "light") await page.locator("#content .text-edit-btn", { hasText: "편집" }).first().click();
+    else if (mode === "edit") await page.locator("#content .code-host").first().dblclick();
+    if (mode !== "view") await expect(ta(page)).toBeVisible();
+    if (mode === "light") await expect(page.locator(".code-host-light")).toHaveCount(1);
+    await page.keyboard.press("Control+g");
+    await page.locator(".code-goto-input:visible").fill(String(target));
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(200);
+    // 마커 글자가 그려진 실제 자리: 편집기는 textarea 와 같은 규칙의 미러로, 보기는 Range 로 잰다.
+    const r = await page.evaluate((mode) => {
+      if (mode === "view"){
+        const wrap = document.querySelector(".code-host-readonly");
+        const walker = document.createTreeWalker(wrap, NodeFilter.SHOW_TEXT);
+        let node; while ((node = walker.nextNode())){
+          const at = node.nodeValue.indexOf("GOTO_MARK");
+          if (at < 0) continue;
+          const range = document.createRange(); range.setStart(node, at); range.setEnd(node, at + 9);
+          const b = range.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+          return { top: b.top, bottom: b.bottom, viewTop: w.top, viewBottom: w.bottom };
+        }
+        return null;
+      }
+      const t = document.querySelector("textarea.code-input"), cs = getComputedStyle(t);
+      const m = document.createElement("div");
+      m.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;box-sizing:border-box";
+      for (const k of ["fontFamily", "fontSize", "fontWeight", "fontStyle", "lineHeight", "padding", "whiteSpace", "overflowWrap", "wordBreak", "letterSpacing", "tabSize"]) m.style[k] = cs[k];
+      m.style.width = t.clientWidth + "px";
+      const at = t.value.indexOf("GOTO_MARK");
+      const span = document.createElement("span"); span.textContent = "GOTO_MARK";
+      m.append(t.value.slice(0, at), span);
+      document.body.appendChild(m);
+      const top = span.getBoundingClientRect().top - m.getBoundingClientRect().top - t.scrollTop;
+      m.remove();
+      const tr = t.getBoundingClientRect();
+      const band = document.querySelector(".jump-line:not([hidden])");
+      const bb = band && band.getBoundingClientRect();
+      return { top: tr.top + top, bottom: tr.top + top + parseFloat(cs.lineHeight), viewTop: tr.top, viewBottom: tr.bottom,
+        caret: t.value.slice(0, t.selectionStart).split("\n").length, band: bb ? { top: bb.top, bottom: bb.bottom } : null };
+    }, mode);
+    expect(r).not.toBeNull();
+    expect(r.top).toBeGreaterThanOrEqual(r.viewTop);
+    expect(r.bottom).toBeLessThanOrEqual(r.viewBottom);
+    if (mode !== "view") expect(r.caret).toBe(target);
+    if (mode === "edit"){                                   // 노란 띠도 그 줄 위에
+      expect(r.band).not.toBeNull();
+      expect(Math.abs(r.band.top - r.top)).toBeLessThan(4);
+    }
+  });
+}

@@ -584,6 +584,75 @@ function setEditorWrap(host, ta, on){
   return wrapped;
 }
 
+/* 줄바꿈 보기에서 start~end 글자가 textarea 안 어디에 그려지는지 잰다(스크롤 전 콘텐츠 좌표).
+   접힌 줄에서는 "줄 번호 × 줄높이"가 맞지 않으므로, textarea 와 같은 폭·글꼴·줄바꿈 규칙의 미러에
+   앞부분+<span>대상</span>+그 줄 나머지를 놓고 실제 위치를 읽는다. 스크롤마다 다시 재지 않게
+   최근 결과 몇 개를 기억해 둔다(찾기 강조·줄 이동 띠가 함께 떠 있어도 번갈아 다시 재지 않게 —
+   글·폭·글꼴이 바뀌면 통째로 비운다). 돌려주는 값: [{left,top,width,height}] */
+const _wrapMeasure = new WeakMap();
+function measureWrappedRange(ta, start, end){
+  const v = ta.value;
+  start = Math.max(0, Math.min(start, v.length));
+  end = Math.max(start, Math.min(end, v.length));
+  const cs = getComputedStyle(ta);
+  // 크롬은 계산된 font 묶음 값을 빈 문자열로 돌려주므로 글꼴 속성은 하나씩 옮긴다.
+  const fontKeys = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "fontStretch", "fontVariant"];
+  const geo = [ta.clientWidth, cs.letterSpacing, cs.tabSize, cs.padding, cs.lineHeight].concat(fontKeys.map(k => cs[k])).join("|");
+  const key = start + ":" + end;
+  let st = _wrapMeasure.get(ta);
+  if (st && st.geo === geo && st.value === v && st.cache.has(key)) return st.cache.get(key);
+  if (!st || !st.mirror.isConnected){
+    const mirror = document.createElement("div");
+    mirror.setAttribute("aria-hidden", "true");
+    mirror.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;overflow:hidden;height:auto";
+    (ta.parentElement || document.body).appendChild(mirror);
+    st = { mirror };
+    _wrapMeasure.set(ta, st);
+  }
+  const m = st.mirror;
+  const bl = parseFloat(cs.borderLeftWidth) || 0, br = parseFloat(cs.borderRightWidth) || 0;
+  const s = m.style;
+  s.boxSizing = "border-box";
+  s.width = (ta.clientWidth + bl + br) + "px";              // 세로 스크롤바 폭은 빼고 글자가 흐르는 폭만
+  s.padding = cs.padding; s.borderStyle = "solid"; s.borderColor = "transparent";
+  s.borderWidth = cs.borderTopWidth + " " + cs.borderRightWidth + " " + cs.borderBottomWidth + " " + cs.borderLeftWidth;
+  for (const k of fontKeys) s[k] = cs[k];
+  s.lineHeight = cs.lineHeight; s.letterSpacing = cs.letterSpacing; s.wordSpacing = cs.wordSpacing;
+  s.tabSize = cs.tabSize; s.textIndent = cs.textIndent; s.textTransform = cs.textTransform;
+  s.fontVariantLigatures = cs.fontVariantLigatures; s.fontFeatureSettings = cs.fontFeatureSettings; s.fontKerning = cs.fontKerning;
+  s.whiteSpace = cs.whiteSpace; s.overflowWrap = cs.overflowWrap; s.wordBreak = cs.wordBreak;
+  const nl = v.indexOf("\n", end);
+  const span = document.createElement("span");
+  span.textContent = v.slice(start, end) || "​";      // 빈 범위도 자리를 잴 수 있게
+  m.replaceChildren(document.createTextNode(v.slice(0, start)), span,
+    document.createTextNode(v.slice(end, nl === -1 ? v.length : nl)));   // 같은 줄 뒷부분도 접히는 자리에 영향
+  const base = m.getBoundingClientRect();
+  const rects = Array.from(span.getClientRects()).filter(r => r.height > 0).map(r => ({
+    left: r.left - base.left, top: r.top - base.top, width: r.width, height: r.height
+  }));
+  m.replaceChildren();                                      // 큰 문서 글을 붙잡아 두지 않는다
+  if (st.geo !== geo || st.value !== v || !st.cache){ st.geo = geo; st.value = v; st.cache = new Map(); }
+  if (st.cache.size >= 8) st.cache.delete(st.cache.keys().next().value);
+  st.cache.set(key, rects);
+  return rects;
+}
+// 1-based 줄 하나가 차지하는 세로 자리. 줄바꿈 보기가 아니면 "줄 번호 × 줄높이" 그대로다.
+// 돌려주는 값: { top, height } (스크롤 전 콘텐츠 좌표)
+function editorLineBox(host, ta, line){
+  const cs = getComputedStyle(ta);
+  const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0;
+  const plain = { top: pt + (line - 1) * lh, height: lh };
+  if (!host.classList.contains("is-wrapped")) return plain;
+  const v = ta.value;
+  let start = 0;
+  for (let n = 1; n < line; n++){ const nl = v.indexOf("\n", start); if (nl === -1) break; start = nl + 1; }
+  const nl = v.indexOf("\n", start);
+  const rects = measureWrappedRange(ta, start, nl === -1 ? v.length : nl);
+  if (!rects.length) return plain;
+  const last = rects[rects.length - 1];
+  return { top: rects[0].top, height: Math.max(lh, last.top + last.height - rects[0].top) };
+}
+
 function buildCodeEditor(text, prof, options={}){
   const host = document.createElement("div"); host.className = "code-host code-host-edit";
   if (prof === "python") host.classList.add("code-color-target");
@@ -612,7 +681,7 @@ function buildCodeEditor(text, prof, options={}){
   // 더블클릭/선택으로 잡은 단어와 같은 단어를 편집기 전체에 은은하게 음영. 실제 구현은 아래 colMetrics 정의 후 할당(초기화 순서 보호).
   const wordHi = document.createElement("div"); wordHi.className = "word-hi-layer"; wordHi.setAttribute("aria-hidden", "true");
   const defHover = document.createElement("div"); defHover.className = "code-def-layer"; defHover.setAttribute("aria-hidden", "true");
-  const findHi = document.createElement("div"); findHi.className = "find-hi-layer"; findHi.setAttribute("aria-hidden", "true");
+  const findHi = document.createElement("div"); findHi.className = "find-hi-layer find-hi-main"; findHi.setAttribute("aria-hidden", "true");
   // 노트북 전체 찾기(Ctrl+F)가 이 셀의 현재 매치를 또렷하게 강조할 때 쓰는 별도 레이어 — 셀 안 찾기(findHi)와 겹치지 않게 분리.
   const spotlightHi = document.createElement("div"); spotlightHi.className = "find-hi-layer"; spotlightHi.setAttribute("aria-hidden", "true");
   let wordHiOcc = [];                 // {line, col, len} — 화면 밖 포함 전체 매치(스크롤 시 보이는 것만 다시 그림)
@@ -809,10 +878,9 @@ function buildCodeEditor(text, prof, options={}){
   let jumpLine = 0, jumpTimer = 0;
   const positionJump = () => {
     if (!jumpLine){ jumpBand.hidden = true; return; }
-    const cs = getComputedStyle(ta);
-    const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0;
-    jumpBand.style.top = (pt + (jumpLine - 1) * lh - ta.scrollTop) + "px";
-    jumpBand.style.height = lh + "px";
+    const box = editorLineBox(host, ta, jumpLine);       // 줄바꿈 보기면 접힌 줄 전체를 덮는다
+    jumpBand.style.top = (box.top - ta.scrollTop) + "px";
+    jumpBand.style.height = box.height + "px";
     jumpBand.hidden = false;
   };
   const clearJump = () => { jumpLine = 0; jumpBand.hidden = true; clearTimeout(jumpTimer); };
@@ -924,8 +992,8 @@ function buildCodeEditor(text, prof, options={}){
     const offset = lineStartOffset(ta.value, n);
     ta.focus();
     ta.selectionStart = ta.selectionEnd = offset;
-    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-    ta.scrollTop = Math.max(0, (n - 1) * lh - ta.clientHeight * 0.35);
+    ta.scrollTop = Math.max(0, editorLineBox(host, ta, n).top - ta.clientHeight * 0.35);
+    ta.scrollLeft = 0;                                  // 캐럿이 줄 맨 앞이므로 가로도 처음으로
     jumpLine = n;
     positionJump();
     clearTimeout(jumpTimer);
@@ -2487,11 +2555,26 @@ function buildCodeEditor(text, prof, options={}){
   const scrollMatchIntoView = (mt) => {
     const cs = getComputedStyle(ta);
     const lh = parseFloat(cs.lineHeight) || 20, pt = parseFloat(cs.paddingTop) || 0, pb = parseFloat(cs.paddingBottom) || 0;
-    const top = pt + mt.line * lh, bottom = top + lh;
+    let top = pt + mt.line * lh, bottom = top + lh;
+    if (host.classList.contains("is-wrapped")){          // 접힌 줄이 섞이면 줄 번호로는 세로 자리를 알 수 없다
+      const rects = measureWrappedRange(ta, mt.start, mt.end);
+      if (rects.length){ top = rects[0].top; bottom = rects[rects.length - 1].top + rects[rects.length - 1].height; }
+    }
     // 화면 밖일 때만 살짝 위쪽 가운데로 이동. 이미 보이면 그대로 둬야 타이핑 중 화면이 튀지 않는다.
     if (top < ta.scrollTop + pt || bottom > ta.scrollTop + ta.clientHeight - pb){
       const want = top - (ta.clientHeight - lh) * 0.4;
       ta.scrollTop = Math.max(0, Math.min(want, ta.scrollHeight - ta.clientHeight));
+    }
+    // 가로: 긴 줄 오른쪽 끝의 매치는 세로만 맞추면 화면 밖에 남는다(줄바꿈 보기는 가로 스크롤이 없다).
+    if (!host.classList.contains("is-wrapped")){
+      const pl = parseFloat(cs.paddingLeft) || 0, pr = parseFloat(cs.paddingRight) || 0;
+      const left = pl + measureCodeText(mt.prefix), right = left + measureCodeText(mt.text);
+      const viewL = ta.scrollLeft + pl, viewR = ta.scrollLeft + ta.clientWidth - pr;
+      if (left < viewL || right > viewR){
+        const room = ta.clientWidth - pl - pr;
+        // 첫 화면에 들어오면 맨 왼쪽으로, 아니면 매치를 왼쪽에서 1/4 쯤에 둔다(앞뒤 문맥이 같이 보이게).
+        ta.scrollLeft = right <= pl + room ? 0 : Math.max(0, left - pl - room * 0.25);
+      }
     }
     syncNow();
   };
@@ -2590,6 +2673,19 @@ function buildCodeEditor(text, prof, options={}){
   renderFindHi = () => {
     findHi.textContent = "";
     if (!findOpen || !findMatches.length) return;
+    // 줄바꿈 보기: 모든 매치를 재면 큰 문서에서 무거우니 지금 매치 하나만 실제 접힌 자리에 칠한다.
+    if (host.classList.contains("is-wrapped")){
+      const mt = findMatches[findIndex];
+      if (!mt) return;
+      for (const r of measureWrappedRange(ta, mt.start, mt.end)){
+        const box = document.createElement("div");
+        box.className = "find-hi find-hi-active";
+        box.style.cssText = "left:" + (r.left - ta.scrollLeft) + "px;top:" + (r.top - ta.scrollTop) +
+                            "px;width:" + Math.max(2, r.width) + "px;height:" + r.height + "px";
+        findHi.appendChild(box);
+      }
+      return;
+    }
     const m = colMetrics();
     const first = Math.floor(ta.scrollTop / m.lh) - 1;
     const last = first + Math.ceil(ta.clientHeight / m.lh) + 2;
@@ -2711,8 +2807,7 @@ function buildCodeEditor(text, prof, options={}){
   const previewGotoLine = (n) => {
     const total = ta.value.split("\n").length;
     const line = Math.max(1, Math.min(total, n));
-    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-    ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.35);
+    ta.scrollTop = Math.max(0, editorLineBox(host, ta, line).top - ta.clientHeight * 0.35);
     clearTimeout(jumpTimer);
     jumpLine = line; positionJump();
     sync();
@@ -3324,6 +3419,17 @@ function buildLightTextEditor(text, options={}){
     if (!curHit){ if (box) hitLayer.textContent = ""; return; }
     const v = ta.value;
     if (curHit.s > v.length) { clearHit(); return; }
+    if (host.classList.contains("is-wrapped")){          // 접힌 줄: 실제 그려진 자리(여러 줄에 걸치면 조각마다)
+      hitLayer.textContent = "";
+      for (const r of measureWrappedRange(ta, curHit.s, curHit.s + curHit.len)){
+        const b = document.createElement("div"); b.className = "lite-hit";
+        b.style.cssText = "top:" + (r.top - ta.scrollTop) + "px;left:" + (r.left - ta.scrollLeft) +
+                          "px;width:" + Math.max(2, r.width) + "px;height:" + r.height + "px";
+        hitLayer.appendChild(b);
+      }
+      return;
+    }
+    if (box && hitLayer.childNodes.length > 1){ hitLayer.textContent = ""; box = null; }   // 줄바꿈 보기에서 돌아온 경우
     const cs = getComputedStyle(ta);
     const lh = parseFloat(cs.lineHeight) || 20, padTop = parseFloat(cs.paddingTop) || 16, padLeft = parseFloat(cs.paddingLeft) || 18;
     const line = lineAtOffset(v, curHit.s), lineStart = offsetOfLine(v, line);
@@ -3370,8 +3476,8 @@ function buildLightTextEditor(text, options={}){
     line = Math.max(1, Math.min(total, parseInt(line, 10) || 1));
     const start = offsetOfLine(v, line);
     ta.focus(); ta.setSelectionRange(start, start);
-    const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-    ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.4);
+    ta.scrollTop = Math.max(0, editorLineBox(host, ta, line).top - ta.clientHeight * 0.4);
+    ta.scrollLeft = 0;                                  // 캐럿이 줄 맨 앞이므로 가로도 처음으로
     syncScroll();
   };
 
@@ -3384,8 +3490,7 @@ function buildLightTextEditor(text, options={}){
       snapshot: () => ta.scrollTop,
       restore: (top) => { ta.scrollTop = top; syncScroll(); },
       preview: (line) => {
-        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20;
-        ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.4);
+        ta.scrollTop = Math.max(0, editorLineBox(host, ta, line).top - ta.clientHeight * 0.4);
         syncScroll();
       },
       commit: (line) => focusLine(line)
@@ -3413,8 +3518,24 @@ function buildLightTextEditor(text, options={}){
     // 선택 위치만 표시(포커스 이동 없음)하고, 강조는 자체 노란 박스로 그린다.
     try { ta.setSelectionRange(s, s + len); } catch(_){}
     const lh = parseFloat(getComputedStyle(ta).lineHeight) || 20, line = lineAtOffset(ta.value, s);
-    ta.scrollTop = Math.max(0, (line - 1) * lh - ta.clientHeight * 0.4);
-    showHit(s, len);              // 일치 부분에 또렷한 강조 박스
+    let top = (line - 1) * lh;
+    if (host.classList.contains("is-wrapped")){          // 접힌 줄이 섞이면 줄 번호로는 세로 자리를 알 수 없다
+      const rects = measureWrappedRange(ta, s, s + len);
+      if (rects.length) top = rects[0].top;
+    }
+    ta.scrollTop = Math.max(0, top - ta.clientHeight * 0.4);
+    showHit(s, len);
+    // 가로: 긴 줄 오른쪽 끝의 매치도 보이게 — 방금 그린 강조 박스의 자리로 판단한다(줄바꿈 보기는 가로 스크롤 없음).
+    const hit = !host.classList.contains("is-wrapped") && hitLayer.firstChild;
+    if (hit){
+      const cs = getComputedStyle(ta);
+      const pl = parseFloat(cs.paddingLeft) || 0, pr = parseFloat(cs.paddingRight) || 0;
+      const left = parseFloat(hit.style.left) + ta.scrollLeft, right = left + parseFloat(hit.style.width);
+      if (left < ta.scrollLeft + pl || right > ta.scrollLeft + ta.clientWidth - pr){
+        const room = ta.clientWidth - pl - pr;
+        ta.scrollLeft = right <= pl + room ? 0 : Math.max(0, left - pl - room * 0.25);
+      }
+    }              // 일치 부분에 또렷한 강조 박스
     syncScroll();
   };
   const closeFind = () => {
