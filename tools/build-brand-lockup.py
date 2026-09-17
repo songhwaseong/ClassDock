@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""헤더 브랜드 락업(마크 + ClassDock 워드마크) SVG 생성기.
+"""헤더 브랜드 락업(Class + 심볼 + ock 워드마크) SVG 생성기.
 
 워드마크는 Century Gothic Bold 의 9글자 외곽선을 패스로 뜬 것이다. 글꼴 파일은 배포하지
 않고 이 글자들의 외곽선만 쓰므로, 글꼴이 깔리지 않은 환경에서도 같은 모양으로 나온다.
@@ -27,9 +27,9 @@ EXE와 브라우저 앱 창·탭 아이콘도 같은 PNG에서 생성한다.
    맞지 않아 반드시 번지고, 글자마다 번지는 정도가 달라 "지저분해" 보인다.
    → MARK 를 26 으로 두어 획을 2.82px 로 키웠다. 줄이려면 그 대가를 각오할 것.
 
-2. GAP 은 반드시 정수여야 한다.
-   6.5 로 두었더니 워드마크 전체가 반 픽셀 밀린 자리에서 시작해, 아래 3번의 스냅이
-   통째로 무의미해졌다.
+2. INLINE_GAP 은 반드시 정수여야 한다.
+   심볼 좌우 여백이 반 픽셀이면 뒤쪽 "ock"까지 반 픽셀 밀려, 아래 3번의 스냅이
+   통째로 무의미해진다.
 
 3. 글자 시작 x 를 정수로 스냅한다(SNAP).
    viewBox 단위 = px 로 맞춰 두었기 때문에(=viewBox 높이와 CSS height 가 같다) 반올림이
@@ -74,10 +74,11 @@ HEADER_MARK = "src/assets/classdock-header-mark.png"
 
 FONT  = r"C:\Windows\Fonts\GOTHICB.TTF"   # Century Gothic Bold
 TEXT  = "ClassDock"
-SPLIT = 5                 # "Class" | "Dock" — 두 색으로 나누는 지점
+ICON_INDEX = 5            # Class[D]ock 의 D 자리를 심볼로 바꾼다
 TRACK = -0.012            # em 자간 보정(기하학적 산세리프는 조금 좁혀야 로고처럼 보인다)
 CAPR  = 0.60              # 대문자 높이 = 마크 높이의 60%
-GAP   = 7.0               # 마크와 글자 사이(px) — 위 함정 2번, 정수일 것
+INLINE_MARK = 20.0        # D 대신 들어갈 심볼 높이(px)
+INLINE_GAP = 1.0          # 심볼 좌우 여백(px)
 
 
 def num(v):
@@ -126,7 +127,7 @@ class Lockup(object):
         S = (self.mark * CAPR) / self.cap_units  # 폰트 단위 -> px
 
         segs = [[], []]
-        x = 0.0
+        x_px = 0.0
         ink_top, ink_bot = 0.0, 0.0
         for i, ch in enumerate(TEXT):
             g = cmap[ord(ch)]
@@ -135,28 +136,33 @@ class Lockup(object):
             if b.bounds:
                 ink_top = max(ink_top, b.bounds[3])
                 ink_bot = min(ink_bot, b.bounds[1])
-            ox = round(x * S) if self.snap else x * S     # 함정 3번
+            ox = round(x_px) if self.snap else x_px       # 함정 3번
+            if i == ICON_INDEX:
+                self.inline_mark_x = ox + INLINE_GAP
+                x_px = self.inline_mark_x + INLINE_MARK + INLINE_GAP
+                continue
             pen = SVGPathPen(gs, ntos=num)
             # y 뒤집기(SVG 는 y-down). 베이스라인 y=0.
             gs[g].draw(TransformPen(pen, Transform(S, 0, 0, -S, ox, 0)))
             d = pen.getCommands()
             if d:
-                segs[0 if i < SPLIT else 1].append(d)
-            x += gs[g].width + TRACK * self.upem
+                segs[0 if i < ICON_INDEX else 1].append(d)
+            x_px += (gs[g].width + TRACK * self.upem) * S
 
-        raw_w = (x - TRACK * self.upem) * S
+        raw_w = x_px - TRACK * self.upem * S
         self.word_w = round(raw_w) if self.snap else raw_w
         self.cap_px = self.mark * CAPR
         self.stem_px = self.cap_px * self.stem_units / self.cap_units
         self.paths = (" ".join(segs[0]), " ".join(segs[1]))
 
-        # 세로 정렬: 마크 중심을 대문자 블록(베이스라인~cap)의 중심에 맞춘다.
+        # 세로 정렬: D 자리에 들어간 심볼 중심을 대문자 블록의 중심에 맞춘다.
         cap_mid = -self.cap_px / 2
-        self.mark_top = cap_mid - self.mark / 2
-        self.top = min(self.mark_top, -ink_top * S)
+        self.inline_mark_top = cap_mid - INLINE_MARK / 2
+        # 기존 26px 락업의 픽셀 스냅과 헤더 높이는 유지한다. 심볼만 그 안에서 20px로 보인다.
+        self.top = min(cap_mid - self.mark / 2, -ink_top * S)
         self.bottom = max(cap_mid + self.mark / 2, -ink_bot * S)
-        self.word_x = self.mark + GAP
-        self.width = self.word_x + self.word_w
+        self.word_x = 0.0
+        self.width = self.word_w
         self.height = self.bottom - self.top
         self.view_box = "%s %s %s %s" % (num(0), num(self.top), num(self.width), num(self.height))
 
@@ -165,19 +171,20 @@ class Lockup(object):
         if embed:
             with open(os.path.join(ROOT, HEADER_MARK), "rb") as f:
                 href = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
-        return ('<image class="brand-mark" x="0" y="%s" width="%s" height="%s" '
+        return ('<image class="brand-mark" x="%s" y="%s" width="%s" height="%s" '
                 'preserveAspectRatio="xMidYMid meet" href="%s"/>'
-                % (num(self.mark_top), num(self.mark), num(self.mark), href))
+                % (num(self.inline_mark_x), num(self.inline_mark_top),
+                   num(INLINE_MARK), num(INLINE_MARK), href))
 
     def svg(self, variant=HEADER_VARIANT, standalone=True):
         c1, c2, title = VARIANTS[variant]
         head = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%s" width="%s" height="%s" '
                 'role="img" aria-label="ClassDock">\n<title>%s</title>\n'
                 % (self.view_box, num(self.width), num(self.height), title))
-        body = ('%s\n<g transform="translate(%s 0)">\n'
-                '<path fill="%s" d="%s"/>\n<path fill="%s" d="%s"/>\n</g>\n</svg>\n'
-                % (self._mark(embed=standalone), num(self.word_x),
-                   c1, self.paths[0], c2, self.paths[1]))
+        body = ('<g transform="translate(%s 0)">\n'
+                '<path fill="%s" d="%s"/>\n<path fill="%s" d="%s"/>\n</g>\n%s\n</svg>\n'
+                % (num(self.word_x), c1, self.paths[0], c2, self.paths[1],
+                   self._mark(embed=standalone)))
         return head + body
 
     def mark_svg(self, variant=HEADER_VARIANT):
@@ -377,8 +384,8 @@ def main():
 
     print("락업 크기   : %s x %s px   (CSS 는 height:%spx)"
           % (num(lock.width), num(lock.height), num(lock.height)))
-    print("마크 %spx / 대문자 %spx / 간격 %spx / 글자폭 %spx"
-          % (num(lock.mark), num(lock.cap_px), num(GAP), num(lock.word_w)))
+    print("D자리 심볼 %spx / 대문자 %spx / 심볼 좌우여백 %spx / 락업폭 %spx"
+          % (num(INLINE_MARK), num(lock.cap_px), num(INLINE_GAP), num(lock.word_w)))
     print("세로획      : %.2f px  %s"
           % (lock.stem_px, "(2.5px 미만이면 작은 크기에서 번져 보인다)" if lock.stem_px < 2.5 else ""))
     print("픽셀 스냅   : %s" % ("켜짐" if lock.snap else "꺼짐  <- 글자마다 획 굵기가 달라 보인다"))
