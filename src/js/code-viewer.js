@@ -2093,27 +2093,36 @@ async function renderCode(file, host, ext, profile, runCtx){
   let savedValue = text;
   if (ownerDoc && typeof ownerDoc.savedText !== "string") ownerDoc.savedText = text;
 
-  const bar = document.createElement("div"); bar.className = "run-bar";
+  const bar = document.createElement("div"); bar.className = "run-bar run-bar-icons";
+  // 실행 바 단추는 [아이콘 + 글자 칸] 한 모양이다. 글자를 바꿀 때도 이 함수로 칸째 갈아 끼운다 —
+  // textContent 로 통째로 쓰면 아이콘 SVG 까지 지워진다(저장 단추의 .run-save-label 과 같은 함정).
+  const setBarIcon = (btn, icon, label, labelCls) => {
+    if (typeof window.setUiIcon === "function") window.setUiIcon(btn, icon); else btn.textContent = "";
+    const slot = document.createElement("span"); slot.className = "run-bar-label" + (labelCls ? " " + labelCls : "");
+    slot.textContent = label;
+    btn.appendChild(slot);
+    return btn;
+  };
   const runBtn = document.createElement("button"); runBtn.className = "run-go"; runBtn.type = "button"; runBtn.textContent = "▶";
   runBtn.dataset.shortcutAction = "runCode"; runBtn.dataset.shortcutTitle = "실행"; runBtn.dataset.shortcutAria = "true";
-  const traceBtn = document.createElement("button"); traceBtn.className = "run-trace"; traceBtn.type = "button"; traceBtn.textContent = "단계 실행";
+  const traceBtn = document.createElement("button"); traceBtn.className = "run-trace"; traceBtn.type = "button"; setBarIcon(traceBtn, "stepRun", "단계 실행");
   traceBtn.title = "코드를 실행하며 줄별 변수 변화를 최대 300단계까지 기록";
-  const analyzeBtn = document.createElement("button"); analyzeBtn.className = "run-analyze"; analyzeBtn.type = "button"; analyzeBtn.textContent = "진단";
+  const analyzeBtn = document.createElement("button"); analyzeBtn.className = "run-analyze"; analyzeBtn.type = "button"; setBarIcon(analyzeBtn, "search", "진단");
   analyzeBtn.title = "코드를 실행하지 않고 문법과 자주 생기는 실수를 검사";
-  const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade run-py-grade"; gradeBtn.type = "button"; gradeBtn.textContent = "채점";
+  const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade run-py-grade"; gradeBtn.type = "button"; setBarIcon(gradeBtn, "check", "채점");
   gradeBtn.title = "입력값과 기대 출력을 기준으로 현재 코드를 자동 채점";
-  const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button"; saveBtn.textContent = ".py 저장";
+  const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button"; setBarIcon(saveBtn, "save", ".py 저장", "run-save-label");
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "Python 파일 저장";
   // 일반 텍스트 편집기의 '보기로'도 run-revert 스타일을 공유하므로, 설정에서 숨길 Python 전용 표식은 따로 둔다.
-  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-py-revert"; revertBtn.type = "button"; revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
-  const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg run-py-pkg"; pkgBtn.type = "button"; pkgBtn.textContent = "라이브러리"; pkgBtn.hidden = true;
-  const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; diagBtn.textContent = "Py Env"; diagBtn.title = "Python 실행 환경 진단";
+  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-py-revert"; revertBtn.type = "button"; setBarIcon(revertBtn, "undo", "원본으로");   // "원본" 단독은 i18n 사전에서 화이트보드의 "Actual size" 와 겹친다 revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
+  const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg run-py-pkg"; pkgBtn.type = "button"; setBarIcon(pkgBtn, "layers", "라이브러리"); pkgBtn.hidden = true;
+  const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; setBarIcon(diagBtn, "python", "Py Env"); diagBtn.title = "Python 실행 환경 진단";
   const outputTabs = document.createElement("span"); outputTabs.className = "run-output-tabs";
   // 터미널은 실행 결과와 분리된 모달 창으로 연다.
-  const terminalTabBtn = document.createElement("button"); terminalTabBtn.className = "run-output-tab"; terminalTabBtn.type = "button"; terminalTabBtn.textContent = "터미널";
+  const terminalTabBtn = document.createElement("button"); terminalTabBtn.className = "run-output-tab"; terminalTabBtn.type = "button"; setBarIcon(terminalTabBtn, "terminal", "터미널");
   terminalTabBtn.title = "명령 터미널 열기"; terminalTabBtn.setAttribute("aria-pressed", "false");
   outputTabs.append(terminalTabBtn);
-  const nbConvertBtn = document.createElement("button"); nbConvertBtn.className = "run-nbconvert"; nbConvertBtn.type = "button"; nbConvertBtn.textContent = "노트북으로";
+  const nbConvertBtn = document.createElement("button"); nbConvertBtn.className = "run-nbconvert"; nbConvertBtn.type = "button"; setBarIcon(nbConvertBtn, "notebook", "노트북으로");
   nbConvertBtn.title = "현재 코드를 주피터 노트북(.ipynb)으로 변환해 새 탭으로 열기 (# %% 를 셀 경계로)";
   // 줄번호(거터)를 클릭해 셀 경계(# %%)를 넣고, 다시 눌러 노트북으로 변환하는 모드 토글
   const cellSplitBtn = document.createElement("button"); cellSplitBtn.className = "run-cellsplit"; cellSplitBtn.type = "button"; cellSplitBtn.textContent = "✂ 셀 나누기";
@@ -2121,7 +2130,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   const autoSplitBtn = document.createElement("button"); autoSplitBtn.className = "run-autosplit"; autoSplitBtn.type = "button"; autoSplitBtn.textContent = "자동분할";
   autoSplitBtn.title = "빈 줄 뒤 최상위 문장마다 셀 경계(# %%)를 자동으로 넣기";
   const nbConvertMore = document.createElement("button");
-  nbConvertMore.className = "run-nbconvert-more"; nbConvertMore.type = "button"; nbConvertMore.textContent = "▾";
+  nbConvertMore.className = "run-nbconvert-more"; nbConvertMore.type = "button"; nbConvertMore.innerHTML = typeof window.uiIcon === "function" ? window.uiIcon("chevronDown") : "▾";
   nbConvertMore.title = "노트북 변환 방법"; nbConvertMore.setAttribute("aria-label", nbConvertMore.title);
   nbConvertMore.setAttribute("aria-haspopup", "menu"); nbConvertMore.setAttribute("aria-expanded", "false");
   const nbConvertMenu = document.createElement("span");
@@ -2131,9 +2140,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const nbConvertGroup = document.createElement("span");
   nbConvertGroup.className = "run-nbconvert-group";
   nbConvertGroup.append(nbConvertBtn, nbConvertMore, nbConvertMenu);
-  const linkBtn = document.createElement("button"); linkBtn.className = "run-link"; linkBtn.type = "button"; linkBtn.textContent = "PDF에 핀";
+  const linkBtn = document.createElement("button"); linkBtn.className = "run-link"; linkBtn.type = "button"; setBarIcon(linkBtn, "pin", "PDF에 핀");
   linkBtn.title = "현재 코드 줄을 PDF에 핀으로 연결";
-  const dedupeBtn = document.createElement("button"); dedupeBtn.className = "run-dedupe"; dedupeBtn.type = "button"; dedupeBtn.textContent = "중복 줄 삭제";
+  const dedupeBtn = document.createElement("button"); dedupeBtn.className = "run-dedupe"; dedupeBtn.type = "button"; setBarIcon(dedupeBtn, "delete", "중복 줄 삭제");
   dedupeBtn.title = "선택한 줄에서 같은 내용을 한 줄만 남깁니다(공백·대소문자 구분)";
   dedupeBtn.addEventListener("click", () => {
     const removed = editor.dedupeSelectedLines ? editor.dedupeSelectedLines() : 0;
@@ -2142,15 +2151,14 @@ async function renderCode(file, host, ext, profile, runCtx){
   });
   // 필기 버튼 — 누르면 편집 잠금 + 캔버스 오버레이가 한 번에 켜짐. 다시 누르면 둘 다 해제.
   const inkBtn = document.createElement("button"); inkBtn.className = "run-ink"; inkBtn.type = "button"; inkBtn.title = "코드 위에 필기 — 켜는 동안 편집 잠금";
-  if (typeof window.setUiIconLabel === "function") window.setUiIconLabel(inkBtn, "pen", "필기");
-  else inkBtn.textContent = "필기";
+  setBarIcon(inkBtn, "pen", "필기");
   // 수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록.
   // PDF 필기바의 ● 녹화와 같은 녹화기를 공유하므로 어느 쪽에서 시작/정지해도 상태가 맞는다.
   const recBtn = document.createElement("button"); recBtn.className = "run-rec"; recBtn.type = "button";
   const _T = (s) => (typeof window.t === "function" ? window.t(s) : s);
   const syncRecBtn = (on) => {
     recBtn.classList.toggle("recording", on);
-    recBtn.textContent = _T(on ? "■ 정지" : "● 녹화");
+    setBarIcon(recBtn, on ? "stop" : "recordRing", _T(on ? "정지" : "녹화"));
     recBtn.title = _T(on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기"
       : "수업 리플레이 녹화 — 코드 편집·실행 결과(학습 화면이면 PDF 필기도)를 시간순으로 기록");
   };
@@ -2165,14 +2173,14 @@ async function renderCode(file, host, ext, profile, runCtx){
   // 코드 따라치기(타자 연습) — 지금 코드를 흐린 교본으로 깔고 그 위에 똑같이 쳐 본다.
   const practiceGroup = document.createElement("span"); practiceGroup.className = "run-practice-group";
   const practiceBtn = document.createElement("button"); practiceBtn.className = "run-practice"; practiceBtn.type = "button";
-  practiceBtn.textContent = "따라치기";
+  setBarIcon(practiceBtn, "task", "따라치기");
   practiceBtn.title = "이 코드를 흐리게 두고 그 위에 똑같이 따라 쳐 보기 — 맞으면 제 색, 틀리면 빨강 (Esc: 그만두기)";
   const practiceInfo = document.createElement("span"); practiceInfo.className = "run-practice-info"; practiceInfo.hidden = true;
   practiceInfo.setAttribute("aria-live", "polite");
   practiceGroup.append(practiceBtn, practiceInfo);
   const setPracticeChrome = (on) => {
     practiceBtn.classList.toggle("is-on", on);
-    practiceBtn.textContent = on ? "그만두기" : "따라치기";
+    setBarIcon(practiceBtn, on ? "stop" : "task", on ? "그만두기" : "따라치기");
     practiceInfo.hidden = !on;
     if (!on) practiceInfo.textContent = "";
   };
@@ -2223,8 +2231,13 @@ async function renderCode(file, host, ext, profile, runCtx){
   addFontGroup("가변폭 (읽기용)", fontGroups.prop);
   fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
   // 후보가 기본 하나뿐이면(설치된 게 없으면) 드롭다운 자체를 숨겨 자리만 차지하지 않게 한다.
-  if (installed.length <= 1) fontPick.hidden = true;
-  fontGroup.append(fontDown, fontUp, fontPick);
+  // select 안에는 SVG 를 못 넣어서 아이콘은 겉 칸에 겹쳐 둔다(클릭은 select 로 통과).
+  const fontPickWrap = document.createElement("span"); fontPickWrap.className = "run-fontpick-wrap";
+  const fontPickIcon = document.createElement("span"); fontPickIcon.className = "run-fontpick-icon"; fontPickIcon.setAttribute("aria-hidden", "true");
+  if (typeof window.uiIcon === "function") fontPickIcon.innerHTML = window.uiIcon("text");
+  fontPickWrap.append(fontPickIcon, fontPick);
+  if (installed.length <= 1) fontPickWrap.hidden = true;
+  fontGroup.append(fontDown, fontUp, fontPickWrap);
   // 편집 흐름상 "고치다가 새로 열기"가 잦아서, 글자 크기 옆에 새 파이썬 코드 버튼을 둔다(사이드바 버튼은 그대로).
   const inFolder = !!(ownerDoc && ownerDoc.archiveCtx && runPathDir(normalizedRunPath(ownerDoc.relPath || ownerDoc.workspacePath || "")));
   const newPyTitle = inFolder ? "이 폴더에 새 파이썬 파일 · 같은 폴더 모듈 import 가능" : "새 파이썬 코드";
@@ -2234,16 +2247,19 @@ async function renderCode(file, host, ext, profile, runCtx){
   // 정상 종료된 stderr 경고만 결과에서 숨기는 표시 설정. 실행 중 stderr는 보류하고 실제 오류는 완료 뒤 표시한다.
   const warningToggle = document.createElement("label"); warningToggle.className = "run-warning-toggle";
   const warningCheckbox = document.createElement("input"); warningCheckbox.type = "checkbox";
-  const warningText = document.createElement("span"); warningText.textContent = "경고 표시";
+  const warningText = document.createElement("span"); warningText.className = "run-bar-label"; warningText.textContent = "경고 표시";
+  const warningIcon = document.createElement("span"); warningIcon.className = "run-warning-icon"; warningIcon.setAttribute("aria-hidden", "true");
+  if (typeof window.uiIcon === "function") warningIcon.innerHTML = window.uiIcon("warning");
   let showPythonWarnings = true;
   try { showPythonWarnings = localStorage.getItem("pythonShowWarnings") !== "0"; } catch(_){}
   warningCheckbox.checked = showPythonWarnings;
   warningToggle.title = "정상 실행 뒤 발생한 Python 경고를 실행 결과에 표시";
-  warningToggle.append(warningCheckbox, warningText);
+  warningToggle.append(warningCheckbox, warningIcon, warningText);
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 결과가 보일 때만 노출. 동작 연결은 split 생성 후(applyOutputLayout).
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   bar.appendChild(runBtn); bar.appendChild(traceBtn); bar.appendChild(analyzeBtn); bar.appendChild(gradeBtn); bar.appendChild(saveBtn); bar.appendChild(revertBtn); bar.appendChild(linkBtn); bar.appendChild(nbConvertGroup); bar.appendChild(inkBtn); bar.appendChild(recBtn); bar.appendChild(pkgBtn); bar.appendChild(diagBtn); bar.appendChild(outputTabs); bar.appendChild(fontGroup); bar.appendChild(practiceGroup); bar.appendChild(newPyBtn); bar.appendChild(warningToggle); bar.appendChild(layoutBtn);   // 실행 상태(status) 문구는 화면에 표시하지 않음(노드는 setStatus 호환용으로만 유지)
-  attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
+  const pySpell = attachSpellcheck(editor, bar, (ownerDoc && ownerDoc.name) || file.name || "Python 맞춤법 검사");
+  if (pySpell && pySpell.button) setBarIcon(pySpell.button, "spellcheck", "맞춤법");
   bar.appendChild(dedupeBtn);
   syncShortcutHints(bar);
 
@@ -2771,7 +2787,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   const applyOutputLayout = () => {
     split.classList.toggle("stack-v", outputStacked);
     divider.setAttribute("aria-orientation", outputStacked ? "horizontal" : "vertical");
-    layoutBtn.textContent = outputStacked ? "Side" : "Below";
+    setBarIcon(layoutBtn, outputStacked ? "arrow" : "arrowDown", outputStacked ? "Side" : "Below");
     layoutBtn.title = outputStacked ? "실행 결과를 편집기 오른쪽 옆으로" : "실행 결과를 편집기 아래로";
     layoutBtn.setAttribute("aria-label", layoutBtn.title);
     syncOutputHideIcon(outputStacked);
@@ -2920,7 +2936,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     cellSplitBtn.classList.remove("is-active");
     cellSplitBtn.textContent = "✂ 셀 나누기";
     cellSplitBtn.title = "줄번호(왼쪽)를 클릭해 셀 경계(# %%)를 넣/빼고, 분할 완료로 노트북 변환";
-    nbConvertBtn.textContent = "노트북으로";
+    setBarIcon(nbConvertBtn, "notebook", "노트북으로");
     nbConvertBtn.classList.remove("is-active");
     nbConvertBtn.title = "현재 코드를 주피터 노트북(.ipynb)으로 변환해 새 탭으로 열기 (# %% 를 셀 경계로)";
     cellSplitSnapshot = null;
@@ -2947,7 +2963,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     cellSplitBtn.classList.add("is-active");
     cellSplitBtn.textContent = "× 셀 나누기 취소";
     cellSplitBtn.title = "셀 나누기를 취소하고 시작 전 코드로 복원";
-    nbConvertBtn.textContent = "✓ 분할 완료";
+    setBarIcon(nbConvertBtn, "check", "분할 완료");
     nbConvertBtn.classList.add("is-active");
     nbConvertBtn.title = "셀 경계 편집을 마치고 노트북으로 변환";
     if (typeof toast === "function") toast("줄번호를 클릭해 셀 경계를 조정하세요. '분할 완료'는 변환, Esc는 취소입니다.", 4600);

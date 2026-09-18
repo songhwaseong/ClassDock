@@ -4536,6 +4536,44 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     color:var(--ink);font:inherit;font-size:12.5px;text-align:left;white-space:nowrap;cursor:pointer}
   .run-nbconvert-menu>button:hover,.run-nbconvert-menu>button.is-active{background:var(--panel-hover);color:#7c3aed}
   .run-nbconvert.is-active{border-color:#7c3aed;color:#7c3aed;background:rgba(124,58,237,.08)}
+  /* Python 실행 바 — [아이콘 + 글자] 한 가지 모양. 색으로 가르던 단계 실행·진단·채점도 같은 톤으로 두고 ▶ 실행만 초록으로 남긴다.
+     기본 규칙은 :where 로 특이도를 낮춰 둔다 — html.hide-tool-* 숨김과 켜짐 상태(.is-on·.recording·.is-ok…)가 그대로 이겨야 한다. */
+  .run-bar.run-bar-icons{gap:8px}
+  .run-bar-icons :where(.run-trace,.run-analyze,.run-grade,.run-save,.run-revert,.run-link,.run-nbconvert,.run-ink,.run-rec,.run-pkg,.run-diag,
+    .run-output-tab,.run-font,.run-newpy,.run-practice,.run-warning-toggle,.run-layout,.spellcheck-trigger,.run-dedupe){
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;min-height:0;min-width:0;box-sizing:border-box;
+    padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    font:inherit;font-size:12.5px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
+  .run-bar-icons :where(.run-trace,.run-analyze,.run-grade,.run-save,.run-revert,.run-link,.run-nbconvert,.run-ink,.run-rec,.run-pkg,.run-diag,
+    .run-output-tab,.run-font,.run-newpy,.run-practice,.run-warning-toggle,.run-layout,.spellcheck-trigger,.run-dedupe):not(.is-on,.is-active,.recording,.is-ok,.is-warn,.has-selection,[aria-pressed="true"]):hover{background:var(--panel-hover);color:var(--ink)}
+  .run-bar-icons :where(button):disabled{opacity:.45;cursor:default}
+  .run-bar-icons .ui-icon{width:15px;height:15px;vertical-align:0}
+  [data-theme="dark"] .run-bar-icons :where(.run-trace,.run-analyze,.run-grade){background:var(--field);border-color:var(--border);color:var(--ink)}
+  .run-bar-icons .run-go{height:30px}
+  .run-bar-icons .run-link{display:none}
+  #content.study-mode .run-bar-icons .run-link{display:inline-flex}
+  .run-bar.run-bar-icons .spellcheck-trigger{padding:0 10px;line-height:1;color:var(--ink)}
+  .run-bar-icons .run-font{padding:0 9px;font-weight:600}
+  .run-bar-icons .run-newpy{font-weight:600}
+  /* 터미널은 탭 묶음 틀 없이 다른 단추와 같은 낱개 단추로 */
+  .run-bar-icons .run-output-tabs{overflow:visible;border:0;border-radius:0;background:none}
+  .run-bar-icons .run-output-tabs>.run-output-tab{border:1px solid var(--border)}
+  .run-bar-icons .run-nbconvert-group>.run-nbconvert{height:30px;border-radius:7px 0 0 7px}
+  .run-bar-icons .run-nbconvert-more{height:30px;min-width:26px;padding:0 6px;border-radius:0 7px 7px 0;color:var(--ink)}
+  /* 경고 표시: 체크박스는 보이지 않게 두고(키보드·화면 낭독은 그대로) 켜짐을 단추 색으로 보여 준다. */
+  .run-bar-icons .run-warning-toggle{position:relative}
+  .run-bar-icons .run-warning-toggle input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+  /* 기본값이 켜짐이라 늘 칠해 두면 '경고가 났다'로 읽힌다 — 켜짐은 아이콘만 호박색, 꺼짐은 흐리게. */
+  .run-bar-icons .run-warning-toggle:has(input:checked) .run-warning-icon{color:#d97706}
+  [data-theme="dark"] .run-bar-icons .run-warning-toggle:has(input:checked) .run-warning-icon{color:#fbbf24}
+  .run-bar-icons .run-warning-toggle:has(input:not(:checked)){color:var(--muted)}
+  .run-bar-icons .run-warning-toggle:has(input:not(:checked)) .run-bar-label{text-decoration:line-through}
+  .run-bar-icons .run-warning-toggle:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+  .run-warning-icon{display:inline-flex}
+  /* 글꼴 고르기 — select 에는 SVG 를 못 넣어 겉 칸에 아이콘을 겹친다. */
+  .run-fontpick-wrap{position:relative;display:inline-flex;align-items:center}
+  .run-fontpick-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);display:inline-flex;color:var(--muted);pointer-events:none}
+  .run-bar-icons .run-fontpick{justify-content:flex-start;max-width:180px;padding:0 6px 0 28px;font-weight:500}
   .run-status{font-size:12.5px;color:#64748b}
   /* 실행 바 '⋯ 더보기' — 노트북에서 보조 버튼을 접는 토글 */
   /* 노트북 커널 툴바(.ipynb 셀 단위 실행) */

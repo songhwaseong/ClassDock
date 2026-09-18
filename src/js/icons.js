@@ -93,6 +93,15 @@
        (이모지 🔊/🔇 는 UI 정리가 지우기만 하고 대신 그릴 그림이 없어 빈 단추가 됐다.) */
     ,volume: '<path d="M4 9.3h3.4L12 5.2v13.6l-4.6-4.1H4z" fill="currentColor" stroke="none"/><path d="M15.4 9.5a3.6 3.6 0 0 1 0 5"/><path d="M18.1 6.9a7.4 7.4 0 0 1 0 10.2"/>'
     ,mute: '<path d="M4 9.3h3.4L12 5.2v13.6l-4.6-4.1H4z" fill="currentColor" stroke="none"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>'
+    // 파이썬 실행 바 — 단계 실행은 ▶ 실행(채운 삼각형)과 갈라 보이게 '속 빈 삼각형 + 멈춤 막대'로 그린다.
+    ,stepRun: '<path d="M6 5.5v13l9-6.5z"/><path d="M18.5 5.5v13"/>'
+    ,recordRing: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>'
+    ,layers: '<path d="m12 3.5 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5M3 16l9 4.5 9-4.5"/>'
+    ,python: '<path d="M12 3H9.5A2.5 2.5 0 0 0 7 5.5V8h5.5M7 8H5.5A2.5 2.5 0 0 0 3 10.5v3A2.5 2.5 0 0 0 5.5 16H7v-2.5A2.5 2.5 0 0 1 9.5 11h5A2.5 2.5 0 0 0 17 8.5v-3A2.5 2.5 0 0 0 14.5 3H12"/><path d="M12 21h2.5a2.5 2.5 0 0 0 2.5-2.5V16h-5.5M17 16h1.5a2.5 2.5 0 0 0 2.5-2.5v-3A2.5 2.5 0 0 0 18.5 8H17v2.5a2.5 2.5 0 0 1-2.5 2.5h-5A2.5 2.5 0 0 0 7 15.5v3A2.5 2.5 0 0 0 9.5 21H12"/><circle cx="9.7" cy="5.5" r=".8" fill="currentColor" stroke="none"/><circle cx="14.3" cy="18.5" r=".8" fill="currentColor" stroke="none"/>'
+    ,terminal: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7 9.5 3 2.5-3 2.5M12.5 15H17"/>'
+    ,arrowDown: '<path d="M12 5v14M6 13l6 6 6-6"/>'
+    ,spellcheck: '<path d="m3 17 4.5-11 4.5 11M4.7 13h5.6"/><path d="m13.5 15 2.8 2.8L21 12"/>'
+    ,pin: '<path d="M9 3.5h6l-1 5 3.5 3.5h-11L10 8.5z"/><path d="M12 12v8.5"/>'
   };
   window.uiIcon = function(name){
     const content = paths[name] || paths.code;

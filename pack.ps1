@@ -41,6 +41,7 @@ New-Item -ItemType Directory -Path (Join-Path $stage "vendor\wheels")  | Out-Nul
 Copy-Item "ClassDock.exe" $stage
 Copy-Item "vendor\pyodide\*" (Join-Path $stage "vendor\pyodide") -Recurse
 Copy-Item "vendor\wheels\*"  (Join-Path $stage "vendor\wheels")  -Recurse
+Copy-Item "docs\API-인증키-안내.md" (Join-Path $stage "API-인증키-안내.md")
 
 $readme = @"
 ClassDock - 테스트용 패키지
@@ -56,9 +57,11 @@ ClassDock - 테스트용 패키지
   ClassDock.exe   실행 파일 (앱 전체가 내장됨)
   vendor/pyodide/          인터넷 없이 파이썬을 돌리기 위한 코어
   vendor/wheels/           추가 파이썬 패키지 오프라인 설치용
+  API-인증키-안내.md       버스·지하철 실시간, 카카오 검색·길찾기, 고시환율에 필요한 인증키 받는 법
 
 ■ 참고
   - 인터넷이 없어도 모든 기능이 동작하도록 만든 패키지입니다.
+    (버스·지하철 실시간처럼 인터넷과 각자 받은 인증키가 필요한 기능만 예외 - API-인증키-안내.md 참고)
   - 처음 실행 시 Windows 보안 경고가 뜨면 "추가 정보 -> 실행"을 눌러주세요.
   - 파일은 외부로 전송되지 않고 모든 처리는 내 PC 안에서만 이뤄집니다.
 "@
