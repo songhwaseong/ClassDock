@@ -7667,12 +7667,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .diary-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
 .diary-btn:disabled{opacity:.38;cursor:default}
 .diary-btn.diary-ico{width:32px;padding:0}
+.diary-btn.diary-ico .run-save-label{display:none}
 .diary-btn.is-on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--field))}
 .diary-primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .diary-primary:hover:not(:disabled){background:var(--accent-d);color:#fff}
 .diary-danger:hover:not(:disabled){border-color:var(--danger);color:var(--danger)}
 .diary-btn .ui-icon{width:16px;height:16px}
-.diary-spell:empty{display:none}
 .diary-status{color:var(--muted);font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 120px}
 .diary-locked-panel{max-width:520px;margin:40px auto;padding:26px;border:1px solid var(--border);border-radius:14px;
   background:var(--panel-2);display:flex;flex-direction:column;align-items:center;gap:11px;text-align:center}
@@ -7709,7 +7709,10 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .diary-main{flex:1;min-width:0;overflow:auto;padding:16px 16px 40px}
 .diary-page-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:780px;margin:0 auto 10px}
 .diary-date{margin:0 4px;font-size:18px;font-weight:700;color:var(--ink)}
-.diary-date.is-today::after{content:attr(data-today);margin-left:8px;padding:1px 7px;border-radius:999px;background:var(--diary-mark);color:#fff;font-size:11.5px;font-weight:600;vertical-align:3px}
+.diary-today-badge{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;height:26px;padding:0 12px 0 9px;border-radius:999px;background:linear-gradient(90deg,#f0507a,#ff6f91);color:#fff;font-size:13px;font-weight:700;line-height:1;box-shadow:0 2px 6px rgba(240,80,122,.28);white-space:nowrap}
+.diary-today-badge[hidden]{display:none}
+.diary-today-badge svg{width:15px;height:15px;flex:0 0 auto}
+.diary-today-sep{width:1px;height:13px;background:rgba(255,255,255,.55)}
 .diary-day-nav{width:30px;min-height:30px;padding:0}
 .diary-entry-title{flex:1 1 160px;min-width:120px;height:32px;padding:4px 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit}
 .diary-paper{position:relative;max-width:780px;margin:0 auto;background:var(--diary-paper);border-radius:6px;box-shadow:0 1px 3px rgba(15,23,42,.12),0 8px 24px rgba(15,23,42,.08);overflow:hidden}
@@ -7763,13 +7766,18 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .diary-pick{gap:4px;min-width:32px;padding:3px 9px;font-size:13px}
 .diary-pick:not(.is-set) .diary-pick-label{color:var(--muted)}
 .diary-pick-emoji{font-size:17px;line-height:1;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
-.diary-pick-pop{position:absolute;z-index:45;display:grid;grid-template-columns:repeat(4,72px);gap:4px;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--panel);box-shadow:var(--shadow)}
+.diary-pick-pop{position:absolute;z-index:45;display:grid;grid-template-columns:repeat(4,48px);gap:4px;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--panel);box-shadow:var(--shadow)}
 .diary-pick-pop[hidden]{display:none}
-.diary-pick-option{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 2px 5px;border:1px solid transparent;border-radius:8px;background:none;color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
+.diary-pick-option{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 2px;border:1px solid transparent;border-radius:8px;background:none;color:var(--ink);font:inherit;font-size:12px;cursor:pointer}
 .diary-pick-option:hover{background:var(--panel-hover)}
 .diary-pick-option.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent)}
 .diary-pick-option .diary-pick-emoji{font-size:24px}
 .diary-pick-clear{grid-column:1/-1;min-height:28px;font-size:12.5px}
+.diary-wx{display:block;width:1.15em;height:1.15em}
+.diary-pick-option .diary-pick-emoji.has-wx{font-size:30px}
+.diary-cal-emoji.has-wx{bottom:1px}
+.diary-print-mark.has-wx .diary-wx{display:inline-block;vertical-align:-.2em;width:1.2em;height:1.2em}
+.diary-btn.diary-ico.diary-pick-clear{width:auto}
 .diary-cal-num{line-height:1}
 .diary-cal-emoji{position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-size:11px;line-height:1;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
 .diary-cal-day.has-emoji::after{display:none}
@@ -7793,7 +7801,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 /* --- 일기장 3단계: 원고지 · 인쇄 --- */
 .diary-doc{--diary-genko:#e2a197}
 [data-theme="dark"] .diary-doc{--diary-genko:#7a4a45}
-.diary-date.is-today::after{content:attr(data-today)}
 .diary-genko{position:relative;cursor:text;user-select:none}
 .diary-genko[hidden]{display:none}
 .diary-genko-grid{position:absolute;inset:0}

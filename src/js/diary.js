@@ -72,6 +72,69 @@ function diaryEnsureFont(id){
 const DIARY_WEATHERS = [["sunny", "☀️", "맑음", "Sunny"], ["partly", "⛅", "구름 조금", "Partly cloudy"], ["cloudy", "☁️", "흐림", "Cloudy"],
   ["rainy", "🌧️", "비", "Rainy"], ["storm", "⛈️", "천둥번개", "Thunderstorm"], ["snowy", "❄️", "눈", "Snowy"],
   ["windy", "🌬️", "바람", "Windy"], ["foggy", "🌫️", "안개", "Foggy"]];
+// 날씨 그림 — 색 칸 + 흰 모양 + 오른쪽 아래로 길게 늘어진 그림자(플랫 아이콘). 이모지는 기기마다 모양이 달라 직접 그린다.
+// 모양은 currentColor 로 한 번만 정의해 두고, 그림자는 같은 모양을 대각선으로 겹쳐 찍어 만든다(겹친 무리 전체에 투명도를 한 번만).
+// 구름 테두리는 --wx-bg 로 칠해 뒤의 해와 갈라 보이게 하고, 그림자 쪽에선 투명으로 꺼 둔다.
+const DIARY_WEATHER_ART = (() => {
+  const cloud = (x, y) => `<circle cx="${x - 6}" cy="${y + 1}" r="5"/><circle cx="${x + 1}" cy="${y - 3}" r="7"/><circle cx="${x + 7}" cy="${y + 1}" r="5"/><rect x="${x - 11}" y="${y + 1}" width="23" height="5" rx="2.5"/>`;
+  const rays = (cx, cy, r1, r2, n) => Array.from({ length:n }, (_, i) => {
+    const a = i * Math.PI * 2 / n, c = Math.cos(a), sn = Math.sin(a);
+    return `<line x1="${(cx + c * r1).toFixed(1)}" y1="${(cy + sn * r1).toFixed(1)}" x2="${(cx + c * r2).toFixed(1)}" y2="${(cy + sn * r2).toFixed(1)}"/>`;
+  }).join("");
+  const line = 'fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"';
+  const fill = 'fill="currentColor"';
+  const edged = `fill="currentColor" style="stroke:var(--wx-bg);stroke-width:2.4"`;
+  return {
+    sunny:["#F6A53A", `<circle cx="24" cy="24" r="7" ${fill}/><g ${line}>${rays(24, 24, 10.5, 14.5, 8)}</g>`],
+    partly:["#F4A07C", `<circle cx="20" cy="19" r="5" ${fill}/><g ${line}>${rays(20, 19, 7.5, 10.5, 8)}</g><g ${edged}>${cloud(27, 27)}</g><g ${fill}>${cloud(27, 27)}</g>`],
+    cloudy:["#B3BACB", `<g ${fill}>${cloud(24, 24)}</g>`],
+    rainy:["#5C8EDC", `<g ${fill}>${cloud(24, 20)}</g><g ${line}><line x1="18" y1="30" x2="16.5" y2="34"/><line x1="24" y1="30" x2="22.5" y2="34"/><line x1="30" y1="30" x2="28.5" y2="34"/><line x1="21" y1="35.5" x2="20" y2="38"/><line x1="27" y1="35.5" x2="26" y2="38"/></g>`],
+    storm:["#8B6FE0", `<g ${fill}>${cloud(24, 19)}</g><path d="M25.5 27 L20 34.5 H24 L22 41 L29 32.5 H25 L27.5 27 Z" ${fill}/>`],
+    snowy:["#7CC2F4", `<g ${line}><line x1="24" y1="12" x2="24" y2="36"/><line x1="13.6" y1="18" x2="34.4" y2="30"/><line x1="13.6" y1="30" x2="34.4" y2="18"/><path d="M20.5 13.5 L24 17 L27.5 13.5 M20.5 34.5 L24 31 L27.5 34.5 M13.5 22.5 L18.3 21 L17 16.3 M34.5 25.5 L29.7 27 L31 31.7 M13.5 25.5 L18.3 27 L17 31.7 M34.5 22.5 L29.7 21 L31 16.3"/></g>`],
+    windy:["#6CC29A", `<g ${line}><path d="M11 19 H28 a4 4 0 1 0 -4 -4"/><path d="M11 25 H34 a4 4 0 1 1 -4 4"/><path d="M11 31 H23"/></g>`],
+    foggy:["#A4ABBD", `<g ${line}><line x1="13" y1="17" x2="35" y2="17"/><line x1="13" y1="24" x2="35" y2="24"/><line x1="13" y1="31" x2="35" y2="31"/></g>`]
+  };
+})();
+// 기분 그림 — 같은 방식으로 흰 얼굴을 그리고, 눈·입은 칸 색(--wx-bg)으로 칠한다(그림자 쪽에선 꺼져 얼굴 그림자만 남는다).
+const DIARY_MOOD_ART = (() => {
+  const face = `<circle cx="24" cy="24" r="13.5" fill="currentColor"/>`;
+  const f = (d) => `<path d="${d}" fill="none" style="stroke:var(--wx-bg)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const solid = (d) => `<path d="${d}" style="fill:var(--wx-bg)"/>`;
+  const dots = `<circle cx="19.5" cy="22" r="1.7" style="fill:var(--wx-bg)"/><circle cx="28.5" cy="22" r="1.7" style="fill:var(--wx-bg)"/>`;
+  const heart = (x, y) => `M${x} ${y + 2.6} l-2.9 -2.9 a1.65 1.65 0 0 1 2.9 -2.3 a1.65 1.65 0 0 1 2.9 2.3 z`;
+  const grin = "M18 26.5 h12 q0 6 -6 6 q-6 0 -6 -6 z";
+  return {
+    happy:["#F6BA33", face + f("M17.8 22 q2.2 -3 4.4 0 M25.8 22 q2.2 -3 4.4 0 M18.5 27 q5.5 5 11 0")],
+    excited:["#F5964A", face + f("M18 19 l3.6 2.6 l-3.6 2.6 M30 19 l-3.6 2.6 l3.6 2.6") + solid(grin)],
+    love:["#F06F6A", face + solid(heart(19.5, 19.5) + " " + heart(28.5, 19.5)) + solid(grin)],
+    calm:["#EDC45C", face + f("M17.8 22 q2.2 2.6 4.4 0 M25.8 22 q2.2 2.6 4.4 0 M20 28.5 q4 2.2 8 0")],
+    tired:["#8C98B3", face + f("M17.8 22.5 h4.4 M25.8 22.5 h4.4 M18.5 29.5 q1.375 -1.6 2.75 0 t2.75 0 t2.75 0 t2.75 0")],
+    sad:["#8B7BE0", face + dots + f("M19 30.5 q5 -4.5 10 0") + solid("M29.2 24.6 C27.4 27.2 27.4 28.9 29.2 28.9 C31 28.9 31 27.2 29.2 24.6 Z")],
+    angry:["#3FB58C", face + f("M17.5 17.5 l4.6 2.6 M30.5 17.5 l-4.6 2.6 M19 30.5 q5 -4 10 0") + dots],
+    worried:["#58A7E6", face + dots + f("M17.5 18.5 l4.2 -1.8 M30.5 18.5 l-4.2 -1.8 M19.5 30 q4.5 -3.4 9 0")]
+  };
+})();
+let _diaryWeatherSeq = 0;
+function diaryWeatherSvg(id){
+  const art = DIARY_WEATHER_ART[id] || DIARY_MOOD_ART[id];
+  if (!art) return "";
+  const n = ++_diaryWeatherSeq, g = "dwx" + n, c = "dwxc" + n;
+  let shadow = "";
+  for (let i = 1; i <= 22; i++) shadow += `<use href="#${g}" x="${i}" y="${i}"/>`;
+  return `<svg class="diary-wx" viewBox="0 0 48 48" aria-hidden="true" focusable="false">`
+    + `<defs><g id="${g}">${art[1]}</g><clipPath id="${c}"><rect width="48" height="48" rx="10"/></clipPath></defs>`
+    + `<rect width="48" height="48" rx="10" fill="${art[0]}"/>`
+    + `<g clip-path="url(#${c})" opacity=".13" style="color:#000;--wx-bg:transparent">${shadow}</g>`
+    + `<use href="#${g}" style="color:#fff;--wx-bg:${art[0]}"/></svg>`;
+}
+// 날씨·기분 표시 칸 — 직접 그린 그림(없는 값이면 이모지 글자로).
+function diaryMarkFill(el, info){
+  const svg = info ? diaryWeatherSvg(info[0]) : "";
+  if (info) el.dataset.mark = info[0]; else delete el.dataset.mark;
+  if (svg){ el.innerHTML = svg; el.classList.add("has-wx"); }
+  else { el.textContent = info ? info[1] : ""; el.classList.remove("has-wx"); }
+  return el;
+}
 const DIARY_MOODS = [["happy", "😊", "기쁨", "Happy"], ["excited", "🤩", "신남", "Excited"], ["love", "🥰", "설렘", "Fluttery"],
   ["calm", "😌", "평온", "Calm"], ["tired", "😴", "피곤", "Tired"], ["sad", "😢", "슬픔", "Sad"], ["angry", "😠", "화남", "Angry"],
   ["worried", "😟", "걱정", "Worried"]];
@@ -230,6 +293,12 @@ function diaryTf(tmpl, vars){
 function diaryUiDateLabel(key){
   if (!diaryIsEn()) return diaryDateLabel(key);
   return diaryDateFromKey(key).toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+}
+// 종이 위 날짜 머리 — 한국어는 "2026. 9. 18" 처럼 짧게(요일까지 든 긴 이름은 title·읽어 주기로).
+function diaryUiHeadDate(key){
+  if (diaryIsEn()) return diaryUiDateLabel(key);
+  const d = diaryDateFromKey(key);
+  return d.getFullYear() + ". " + (d.getMonth() + 1) + ". " + d.getDate();
 }
 function diaryUiShortDate(key){
   const d = diaryDateFromKey(key);
@@ -1019,14 +1088,15 @@ function mountDiaryEditor(doc){
   titleInput.setAttribute("aria-label", "일기장 이름");
   const undoBtn = diaryButton("", "되돌리기 (Ctrl+Z)", "diary-btn", "undo");
   const redoBtn = diaryButton("", "다시 실행 (Ctrl+Y)", "diary-btn", "redo");
-  const photoBtn = diaryButton("사진 붙이기", "사진을 스티커처럼 붙이기 — 종이 위로 끌어다 놓아도 돼요", "diary-btn", "image");
-  const styleBtn = diaryButton("꾸미기", "줄 무늬·배경 그림 바꾸기", "diary-btn", "sliders");
+  const photoBtn = diaryButton("", "사진을 스티커처럼 붙이기 — 종이 위로 끌어다 놓아도 돼요", "diary-btn", "image");
+  const styleBtn = diaryButton("", "줄 무늬·배경 그림 바꾸기", "diary-btn", "sliders");
   styleBtn.setAttribute("aria-haspopup", "dialog");
   styleBtn.setAttribute("aria-expanded", "false");
-  const protectBtn = diaryButton("암호", "파일 암호 설정·변경", "diary-btn", "lock");
+  const protectBtn = diaryButton("", "파일 암호 설정·변경", "diary-btn", "lock");
   protectBtn.setAttribute("aria-haspopup", "menu");
   const saveBtn = diaryButton("저장", "일기장 저장 (Ctrl+S)", "diary-btn diary-primary run-save", "save", "run-save-label");
   saveBtn.dataset.shortcutAction = "saveCurrent";
+  saveBtn.classList.add("diary-ico");            // 그림만 — 글자 칸(.run-save-label)은 documents.js 가 갈아 끼우므로 남겨 두고 CSS 로 감춘다
   const status = document.createElement("span");
   status.className = "diary-status";
   status.setAttribute("aria-live", "polite");
@@ -1034,9 +1104,7 @@ function mountDiaryEditor(doc){
   photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
-  const printBtn = diaryButton("인쇄", "인쇄·PDF로 저장 — 이 날·이번 달·일기장 전체", "diary-btn", "print");
-  printBtn.setAttribute("aria-haspopup", "menu");
-  bar.append(titleInput, undoBtn, redoBtn, photoBtn, styleBtn, protectBtn, printBtn, saveBtn, status, photoInput, bgInput);
+  bar.append(titleInput, undoBtn, redoBtn, photoBtn, styleBtn, protectBtn, saveBtn, status, photoInput, bgInput);
 
   const body = document.createElement("div");
   body.className = "diary-body";
@@ -1066,6 +1134,15 @@ function mountDiaryEditor(doc){
   const dateLabel = document.createElement("h2");
   dateLabel.className = "diary-date";
   const nextDay = diaryButton("", "다음날", "diary-btn diary-day-nav", "arrow");
+  // 오늘 배지 — 달력 그림 · 가는 선 · "오늘". 날짜 글자와 따로 두어야 날짜 칸 글자가 날짜만 남는다.
+  const todayBadge = document.createElement("span");
+  todayBadge.className = "diary-today-badge";
+  todayBadge.hidden = true;
+  todayBadge.innerHTML = '<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="15" height="14" rx="3" fill="currentColor"/>'
+    + '<rect x="5.6" y="1.5" width="2" height="4.2" rx="1" fill="currentColor"/><rect x="12.4" y="1.5" width="2" height="4.2" rx="1" fill="currentColor"/>'
+    + '<g fill="var(--diary-today-ink,#f0507a)"><rect x="5" y="9" width="2.4" height="2.2" rx=".6"/><rect x="8.8" y="9" width="2.4" height="2.2" rx=".6"/><rect x="12.6" y="9" width="2.4" height="2.2" rx=".6"/>'
+    + '<rect x="5" y="12.8" width="2.4" height="2.2" rx=".6"/><rect x="8.8" y="12.8" width="2.4" height="2.2" rx=".6"/></g></svg>'
+    + '<span class="diary-today-sep" aria-hidden="true"></span><span class="diary-today-text"></span>';
   const entryTitle = document.createElement("input");
   entryTitle.className = "diary-entry-title";
   entryTitle.type = "text";
@@ -1078,7 +1155,7 @@ function mountDiaryEditor(doc){
   weatherBtn.dataset.pick = "weather";
   const moodBtn = diaryButton("", "기분 고르기", "diary-btn diary-pick ui-keep-symbols");
   moodBtn.dataset.pick = "mood";
-  pageHead.append(prevDay, dateLabel, nextDay, weatherBtn, moodBtn, entryTitle, deleteBtn);
+  pageHead.append(prevDay, dateLabel, todayBadge, nextDay, weatherBtn, moodBtn, entryTitle, deleteBtn);
 
   const paper = document.createElement("div");
   paper.className = "diary-paper";
@@ -1350,7 +1427,7 @@ function mountDiaryEditor(doc){
       if (mark){
         const em = document.createElement("span");
         em.className = "diary-cal-emoji";
-        em.textContent = mark[1];
+        diaryMarkFill(em, mark);
         b.append(em);
         b.classList.add("has-emoji");
       }
@@ -1379,7 +1456,7 @@ function mountDiaryEditor(doc){
       label.textContent = diaryEntryLabel(e);
       b.append(day);
       const mark = diaryMoodInfo(e.mood) || diaryWeatherInfo(e.weather);
-      if (mark){ const em = document.createElement("span"); em.className = "diary-month-item-emoji"; em.textContent = mark[1]; b.append(em); }
+      if (mark){ const em = document.createElement("span"); em.className = "diary-month-item-emoji"; diaryMarkFill(em, mark); b.append(em); }
       b.append(label);
       b.addEventListener("click", () => goTo(e.date));
       return b;
@@ -2074,9 +2151,12 @@ function mountDiaryEditor(doc){
   /* ----- 날짜 이동 ----- */
   function renderPage(){
     const entry = entryOf(current);
-    dateLabel.textContent = diaryUiDateLabel(current);
+    dateLabel.textContent = diaryUiHeadDate(current);
+    dateLabel.title = diaryUiDateLabel(current);
+    dateLabel.setAttribute("aria-label", diaryUiDateLabel(current) + (current === today ? " · " + diaryT("오늘") : ""));
     dateLabel.classList.toggle("is-today", current === today);
-    dateLabel.dataset.today = diaryT("오늘");
+    todayBadge.hidden = current !== today;
+    todayBadge.querySelector(".diary-today-text").textContent = diaryT("오늘");
     entryTitle.value = entry ? entry.title : "";
     if (area.value !== (entry ? entry.text : "")) area.value = entry ? entry.text : "";
     area.placeholder = diaryT(current === today ? "오늘은 어떤 하루였나요?" : "이 날의 일기를 적어 보세요.");
@@ -2093,7 +2173,7 @@ function mountDiaryEditor(doc){
     const weather = diaryWeatherInfo(entry && entry.weather), mood = diaryMoodInfo(entry && entry.mood);
     const paint = (btn, info, word) => {
       btn.replaceChildren();
-      const em = document.createElement("span"); em.className = "diary-pick-emoji"; em.textContent = info ? info[1] : "";
+      const em = document.createElement("span"); em.className = "diary-pick-emoji"; diaryMarkFill(em, info);
       const label = document.createElement("span"); label.className = "diary-pick-label"; label.textContent = info ? diaryName(info) : diaryT(word);
       if (info) btn.append(em);
       btn.append(label);
@@ -2127,19 +2207,19 @@ function mountDiaryEditor(doc){
     pickPop.setAttribute("aria-label", diaryT(kind === "weather" ? "날씨 고르기" : "기분 고르기"));
     pickPop.dataset.kind = kind;
     const buttons = options.map((info) => {
-      const [id, emoji] = info;
+      const id = info[0];
       const b = document.createElement("button");
       b.type = "button";
       b.className = "diary-pick-option" + (id === now ? " is-on" : "");
       b.dataset.value = id;
       b.setAttribute("aria-pressed", String(id === now));
-      const em = document.createElement("span"); em.className = "diary-pick-emoji"; em.textContent = emoji;
-      const label = document.createElement("span"); label.textContent = diaryName(info);
-      b.append(em, label);
+      const em = document.createElement("span"); em.className = "diary-pick-emoji"; diaryMarkFill(em, info);
+      b.title = diaryName(info); b.setAttribute("aria-label", diaryName(info));   // 그림만 — 이름은 마우스를 올리면 보인다
+      b.append(em);
       b.addEventListener("click", () => { setEntryField(kind, id === now ? "" : id); closePicker(); anchor.focus(); });
       return b;
     });
-    const clear = diaryButton(diaryT("지우기"), "", "diary-btn diary-pick-clear");
+    const clear = diaryButton("", diaryT("지우기"), "diary-btn diary-pick-clear", "delete");
     clear.disabled = !now;
     clear.addEventListener("click", () => { setEntryField(kind, ""); closePicker(); anchor.focus(); });
     pickPop.replaceChildren(...buttons, clear);
@@ -2227,12 +2307,6 @@ function mountDiaryEditor(doc){
     await addStickers(imgs);
   });
   if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
-  if (typeof MNKoreanSpellcheck !== "undefined" && MNKoreanSpellcheck && typeof MNKoreanSpellcheck.attach === "function"){
-    const host = document.createElement("span");
-    host.className = "diary-spell";
-    bar.insertBefore(host, saveBtn);
-    try { MNKoreanSpellcheck.attach({ textarea:area, buttonHost:host, mode:"plain", label:"맞춤법 검사" }); } catch(_){}
-  }
   paper.addEventListener("pointerdown", (e) => { if (!e.target.closest(".diary-sticker")) selectSticker(""); });
   genkoLayer.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !genkoLay) return;
@@ -2489,7 +2563,8 @@ function mountDiaryEditor(doc){
     for (const m of marks){
       const tag = document.createElement("span");
       tag.className = "diary-print-mark";
-      tag.textContent = m[1] + " " + diaryName(m);
+      diaryMarkFill(tag, m);
+      tag.append(" " + diaryName(m));
       date.append(tag);
     }
     head.append(date);
@@ -2617,15 +2692,14 @@ function mountDiaryEditor(doc){
     const month = all.filter(e => e.date.startsWith(prefix));
     const monthName = diaryUiMonthLabel(viewYear, viewMonth);
     const tip = diaryT("인쇄 창의 '대상'에서 'PDF로 저장'을 고르면 PDF 파일이 됩니다");
-    const r = (anchor && anchor.isConnected ? anchor : printBtn).getBoundingClientRect();
+    const r = (anchor && anchor.isConnected ? anchor : saveBtn).getBoundingClientRect();
     MNContextMenu.open(r.left, r.bottom + 4, [
       { label:diaryTf("이 날 인쇄 ({date})", { date:diaryUiShortDate(current) }), title:tip, disabled:!day.length, action:() => printEntries(day) },
       { label:diaryTf("이번 달 인쇄 ({month} · {n}편)", { month:monthName, n:month.length }), title:tip, disabled:!month.length, action:() => printEntries(month, monthName) },
       { label:diaryTf("일기장 전체 인쇄 ({n}편)", { n:all.length }), title:tip, disabled:!all.length, action:() => printEntries(all) }
     ], { autoFocus:true });
   }
-  printBtn.addEventListener("click", (e) => { e.stopPropagation(); openPrintMenu(printBtn); });
-  // 상단 인쇄 단추(app.js)도 같은 고르기 메뉴를 연다.
+  // 도구막대엔 인쇄 단추를 두지 않는다 — 상단 인쇄 단추(app.js)·Ctrl+P 가 이 고르기 메뉴를 연다.
   doc.printDiary = () => openPrintMenu(document.getElementById("btnPrint"));
   doc._diaryPrintEntries = printEntries;           // e2e·명령에서 고르기 없이 부를 때
 
@@ -2684,7 +2758,7 @@ if (typeof module !== "undefined" && module.exports){
     DIARY_FONTS, DIARY_HAND_FONTS, DIARY_FONT_STACKS, diaryFontScale, diaryEnsureFont, DIARY_WEATHERS, DIARY_MOODS, diaryNormalizeAngle, diaryWeatherInfo, diaryMoodInfo, diaryWeatherMoodLabel,
     DIARY_PENS, DIARY_PEN_SIZES, diaryNormalizeStroke, diaryDrawStrokes,
     diaryReorder, DIARY_GENKO_COLS, diaryGenkoGrid, diaryPictureBox, diaryUsesGenko, diaryStickerBottom, diaryGenkoMetrics, diaryGenkoLayout, diaryGenkoIndexAt,
-    diaryUiDateLabel, diaryUiMonthLabel, diaryUiWeekday, diaryT, diaryTf,
+    diaryUiDateLabel, diaryUiHeadDate, diaryUiMonthLabel, diaryUiWeekday, diaryT, diaryTf,
     diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryLineMetrics, diaryLineBackground,
     diaryCrc32, diaryZipBuild, diaryZipRead, diaryPack, diaryUnpack, diaryScratchFileName, diaryStarterBytes,
     diaryCryptoReady, diaryIsEncrypted, diaryEncryptedInfo, diaryDeriveProtection, diarySealBytes, diaryOpenSealed, diaryOutputBytes
