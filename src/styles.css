@@ -15,6 +15,9 @@
     /* 주석 전용 색 — 예전엔 --code-muted 를 함께 썼지만 그 변수는 줄번호·안내문 등 50곳 가까이 쓰여
        설정에서 주석색만 바꿀 수 없었다. 값은 --code-muted 와 같게 두어 겉보기는 그대로다. */
     --code-comment:#64748b;
+    /* 상태색·그림자·옅은 판 — 예전엔 정의 없이 var(--warn,#…) 식으로 곳마다 다른 대신 값을 적어 주황이 세 가지로 갈렸고,
+       --shadow·--panel-soft 는 대신 값도 없어 그림자·배경이 통째로 빠졌다. */
+    --warn:#d97706;--ok:#16a34a;--shadow:0 6px 18px rgba(15,23,42,.14);--panel-soft:var(--panel-2);
     --code-caret:#111827;--code-panel:#f8fafc;--code-panel-head:#eef2f7;
     --memo-paper:#fff9e6;--memo-paper-border:#ead8a0;
     /* 시험지 화면 보조 버튼 hover — --panel-2 판 위에서도 묻히지 않게 강조색을 옅게 깐다 */
@@ -70,13 +73,13 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-connect-grid{display:grid;grid-template-columns:minmax(180px,2fr) minmax(90px,.65fr);gap:14px 12px;margin-top:20px}
 .ssh-field{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:700;color:var(--muted,#475569)}
 .ssh-field:nth-child(3),.ssh-field:nth-child(4){grid-column:auto}
-.ssh-field input,.ssh-field select{height:42px;border:1px solid var(--line,#cbd5e1);border-radius:9px;padding:0 11px;background:var(--panel,#fff);color:var(--text,#0f172a);font:inherit;font-weight:500;outline:none}
+.ssh-field input,.ssh-field select{height:42px;border:1px solid var(--border);border-radius:9px;padding:0 11px;background:var(--panel,#fff);color:var(--ink);font:inherit;font-weight:500;outline:none}
 .ssh-field input:focus,.ssh-field select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
 .ssh-field input:disabled,.ssh-field select:disabled{opacity:.65}
 .ssh-key-field,.ssh-credential-field{grid-column:1/-1}
 .ssh-key-picker{display:flex;align-items:center;min-width:0;gap:10px}
 .ssh-key-picker .btn{flex:0 0 auto;min-height:38px}
-.ssh-key-picker span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text,#0f172a);font-weight:600}
+.ssh-key-picker span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink);font-weight:600}
 .ssh-remember{margin-top:16px}
 .ssh-security-note{margin:14px 0 0;padding:11px 13px;border-radius:9px;background:rgba(59,130,246,.08);color:var(--muted,#475569);font-size:12.5px;line-height:1.55}
 .ssh-connect-status{min-height:22px;margin-top:12px;color:#2563eb;font-size:13px;font-weight:700}
@@ -143,6 +146,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     --code-border:#1e293b;--code-hover:#334155;--code-string:#86efac;--code-number:#fca5a5;
     --code-keyword:#93c5fd;--code-type:#f0abfc;--code-param:#c084fc;--code-builtin:#dcdcaa;--code-decorator:#facc15;--code-function:#67e8f9;--code-select:rgba(148,163,184,.35);
     --code-comment:#64748b;
+    --warn:#f59e0b;--ok:#4ade80;--shadow:0 6px 18px rgba(0,0,0,.45);
     --code-caret:#e2e8f0;--code-panel:#0f172a;--code-panel-head:#0b1120;
     --memo-paper:var(--field);--memo-paper-border:var(--border);
     --exam-btn-hover-bg:color-mix(in srgb,var(--accent) 34%,var(--field));--exam-btn-hover-ink:#e0e7ff;
@@ -1522,7 +1526,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-lyric-input{min-width:150px;padding:6px 9px;border:1px solid var(--accent);border-radius:8px;background:var(--field,#fff);color:var(--ink);font:inherit}
   .music-lyric-hint{color:var(--muted);font-size:12px}
   .music-lyric-bar[hidden]{display:none}
-  .music-notice{padding:6px 12px;font-size:12px;background:color-mix(in srgb,var(--warn,#d98324) 16%,transparent);
+  .music-notice{padding:6px 12px;font-size:12px;background:color-mix(in srgb,var(--warn) 16%,transparent);
     color:var(--ink);border-bottom:1px solid var(--border)}
   .music-score-workspace{display:flex;flex:1;min-height:0;overflow:hidden;background:#fff}
   .music-score{flex:1;min-width:0;min-height:0;overflow:auto;padding:12px;background:#fff}
@@ -2686,7 +2690,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     padding:8px 12px;border-radius:8px;opacity:.85;z-index:15;max-width:280px;line-height:1.5}
   /* ===== 오피스 뷰어 ===== */
   .office{position:absolute;inset:0;overflow:auto;background:var(--viewer);padding:24px 12px 60px;isolation:isolate}
-  .binary-asset-card{max-width:560px;margin:48px auto;padding:32px;border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:0 12px 36px #00000012;text-align:center}
+  .binary-asset-card{max-width:560px;margin:48px auto;padding:32px;border:1px solid var(--border);border-radius:18px;background:var(--panel);box-shadow:0 12px 36px #00000012;text-align:center}
   .binary-asset-icon{display:grid;place-items:center;width:72px;height:72px;margin:0 auto 18px;border-radius:16px;background:#7c3aed1c;color:#7c3aed;font-weight:800;font-size:15px;letter-spacing:.04em}
   .binary-asset-card h2{margin:0 0 10px;overflow-wrap:anywhere}
   .binary-asset-card p{margin:8px 0;color:var(--muted);line-height:1.65}
@@ -6240,13 +6244,13 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .brl-before{color:var(--danger,#e06c75);text-decoration:line-through;opacity:.75;
     overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}
-  .brl-after{color:var(--ok,#98c379);overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}
+  .brl-after{color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-all}
   .batch-replace-more{padding:3px 11px;color:var(--muted);font-style:italic}
   /* 바꾸지 않는 자리(머리말·메모·탭을 넘는 일치)를 숫자로 적어 둔다 — 조용히 빠뜨리지 않기 위해. */
   .batch-replace-note{padding:4px 11px 6px;color:var(--muted);font-style:italic}
   .batch-replace-badge{flex:0 0 auto;font-size:11px;line-height:1.6;padding:0 7px;border-radius:999px;
     border:1px solid var(--border);color:var(--muted);white-space:nowrap}
-  .batch-replace-badge.warn{border-color:var(--warn,#d19a66);color:var(--warn,#d19a66)}
+  .batch-replace-badge.warn{border-color:var(--warn);color:var(--warn)}
   /* 바꿀 수 없는 문서는 목록에서 지우지 않고 사유와 함께 흐리게 남긴다. */
   .batch-replace-file.blocked{opacity:.6;border-style:dashed}
   .batch-replace-file.blocked .batch-replace-file-head{cursor:default}
@@ -6286,7 +6290,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .data-convert-grid th{background:var(--field,rgba(127,127,127,.12));font-weight:700;position:sticky;top:0}
   .data-convert-grid td.empty{background:rgba(127,127,127,.07)}
   .data-convert-loss{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden}
-  .data-convert-loss.ok{border-color:color-mix(in srgb,var(--ok,#98c379) 45%,var(--border))}
+  .data-convert-loss.ok{border-color:color-mix(in srgb,var(--ok) 45%,var(--border))}
   .data-convert-loss.warn{border-color:color-mix(in srgb,#f59e0b 55%,var(--border))}
   .data-convert-loss.error{border-color:color-mix(in srgb,var(--danger,#e06c75) 55%,var(--border))}
   .data-convert-loss-head{display:flex;align-items:center;gap:8px;width:100%;font:inherit;font-size:12.5px;
@@ -6304,7 +6308,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .data-convert-loss-change{display:flex;align-items:center;gap:7px;margin-top:3px;font-family:Consolas,"Courier New",monospace;
     font-size:11.5px;flex-wrap:wrap}
   .data-convert-loss-change .before{color:var(--danger,#e06c75)}
-  .data-convert-loss-change .after{color:var(--ok,#98c379)}
+  .data-convert-loss-change .after{color:var(--ok)}
   .data-convert-loss-change .arrow{color:var(--muted)}
   .data-convert-loss-hint{color:var(--muted);margin-top:3px}
   .data-convert-opts{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:4px}
@@ -6329,7 +6333,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     padding:6px 9px;border:1px solid var(--border);border-radius:8px;background:var(--field,var(--panel));color:var(--ink)}
   .exchange-rate-note{color:var(--muted);font-size:12px;margin:8px 0 0}
   .exchange-rate-status{font-size:12.5px;color:var(--muted);margin:6px 0 10px;min-height:1.4em}
-  .exchange-rate-status.ok{color:var(--ok,#98c379)}
+  .exchange-rate-status.ok{color:var(--ok)}
   .exchange-rate-status.bad{color:var(--danger,#e06c75)}
   /* 계산기 — 고른 통화 칸이 왼쪽·오른쪽으로 옮겨 다니며 방향을 나타낸다. */
   .exchange-rate-calc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin-bottom:10px;
@@ -7170,8 +7174,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 /* 고칠 수 있는 칸은 마우스를 얹었을 때만 알린다 — 늘 칠해 두면 표가 시끄러워진다. */
 .db-grid td.db-cell-editable:hover{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 70%,transparent)}
 /* 담아 둔 변경 — 아직 서버에 가지 않은 값이라 눈에 띄게 둔다. 적용하면 표를 다시 그리며 사라진다. */
-.db-grid td.db-cell-staged{background:color-mix(in srgb,var(--warn,#d97706) 20%,var(--field));font-weight:700}
-.db-grid tbody tr:nth-child(even) td.db-cell-staged{background:color-mix(in srgb,var(--warn,#d97706) 24%,var(--field))}
+.db-grid td.db-cell-staged{background:color-mix(in srgb,var(--warn) 20%,var(--field));font-weight:700}
+.db-grid tbody tr:nth-child(even) td.db-cell-staged{background:color-mix(in srgb,var(--warn) 24%,var(--field))}
 .db-grid tbody tr.db-row-staged td{background:color-mix(in srgb,var(--danger) 14%,var(--field));
   color:color-mix(in srgb,var(--danger) 70%,var(--ink));text-decoration:line-through}
 .db-grid tbody tr.db-row-staged .db-grid-index{background:color-mix(in srgb,var(--danger) 22%,var(--panel-2));
@@ -7184,8 +7188,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   color:var(--db-result-text-color,var(--ink));font:inherit;outline:none}
 /* 변경 바 — 담아 둔 변경이 있을 때만 나온다. */
 .db-edit-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border-radius:8px;
-  border:1px solid color-mix(in srgb,var(--warn,#d97706) 45%,var(--border));
-  background:color-mix(in srgb,var(--warn,#d97706) 10%,var(--panel))}
+  border:1px solid color-mix(in srgb,var(--warn) 45%,var(--border));
+  background:color-mix(in srgb,var(--warn) 10%,var(--panel))}
 .db-edit-count{font-size:12px}
 .db-edit-detail{color:var(--muted);font-size:11.5px;overflow-wrap:anywhere}
 /* 담아 둔 변경 목록 창 */
@@ -7523,7 +7527,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 
 /* 사용자 정의 함수 관리 */
 .xlsx-function-overlay{position:fixed;inset:0;z-index:12000;background:#0006;display:grid;place-items:center;padding:20px}
-.xlsx-function-dialog{width:min(560px,100%);max-height:90vh;overflow:auto;background:var(--panel,#fff);color:var(--text,#172033);border:1px solid var(--border,#ccd4df);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 15px 60px #0005}
+.xlsx-function-dialog{width:min(560px,100%);max-height:90vh;overflow:auto;background:var(--panel,#fff);color:var(--ink);border:1px solid var(--border,#ccd4df);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 15px 60px #0005}
 .xlsx-function-dialog label{display:flex;flex-direction:column;gap:5px;font-size:13px}
 .xlsx-function-dialog input,.xlsx-function-dialog textarea,.xlsx-function-dialog select{width:100%;box-sizing:border-box;font:inherit;color:inherit;background:var(--bg,#fff);border:1px solid var(--border,#ccd4df);border-radius:5px;padding:7px}
 .xlsx-function-dialog input[readonly]{opacity:.7}
