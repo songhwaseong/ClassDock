@@ -253,11 +253,104 @@ const MNSubwayLive = (function(){
     return alive;
   }
 
+  /* ── 역별 도착 정보(realtimeStationArrival) ──
+     역 이름을 API 가 쓰는 '원래 이름' 으로 물어야 한다. 표의 키는 괄호 부역명을 뗀 이름이라
+     그대로 물으면 '총신대입구' → 자료 없음, '총신대입구(이수)' → 9줄(2026-09-18 실측).
+     같은 이름도 노선마다 다르다 — 신촌은 2호선이 '신촌', 경의중앙선이 '신촌(경의중앙선)'.
+     아래 표는 2026-09-18 전체 역 조회(realtimeStationArrival/ALL, 2,969줄)에서 표 키와 다른 것만 뽑았다.
+     역 이름이 바뀌면(부역명 추가 등) 여기에 더한다. 없는 역은 표 키 그대로 묻는다. */
+  const API_NAMES = {
+    "1호선": { "쌍용":"쌍용(나사렛대)" },
+    "4호선": { "총신대입구":"총신대입구(이수)" },
+    "5호선": { "광나루":"광나루(장신대)", "신정":"신정(은행정)", "아차산":"아차산(어린이대공원후문)",
+      "오목교":"오목교(목동운동장앞)", "군자":"군자(능동)", "천호":"천호(풍납토성)",
+      "올림픽공원":"올림픽공원(한국체대)", "굽은다리":"굽은다리(강동구민회관앞)" },
+    "6호선": { "월곡":"월곡(동덕여대)", "월드컵경기장":"월드컵경기장(성산)", "안암":"안암(고대병원앞)",
+      "화랑대":"화랑대(서울여대입구)", "증산":"증산(명지대앞)", "상월곡":"상월곡(한국과학기술연구원)",
+      "새절":"새절(신사)", "대흥":"대흥(서강대앞)", "응암":"응암순환(상선)" },
+    "7호선": { "공릉":"공릉(서울산업대입구)", "숭실대입구":"숭실대입구(살피재)", "어린이대공원":"어린이대공원(세종대)",
+      "이수":"총신대입구(이수)", "상도":"상도(중앙대앞)", "군자":"군자(능동)" },
+    "8호선": { "몽촌토성":"몽촌토성(평화의문)", "남한산성입구":"남한산성입구(성남법원,검찰청)", "천호":"천호(풍납토성)" },
+    "경의중앙선": { "신촌":"신촌(경의중앙선)" },
+    "우이신설선": { "4.19민주묘지":"4.19 민주묘지" }
+  };
+  function apiStationName(line, name){
+    const map = API_NAMES[line];
+    return (map && Object.prototype.hasOwnProperty.call(map, name) && map[name]) || String(name || "");
+  }
+
+  /* subwayId → 표의 노선 이름. 같은 역에 서는 다른 노선도 함께 오므로 무엇인지 가려 보인다.
+     GTX-A(1032)·경강선(1081)·신림선(1094)은 표에 없어 번호로만 보인다. */
+  const SUBWAY_IDS = {
+    "1001":"1호선", "1002":"2호선", "1003":"3호선", "1004":"4호선", "1005":"5호선", "1006":"6호선",
+    "1007":"7호선", "1008":"8호선", "1009":"9호선", "1063":"경의중앙선", "1065":"공항철도",
+    "1067":"경춘선", "1075":"수인분당선", "1077":"신분당선", "1092":"우이신설선", "1093":"서해선",
+    "1032":"GTX-A", "1081":"경강선", "1094":"신림선"
+  };
+  function lineOfSubwayId(id){ return SUBWAY_IDS[String(id == null ? "" : id).trim()] || ""; }
+
+  /* 받아 온 도착 목록을 노선·방향으로 묶는다. line(지금 보는 노선)을 맨 앞에 둔다.
+     arvlMsg2 가 사람이 읽는 말("5분 후 (종각)", "전역 도착", "[2]번째 전역 (용산)")이라 그것을 그대로 쓰고,
+     barvlDt(초)는 0 으로 오는 일이 많아 값이 있을 때만 쓴다. ordkey 가 방향 안의 도착 차례다. */
+  function arrivals(body, line){
+    const list = body && Array.isArray(body.realtimeArrivalList) ? body.realtimeArrivalList : [];
+    const text = (value) => String(value == null ? "" : value).trim();
+    const seen = new Map();
+    let rows = [];
+    for (const r of list){
+      if (!r || typeof r !== "object") continue;
+      const subwayId = text(r.subwayId);
+      const direction = text(r.updnLine);
+      const trainNo = text(r.btrainNo);
+      const message = text(r.arvlMsg2).replace(/\[(\d+)\]/g, "$1");
+      const destination = terminalOf(text(r.bstatnNm)) || text(r.bstatnNm);
+      if (!message && !destination) continue;
+      const heading = text(r.trainLineNm);
+      const seconds = Number(r.barvlDt);
+      const row = {
+        subwayId: subwayId, line: lineOfSubwayId(subwayId) || subwayId, direction: direction,
+        towards: (/-\s*(.+?)\s*$/.exec(heading) || [])[1] || "",
+        destination: destination, message: message, current: text(r.arvlMsg3), code: text(r.arvlCd),
+        seconds: text(r.barvlDt) !== "" && Number.isFinite(seconds) && seconds > 0 ? seconds : null,
+        kind: text(r.btrainSttus), express: !!text(r.btrainSttus) && text(r.btrainSttus) !== "일반",
+        lastTrain: text(r.lstcarAt) === "1", received: parseTime(r.recptnDt), order: text(r.ordkey)
+      };
+      // 같은 열차가 받은 시각만 다르게 두 줄로 오는 일이 있다(2026-09-18 서울역 1호선 0099:
+      // 12:39 '2번째 전역' · 12:40 '5분 후'). 가장 최근에 받은 줄만 남긴다.
+      const key = subwayId + "|" + direction + "|" + trainNo;
+      const earlier = trainNo && trainNo !== "0" ? seen.get(key) : null;
+      if (earlier){
+        if (!(row.received > earlier.received)) continue;
+        rows = rows.filter((item) => item !== earlier);
+      }
+      seen.set(key, row);
+      rows.push(row);
+    }
+    /* ordkey = [상하행 1자리][차례 1자리][몇 정거장 전 3자리][종착역][급행]. 차례 자리는 실제 도착 순서와
+       어긋날 때가 있어(서울역 1호선 하행: 차례 1 이 26정거장 전, 차례 2 가 '5분 후') 정거장 수로 줄 세운다. */
+    const away = (row) => { const n = parseInt(row.order.slice(2, 5), 10); return Number.isFinite(n) ? n : 999; };
+    rows.sort((a, b) => (a.line === line ? 0 : 1) - (b.line === line ? 0 : 1)
+      || a.line.localeCompare(b.line, "ko", { numeric:true })
+      || a.direction.localeCompare(b.direction, "ko")
+      || away(a) - away(b)
+      || (a.seconds == null ? Infinity : a.seconds) - (b.seconds == null ? Infinity : b.seconds)
+      || a.order.localeCompare(b.order));
+    // 노선·방향 묶음. 방면은 그 방향 첫 열차의 '○○방면' 을 쓴다.
+    const groups = [];
+    for (const row of rows){
+      const last = groups[groups.length - 1];
+      if (last && last.line === row.line && last.direction === row.direction) last.rows.push(row);
+      else groups.push({ line: row.line, direction: row.direction, towards: row.towards, rows: [row] });
+    }
+    return groups;
+  }
+
   return {
     DWELL_SECONDS, SPEED_MPS, MIN_RUN_SECONDS, MAX_PROGRESS, STALE_SECONDS,
     useTable, normalize, terminalOf, isPseudo, station, stationsOf, neighbours, metres,
     nextStation, previousStation, firstStepToward, parseTime,
-    buildEvent, progressOf, positionOf, coordsOf, ingest
+    buildEvent, progressOf, positionOf, coordsOf, ingest,
+    API_NAMES, apiStationName, lineOfSubwayId, arrivals
   };
 })();
 

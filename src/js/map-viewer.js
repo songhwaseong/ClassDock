@@ -66,7 +66,7 @@ const MAP_MARKER_COLORS = [
   { id:"slate",  label:"검정", hex:"#334155" }
 ];
 
-/* 지도 위에 떠 있는 칸(반경 보기·제주 버스)을 제목줄로 끌어 지도 안에서 옮긴다.
+/* 지도 위에 떠 있는 칸(반경 보기·버스)을 제목줄로 끌어 지도 안에서 옮긴다.
    화면 좌표(fixed)로 띄우지 않는 까닭: 반경 칸은 접으면 폭이 줄어야 하고, 칸은 지도(무대)와 함께 움직여야 한다.
    그래서 크기는 건드리지 않고 무대 기준 left/top 만 바꾸며, 무대·칸 크기가 바뀌면 무대 안으로 다시 넣는다. */
 function mapMakePanelMovable(panel, handle, stage, doc){
@@ -729,18 +729,29 @@ function mapMarkersFromCsv(text){
   if (rows.length < 2) throw new Error("csv-empty");
   const headers = rows[0].map(value => String(value).trim().toLowerCase());
   const find = (aliases) => headers.findIndex(header => aliases.includes(header));
-  const labelAt = find(["이름", "장소", "name", "label"]);
+  const labelAt = find(["이름", "장소", "사업장명", "시설명", "name", "label"]);
   const latAt = find(["위도", "lat", "latitude"]);
   const lngAt = find(["경도", "lng", "lon", "longitude"]);
   const noteAt = find(["메모", "설명", "note", "description"]);
   const colorAt = find(["색", "색상", "color"]);
-  const addressAt = find(["주소", "도로명주소", "지번주소", "소재지", "address", "addr"]);
+  // 인허가(LOCALDATA)는 '도로명전체주소'·'소재지전체주소', 공공데이터 표준은 '소재지도로명주소'.
+  const addressAt = find(["주소", "도로명주소", "지번주소", "소재지", "도로명전체주소", "소재지전체주소",
+    "소재지도로명주소", "소재지지번주소", "address", "addr"]);
   const phoneAt = find(["전화번호", "전화", "연락처", "phone", "tel"]);
   const regionAt = find(["시도", "광역시도", "region"]);
   const districtAt = find(["시군구", "구", "district"]);
-  if ((latAt < 0 || lngAt < 0) && addressAt < 0) throw Object.assign(new Error("csv-columns"), { headers:rows[0] });
+  /* 평면 좌표(미터) 열. 공공데이터는 위경도 대신 이것만 주는 일이 흔하다 — 인허가(LOCALDATA)는
+     '좌표정보(x)', 도로명주소·공간정보는 'X좌표'·'x'. 위경도 열이 없을 때만 이 열을 좌표로 쓴다. */
+  const xAt = find(["x", "x좌표", "좌표x", "좌표정보(x)", "좌표정보x", "xcoord", "x_coord", "tm_x", "x좌표값"]);
+  const yAt = find(["y", "y좌표", "좌표y", "좌표정보(y)", "좌표정보y", "ycoord", "y_coord", "tm_y", "y좌표값"]);
+  const hasLatLng = latAt >= 0 && lngAt >= 0;
+  const hasXY = xAt >= 0 && yAt >= 0;
+  if (!hasLatLng && !hasXY && addressAt < 0) throw Object.assign(new Error("csv-columns"), { headers:rows[0] });
+  // 위경도 열에 평면 좌표를 적어 둔 표도 있다(위도=북쪽 값 y, 경도=동쪽 값 x 로 읽는다).
+  const eastAt = hasLatLng ? lngAt : xAt, northAt = hasLatLng ? latAt : yAt;
   const markers = [];
   const pending = [];
+  const projected = [];
   let skipped = 0;
   for (const row of rows.slice(1, MAP_CSV_MAX_MARKERS + 1)){
     const colorRaw = colorAt >= 0 ? String(row[colorAt] || "").trim().toLowerCase() : "red";
@@ -756,20 +767,25 @@ function mapMarkersFromCsv(text){
     };
     /* 빈 칸을 숫자로 읽으면 Number("")는 0 이다 — 그대로 두면 좌표를 비워 둔 줄이 아프리카 앞바다
        (0, 0)에 표시로 찍힌다. 그래서 "좌표를 적었는가"를 먼저 보고 값을 읽는다. */
-    const wroteCoords = latAt >= 0 && lngAt >= 0
-      && String(row[latAt] || "").trim() !== "" && String(row[lngAt] || "").trim() !== "";
-    const lat = wroteCoords ? Number(row[latAt]) : NaN;
-    const lng = wroteCoords ? Number(row[lngAt]) : NaN;
+    const wroteCoords = eastAt >= 0 && northAt >= 0
+      && String(row[northAt] || "").trim() !== "" && String(row[eastAt] || "").trim() !== "";
+    const lat = wroteCoords ? Number(String(row[northAt]).replace(/,/g, "")) : NaN;
+    const lng = wroteCoords ? Number(String(row[eastAt]).replace(/,/g, "")) : NaN;
     const usable = Number.isFinite(lat) && Number.isFinite(lng) && lat >= -85 && lat <= 85 && lng >= -180 && lng <= 180;
     if (usable){ markers.push(mapNormalizeMarker({ ...shared, lat, lng })); continue; }
+    /* 위경도 범위를 크게 벗어난 수는 평면 좌표다 — 버리지 않고 모아 두면 화면이 좌표계를 골라 바꾼다. */
+    if (wroteCoords && typeof MNKoreaCoords !== "undefined" && MNKoreaCoords.looksProjected(lng, lat)){
+      projected.push({ ...shared, x:lng, y:lat });
+      continue;
+    }
     /* 좌표를 적기는 했는데 쓸 수 없는 값이면(999 같은 오타) 그건 자료 오류다 — 이름을 장소로
        착각해 검색을 부르지 않고 예전처럼 제외한다. 좌표 칸이 아예 비어 있을 때만 찾아 나선다. */
     const query = shared.address || (wroteCoords ? "" : shared.label.trim());
     if (query && pending.length < MAP_GEOCODE_BATCH_MAX) pending.push({ ...shared, query });
     else skipped++;
   }
-  if (!markers.length && !pending.length) throw new Error("csv-no-markers");
-  return { markers, pending, skipped, truncated: Math.max(0, rows.length - 1 - MAP_CSV_MAX_MARKERS) };
+  if (!markers.length && !pending.length && !projected.length) throw new Error("csv-no-markers");
+  return { markers, pending, projected, headers:rows[0], skipped, truncated: Math.max(0, rows.length - 1 - MAP_CSV_MAX_MARKERS) };
 }
 function mapCsvEscape(value){
   const text = String(value == null ? "" : value);
@@ -1296,13 +1312,15 @@ function mapDriveGuide(access){
 }
 /* 표시 좌표 목록([위도, 경도] …)을 런처가 받는 딸림값으로 바꾼다. 첫 표시가 출발, 마지막이
    도착, 사이에 있는 것들이 들르는 곳이다 — 카카오는 x=경도·y=위도 차례라 여기서 뒤집는다. */
-function mapDirectionsSpot(points, options){
+function mapDirectionsSpot(points, options, depart){
   const list = (Array.isArray(points) ? points : [])
     .filter(point => Array.isArray(point) && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])));
   if (list.length < 2) return null;
   const settings = mapNormalizeDriveOptions(options);
   const pair = (point) => Number(point[1]).toFixed(6) + "," + Number(point[0]).toFixed(6);
+  const when = mapDriveDepartValue(depart);
   return {
+    ...(when ? { depart:when } : {}),
     x: Number(list[0][1]).toFixed(6), y: Number(list[0][0]).toFixed(6),
     x2: Number(list[list.length - 1][1]).toFixed(6), y2: Number(list[list.length - 1][0]).toFixed(6),
     via: list.slice(1, -1).map(pair).join("|"),
@@ -1389,10 +1407,16 @@ function mapDirectionsRoute(raw){
   const route = raw && Array.isArray(raw.routes) ? raw.routes[0] : null;
   return mapDirectionsCandidate(route);
 }
-async function mapFetchDirections(points, options){
-  const spot = mapDirectionsSpot(points, options);
+/* 어느 카카오모빌리티 API 로 물을지. 출발 시각을 정했으면 미래 길찾기(경유지 5곳까지), 경유지가 5곳을
+   넘으면 다중 경유지(POST, 30곳), 그 밖에는 예전 그대로 기본 길찾기. 셋 다 답 모양이 같다. */
+function mapDirectionsProvider(pointCount, depart){
+  if (mapDriveDepartValue(depart)) return "kakao-future";
+  return pointCount - 2 > MAP_DRIVE_GET_VIA_MAX ? "kakao-waypoints" : "kakao-directions";
+}
+async function mapFetchDirections(points, options, depart){
+  const spot = mapDirectionsSpot(points, options, depart);
   if (!spot) return { points:[], distance:0, duration:0, error:"directions-empty" };
-  const raw = await mapFetchGeocode("", "kakao-directions", spot);
+  const raw = await mapFetchGeocode("", mapDirectionsProvider(points.length, depart), spot);
   const result = mapDirectionsRoute(raw);
   result.alternatives = mapDirectionsRoutes(raw);
   return result;
@@ -1664,7 +1688,32 @@ const MAP_ROUTE_COLOR = "#7c3aed";
    경유지 상한이 5 개라 출발·도착을 더해 표시 7 개까지만 한 번에 물을 수 있다. 하루 무료 몫이
    따로 매겨지는 API 라, 같은 표시 배치로 두 번 묻지 않도록 답을 좌표 서명으로 담아 둔다. */
 const MAP_DRIVE_COLOR = "#0284c7";
-const MAP_DRIVE_MAX_MARKERS = 7;
+/* 다중 경유지 API(경유지 30곳)로 출발·도착까지 32개. 출발 시각을 정한 미래 길찾기는 GET 이라
+   예전처럼 경유지 5곳(표시 7개)까지다. */
+const MAP_DRIVE_MAX_MARKERS = 32;
+const MAP_DRIVE_GET_VIA_MAX = 5;
+const MAP_DRIVE_FUTURE_MAX_MARKERS = MAP_DRIVE_GET_VIA_MAX + 2;
+const MAP_DRIVE_DEST_MAX = 30;            // 다중 목적지 한 번에 30곳
+const MAP_DRIVE_DEST_RADIUS = 10000;      // 다중 목적지는 출발지에서 직선 10km 안만 답한다
+/* 출발 시각: Date·"2026-09-19T08:30"(datetime-local)·"202609190830" → "202609190830". 읽을 수 없으면 "". */
+function mapDriveDepartValue(value){
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    return value.getFullYear() + pad(value.getMonth() + 1) + pad(value.getDate()) + pad(value.getHours()) + pad(value.getMinutes());
+  }
+  const text = String(value == null ? "" : value).trim();
+  const m = /^(\d{4})-?(\d{2})-?(\d{2})[T ]?(\d{2}):?(\d{2})$/.exec(text);
+  if (!m) return "";
+  const date = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  if (date.getFullYear() !== +m[1] || date.getMonth() !== +m[2] - 1 || date.getDate() !== +m[3]
+    || date.getHours() !== +m[4] || date.getMinutes() !== +m[5]) return "";
+  return m[1] + m[2] + m[3] + m[4] + m[5];
+}
+function mapDriveDepartDate(value){
+  const text = mapDriveDepartValue(value);
+  return text ? new Date(+text.slice(0, 4), +text.slice(4, 6) - 1, +text.slice(6, 8), +text.slice(8, 10), +text.slice(10, 12)) : null;
+}
 const MAP_DRIVE_CACHE_MAX = 20;
 const MAP_DRIVE_DELAY_MS = 500;       // 표시를 끌어 옮기는 동안에는 묻지 않고 손을 뗀 뒤에 한 번만
 const MAP_DRIVE_TRAFFIC = {
@@ -1682,12 +1731,15 @@ function mapDriveItemPoint(item){
   if (Array.isArray(item)) return [Number(item[0]), Number(item[1])];
   return [Number(item && item.lat), Number(item && item.lng)];
 }
-/* 표시가 일곱 개뿐이라 가능한 모든 경유 순서(최대 5! = 120)를 직접 비교한다. 출발·도착은
-   사용자가 정한 뜻이므로 고정하고, 가운데 경유지만 직선 연결 거리가 가장 짧은 순서로 바꾼다. */
+/* 출발·도착은 사용자가 정한 뜻이므로 고정하고, 가운데 경유지만 직선 연결 거리가 가장 짧은 순서로 바꾼다.
+   경유지가 7곳 이하면 모든 순서(최대 7! = 5,040)를 직접 비교하고, 그보다 많으면(최대 30곳)
+   가까운 곳부터 잇고 2-opt 로 꼬인 구간을 푸는 근사로 간다 — 30! 은 셀 수 없다. */
+const MAP_DRIVE_EXACT_ORDER_MAX = 7;
 function mapOptimizeDriveOrder(items){
   const list = Array.isArray(items) ? items.slice() : [];
   if (list.length < 4) return list;
   const start = list[0], end = list[list.length - 1], middle = list.slice(1, -1);
+  if (middle.length > MAP_DRIVE_EXACT_ORDER_MAX) return mapOptimizeDriveOrderApprox(start, middle, end);
   let best = list, bestLength = mapLineLengthMeters(list.map(mapDriveItemPoint));
   const visit = (prefix, rest) => {
     if (!rest.length){
@@ -1701,11 +1753,73 @@ function mapOptimizeDriveOrder(items){
   visit([], middle);
   return best;
 }
-function mapDriveOrderedItems(items, options){
+function mapOptimizeDriveOrderApprox(start, middle, end){
+  const at = mapDriveItemPoint;
+  const rest = middle.slice(), route = [start];
+  while (rest.length){
+    const here = at(route[route.length - 1]);
+    let best = 0, bestLength = Infinity;
+    rest.forEach((item, index) => {
+      const length = mapDistanceMeters(here, at(item));
+      if (length < bestLength){ best = index; bestLength = length; }
+    });
+    route.push(rest.splice(best, 1)[0]);
+  }
+  route.push(end);
+  // 2-opt: 두 구간을 맞바꿔 짧아지면 그 사이를 뒤집는다(양 끝은 건드리지 않는다).
+  const length = (a, b) => mapDistanceMeters(at(route[a]), at(route[b]));
+  for (let pass = 0, improved = true; improved && pass < 50; pass++){
+    improved = false;
+    for (let i = 1; i < route.length - 2; i++){
+      for (let k = i + 1; k < route.length - 1; k++){
+        const before = length(i - 1, i) + length(k, k + 1);
+        const after = length(i - 1, k) + length(i, k + 1);
+        if (after + 0.01 < before){
+          route.splice(i, k - i + 1, ...route.slice(i, k + 1).reverse());
+          improved = true;
+        }
+      }
+    }
+  }
+  return route;
+}
+function mapDriveOrderedItems(items, options, depart){
   const settings = mapNormalizeDriveOptions(options);
   const source = Array.isArray(items) ? items : [];
-  const limited = (settings.reverse ? source.slice().reverse() : source.slice()).slice(0, MAP_DRIVE_MAX_MARKERS);
+  const max = mapDriveDepartValue(depart) ? MAP_DRIVE_FUTURE_MAX_MARKERS : MAP_DRIVE_MAX_MARKERS;
+  const limited = (settings.reverse ? source.slice().reverse() : source.slice()).slice(0, max);
   return settings.optimize ? mapOptimizeDriveOrder(limited) : limited;
+}
+/* 다중 목적지: 출발 표시 하나에서 나머지 표시 각각까지 차로 걸리는 거리·시간.
+   카카오는 출발지에서 직선 10km 안만 답하므로 그 밖은 묻지 않고 '반경 밖' 으로 돌려준다.
+   돌려주는 것: [{ item, straight, distance, duration, error }] — 물은 차례대로. */
+async function mapFetchDestinations(origin, targets, options){
+  const from = mapDriveItemPoint(origin);
+  const settings = mapNormalizeDriveOptions(options);
+  const rows = (Array.isArray(targets) ? targets : []).slice(0, MAP_DRIVE_DEST_MAX).map(item => {
+    const straight = mapDistanceMeters(from, mapDriveItemPoint(item));
+    return { item, straight, distance:0, duration:0, error:straight > MAP_DRIVE_DEST_RADIUS ? "out-of-radius" : "" };
+  });
+  const asked = rows.filter(row => !row.error);
+  if (!asked.length) return rows;
+  const raw = await mapFetchGeocode("", "kakao-destinations", {
+    x:Number(from[1]).toFixed(6), y:Number(from[0]).toFixed(6),
+    via:asked.map(row => { const p = mapDriveItemPoint(row.item); return Number(p[1]).toFixed(6) + "," + Number(p[0]).toFixed(6); }).join("|"),
+    priority:settings.priority === "DISTANCE" ? "DISTANCE" : "TIME",
+    avoid:settings.avoid.join("|")
+  });
+  const answers = new Map((raw && Array.isArray(raw.routes) ? raw.routes : []).map(route => [String(route && route.key), route]));
+  asked.forEach((row, index) => {
+    const route = answers.get(String(index));
+    const summary = route && route.summary && typeof route.summary === "object" ? route.summary : null;
+    if (!route || Number(route.result_code) !== 0 || !summary){
+      row.error = route && Number(route.result_code) === 304 ? "out-of-radius" : "no-route";
+      return;
+    }
+    row.distance = Math.max(0, Number(summary.distance) || 0);
+    row.duration = Math.max(0, Number(summary.duration) || 0);
+  });
+  return rows;
 }
 function mapSampleRoutePoints(points, max = 2000){
   const list = Array.isArray(points) ? points : [];
@@ -2208,7 +2322,7 @@ async function mapStampCapture(pngUrl, attribution, labels){
    확대·이동 단추는 정지 그림에서 쓸모가 없고, 말풍선·이름표는 더 고약하다 — Leaflet 은 닫은
    말풍선을 페이드아웃으로 지워서 closePopup() 뒤에도 200ms 가량 DOM 에 남는다. 그대로 찍으면
    편집 서식이 지도 한복판에 박힌 그림이 나온다(실측 확인). display:none 이면 시점과 무관하다. */
-const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel", ".map-choro-hover"];
+const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel", ".map-subway-arrival-panel", ".map-choro-hover"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
    html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다.
@@ -3647,6 +3761,141 @@ function openMapAreaStats(shape, markers){
   mapTranslate(modal);
 }
 
+/* ── 평면 좌표 → 위경도 (표 들이기) ──
+   표에 위경도 대신 평면 좌표(미터)가 적혀 있으면 좌표계를 골라 앱 안에서 바꾼다(MNKoreaCoords —
+   카카오 변환은 UTM-K 를 받지 않아 쓰지 않는다). 중부원점 계열은 값만으로 가를 수 없으므로
+   (5186 과 5181 은 100km 차이) 주소 열이 있으면 행정경계(korea-regions)에 떨어뜨려 주소와 맞는
+   쪽을 고르고, 없으면 짐작한 것을 미리보기와 함께 보여 사람이 확인하게 한다. */
+const MAP_PROJECTED_SAMPLE = 20;
+function mapProjectedRegionIndex(){
+  if (typeof mapChoroData !== "function" || !mapChoroData()) return null;
+  return mapChoroRegions("sgg", MAP_CHORO_VINTAGES[0]).map(region => ({ sido:region.sido, sgg:region.sgg, geometry:mapChoroGeometry(region.geom) }));
+}
+function mapProjectedRegionAt(index, point){
+  if (!index || !point) return null;
+  return index.find(region => mapChoroContains(region.geometry, point[0], point[1])) || null;
+}
+/* 주소가 그 시군구를 가리키는가. 시도까지 맞으면 1, 시군구 이름만 맞으면 0.5("중구"는 여러 시에 있다). */
+function mapProjectedAddressScore(address, region){
+  const text = mapChoroNorm(address);
+  if (!text || !region) return 0;
+  const city = /^(.+?시)(.+구)$/.exec(region.sgg);
+  const sggHit = city ? (text.includes(city[1]) || text.includes(city[2])) : text.includes(mapChoroNorm(region.sgg));
+  if (!sggHit) return 0;
+  return mapChoroSidoAliases(region.sido).some(alias => text.includes(alias)) ? 1 : 0.5;
+}
+function mapProjectedConvert(rows, id, swap){
+  return rows.map(row => MNKoreaCoords.toWgs84(id, swap ? row.y : row.x, swap ? row.x : row.y));
+}
+/* rows: [{ x, y, label, address, … }] → 넣을 표시 목록(취소하면 null). */
+async function mapConvertProjectedRows(rows, headers){
+  if (typeof MNKoreaCoords === "undefined" || !rows.length) return null;
+  try { if (typeof MNLazy !== "undefined") await MNLazy.need("koreaRegions"); } catch(_){}
+  const index = mapProjectedRegionIndex();
+  const sample = rows.slice(0, MAP_PROJECTED_SAMPLE);
+  const guessed = MNKoreaCoords.guess(rows.map(row => [row.x, row.y]), headers);
+  let chosen = { id:guessed.candidates[0] || "5186", swap:guessed.swap };
+  let reason = mapT("값 범위로 짐작했어요 — 아래 위치가 맞는지 확인해 주세요.");
+  const withAddress = sample.filter(row => row.address);
+  if (index && withAddress.length){
+    let best = null;
+    for (const id of MNKoreaCoords.SYSTEMS.map(system => system.id)){
+      for (const swap of [false, true]){
+        const points = mapProjectedConvert(withAddress, id, swap);
+        const score = withAddress.reduce((sum, row, i) => sum + mapProjectedAddressScore(row.address, mapProjectedRegionAt(index, points[i])), 0);
+        // 같은 점수면 짐작한 차례를 따른다(5174·2097 처럼 250m 차이라 주소로는 못 가르는 것).
+        const rank = guessed.candidates.indexOf(id);
+        if (!best || score > best.score || (score === best.score && rank >= 0 && (best.rank < 0 || rank < best.rank)))
+          best = { id, swap, score, rank };
+      }
+    }
+    if (best && best.score > 0){
+      chosen = { id:best.id, swap:best.swap };
+      reason = mapTf("주소 열과 맞춰 골랐어요 — {total}줄 중 {count}줄이 주소와 같은 시군구예요.",
+        { total:withAddress.length, count:Math.round(best.score) });
+    }
+  }
+  return await new Promise(resolve => {
+    const modal = document.createElement("div");
+    modal.className = "modal map-projected-modal";
+    modal.innerHTML =
+      '<div class="modal-card map-projected-card">' +
+        '<h3>평면 좌표를 위경도로 바꾸기</h3>' +
+        '<p class="sub map-projected-intro"></p>' +
+        '<label class="map-projected-row">좌표계 <select class="map-projected-system"></select></label>' +
+        '<label class="map-projected-row"><input class="map-projected-swap" type="checkbox"> X·Y 열을 바꿔 읽기</label>' +
+        '<p class="map-projected-reason"></p>' +
+        '<div class="map-projected-preview"><table><thead><tr><th>이름</th><th>주소</th><th>바꾼 위치</th></tr></thead><tbody></tbody></table></div>' +
+        '<p class="map-projected-summary"></p>' +
+        '<div class="modal-actions"><span class="spacer"></span>' +
+          '<button class="btn map-projected-cancel" type="button">취소</button>' +
+          '<button class="btn primary map-projected-apply" type="button">표시 넣기</button></div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    mapTranslate(modal);
+    const select = modal.querySelector(".map-projected-system");
+    const swapBox = modal.querySelector(".map-projected-swap");
+    for (const system of MNKoreaCoords.SYSTEMS){
+      const option = document.createElement("option");
+      option.value = system.id;
+      option.textContent = system.label + " — " + mapT(system.hint);
+      select.appendChild(option);
+    }
+    select.value = chosen.id;
+    swapBox.checked = chosen.swap;
+    modal.querySelector(".map-projected-intro").textContent =
+      mapTf("표의 {count}줄이 위도·경도가 아니라 평면 좌표(미터)예요. 자료가 쓰는 좌표계를 고르면 앱 안에서 바꿔 표시로 넣어요(인터넷·인증키가 필요 없어요).", { count:rows.length });
+    modal.querySelector(".map-projected-reason").textContent = reason;
+    const body = modal.querySelector("tbody");
+    const summary = modal.querySelector(".map-projected-summary");
+    const apply = modal.querySelector(".map-projected-apply");
+    let converted = [];
+    const refresh = () => {
+      converted = mapProjectedConvert(rows, select.value, swapBox.checked);
+      const inside = converted.filter(point => MNKoreaCoords.inKorea(point)).length;
+      body.replaceChildren(...sample.slice(0, 6).map((row, i) => {
+        const tr = document.createElement("tr");
+        const point = converted[i];
+        const region = mapProjectedRegionAt(index, point);
+        const where = !point ? mapT("바꿀 수 없음")
+          : region ? region.sido + " " + mapChoroSggLabel(region.sgg)
+          : MNKoreaCoords.inKorea(point) ? mapTf("{lat}, {lng} (경계 밖·바다)", { lat:point[0].toFixed(4), lng:point[1].toFixed(4) })
+          : mapT("대한민국 밖");
+        for (const text of [row.label || "", row.address || "", where]){
+          const td = document.createElement("td"); td.textContent = text; tr.appendChild(td);
+        }
+        if (row.address && region) tr.classList.toggle("is-match", mapProjectedAddressScore(row.address, region) > 0);
+        return tr;
+      }));
+      summary.textContent = mapTf("{count}줄 중 {inside}줄이 대한민국 안에 떨어져요.", { count:rows.length, inside });
+      summary.classList.toggle("is-warning", inside < rows.length);
+      apply.disabled = inside === 0;
+      apply.textContent = mapTf("표시 {count}개 넣기", { count:inside });
+    };
+    const close = (value) => { window.removeEventListener("keydown", onKey, true); modal.remove(); resolve(value); };
+    const onKey = (event) => { if (event.key === "Escape"){ event.preventDefault(); event.stopImmediatePropagation(); close(null); } };
+    window.addEventListener("keydown", onKey, true);
+    modal.addEventListener("mousedown", event => { if (event.target === modal) close(null); });
+    select.addEventListener("change", refresh);
+    swapBox.addEventListener("change", refresh);
+    modal.querySelector(".map-projected-cancel").addEventListener("click", () => close(null));
+    apply.addEventListener("click", () => {
+      // 한국 밖에 떨어진 줄은 좌표계가 맞지 않거나 자료 오류라 넣지 않는다.
+      const markers = [];
+      rows.forEach((row, i) => {
+        const point = converted[i];
+        if (!MNKoreaCoords.inKorea(point)) return;
+        const rest = { ...row };
+        delete rest.x; delete rest.y;
+        markers.push(mapNormalizeMarker({ ...rest, lat:point[0], lng:point[1] }));
+      });
+      close({ markers, system:select.value, dropped:rows.length - markers.length });
+    });
+    refresh();
+    select.focus();
+  });
+}
+
 function openMapGeoExport(model){
   const markers = Array.isArray(model && model.markers) ? model.markers : [];
   const shapes = Array.isArray(model && model.shapes) ? model.shapes : [];
@@ -3690,7 +3939,7 @@ function openMapDriveSettings(config){
   const value = config && typeof config === "object" ? config : {};
   const current = mapNormalizeDriveOptions(value.options);
   const markers = Array.isArray(value.markers) ? value.markers : [];
-  const ordered = mapDriveOrderedItems(markers, current);
+  const ordered = mapDriveOrderedItems(markers, current, value.depart);
   const points = ordered.map(marker => [marker.lat, marker.lng]);
   const straight = mapLineLengthMeters(points);
   const modal = document.createElement("div");
@@ -3721,6 +3970,19 @@ function openMapDriveSettings(config){
         '<label><input class="map-drive-optimize" type="checkbox"> 경유지 순서 자동 최적화</label>' +
         '<label><input class="map-drive-compare" type="checkbox"> 직선 거리도 함께 표시</label>' +
       '</div>' +
+      '<fieldset class="map-drive-depart"><legend>출발 시각</legend>' +
+        '<label><input type="radio" name="map-drive-depart" value="now"> 지금 출발</label>' +
+        '<label><input type="radio" name="map-drive-depart" value="later"> 정해서 출발 ' +
+          '<input class="map-drive-depart-at" type="datetime-local"></label>' +
+        '<small class="map-drive-depart-note">정한 시각의 예상 교통으로 길을 찾아요. 이때는 표시 7개까지 이을 수 있어요.</small>' +
+      '</fieldset>' +
+      '<section class="map-drive-destinations">' +
+        '<h4>여러 곳까지 비교</h4>' +
+        '<p class="map-drive-destinations-sub"></p>' +
+        '<button class="btn map-drive-destinations-run" type="button">첫 표시에서 나머지까지 비교</button>' +
+        '<div class="map-drive-destinations-wrap" hidden><table><thead><tr><th>표시</th><th>직선</th><th>차로 거리</th><th>예상 시간</th></tr></thead><tbody></tbody></table>' +
+          '<button class="btn map-drive-destinations-memo" type="button">메모 표로 보내기</button></div>' +
+      '</section>' +
       '<section class="map-drive-comparison" hidden>' +
         '<h4>길찾기 비교</h4><p class="map-drive-straight"></p>' +
         '<div class="map-drive-candidates"></div>' +
@@ -3822,6 +4084,67 @@ function openMapDriveSettings(config){
       ? mapT("설정을 바꾼 뒤 적용·길찾기를 누르면 비교 결과가 갱신됩니다.")
       : mapT("설정을 고른 뒤 적용·길찾기를 눌러 주세요.");
   }
+  /* 출발 시각. 문서에 남기지 않는 값이라 옵션(readOptions)과 따로 다룬다. */
+  const departAt = modal.querySelector(".map-drive-depart-at");
+  const departRadios = modal.querySelectorAll('input[name="map-drive-depart"]');
+  const pad = (n) => String(n).padStart(2, "0");
+  const toLocalInput = (date) => date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) + "T" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+  const departCurrent = mapDriveDepartDate(value.depart);
+  const soon = new Date(Date.now() + 60 * 60 * 1000);
+  departAt.value = toLocalInput(departCurrent || new Date(soon.getFullYear(), soon.getMonth(), soon.getDate(), soon.getHours(), 0));
+  departAt.min = toLocalInput(new Date());
+  departRadios.forEach(radio => { radio.checked = radio.value === (departCurrent ? "later" : "now"); });
+  const syncDepart = () => { departAt.disabled = !modal.querySelector('input[name="map-drive-depart"][value="later"]').checked; };
+  departRadios.forEach(radio => radio.addEventListener("change", syncDepart));
+  departAt.addEventListener("focus", () => { modal.querySelector('input[name="map-drive-depart"][value="later"]').checked = true; syncDepart(); });
+  syncDepart();
+  const readDepart = () => departAt.disabled ? "" : mapDriveDepartValue(departAt.value);
+
+  /* 여러 곳까지 비교(다중 목적지). 첫 표시에서 나머지 표시 각각까지 — 직선 10km 밖은 카카오가 답하지 않는다. */
+  const destSub = modal.querySelector(".map-drive-destinations-sub");
+  const destRun = modal.querySelector(".map-drive-destinations-run");
+  const destWrap = modal.querySelector(".map-drive-destinations-wrap");
+  const destBody = destWrap.querySelector("tbody");
+  const destOrigin = markers[0];
+  const destTargets = markers.slice(1, 1 + MAP_DRIVE_DEST_MAX);
+  let destRows = [];
+  destSub.textContent = markers.length >= 2
+    ? mapTf("{origin}에서 다른 표시 {count}곳까지 차로 걸리는 거리·시간을 한 번에 비교해요(직선 10km 안, 최대 30곳).",
+      { origin:destOrigin.label || mapT("이름 없는 표시"), count:destTargets.length })
+    : mapT("표시가 두 개 이상 있어야 비교할 수 있어요.");
+  destRun.disabled = markers.length < 2 || typeof value.onCompareDestinations !== "function";
+  destRun.addEventListener("click", async () => {
+    destRun.disabled = true;
+    destRun.textContent = mapT("비교하는 중…");
+    try {
+      destRows = await value.onCompareDestinations(destOrigin, destTargets, readOptions());
+      destRows.sort((a, b) => (a.error ? 1 : 0) - (b.error ? 1 : 0) || a.duration - b.duration || a.straight - b.straight);
+      destBody.replaceChildren(...destRows.map(row => {
+        const tr = document.createElement("tr");
+        const cells = [row.item.label || mapT("이름 없는 표시"), mapFormatDistance(row.straight),
+          row.error ? (row.error === "out-of-radius" ? mapT("반경(10km) 밖") : mapT("길 없음")) : mapFormatDistance(row.distance),
+          row.error ? "" : mapFormatDuration(row.duration)];
+        for (const text of cells){ const td = document.createElement("td"); td.textContent = text; tr.appendChild(td); }
+        return tr;
+      }));
+      destWrap.hidden = false;
+    } catch(error){
+      destSub.textContent = error && error.message === "kakao-key-required"
+        ? mapT("카카오 REST API 키가 없어 길을 찾을 수 없어요 — 설정 → 지도 검색에서 키를 등록해 주세요.")
+        : mapT("비교 결과를 받아오지 못했어요 — 인터넷 연결을 확인하고 다시 눌러 주세요.");
+    } finally {
+      destRun.disabled = false;
+      destRun.textContent = mapT("다시 비교");
+    }
+  });
+  modal.querySelector(".map-drive-destinations-memo").addEventListener("click", () => {
+    if (!destRows.length || typeof window.addTableToScratchpad !== "function") return;
+    const table = [[mapT("출발"), mapT("도착"), mapT("직선 거리(m)"), mapT("차로 거리(m)"), mapT("예상 시간(분)")]].concat(destRows.map(row => [
+      destOrigin.label || "", row.item.label || "", String(Math.round(row.straight)),
+      row.error ? "" : String(Math.round(row.distance)), row.error ? "" : String(Math.round(row.duration / 60))]));
+    if (window.addTableToScratchpad(table) && typeof toast === "function") toast(mapTf("비교 {count}줄을 메모 표로 보냈어요.", { count:destRows.length }), 3000);
+  });
+
   const readOptions = () => mapNormalizeDriveOptions({
     priority:priority.value,
     fuel:fuel.value,
@@ -3835,7 +4158,16 @@ function openMapDriveSettings(config){
   const close = () => { window.removeEventListener("keydown", onKey, true); modal.remove(); };
   const onKey = event => { if (event.key === "Escape"){ event.preventDefault(); event.stopImmediatePropagation(); close(); } };
   modal.querySelector(".map-drive-apply").addEventListener("click", () => {
-    if (typeof value.onApply === "function") value.onApply(readOptions());
+    const depart = readDepart();
+    if (!departAt.disabled){
+      const at = mapDriveDepartDate(depart);
+      if (!at || at.getTime() <= Date.now()){
+        modal.querySelector(".map-drive-settings-note").textContent = mapT("출발 시각은 지금보다 뒤로 정해 주세요.");
+        departAt.focus();
+        return;
+      }
+    }
+    if (typeof value.onApply === "function") value.onApply(readOptions(), depart);
     close();
   });
   modal.querySelector(".map-drive-disable").addEventListener("click", () => {
@@ -5314,8 +5646,10 @@ async function mountMapEditor(doc){
       }
       subwayLabelsShown = subwayLabelsWanted();
       for (const [name, at] of Object.entries(stations)){
+        // 누르면 그 역 도착 정보. 지도 클릭(표시 넣기 등)으로 번지지 않게 막는다.
         const dot = L.circleMarker(at, { pane:"mapSubwayRoutePane", radius:4, weight:2,
-          color:color, fillColor:"#ffffff", fillOpacity:1, className:"map-subway-station" });
+          color:color, fillColor:"#ffffff", fillOpacity:1, className:"map-subway-station", bubblingMouseEvents:false });
+        dot.on("click", () => subwayShowArrivals(line, name));
         subwayBindLabel(dot, name);
         subwayRouteLayer.addLayer(dot);
         subwayStationDots.push({ dot:dot, name:name });
@@ -5420,6 +5754,128 @@ async function mountMapEditor(doc){
       }
     };
 
+    /* ── 역별 도착 정보 ──
+       역 점을 누르면 연다. 하루 1,000회 한도를 열차 위치와 함께 쓰므로 자동으로 다시 묻지 않고
+       [새로고침]을 누를 때만 묻는다(런처도 20초 캐시). 역 이름은 API 원래 이름으로 바꿔 묻는다
+       (MNSubwayLive.apiStationName — '총신대입구' 로는 자료가 없다). 그 역에 서는 다른 노선도 함께 오므로
+       지금 보는 노선을 맨 앞에 두고 노선·방향으로 묶는다. 문서에는 아무것도 남기지 않는다. */
+    const SUBWAY_ARRIVAL_ROWS = 4;           // 방향마다 보일 열차 수 — 멀리 있는 열차는 수업에 쓸모가 적다
+    const subwayArrivalPanel = document.createElement("section");
+    subwayArrivalPanel.className = "map-subway-arrival-panel";
+    subwayArrivalPanel.hidden = true;
+    subwayArrivalPanel.setAttribute("aria-label", "역 도착 정보");
+    const subwayArrivalHead = document.createElement("div");
+    subwayArrivalHead.className = "map-subway-arrival-head";
+    const subwayArrivalTitle = document.createElement("strong");
+    const subwayArrivalRefresh = document.createElement("button");
+    subwayArrivalRefresh.type = "button"; subwayArrivalRefresh.className = "map-btn"; subwayArrivalRefresh.textContent = "새로고침";
+    const subwayArrivalClose = document.createElement("button");
+    subwayArrivalClose.type = "button"; subwayArrivalClose.className = "map-btn"; subwayArrivalClose.textContent = "닫기";
+    subwayArrivalHead.append(subwayArrivalTitle, subwayArrivalRefresh, subwayArrivalClose);
+    const subwayArrivalBody = document.createElement("div");
+    subwayArrivalBody.className = "map-subway-arrival-body";
+    const subwayArrivalStatus = document.createElement("p");
+    subwayArrivalStatus.className = "map-subway-arrival-status";
+    subwayArrivalStatus.setAttribute("role", "status");
+    subwayArrivalStatus.setAttribute("aria-live", "polite");
+    subwayArrivalPanel.append(subwayArrivalHead, subwayArrivalBody, subwayArrivalStatus);
+    stage.appendChild(subwayArrivalPanel);
+    mapTranslate(subwayArrivalPanel);
+    L.DomEvent.disableClickPropagation(subwayArrivalPanel);
+    L.DomEvent.disableScrollPropagation(subwayArrivalPanel);
+    mapMakePanelMovable(subwayArrivalPanel, subwayArrivalHead, stage, doc);
+    let subwayArrivalAt = null;              // { line, name } — 지금 열린 역
+    let subwayArrivalSeq = 0;
+    const subwayArrivalFailText = (reason) => reason === "subway-key-required"
+      ? mapT("지하철 인증키가 없어요 — 설정 → 지하철 실시간에서 넣어 주세요.")
+      : reason === "subway-key-invalid" ? mapT("지하철 인증키가 맞지 않아요 — 설정 → 지하철 실시간에서 확인해 주세요.")
+      : mapT("도착 정보를 받지 못했어요. 잠시 후 새로고침해 주세요.");
+    const subwayRenderArrivals = (groups, line) => {
+      const nodes = [];
+      for (const group of groups){
+        const box = document.createElement("div");
+        box.className = "map-subway-arrival-group" + (group.line === line ? " is-current" : "");
+        const title = document.createElement("div");
+        title.className = "map-subway-arrival-group-title";
+        const badge = document.createElement("span");
+        badge.className = "map-subway-arrival-line";
+        badge.textContent = group.line;
+        badge.style.backgroundColor = MAP_SUBWAY_COLORS[group.line] || "#64748b";
+        const towards = document.createElement("span");
+        towards.textContent = [group.direction, group.towards].filter(Boolean).join(" · ");
+        title.append(badge, towards);
+        const list = document.createElement("ul");
+        for (const row of group.rows.slice(0, SUBWAY_ARRIVAL_ROWS)){
+          const item = document.createElement("li");
+          const where = document.createElement("span");
+          where.className = "map-subway-arrival-dest";
+          where.textContent = mapTf("{terminal}행", { terminal:row.destination });
+          const when = document.createElement("span");
+          when.className = "map-subway-arrival-when";
+          when.textContent = row.message;
+          item.append(where, when);
+          if (row.express){
+            const tag = document.createElement("span");
+            tag.className = "map-subway-arrival-tag";
+            tag.textContent = row.kind;      // 급행·ITX 처럼 API 가 준 이름 그대로
+            item.appendChild(tag);
+          }
+          if (row.lastTrain){
+            const tag = document.createElement("span");
+            tag.className = "map-subway-arrival-tag is-last";
+            tag.textContent = mapT("막차");
+            item.appendChild(tag);
+          }
+          list.appendChild(item);
+        }
+        box.append(title, list);
+        nodes.push(box);
+      }
+      subwayArrivalBody.replaceChildren(...nodes);
+    };
+    const subwayShowArrivals = async (line, name) => {
+      if (!line || !name) return;
+      const seq = ++subwayArrivalSeq;
+      subwayArrivalAt = { line, name };
+      subwayArrivalPanel.hidden = false;
+      subwayArrivalTitle.textContent = mapTf("{station} 도착 정보", { station:name });
+      subwayArrivalStatus.textContent = mapT("도착 정보를 받는 중…");
+      subwayArrivalRefresh.disabled = true;
+      try {
+        const station = MNSubwayLive.apiStationName(line, name);
+        const response = await fetch("/subway-arrival?station=" + encodeURIComponent(station), { cache:"no-store" });
+        if (!response.ok) throw new Error((await response.text()).trim() || "HTTP " + response.status);
+        const body = await response.json();
+        if (seq !== subwayArrivalSeq) return;
+        const groups = MNSubwayLive.arrivals(body, line);
+        subwayRenderArrivals(groups, line);
+        let received = 0;
+        for (const group of groups) for (const row of group.rows) if (row.received > received) received = row.received;
+        subwayArrivalStatus.textContent = groups.length
+          ? mapTf("기준 {time}", { time:new Date(received || Date.now()).toLocaleTimeString([], { hour12:false }) })
+          : mapT("지금은 이 역 도착 정보가 없어요.");
+      } catch(error){
+        if (seq !== subwayArrivalSeq) return;
+        subwayArrivalBody.replaceChildren();
+        subwayArrivalStatus.textContent = subwayArrivalFailText(error && error.message);
+      } finally {
+        if (seq === subwayArrivalSeq) subwayArrivalRefresh.disabled = false;
+      }
+    };
+    const subwayCloseArrivals = () => {
+      subwayArrivalSeq++;
+      subwayArrivalAt = null;
+      subwayArrivalPanel.hidden = true;
+      subwayArrivalBody.replaceChildren();
+    };
+    subwayArrivalRefresh.addEventListener("click", () => {
+      if (subwayArrivalAt) subwayShowArrivals(subwayArrivalAt.line, subwayArrivalAt.name);
+    });
+    subwayArrivalClose.addEventListener("click", subwayCloseArrivals);
+    subwayArrivalPanel.addEventListener("keydown", (event) => {
+      if (event.key === "Escape"){ event.stopPropagation(); subwayCloseArrivals(); }
+    });
+
     const subwayStop = () => {
       subwayOn = false;
       clearInterval(subwayTimer); subwayTimer = 0;
@@ -5436,6 +5892,7 @@ async function mountMapEditor(doc){
       map.removeLayer(subwayLayer);
       subwayBtn.classList.remove("is-on");
       subwayBtn.setAttribute("aria-pressed", "false");
+      subwayCloseArrivals();
     };
 
     const subwayStart = () => {
@@ -5477,7 +5934,7 @@ async function mountMapEditor(doc){
     mapTranslate(toolRow);
 
     if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
-    doc.cleanupFns.push(() => { if (subwayOn) subwayStop(); });
+    doc.cleanupFns.push(() => { if (subwayOn) subwayStop(); subwayArrivalPanel.remove(); });
   }
 
   const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow, doc, t:mapT,
@@ -5994,7 +6451,7 @@ async function mountMapEditor(doc){
   let routeLayer = null;
   const routePoints = () => model.markers.filter(markerVisible).map(marker => [marker.lat, marker.lng]);
   const straightRoutePoints = () => model.drive
-    ? mapDriveOrderedItems(routePoints(), model.driveOptions) : routePoints();
+    ? mapDriveOrderedItems(routePoints(), model.driveOptions, driveDepart) : routePoints();
   redrawRoute = () => {
     const points = model.route ? straightRoutePoints() : [];
     if (points.length < 2){
@@ -6041,6 +6498,8 @@ async function mountMapEditor(doc){
   let driveTrafficLayers = [];
   let driveGuideLayer = null;
   let lastDriveResult = null;
+  /* 출발 시각(yyyyMMddHHmm, 비면 지금). 문서에는 남기지 않는다 — 파일을 다음에 열면 이미 지난 시각이다. */
+  let driveDepart = "";
   let driveTimer = 0;
   let driveSeq = 0;              // 늦게 도착한 옛 답이 새 길을 덮어쓰지 않게 하는 번호표
   let driveKey = "";             // 이미 손을 본 표시 배치(그렸든 실패했든) — 같은 배치를 두 번 묻지 않는다
@@ -6078,8 +6537,10 @@ async function mountMapEditor(doc){
   };
   const drawDrive = (result, used, total) => {
     if (driveGuideLayer){ map.removeLayer(driveGuideLayer); driveGuideLayer = null; }
+    const departAt = mapDriveDepartDate(driveDepart);
     const label = mapTf(used < total ? "앞 표시 {count}개 · 차로 {distance} · {duration}" : "표시 {count}개 · 차로 {distance} · {duration}",
-      { count:used, distance:mapFormatDistance(result.distance), duration:mapFormatDuration(result.duration) });
+      { count:used, distance:mapFormatDistance(result.distance), duration:mapFormatDuration(result.duration) })
+      + (departAt ? " · " + mapTf("{time} 출발 예상", { time:departAt.toLocaleString([], { month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit", hour12:false }) }) : "");
     if (!driveLayer){
       driveLayer = L.polyline(result.points, {
         pane: "mapRoutePane",
@@ -6132,17 +6593,17 @@ async function mountMapEditor(doc){
     if (!model.drive) return dropDrive();
     const settings = mapNormalizeDriveOptions(model.driveOptions);
     const allPoints = routePoints();
-    // 카카오 경유지 상한(5)에 출발·도착을 더한 만큼만 한 번에 물을 수 있다 — 넘치면 설정한
+    // 한 번에 물을 수 있는 표시 수(다중 경유지 32 · 출발 시각을 정하면 7)를 넘치면 설정한
     // 순서의 앞쪽만 잇고, 그 사실을 선 이름표에 적어 둔다(말없이 자르면 지도가 거짓말을 한다).
-    const points = mapDriveOrderedItems(allPoints, settings);
+    const points = mapDriveOrderedItems(allPoints, settings, driveDepart);
     if (points.length < 2) return dropDrive();
-    const signature = JSON.stringify({ points:points.map(point => [Number(point[0]).toFixed(6), Number(point[1]).toFixed(6)]), settings });
+    const signature = JSON.stringify({ points:points.map(point => [Number(point[0]).toFixed(6), Number(point[1]).toFixed(6)]), settings, depart:driveDepart });
     if (signature === driveKey) return;
     const token = ++driveSeq;
     let result = driveCache.get(signature);
     if (!result){
       setStatus(mapT("자동차 길을 찾는 중…"));
-      try { result = await mapFetchDirections(points, settings); }
+      try { result = await mapFetchDirections(points, settings, driveDepart); }
       catch (error){
         if (token !== driveSeq || !model.drive) return;
         restoreStatus();
@@ -6999,18 +7460,24 @@ async function mountMapEditor(doc){
     openMapDriveSettings({
       markers:visibleMarkers,
       options:model.driveOptions,
+      depart:driveDepart,
       result:lastDriveResult,
+      onCompareDestinations:(origin, targets, options) => mapFetchDestinations(origin, targets, options),
       enabled:!!model.drive,
-      onApply:(settings) => {
+      onApply:(settings, depart) => {
         dropDrive();
+        driveDepart = mapDriveDepartValue(depart);
         model.driveOptions = mapNormalizeDriveOptions(settings);
         model.route = model.driveOptions.compare;
         model.drive = true;
         syncRouteButton(); redrawRoute(); syncDriveButton();
         touch(); scheduleDrive();
-        if (visibleMarkers.length > MAP_DRIVE_MAX_MARKERS && typeof toast === "function"){
-          toast(mapTf("자동차 길찾기는 표시 {max}개까지 한 번에 이어요 — 지금 보이는 {count}개 가운데 설정한 순서의 {max}개만 길을 찾았습니다(경유지 상한).",
-            { max:MAP_DRIVE_MAX_MARKERS, count:visibleMarkers.length }), 5000);
+        const max = driveDepart ? MAP_DRIVE_FUTURE_MAX_MARKERS : MAP_DRIVE_MAX_MARKERS;
+        if (visibleMarkers.length > max && typeof toast === "function"){
+          toast(mapTf(driveDepart
+            ? "출발 시각을 정한 길찾기는 표시 {max}개까지 한 번에 이어요 — 지금 보이는 {count}개 가운데 설정한 순서의 {max}개만 길을 찾았습니다."
+            : "자동차 길찾기는 표시 {max}개까지 한 번에 이어요 — 지금 보이는 {count}개 가운데 설정한 순서의 {max}개만 길을 찾았습니다(경유지 상한).",
+            { max, count:visibleMarkers.length }), 5000);
         }
       },
       onDisable:() => {
@@ -7250,6 +7717,17 @@ async function mountMapEditor(doc){
           ? mapTf(" · 좌표 오류 {skipped}개 제외 · 상한 초과 {truncated}개 제외", imported) : "";
         if (typeof toast === "function") toast(mapTf("CSV에서 표시 {count}개를 추가했습니다", { count:imported.markers.length }) + extra, 4200);
       }
+      if (imported.projected && imported.projected.length){
+        const converted = await mapConvertProjectedRows(imported.projected, imported.headers);
+        if (converted && converted.markers.length){
+          converted.markers.forEach(marker => { model.markers.push(marker); addMarkerLayer(marker); });
+          if (!imported.markers.length) fitToMarkers(converted.markers);
+          touch();
+          const system = MNKoreaCoords.system(converted.system);
+          if (typeof toast === "function") toast(mapTf("평면 좌표 {count}줄을 {system}로 바꿔 표시로 넣었습니다", { count:converted.markers.length, system:system ? system.label : "" })
+            + (converted.dropped ? mapTf(" · 대한민국 밖 {dropped}줄 제외", converted) : ""), 4200);
+        }
+      }
       if (imported.pending.length){
         const found = await runPendingGeocode(imported.pending, timelineOptions || {});
         if (found && found.length && !imported.markers.length) fitToMarkers(found);
@@ -7265,7 +7743,7 @@ async function mountMapEditor(doc){
         : code === "timeline-no-places"
         ? "연대표 표에서 장소나 주소가 있는 항목을 찾지 못했습니다."
         : code === "csv-columns"
-        ? "첫 줄에 지도용 위도·경도/주소 열 또는 연대표용 시작·제목 열이 필요합니다. [표 양식]으로 모양을 확인하세요."
+        ? "첫 줄에 지도용 위도·경도(또는 X·Y 좌표)/주소 열 또는 연대표용 시작·제목 열이 필요합니다. [표 양식]으로 모양을 확인하세요."
         : code === "geo-no-items" || code === "geojson-features" || (error && error.name === "SyntaxError")
         ? "지도 자료에서 사용할 수 있는 표시·경로·영역을 찾지 못했습니다."
         : "표에서 사용할 수 있는 표시를 찾지 못했습니다.";

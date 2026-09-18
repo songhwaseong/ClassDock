@@ -3322,10 +3322,14 @@ class ClassDockLauncher
                 {
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
                 }
-                else if (method == "GET" && path == "/jeju-bus-catalog")
+                else if (method == "GET" && (path == "/jeju-bus-catalog" || path.StartsWith("/jeju-bus-catalog?", StringComparison.Ordinal)))
                 {
+                    string catalogCity = (QueryValue(path, "city") ?? "").Trim();
+                    if (!ValidBusCity(catalogCity))
+                    { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
+                    string catalogFile = BusCatalogFile(catalogCity);
                     byte[] saved = null;
-                    try { if (File.Exists(JejuBusCatalogFile)) saved = File.ReadAllBytes(JejuBusCatalogFile); } catch { }
+                    try { if (File.Exists(catalogFile)) saved = File.ReadAllBytes(catalogFile); } catch { }
                     if (saved != null) WriteResponse(stream, "200 OK", "application/json; charset=utf-8", saved);
                     else WriteResponse(stream, "404 Not Found", "text/plain", Encoding.UTF8.GetBytes("no-catalog"));
                 }
@@ -3342,7 +3346,10 @@ class ClassDockLauncher
                     int minimum;
                     if (!Int32.TryParse(QueryValue(path, "min") ?? "", NumberStyles.None, CultureInfo.InvariantCulture, out minimum)) minimum = 1;
                     minimum = Math.Max(1, Math.Min(900, minimum));
-                    if (StartJejuBusCatalog(minimum))
+                    string refreshCity = (QueryValue(path, "city") ?? "").Trim();
+                    if (!ValidBusCity(refreshCity))
+                    { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
+                    if (StartJejuBusCatalog(minimum, refreshCity))
                         WriteResponse(stream, "202 Accepted", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JejuBusCatalogStatusJson()));
                     else WriteResponse(stream, "409 Conflict", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JejuBusCatalogStatusJson()));
                 }
@@ -3355,11 +3362,15 @@ class ClassDockLauncher
                 {
                     int question = path.IndexOf('?');
                     string kind = (question < 0 ? path : path.Substring(0, question)).Substring("/jeju-bus-".Length);
-                    string value = (QueryValue(path, kind == "routes" ? "keyword" : "routeId") ?? "").Trim();
-                    if (!(kind == "routes" || kind == "route" || kind == "position") || !ValidJejuBusValue(kind, value))
+                    string value = kind == "cities" ? "all"
+                        : kind == "nearby" ? (QueryValue(path, "lat") ?? "").Trim() + "," + (QueryValue(path, "lng") ?? "").Trim()
+                        : (QueryValue(path, kind == "routes" ? "keyword" : kind == "arrivals" ? "nodeId" : "routeId") ?? "").Trim();
+                    string busCity = (QueryValue(path, "city") ?? "").Trim();
+                    if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby")
+                        || !ValidJejuBusValue(kind, value) || !ValidBusCity(busCity))
                     { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
                     byte[] result; DateTime fetchedAt; bool stale; int retry; string busError;
-                    if (TryJejuBus(kind, value, QueryValue(path, "refresh") == "1", out result, out fetchedAt, out stale, out retry, out busError))
+                    if (TryJejuBus(kind, value, busCity, QueryValue(path, "refresh") == "1", out result, out fetchedAt, out stale, out retry, out busError))
                         WriteResponse(stream, "200 OK", "application/json; charset=utf-8", result,
                             "X-ClassDock-Bus-Fetched-At: " + fetchedAt.ToString("o", CultureInfo.InvariantCulture) + "\r\n"
                             + "X-ClassDock-Bus-Stale: " + (stale ? "1" : "0") + "\r\n"
@@ -3431,6 +3442,21 @@ class ClassDockLauncher
                     else
                         WriteResponse(stream, subwayError == "subway-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
                             "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(subwayError));
+                }
+                else if (method == "GET" && path.StartsWith("/subway-arrival?", StringComparison.Ordinal))
+                {
+                    string station = QueryValue(path, "station") ?? "";
+                    if (!ValidSubwayStationName(station))
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("subway-bad-request"));
+                        return;
+                    }
+                    byte[] arrivalData; bool arrivalCached; string arrivalError;
+                    if (TrySubwayArrival(station, out arrivalData, out arrivalCached, out arrivalError))
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", arrivalData, null);
+                    else
+                        WriteResponse(stream, arrivalError == "subway-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
+                            "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(arrivalError));
                 }
                 else if (method == "GET" && path == "/subway-key-status")
                 {
@@ -4338,6 +4364,16 @@ class ClassDockLauncher
        확인). 다만 하루 무료 몫이 이 API 에 따로 매겨지므로 부르는 자리를 한 곳(표시 잇는 길찾기)
        으로 좁히고, 같은 표시 배치로는 두 번 묻지 않게 화면에서 답을 담아 둔다. */
     const string KakaoDirectionsEndpoint = "https://apis-navi.kakaomobility.com/v1/directions";
+    /* 같은 키로 되는 카카오모빌리티 셋(2026-09-18 실제 키로 확인).
+       waypoints    = 다중 경유지(POST, 경유지 30곳). GET 길찾기는 5곳까지라 그보다 많을 때만 쓴다.
+                      avoid 는 배열이어야 한다 — "toll|ferries" 문자열로 보내면 500.
+       future       = 출발 시각을 정한 길찾기(GET, departure_time=yyyyMMddHHmm). 경유지 5곳까지.
+       destinations = 한 출발지에서 여러 목적지(POST, 30곳, 직선 반경 10km 안). 요약(거리·시간)만 온다.
+                      priority 는 TIME·DISTANCE 만 받는다(RECOMMEND 는 400), 반경 밖 목적지는 그 줄만 304. */
+    const string KakaoWaypointsEndpoint = "https://apis-navi.kakaomobility.com/v1/waypoints/directions";
+    const string KakaoFutureEndpoint = "https://apis-navi.kakaomobility.com/v1/future/directions";
+    const string KakaoDestinationsEndpoint = "https://apis-navi.kakaomobility.com/v1/destinations/directions";
+    const int KakaoGetViaMax = 5;
     /* 장소 이름 검색으로 돌려줄 후보 수. 화면 목록(map-viewer.js MAP_SEARCH_RESULT_MAX)·Go 폴백
        런처(main.go geocodeResultLimit)와 같은 값이어야 한다 — 한쪽만 올리면 다른 쪽에서 잘린다. */
     const string GeocodeResultLimit = "8";      // 주소 뒤에 그대로 붙이는 값이라 문자열로 둔다
@@ -4506,12 +4542,13 @@ class ClassDockLauncher
         public string Fuel = "";
         public string Hipass = "";
         public string Alternatives = "";
+        public string Depart = "";      // 미래 길찾기의 출발 시각 yyyyMMddHHmm
         public bool HasPoint { get { return X.Length > 0 && Y.Length > 0; } }
         public bool HasEnd { get { return X2.Length > 0 && Y2.Length > 0; } }
         public string CacheKey
         {
             get { return X + "|" + Y + "|" + Radius + "|" + Category + "|" + Page + "|" + X2 + "|" + Y2 + "|" + Via
-                + "|" + Priority + "|" + Avoid + "|" + Fuel + "|" + Hipass + "|" + Alternatives; }
+                + "|" + Priority + "|" + Avoid + "|" + Fuel + "|" + Hipass + "|" + Alternatives + "|" + Depart; }
         }
     }
     static string GeocodeNumber(string value, double min, double max)
@@ -4522,8 +4559,9 @@ class ClassDockLauncher
         return parsed.ToString("0.######", CultureInfo.InvariantCulture);
     }
     /* 들르는 곳 목록("x,y|x,y")도 좌표와 같은 규칙으로 다시 짠다 — 브라우저가 보낸 글자를
-       그대로 붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다. 카카오 상한이 5 개다. */
-    const int GeocodeViaMax = 5;
+       그대로 붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다.
+       다중 경유지·다중 목적지 API 의 상한이 30 이다(GET 길찾기는 5 — 주소를 만들 때 자른다). */
+    const int GeocodeViaMax = 30;
     static string GeocodeVia(string raw)
     {
         List<string> points = new List<string>();
@@ -4554,6 +4592,39 @@ class ClassDockLauncher
         foreach (string item in allowed) if (requested.Contains(item)) clean.Add(item);
         return string.Join("|", clean.ToArray());
     }
+    // 출발 시각 yyyyMMddHHmm — 날짜로 읽히는 것만 통과시킨다.
+    static string DirectionsDepart(string raw)
+    {
+        string value = (raw ?? "").Trim();
+        DateTime parsed;
+        return value.Length == 12 && DateTime.TryParseExact(value, "yyyyMMddHHmm", CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed)
+            ? value : "";
+    }
+    static string ViaGet(string via)
+    {
+        return string.Join("|", (via ?? "").Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries).Take(KakaoGetViaMax).ToArray());
+    }
+    // POST 본문의 좌표 한 점. 값은 GeocodeNumber 를 거친 숫자 글자라 그대로 넣어도 된다.
+    static string KakaoPointJson(string x, string y, string key)
+    {
+        return "{\"x\":" + x + ",\"y\":" + y + (key != null ? ",\"key\":\"" + key + "\"" : "") + "}";
+    }
+    static string KakaoAvoidJson(string avoid)
+    {
+        return "[" + string.Join(",", (avoid ?? "").Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries).Select(item => "\"" + item + "\"").ToArray()) + "]";
+    }
+    static string KakaoViaJson(string via, bool keyed)
+    {
+        List<string> points = new List<string>();
+        int index = 0;
+        foreach (string piece in (via ?? "").Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] parts = piece.Split(',');
+            if (parts.Length == 2) points.Add(KakaoPointJson(parts[0], parts[1], keyed ? index.ToString(CultureInfo.InvariantCulture) : null));
+            index++;
+        }
+        return "[" + string.Join(",", points.ToArray()) + "]";
+    }
     static GeocodeSpot ReadGeocodeSpot(string path)
     {
         GeocodeSpot spot = new GeocodeSpot();
@@ -4567,6 +4638,7 @@ class ClassDockLauncher
         spot.Fuel = DirectionsChoice(QueryValue(path, "fuel"), "GASOLINE", "GASOLINE", "DIESEL", "LPG");
         spot.Hipass = DirectionsChoice(QueryValue(path, "hipass"), "false", "true", "false");
         spot.Alternatives = DirectionsChoice(QueryValue(path, "alternatives"), "false", "true", "false");
+        spot.Depart = DirectionsDepart(QueryValue(path, "depart"));
         spot.Radius = GeocodeNumber(QueryValue(path, "radius"), 1, 20000);      // 카카오 반경 상한
         spot.Page = GeocodeNumber(QueryValue(path, "page"), 1, 3);
         // 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
@@ -4598,16 +4670,48 @@ class ClassDockLauncher
                 TileTlsReady = true;
             }
             string url;
-            if (provider == "kakao-coord2address" || provider == "kakao-coord2region")
+            string postBody = null;
+            if (provider == "kakao-waypoints")
+            {
+                url = KakaoWaypointsEndpoint;
+                postBody = "{\"origin\":" + KakaoPointJson(spot.X, spot.Y, null)
+                    + ",\"destination\":" + KakaoPointJson(spot.X2, spot.Y2, null)
+                    + ",\"waypoints\":" + KakaoViaJson(spot.Via, false)
+                    + ",\"priority\":\"" + spot.Priority + "\",\"avoid\":" + KakaoAvoidJson(spot.Avoid)
+                    + ",\"car_fuel\":\"" + spot.Fuel + "\",\"car_hipass\":" + spot.Hipass
+                    + ",\"alternatives\":" + spot.Alternatives + ",\"road_details\":false,\"summary\":false}";
+            }
+            else if (provider == "kakao-destinations")
+            {
+                url = KakaoDestinationsEndpoint;
+                postBody = "{\"origin\":" + KakaoPointJson(spot.X, spot.Y, null)
+                    + ",\"destinations\":" + KakaoViaJson(spot.Via, true)
+                    + ",\"radius\":10000,\"priority\":\"" + (spot.Priority == "DISTANCE" ? "DISTANCE" : "TIME") + "\""
+                    + ",\"avoid\":" + KakaoAvoidJson(spot.Avoid) + "}";
+            }
+            else if (provider == "kakao-future")
+            {
+                string via = ViaGet(spot.Via);
+                url = KakaoFutureEndpoint + "?origin=" + spot.X + "," + spot.Y
+                    + "&destination=" + spot.X2 + "," + spot.Y2
+                    + (via.Length > 0 ? "&waypoints=" + Uri.EscapeDataString(via) : "")
+                    + "&departure_time=" + spot.Depart
+                    + "&priority=" + spot.Priority
+                    + (spot.Avoid.Length > 0 ? "&avoid=" + Uri.EscapeDataString(spot.Avoid) : "")
+                    + "&car_fuel=" + spot.Fuel + "&car_hipass=" + spot.Hipass
+                    + "&alternatives=" + spot.Alternatives + "&road_details=false&summary=false";
+            }
+            else if (provider == "kakao-coord2address" || provider == "kakao-coord2region")
             {
                 string endpoint = provider == "kakao-coord2region" ? KakaoCoordRegionEndpoint : KakaoCoordAddressEndpoint;
                 url = endpoint + "?x=" + spot.X + "&y=" + spot.Y;
             }
             else if (provider == "kakao-directions")
             {
+                string via = ViaGet(spot.Via);
                 url = KakaoDirectionsEndpoint + "?origin=" + spot.X + "," + spot.Y
                     + "&destination=" + spot.X2 + "," + spot.Y2
-                    + (spot.Via.Length > 0 ? "&waypoints=" + Uri.EscapeDataString(spot.Via) : "")
+                    + (via.Length > 0 ? "&waypoints=" + Uri.EscapeDataString(via) : "")
                     + "&priority=" + spot.Priority
                     + (spot.Avoid.Length > 0 ? "&avoid=" + Uri.EscapeDataString(spot.Avoid) : "")
                     + "&car_fuel=" + spot.Fuel + "&car_hipass=" + spot.Hipass
@@ -4651,13 +4755,21 @@ class ClassDockLauncher
             if (kakao) request.Headers[HttpRequestHeader.Authorization] = "KakaoAK " + kakaoKey;
             request.Timeout = 12000;
             request.ReadWriteTimeout = 12000;
+            if (postBody != null)
+            {
+                byte[] payload = Encoding.UTF8.GetBytes(postBody);
+                request.Method = "POST";
+                request.ContentType = "application/json";
+                request.ContentLength = payload.Length;
+                using (Stream output = request.GetRequestStream()) output.Write(payload, 0, payload.Length);
+            }
             using (WebResponse response = request.GetResponse())
             using (Stream body = response.GetResponseStream())
             using (MemoryStream buffer = new MemoryStream())
             {
                 byte[] chunk = new byte[8192];
                 int read; long total = 0;
-                int maxBytes = provider == "kakao-directions" ? DirectionsMaxBytes : GeocodeMaxBytes;
+                int maxBytes = IsDirectionsProvider(provider) ? DirectionsMaxBytes : GeocodeMaxBytes;
                 while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
                 {
                     total += read;
@@ -4679,8 +4791,13 @@ class ClassDockLauncher
     }
     static readonly string[] GeocodeProviders = {
         "osm", "osm-reverse", "kakao-address", "kakao-keyword",
-        "kakao-category", "kakao-coord2address", "kakao-coord2region", "kakao-directions"
+        "kakao-category", "kakao-coord2address", "kakao-coord2region", "kakao-directions",
+        "kakao-waypoints", "kakao-future", "kakao-destinations"
     };
+    static bool IsDirectionsProvider(string provider)
+    {
+        return provider == "kakao-directions" || provider == "kakao-waypoints" || provider == "kakao-future" || provider == "kakao-destinations";
+    }
     static bool TryGeocodePlace(string query, string requestedProvider, GeocodeSpot spot, out byte[] data, out string error)
     {
         data = null; error = "geocode-failed";
@@ -4689,13 +4806,15 @@ class ClassDockLauncher
         string provider = Array.IndexOf(GeocodeProviders, requestedProvider ?? "") >= 0 ? requestedProvider : "osm";
         // 좌표로 부르는 갈래는 검색어 대신 기준점이 있어야 한다.
         bool needsPoint = provider == "kakao-category" || provider == "kakao-coord2address"
-            || provider == "kakao-coord2region" || provider == "osm-reverse" || provider == "kakao-directions";
+            || provider == "kakao-coord2region" || provider == "osm-reverse" || IsDirectionsProvider(provider);
         if (needsPoint)
         {
             if (!spot.HasPoint) { error = "geocode-bad-point"; return false; }
             if (provider == "kakao-category" && spot.Category.Length == 0) { error = "geocode-bad-category"; return false; }
             // 길찾기는 출발점만으로는 뜻이 없다 — 도착점이 빠지면 카카오에 묻지 않고 여기서 끊는다.
-            if (provider == "kakao-directions" && !spot.HasEnd) { error = "geocode-bad-point"; return false; }
+            if ((provider == "kakao-directions" || provider == "kakao-waypoints" || provider == "kakao-future") && !spot.HasEnd) { error = "geocode-bad-point"; return false; }
+            if (provider == "kakao-future" && spot.Depart.Length == 0) { error = "geocode-bad-point"; return false; }
+            if (provider == "kakao-destinations" && spot.Via.Length == 0) { error = "geocode-bad-point"; return false; }
         }
         else if (q.Length == 0 || q.Length > 200) { error = "geocode-bad-query"; return false; }
         string kakaoKey = "";
@@ -4707,7 +4826,7 @@ class ClassDockLauncher
         string cacheKey = provider + "\n" + q + "\n" + spot.CacheKey;
         /* 길찾기에는 현재 교통 속도·통제 상황이 반영된다. 화면 안의 짧은 중복은 JS가 막으므로,
            런처의 무기한 장소 검색 캐시에는 넣지 않아 저장 지도를 다시 열면 새 답을 받게 한다. */
-        bool cacheable = provider != "kakao-directions";
+        bool cacheable = !IsDirectionsProvider(provider);
         if (cacheable)
             lock (GeocodeLock) if (GeocodeCache.TryGetValue(cacheKey, out data)) return true;
         if (!TryFetchGeocode(q, provider, kakaoKey, spot, out data, out error)) return false;
@@ -5177,6 +5296,7 @@ class ClassDockLauncher
             catch { return false; }
         }
         lock (SubwayCacheLock) SubwayCache.Clear();   // 키를 지우면 그 키로 받아 둔 것도 남기지 않는다
+        lock (SubwayArrivalCacheLock) SubwayArrivalCache.Clear();
         return true;
     }
     static bool TrySetSubwayKey(string value, bool remember, out string error)
@@ -5222,11 +5342,59 @@ class ClassDockLauncher
 
     static bool TryFetchSubwayPosition(string line, string key, out byte[] data, out string error)
     {
+        return TryFetchSubway("realtimePosition", SubwayRowLimit, line, key, out data, out error);
+    }
+
+    /* 역별 도착 정보(realtimeStationArrival). 같은 키·같은 호스트에서 경로만 다르다.
+       역 이름은 API 가 쓰는 원래 이름이어야 한다 — '총신대입구' 로는 자료 없음, '총신대입구(이수)' 로 물어야 나온다.
+       그 대응은 화면(subway-live.js API_NAMES)이 정해서 보내고, 런처는 글자만 거른다. */
+    const int SubwayArrivalRowLimit = 60;       // 환승역(서울역 19줄)도 넉넉히
+    static readonly TimeSpan SubwayArrivalCacheMaxAge = TimeSpan.FromSeconds(20);
+    static readonly object SubwayArrivalCacheLock = new object();
+    static readonly Dictionary<string, SubwayCacheEntry> SubwayArrivalCache = new Dictionary<string, SubwayCacheEntry>();
+    static bool ValidSubwayStationName(string value)
+    {
+        string name = value ?? "";
+        if (name.Length == 0 || name.Length > 30 || name.Trim() != name) return false;
+        return name.All(c => (c >= '\uAC00' && c <= '\uD7A3') || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+            || c == '(' || c == ')' || c == ',' || c == '.' || c == ' ' || c == '-')
+            && name.Any(c => (c >= '\uAC00' && c <= '\uD7A3') || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
+    }
+    static bool TrySubwayArrival(string station, out byte[] data, out bool cached, out string error)
+    {
+        data = null; cached = false; error = "subway-failed";
+        string key = CurrentSubwayKey();
+        if (key.Length == 0) { error = "subway-key-required"; return false; }
+        SubwayCacheEntry stored = null;
+        lock (SubwayArrivalCacheLock) SubwayArrivalCache.TryGetValue(station, out stored);
+        if (stored != null && DateTime.UtcNow - stored.AtUtc < SubwayArrivalCacheMaxAge)
+        {
+            data = stored.Data; error = "";
+            return true;
+        }
+        byte[] fetched; string fetchError;
+        if (TryFetchSubway("realtimeStationArrival", SubwayArrivalRowLimit, station, key, out fetched, out fetchError))
+        {
+            lock (SubwayArrivalCacheLock)
+            {
+                if (SubwayArrivalCache.Count >= 200) SubwayArrivalCache.Clear();   // 역 이름 수만큼만 차므로 간단히 비운다
+                SubwayArrivalCache[station] = new SubwayCacheEntry(fetched, DateTime.UtcNow);
+            }
+            data = fetched; error = "";
+            return true;
+        }
+        // 도착 예정은 1분만 지나도 틀린 말이 된다 — 낡은 값을 대신 내주지 않는다.
+        error = fetchError;
+        return false;
+    }
+
+    static bool TryFetchSubway(string service, int rows, string target, string key, out byte[] data, out string error)
+    {
         data = null; error = "subway-failed";
         try
         {
-            string url = SubwayPositionEndpoint + Uri.EscapeDataString(key) + "/json/realtimePosition/0/"
-                + SubwayRowLimit.ToString(CultureInfo.InvariantCulture) + "/" + Uri.EscapeDataString(line);
+            string url = SubwayPositionEndpoint + Uri.EscapeDataString(key) + "/json/" + service + "/0/"
+                + rows.ToString(CultureInfo.InvariantCulture) + "/" + Uri.EscapeDataString(target);
             HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
             request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";
             request.Accept = "application/json";
@@ -5286,7 +5454,13 @@ class ClassDockLauncher
         return false;
     }
 
-    /* 제주 버스 = TAGO(국토교통부 국가대중교통정보센터, 공공데이터포털). 원격 URL을 입력받지 않고 세 가지 조회만 허용한다.
+    /* 버스 = TAGO(국토교통부 국가대중교통정보센터, 공공데이터포털). 원격 URL을 입력받지 않고 정해 둔 조회만 허용한다.
+       처음엔 제주만 봤으나(엔드포인트 이름 jeju-bus-* 는 그때 것) 같은 키로 전국 도시를 cityCode 만 바꿔 묻는다.
+       도시를 비워 보내면 제주다. 도시 목록(cities)·근처 정류장(nearby)은 도시 없이 묻는다.
+         cities   = 노선정보 getCtyCodeList          routes/route = 노선정보
+         position = 버스위치정보                     arrivals     = 버스도착정보(정류장별 도착 예정)
+         nearby   = 버스정류소정보(좌표 근처 정류장, 응답에 citycode 가 들어 있다)
+       활용신청은 API 마다 따로다 — 도착·정류소 정보는 신청하지 않았으면 그 조회만 키 문제로 거절된다.
        이 API 는 오류도 HTTP 200 에 본문 resultCode 로 알린다(00 정상 · 03 자료 없음 · 22 한도 초과 · 20/30/31/32 키 문제).
        키가 틀리면 게이트웨이가 _type=json 을 무시하고 XML 이나 401 을 주기도 하므로 그것도 키 문제로 읽는다. */
     const string TagoBase = "https://apis.data.go.kr/1613000/";
@@ -5311,28 +5485,77 @@ class ClassDockLauncher
     static readonly Dictionary<string, JejuBusCacheEntry> JejuBusCache = new Dictionary<string, JejuBusCacheEntry>();
     static readonly object[] JejuBusGates = Enumerable.Range(0, 16).Select(i => new object()).ToArray();
 
+    // 노선 번호. 제주는 숫자·하이픈뿐이지만 다른 도시엔 "마을1"·"급행2"·"B1" 같은 번호가 있다.
+    static bool ValidBusRouteNumber(string value)
+    {
+        return !String.IsNullOrEmpty(value) && value.Length <= 20
+            && value.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '가' && c <= '힣') || c == '-')
+            && value.Any(c => (c >= '0' && c <= '9') || (c >= '가' && c <= '힣') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
+    }
+    static bool ValidBusCity(string value)
+    {
+        return value != null && value.Length <= 9 && value.All(c => c >= '0' && c <= '9');
+    }
     static bool ValidJejuBusValue(string kind, string value)
     {
         if (String.IsNullOrEmpty(value)) return false;
-        if (kind == "routes")
-            return value.Length <= 12 && value.All(c => (c >= '0' && c <= '9') || c == '-') && value.Any(c => c >= '0' && c <= '9');
+        if (kind == "routes") return ValidBusRouteNumber(value);
+        if (kind == "cities") return value == "all";
+        if (kind == "nearby")
+        {
+            // "위도,경도" — 대한민국 범위 안, 소수 넷째 자리(약 10m)로 잘라 캐시가 잘게 갈라지지 않게 한다.
+            string[] parts = value.Split(',');
+            double lat, lng;
+            return parts.Length == 2 && parts.All(p => p.Length <= 12)
+                && Double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out lat)
+                && Double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out lng)
+                && lat >= 33 && lat <= 38.7 && lng >= 124.5 && lng <= 132;
+        }
         return value.Length <= 30 && value.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
     }
-    static bool TryJejuBus(string kind, string value, bool refresh, out byte[] data, out DateTime fetchedAt, out bool stale, out int retry, out string error)
+    static string NearbyBusSpot(string value)
+    {
+        string[] parts = value.Split(',');
+        Func<string, string> round = p => Math.Round(Double.Parse(p, NumberStyles.Float, CultureInfo.InvariantCulture), 4)
+            .ToString("0.0###", CultureInfo.InvariantCulture);
+        return round(parts[0]) + "," + round(parts[1]);
+    }
+    static bool TryJejuBus(string kind, string value, string city, bool refresh, out byte[] data, out DateTime fetchedAt, out bool stale, out int retry, out string error)
     {
         data = null; fetchedAt = DateTime.MinValue; stale = false; retry = 30; error = "bus-fetch-failed";
         string key = CurrentTagoKey();
         if (key.Length == 0) { error = "bus-key-required"; return false; }
         string service, operation, query;
+        bool needsCity = true;
         switch (kind)
         {
+            case "cities": service = "BusRouteInfoInqireService"; operation = "getCtyCodeList"; query = "numOfRows=300"; needsCity = false; break;
             case "routes": service = "BusRouteInfoInqireService"; operation = "getRouteNoList"; query = "routeNo=" + Uri.EscapeDataString(value) + "&numOfRows=300"; break;
             case "route": service = "BusRouteInfoInqireService"; operation = "getRouteAcctoThrghSttnList"; query = "routeId=" + Uri.EscapeDataString(value) + "&numOfRows=1000"; break;
             case "position": service = "BusLcInfoInqireService"; operation = "getRouteAcctoBusLcList"; query = "routeId=" + Uri.EscapeDataString(value) + "&numOfRows=300"; break;
+            case "arrivals": service = "ArvlInfoInqireService"; operation = "getSttnAcctoArvlPrearngeInfoList"; query = "nodeId=" + Uri.EscapeDataString(value) + "&numOfRows=100"; break;
+            case "nearby":
+                value = NearbyBusSpot(value);
+                string[] spot = value.Split(',');
+                service = "BusSttnInfoInqireService"; operation = "getCrdntPrxmtSttnList";
+                query = "gpsLati=" + spot[0] + "&gpsLong=" + spot[1] + "&numOfRows=50"; needsCity = false; break;
             default: return false;
         }
-        string cacheKey = kind + ":" + value;
-        int ttl = kind == "position" ? 30 : 86400;
+        city = needsCity ? (city ?? "") : "";
+        if (needsCity && city.Length == 0)
+        {
+            try { city = TagoJejuCity(key); }
+            catch (TagoException failure)
+            {
+                error = failure.Reason;
+                retry = failure.Reason == "bus-quota" ? 1800 : failure.Reason == "bus-key-invalid" ? 60 : 30;
+                return false;
+            }
+        }
+        if (needsCity) query = "cityCode=" + city + "&" + query;
+        string cacheKey = kind + ":" + city + ":" + value;
+        // 도착 예정은 금방 바뀐다. 목록·정류장은 하루 두어도 된다.
+        int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : 86400;
         lock (JejuBusGates[(cacheKey.GetHashCode() & Int32.MaxValue) % JejuBusGates.Length])
         {
             JejuBusCacheEntry entry;
@@ -5351,14 +5574,14 @@ class ClassDockLauncher
             }
             DateTime now = DateTime.UtcNow;
             // 새로고침도 30초 이내 중복 호출을 만들지 않는다.
-            if (entry.Data != null && now < entry.FetchedAt.AddSeconds(refresh ? 30 : ttl))
+            if (entry.Data != null && now < entry.FetchedAt.AddSeconds(refresh ? Math.Min(30, ttl) : ttl))
             { data = entry.Data; fetchedAt = entry.FetchedAt; return true; }
             if (now >= entry.RetryAt)
             {
                 try
                 {
                     int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
-                    byte[] received = TagoGet(service, operation, query, key, max);
+                    byte[] received = TagoGetRaw(service, operation, query, key, max);
                     entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue; entry.Error = ""; entry.Upstream = "";
                     data = entry.Data; fetchedAt = entry.FetchedAt; return true;
                 }
@@ -5409,7 +5632,12 @@ class ClassDockLauncher
     // TAGO 한 번 묻기. 정상(00)·자료 없음(03)이면 원문을 돌려주고, 그 밖에는 TagoException 을 던진다.
     static byte[] TagoGet(string service, string operation, string query, string key, int max)
     {
-        return TagoGetRaw(service, operation, "cityCode=" + TagoJejuCity(key) + "&" + query, key, max);
+        return TagoGet(service, operation, query, key, max, "");
+    }
+    // city 가 비면 제주.
+    static byte[] TagoGet(string service, string operation, string query, string key, int max, string city)
+    {
+        return TagoGetRaw(service, operation, "cityCode=" + (String.IsNullOrEmpty(city) ? TagoJejuCity(key) : city) + "&" + query, key, max);
     }
     static byte[] TagoGetRaw(string service, string operation, string query, string key, int max)
     {
@@ -5669,10 +5897,17 @@ class ClassDockLauncher
     // 결과가 너무 적으면 예전 목록을 그대로 둔다.
     static readonly string JejuBusCatalogFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "jeju-bus-routes.json");
+    // 제주(도시 빈칸)는 예전 파일 이름을 그대로 쓰고, 다른 도시는 도시코드마다 따로 둔다.
+    static string BusCatalogFile(string city)
+    {
+        return String.IsNullOrEmpty(city) ? JejuBusCatalogFile : Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "bus-routes-" + city + ".json");
+    }
     const int JejuBusCatalogSteps = 10, JejuBusCatalogMaxPages = 5, JejuBusCatalogGapMs = 300;
     static readonly object JejuBusCatalogLock = new object();
     static string JejuBusCatalogState = "idle"; // idle · running · done · failed · cancelled
     static string JejuBusCatalogError = "";
+    static string JejuBusCatalogCity = "";
     static int JejuBusCatalogDone, JejuBusCatalogFound;
     static bool JejuBusCatalogCancel;
 
@@ -5683,21 +5918,22 @@ class ClassDockLauncher
         {
             status["state"] = JejuBusCatalogState; status["error"] = JejuBusCatalogError;
             status["done"] = JejuBusCatalogDone; status["found"] = JejuBusCatalogFound;
+            status["city"] = JejuBusCatalogCity;
         }
         status["total"] = JejuBusCatalogSteps;
         return new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(status);
     }
-    static bool StartJejuBusCatalog(int minimum)
+    static bool StartJejuBusCatalog(int minimum, string city)
     {
         lock (JejuBusCatalogLock)
         {
             if (JejuBusCatalogState == "running") return false;
-            JejuBusCatalogState = "running"; JejuBusCatalogError = ""; JejuBusCatalogCancel = false;
+            JejuBusCatalogState = "running"; JejuBusCatalogError = ""; JejuBusCatalogCancel = false; JejuBusCatalogCity = city ?? "";
             JejuBusCatalogDone = 0; JejuBusCatalogFound = 0;
         }
         Thread worker = new Thread(delegate()
         {
-            try { RunJejuBusCatalog(minimum); }
+            try { RunJejuBusCatalog(minimum, city ?? ""); }
             catch (TagoException failure) { FinishJejuBusCatalog("failed", failure.Reason == "bus-invalid-data" ? "bus-fetch-failed" : failure.Reason); }
             catch { FinishJejuBusCatalog("failed", "bus-fetch-failed"); }
         });
@@ -5714,7 +5950,7 @@ class ClassDockLauncher
         return row.TryGetValue(key, out value) && value != null ? Convert.ToString(value, CultureInfo.InvariantCulture).Trim() : "";
     }
     // 번호 조건 하나(빈 문자열 = 조건 없음)로 여러 쪽을 받아 모은다. 취소되면 false.
-    static bool CollectJejuBusCatalog(string routeNo, string key, Dictionary<string, object[]> routes)
+    static bool CollectJejuBusCatalog(string routeNo, string key, string city, Dictionary<string, object[]> routes)
     {
         const int max = 5 * 1024 * 1024, rows = 1000;
         for (int page = 1; page <= JejuBusCatalogMaxPages; page++)
@@ -5726,7 +5962,7 @@ class ClassDockLauncher
             for (int attempt = 0; attempt < 3 && body == null; attempt++)
             {
                 if (attempt > 0) Thread.Sleep(3000);
-                try { body = TagoGet("BusRouteInfoInqireService", "getRouteNoList", query, key, max); }
+                try { body = TagoGet("BusRouteInfoInqireService", "getRouteNoList", query, key, max, city); }
                 catch (TagoException failure) { if (failure.Reason != "bus-invalid-data" || attempt == 2) throw; }
                 catch (WebException failure)
                 {
@@ -5743,7 +5979,7 @@ class ClassDockLauncher
             foreach (var row in items)
             {
                 string number = JejuBusField(row, "routeno");
-                if (number.Length == 0 || number.Length > 12 || !number.All(c => (c >= '0' && c <= '9') || c == '-')) continue;
+                if (!ValidBusRouteNumber(number)) continue;
                 object[] known;
                 if (routes.TryGetValue(number, out known)) known[3] = (int)known[3] + 1;
                 else routes[number] = new object[] { number, JejuBusField(row, "startnodenm"), JejuBusField(row, "endnodenm"), 1 };
@@ -5754,13 +5990,13 @@ class ClassDockLauncher
         }
         return true;
     }
-    static void RunJejuBusCatalog(int minimum)
+    static void RunJejuBusCatalog(int minimum, string city)
     {
         string key = CurrentTagoKey();
         if (key.Length == 0) { FinishJejuBusCatalog("failed", "bus-key-required"); return; }
         // 같은 노선 ID 가 여러 번호 조건에 겹쳐 나오므로(21 은 1·2 둘 다에 걸림) 세부 노선 수는 조건 하나에서만 센다.
         var all = new Dictionary<string, object[]>();
-        try { if (!CollectJejuBusCatalog("", key, all)) { FinishJejuBusCatalog("cancelled", ""); return; } }
+        try { if (!CollectJejuBusCatalog("", key, city, all)) { FinishJejuBusCatalog("cancelled", ""); return; } }
         catch (TagoException failure)
         {
             // 번호 없는 조회를 받아 주지 않는 경우다 — 나눠 묻기로 넘어간다.
@@ -5775,7 +6011,7 @@ class ClassDockLauncher
             for (int digit = 1; digit <= 9; digit++)
             {
                 var part = new Dictionary<string, object[]>();
-                if (!CollectJejuBusCatalog(digit.ToString(CultureInfo.InvariantCulture), key, part)) { FinishJejuBusCatalog("cancelled", ""); return; }
+                if (!CollectJejuBusCatalog(digit.ToString(CultureInfo.InvariantCulture), key, city, part)) { FinishJejuBusCatalog("cancelled", ""); return; }
                 foreach (var pair in part) if (!result.ContainsKey(pair.Key)) result[pair.Key] = pair.Value;
                 lock (JejuBusCatalogLock) { JejuBusCatalogDone = 1 + digit; JejuBusCatalogFound = result.Count; }
             }
@@ -5784,13 +6020,15 @@ class ClassDockLauncher
         var body = new Dictionary<string, object>();
         body["updatedAt"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
         body["source"] = "tago";
+        body["city"] = city;
         body["routes"] = result.Values.ToList();
         byte[] bytes = Encoding.UTF8.GetBytes(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(body));
-        Directory.CreateDirectory(Path.GetDirectoryName(JejuBusCatalogFile));
-        string temp = JejuBusCatalogFile + ".tmp";
+        string file = BusCatalogFile(city);
+        Directory.CreateDirectory(Path.GetDirectoryName(file));
+        string temp = file + ".tmp";
         File.WriteAllBytes(temp, bytes);
-        if (File.Exists(JejuBusCatalogFile)) File.Replace(temp, JejuBusCatalogFile, null);
-        else File.Move(temp, JejuBusCatalogFile);
+        if (File.Exists(file)) File.Replace(temp, file, null);
+        else File.Move(temp, file);
         lock (JejuBusCatalogLock) { JejuBusCatalogDone = JejuBusCatalogSteps; }
         FinishJejuBusCatalog("done", "");
     }

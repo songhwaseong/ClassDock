@@ -148,3 +148,49 @@ test("보간 상수는 실측으로 맞춘 값이라 함께 움직인다", () =>
   assert.match(source, /도착 → 다음 역 도착/);
   assert.match(source, /34km\/h/);
 });
+
+/* ── 역별 도착 정보(realtimeStationArrival) ── 2026-09-18 서울역 실제 응답에서 줄인 표본. */
+const arrivalRow = (o) => ({ subwayId:"1001", updnLine:"하행", trainLineNm:"인천행 - 남영방면", statnNm:"서울",
+  bstatnNm:"인천", barvlDt:"0", btrainNo:"0099", btrainSttus:"일반", lstcarAt:"0", arvlCd:"99",
+  arvlMsg2:"", arvlMsg3:"", recptnDt:"2026-09-18 12:40:20", ordkey:"11001인천0", ...o });
+
+test("도착 정보 역 이름은 API 원래 이름으로 바꾸고, 대응표의 키는 모두 표에 있는 역이다", () => {
+  assert.equal(live.apiStationName("4호선", "총신대입구"), "총신대입구(이수)");
+  assert.equal(live.apiStationName("7호선", "이수"), "총신대입구(이수)");
+  // 같은 이름도 노선마다 다르다.
+  assert.equal(live.apiStationName("2호선", "신촌"), "신촌");
+  assert.equal(live.apiStationName("경의중앙선", "신촌"), "신촌(경의중앙선)");
+  assert.equal(live.apiStationName("2호선", "강남"), "강남");
+  assert.equal(live.apiStationName("2호선", "constructor"), "constructor");
+  for (const [line, names] of Object.entries(live.API_NAMES)) {
+    for (const name of Object.keys(names)) {
+      assert.ok(live.station(line, name), `${line} ${name} 가 역 표에 없다`);
+    }
+  }
+});
+
+test("도착 정보는 노선·방향으로 묶고, 보는 노선을 앞세우며 정거장 수로 줄 세운다", () => {
+  const body = { realtimeArrivalList: [
+    arrivalRow({ ordkey:"11026인천0", btrainNo:"1609", arvlMsg2:"[26]번째 전역 (양주)" }),
+    arrivalRow({ ordkey:"11002인천0", arvlMsg2:"[2]번째 전역 (종각)", recptnDt:"2026-09-18 12:39:26" }),
+    arrivalRow({ ordkey:"12002인천0", arvlMsg2:"5분 후 (종각)", barvlDt:"300" }),
+    arrivalRow({ subwayId:"1004", updnLine:"상행", trainLineNm:"진접행 - 회현방면", bstatnNm:"진접", btrainNo:"4580",
+      ordkey:"02004진접0", arvlMsg2:"8분 후 (이촌)", btrainSttus:"급행", lstcarAt:"1" }),
+    arrivalRow({ subwayId:"1006", updnLine:"상행", bstatnNm:"응암순환(상선)", btrainNo:"6001", ordkey:"01001응암순환0", arvlMsg2:"전역 도착" }),
+    { error:"x" }
+  ] };
+  const groups = live.arrivals(body, "4호선");
+  assert.deepEqual(groups.map((g) => [g.line, g.direction, g.towards]),
+    [["4호선", "상행", "회현방면"], ["1호선", "하행", "남영방면"], ["6호선", "상행", "남영방면"]]);
+  // 같은 열차(0099)는 늦게 받은 '5분 후' 만 남고, 26정거장 전 열차는 뒤로 간다.
+  assert.deepEqual(groups[1].rows.map((r) => r.message), ["5분 후 (종각)", "26번째 전역 (양주)"]);
+  assert.equal(groups[1].rows[0].seconds, 300);
+  assert.equal(groups[1].rows[1].seconds, null);
+  const express = groups[0].rows[0];
+  assert.equal(express.express, true); assert.equal(express.kind, "급행"); assert.equal(express.lastTrain, true);
+  assert.equal(groups[2].rows[0].destination, "응암");
+  assert.deepEqual(live.arrivals({}, "1호선"), []);
+  assert.deepEqual(live.arrivals(null, "1호선"), []);
+  assert.equal(live.lineOfSubwayId(1063), "경의중앙선");
+  assert.equal(live.lineOfSubwayId("9999"), "");
+});

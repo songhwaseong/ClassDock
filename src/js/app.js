@@ -1291,7 +1291,7 @@ function wire(){
       else if (tagoKeyStatus.hasKey) setTagoStatus(tagoKeyStatus.remembered
         ? "버스 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
         : "버스 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
-      else setTagoStatus("인증키가 없어 지도의 '제주 버스'를 쓸 수 없습니다.", "");
+      else setTagoStatus("인증키가 없어 지도의 '버스'를 쓸 수 없습니다.", "");
     } catch(_){ setTagoStatus("버스 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
     syncTagoFields();
   };

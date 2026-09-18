@@ -6904,6 +6904,16 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-drive-avoid{margin:14px 0 10px;padding:11px 12px;border:1px solid var(--border);border-radius:10px}
 .map-drive-avoid legend{padding:0 6px;font-size:13px;font-weight:850}.map-drive-avoid label,.map-drive-switches label{display:inline-flex;align-items:center;gap:6px;margin:4px 13px 4px 0;font-size:13px}
 .map-drive-switches{display:flex;flex-wrap:wrap;padding:3px 0 11px}
+.map-drive-depart{margin:4px 0 10px;padding:11px 12px;border:1px solid var(--border);border-radius:10px}
+.map-drive-depart legend{padding:0 6px;font-size:13px;font-weight:850}
+.map-drive-depart label{display:inline-flex;align-items:center;gap:6px;margin:4px 13px 4px 0;font-size:13px}
+.map-drive-depart-note{display:block;font-size:12px;opacity:.75;margin-top:4px}
+.map-drive-destinations{margin:4px 0 10px;padding:11px 12px;border:1px solid var(--border);border-radius:10px}
+.map-drive-destinations h4{margin:0 0 4px;font-size:13px}
+.map-drive-destinations-sub{margin:0 0 8px;font-size:12px;opacity:.85}
+.map-drive-destinations-wrap{margin-top:8px;max-height:240px;overflow:auto}
+.map-drive-destinations-wrap table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px}
+.map-drive-destinations-wrap th,.map-drive-destinations-wrap td{padding:4px 6px;text-align:left;border-bottom:1px solid var(--border)}
 .map-drive-comparison{margin-top:10px;padding:13px;border:1px solid color-mix(in srgb,#0284c7 28%,var(--border));border-radius:11px;background:color-mix(in srgb,#0284c7 5%,var(--panel))}
 .map-drive-comparison h4{margin:0 0 5px}.map-drive-straight{margin:0 0 8px;color:var(--muted);font-size:13px}
 .map-drive-candidates{display:grid;gap:6px}.map-drive-candidate{padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--field);font-size:13px}.map-drive-candidate.is-primary{border-color:#0284c7;font-weight:800}
@@ -7588,6 +7598,49 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-jeju-bus-catalog-info{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;font-size:12px}
 .map-jeju-bus-catalog-info span{flex:1;min-width:150px;opacity:.85}
 .map-jeju-bus-panel>select{width:100%;max-width:100%}.map-jeju-bus-preview{white-space:pre-wrap;max-height:120px;overflow:auto;font-size:12px;overflow-wrap:anywhere}
+/* 평면 좌표 → 위경도(표 들이기) */
+.map-projected-card{width:min(620px,calc(100vw - 32px))}
+.map-projected-row{display:flex;align-items:center;gap:8px;margin:6px 0}
+.map-projected-row select{flex:1;min-width:0}
+.map-projected-reason{font-size:12px;opacity:.85;margin:6px 0}
+.map-projected-preview{max-height:220px;overflow:auto;border:1px solid var(--line,#d7dde3);border-radius:8px}
+.map-projected-preview table{width:100%;border-collapse:collapse;font-size:12px}
+.map-projected-preview th,.map-projected-preview td{padding:4px 8px;text-align:left;border-bottom:1px solid var(--line,#e5e7eb);overflow-wrap:anywhere}
+.map-projected-preview tr.is-match td:last-child{color:#15803d;font-weight:600}
+.map-projected-summary{font-size:12px;margin:8px 0 0}
+.map-projected-summary.is-warning{color:#b45309}
+/* 지하철 역 도착 정보 — 버스 칸(오른쪽)과 겹치지 않게 왼쪽, 확대 단추 옆에 띄운다. */
+.map-subway-arrival-panel{position:absolute;top:12px;left:56px;z-index:1000;width:min(340px,calc(100% - 68px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:12px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
+.map-subway-arrival-panel[hidden]{display:none}
+.map-subway-arrival-head{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.map-subway-arrival-head strong{flex:1;min-width:0;overflow-wrap:anywhere}
+.map-subway-arrival-group{margin-bottom:8px}
+.map-subway-arrival-group:not(.is-current){opacity:.8}
+.map-subway-arrival-group-title{display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px}
+.map-subway-arrival-line{display:inline-block;padding:0 6px;border-radius:6px;color:#fff;font-size:12px;font-weight:700}
+.map-subway-arrival-group ul{list-style:none;margin:0;padding:0 0 0 4px}
+.map-subway-arrival-group li{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;padding:1px 0}
+.map-subway-arrival-dest{min-width:84px;font-weight:600}
+.map-subway-arrival-when{flex:1;min-width:0;overflow-wrap:anywhere}
+.map-subway-arrival-tag{padding:0 5px;border-radius:5px;background:#c0392b;color:#fff;font-size:11px}
+.map-subway-arrival-tag.is-last{background:#475569}
+.map-subway-arrival-status{margin:4px 0 0;font-size:12px;opacity:.85}
+.map-jeju-bus-heading .map-jeju-bus-city{flex:1;min-width:0;max-width:170px;margin-left:auto}
+.map-jeju-bus-stops{margin:4px 0 10px;padding-top:10px;border-top:1px solid #98b9bd66}
+.map-jeju-bus-stop-tools{display:flex;gap:8px;flex-wrap:wrap}
+.map-jeju-bus-stop-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:150px;overflow:auto}
+.map-jeju-bus-stop-list[hidden],.map-jeju-bus-arrivals[hidden]{display:none}
+.map-jeju-bus-stop-list .map-jeju-bus-stop{text-align:left;justify-content:flex-start;white-space:normal;overflow-wrap:anywhere}
+.map-jeju-bus-stop-note{margin:0;font-size:12px;opacity:.85}
+.map-jeju-bus-arrivals{margin-top:10px;padding:8px;border:1px solid #98b9bd;border-radius:8px}
+.map-jeju-bus-arrivals-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.map-jeju-bus-arrivals-head strong{overflow-wrap:anywhere}
+.map-jeju-bus-arrival-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;max-height:200px;overflow:auto}
+.map-jeju-bus-arrival-list .map-jeju-bus-arrival{width:100%;display:flex;align-items:center;gap:8px;text-align:left;justify-content:flex-start;flex-wrap:wrap}
+.map-jeju-bus-arrival-number{display:inline-block;min-width:34px;padding:0 6px;border-radius:6px;background:#087f8c;color:#fff;font-weight:700;text-align:center}
+.map-jeju-bus-arrival-when{font-weight:600}
+.map-jeju-bus-arrival-kind{font-size:11px;opacity:.75}
+.map-jeju-bus-arrival-status{margin:6px 0 0;font-size:12px;opacity:.85}
 .map-jeju-bus-status{font-weight:600}.map-jeju-bus-note{font-size:12px;opacity:.8}.map-jeju-bus-panel a{color:#087f8c}
 .map-jeju-bus-icon{display:inline-flex;align-items:center;gap:3px;padding:2px 5px;border:2px solid white;border-radius:8px;background:#087f8c;color:white;box-shadow:0 1px 4px #0006;font:bold 11px/18px sans-serif;white-space:nowrap}
 .map-jeju-bus-number{display:none}.bus-wide-label .map-jeju-bus-number{display:inline}

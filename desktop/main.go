@@ -11,6 +11,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
@@ -93,6 +94,17 @@ const (
 	subwayRowLimit    = 400              // 가장 붐비는 노선의 열차 수보다 넉넉히(상한은 1000)
 	subwayMaxBytes    = 512 * 1024
 	subwayCacheAge    = 12 * time.Second // 열차 보고 간격이 30초 안팎이라 이 정도면 화면이 안 끊긴다
+
+	// 역별 도착 정보 — 같은 키·호스트에서 경로만 다르다. 역 이름은 API 가 쓰는 원래 이름(괄호 부역명 포함)이어야 한다.
+	subwayArrivalURL      = "http://swopenapi.seoul.go.kr/api/subway/%s/json/realtimeStationArrival/0/%d/%s"
+	subwayArrivalRowLimit = 60
+	subwayArrivalCacheAge = 20 * time.Second
+
+	// launcher.cs 의 KakaoWaypointsEndpoint 등과 같은 셋 — 규칙(avoid 배열·TIME/DISTANCE·반경 10km)은 그쪽 주석에.
+	kakaoWaypointsURL    = "https://apis-navi.kakaomobility.com/v1/waypoints/directions"
+	kakaoFutureURL       = "https://apis-navi.kakaomobility.com/v1/future/directions"
+	kakaoDestinationsURL = "https://apis-navi.kakaomobility.com/v1/destinations/directions"
+	kakaoGetViaMax       = 5
 )
 
 var (
@@ -360,6 +372,7 @@ type geocodeSpot struct {
 	x2, y2, via           string
 	priority, avoid, fuel string
 	hipass, alternatives  string
+	depart                string // 미래 길찾기의 출발 시각 yyyyMMddHHmm
 }
 
 func (s geocodeSpot) hasPoint() bool { return s.x != "" && s.y != "" }
@@ -367,7 +380,7 @@ func (s geocodeSpot) hasEnd() bool   { return s.x2 != "" && s.y2 != "" }
 func (s geocodeSpot) cacheKey() string {
 	return s.x + "|" + s.y + "|" + s.radius + "|" + s.category + "|" + s.page +
 		"|" + s.x2 + "|" + s.y2 + "|" + s.via + "|" + s.priority + "|" + s.avoid +
-		"|" + s.fuel + "|" + s.hipass + "|" + s.alternatives
+		"|" + s.fuel + "|" + s.hipass + "|" + s.alternatives + "|" + s.depart
 }
 
 func geocodeNumber(value string, min, max float64) string {
@@ -381,9 +394,69 @@ func geocodeNumber(value string, min, max float64) string {
 /*
 들르는 곳 목록("x,y|x,y")도 좌표와 같은 규칙으로 다시 짠다 — 브라우저가 보낸 글자를 그대로
 
-	붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다. 카카오 상한이 5 개다.
+	붙이지 않고 숫자로 읽힌 것만 카카오가 받는 꼴로 되돌려 준다.
+	다중 경유지·다중 목적지 API 의 상한이 30 이다(GET 길찾기는 5 — 주소를 만들 때 자른다).
 */
-const geocodeViaMax = 5
+const geocodeViaMax = 30
+
+// GET 길찾기(기본·미래)는 경유지 5곳까지다.
+func viaGet(via string) string {
+	parts := strings.Split(via, "|")
+	if len(parts) > kakaoGetViaMax {
+		parts = parts[:kakaoGetViaMax]
+	}
+	return strings.Join(parts, "|")
+}
+
+// 출발 시각 yyyyMMddHHmm — 날짜로 읽히는 것만 통과시킨다.
+func directionsDepart(raw string) string {
+	value := strings.TrimSpace(raw)
+	if len(value) != 12 {
+		return ""
+	}
+	if _, err := time.Parse("200601021504", value); err != nil {
+		return ""
+	}
+	return value
+}
+
+// POST 본문의 좌표. 값은 geocodeNumber 를 거친 숫자 글자다.
+func kakaoPoint(x, y string) map[string]interface{} {
+	fx, _ := strconv.ParseFloat(x, 64)
+	fy, _ := strconv.ParseFloat(y, 64)
+	return map[string]interface{}{"x": fx, "y": fy}
+}
+
+func kakaoViaPoints(via string, keyed bool) []map[string]interface{} {
+	points := []map[string]interface{}{}
+	for index, piece := range strings.Split(via, "|") {
+		parts := strings.Split(piece, ",")
+		if len(parts) != 2 {
+			continue
+		}
+		point := kakaoPoint(parts[0], parts[1])
+		if keyed {
+			point["key"] = strconv.Itoa(index)
+		}
+		points = append(points, point)
+	}
+	return points
+}
+
+func kakaoAvoidList(avoid string) []string {
+	list := []string{}
+	for _, item := range strings.Split(avoid, "|") {
+		if item != "" {
+			list = append(list, item)
+		}
+	}
+	return list
+}
+
+func isDirectionsProvider(provider string) bool {
+	return provider == "kakao-directions" || provider == "kakao-waypoints" ||
+		provider == "kakao-future" || provider == "kakao-destinations"
+}
 
 func geocodeVia(raw string) string {
 	points := []string{}
@@ -443,6 +516,7 @@ func readGeocodeSpot(query url.Values) geocodeSpot {
 		fuel:         directionsChoice(query.Get("fuel"), "GASOLINE", "GASOLINE", "DIESEL", "LPG"),
 		hipass:       directionsChoice(query.Get("hipass"), "false", "true", "false"),
 		alternatives: directionsChoice(query.Get("alternatives"), "false", "true", "false"),
+		depart:       directionsDepart(query.Get("depart")),
 	}
 	// 카카오 카테고리 코드는 언제나 영문 두 글자 + 숫자 한 글자다(SC4·CS2 …).
 	category := strings.ToUpper(strings.TrimSpace(query.Get("category")))
@@ -465,7 +539,48 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 	}
 
 	var endpoint string
-	if provider == "kakao-coord2address" || provider == "kakao-coord2region" {
+	var postBody []byte
+	if provider == "kakao-waypoints" || provider == "kakao-destinations" {
+		body := map[string]interface{}{"origin": kakaoPoint(spot.x, spot.y), "avoid": kakaoAvoidList(spot.avoid)}
+		if provider == "kakao-waypoints" {
+			endpoint = kakaoWaypointsURL
+			body["destination"] = kakaoPoint(spot.x2, spot.y2)
+			body["waypoints"] = kakaoViaPoints(spot.via, false)
+			body["priority"] = spot.priority
+			body["car_fuel"] = spot.fuel
+			body["car_hipass"] = spot.hipass == "true"
+			body["alternatives"] = spot.alternatives == "true"
+			body["road_details"] = false
+			body["summary"] = false
+		} else {
+			endpoint = kakaoDestinationsURL
+			body["destinations"] = kakaoViaPoints(spot.via, true)
+			body["radius"] = 10000
+			body["priority"] = "TIME"
+			if spot.priority == "DISTANCE" {
+				body["priority"] = "DISTANCE"
+			}
+		}
+		postBody, _ = json.Marshal(body)
+	} else if provider == "kakao-future" {
+		values := url.Values{}
+		values.Set("origin", spot.x+","+spot.y)
+		values.Set("destination", spot.x2+","+spot.y2)
+		if spot.via != "" {
+			values.Set("waypoints", viaGet(spot.via))
+		}
+		values.Set("departure_time", spot.depart)
+		values.Set("priority", spot.priority)
+		if spot.avoid != "" {
+			values.Set("avoid", spot.avoid)
+		}
+		values.Set("car_fuel", spot.fuel)
+		values.Set("car_hipass", spot.hipass)
+		values.Set("alternatives", spot.alternatives)
+		values.Set("road_details", "false")
+		values.Set("summary", "false")
+		endpoint = kakaoFutureURL + "?" + values.Encode()
+	} else if provider == "kakao-coord2address" || provider == "kakao-coord2region" {
 		endpoint = kakaoCoordAddressURL
 		if provider == "kakao-coord2region" {
 			endpoint = kakaoCoordRegionURL
@@ -479,7 +594,7 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 		values.Set("origin", spot.x+","+spot.y)
 		values.Set("destination", spot.x2+","+spot.y2)
 		if spot.via != "" {
-			values.Set("waypoints", spot.via)
+			values.Set("waypoints", viaGet(spot.via))
 		}
 		values.Set("priority", spot.priority)
 		if spot.avoid != "" {
@@ -573,12 +688,21 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 		parsedEndpoint.RawQuery = values.Encode()
 		endpoint = parsedEndpoint.String()
 	}
-	request, err := http.NewRequest("GET", endpoint, nil)
+	method := "GET"
+	var payload io.Reader
+	if postBody != nil {
+		method = "POST"
+		payload = bytes.NewReader(postBody)
+	}
+	request, err := http.NewRequest(method, endpoint, payload)
 	if err != nil {
 		return nil, "geocode-failed"
 	}
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "application/json")
+	if postBody != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	if kakao {
 		request.Header.Set("Authorization", "KakaoAK "+kakaoKey)
 	}
@@ -594,7 +718,7 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 		return nil, "geocode-failed"
 	}
 	maxBytes := geocodeMaxBytes
-	if provider == "kakao-directions" {
+	if isDirectionsProvider(provider) {
 		maxBytes = directionsMaxBytes
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, int64(maxBytes)+1))
@@ -607,6 +731,7 @@ func fetchGeocode(query, provider, kakaoKey string, spot geocodeSpot) ([]byte, s
 var geocodeProviders = []string{
 	"osm", "osm-reverse", "kakao-address", "kakao-keyword",
 	"kakao-category", "kakao-coord2address", "kakao-coord2region", "kakao-directions",
+	"kakao-waypoints", "kakao-future", "kakao-destinations",
 }
 
 func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, string) {
@@ -620,7 +745,7 @@ func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, st
 	}
 	// 좌표로 부르는 갈래는 검색어 대신 기준점이 있어야 한다.
 	needsPoint := provider == "kakao-category" || provider == "kakao-coord2address" ||
-		provider == "kakao-coord2region" || provider == "osm-reverse" || provider == "kakao-directions"
+		provider == "kakao-coord2region" || provider == "osm-reverse" || isDirectionsProvider(provider)
 	if needsPoint {
 		if !spot.hasPoint() {
 			return nil, "geocode-bad-point"
@@ -629,7 +754,10 @@ func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, st
 			return nil, "geocode-bad-category"
 		}
 		// 길찾기는 출발점만으로는 뜻이 없다 — 도착점이 빠지면 카카오에 묻지 않고 여기서 끊는다.
-		if provider == "kakao-directions" && !spot.hasEnd() {
+		if (provider == "kakao-directions" || provider == "kakao-waypoints" || provider == "kakao-future") && !spot.hasEnd() {
+			return nil, "geocode-bad-point"
+		}
+		if (provider == "kakao-future" && spot.depart == "") || (provider == "kakao-destinations" && spot.via == "") {
 			return nil, "geocode-bad-point"
 		}
 	} else if query == "" || len(query) > 200 {
@@ -644,7 +772,7 @@ func geocodePlace(query, requestedProvider string, spot geocodeSpot) ([]byte, st
 	}
 	cacheKey := provider + "\n" + query + "\n" + spot.cacheKey()
 	// 길찾기는 현재 교통 정보가 바뀌므로 런처의 무기한 장소 검색 캐시에 넣지 않는다.
-	cacheable := provider != "kakao-directions"
+	cacheable := !isDirectionsProvider(provider)
 	if cacheable {
 		geocodeMu.Lock()
 		cached, ok := geocodeCache[cacheKey]
@@ -1036,7 +1164,62 @@ func subwayResultCode(data []byte) string {
 }
 
 func fetchSubwayPosition(line, key string) ([]byte, string) {
-	endpoint := fmt.Sprintf(subwayPositionURL, url.PathEscape(key), subwayRowLimit, url.PathEscape(line))
+	return fetchSubway(fmt.Sprintf(subwayPositionURL, url.PathEscape(key), subwayRowLimit, url.PathEscape(line)))
+}
+
+func fetchSubwayArrival(station, key string) ([]byte, string) {
+	return fetchSubway(fmt.Sprintf(subwayArrivalURL, url.PathEscape(key), subwayArrivalRowLimit, url.PathEscape(station)))
+}
+
+/* 화면이 API 이름표(subway-live.js API_NAMES)로 바꿔 보낸 역 이름. 경로에 들어가므로 글자를 거른다. */
+func validSubwayStationName(name string) bool {
+	if name == "" || len([]rune(name)) > 30 || strings.TrimSpace(name) != name {
+		return false
+	}
+	letters := false
+	for _, ch := range name {
+		switch {
+		case ch >= '가' && ch <= '힣', ch >= '0' && ch <= '9', ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z':
+			letters = true
+		case ch == '(' || ch == ')' || ch == ',' || ch == '.' || ch == ' ' || ch == '-':
+		default:
+			return false
+		}
+	}
+	return letters
+}
+
+var (
+	subwayArrivalMu    sync.Mutex
+	subwayArrivalCache = map[string]subwayEntry{}
+)
+
+// 도착 예정은 1분만 지나도 틀린 말이 되므로 실패했을 때 낡은 값을 대신 내주지 않는다.
+func subwayArrival(station string) ([]byte, string) {
+	key := currentSubwayKey()
+	if key == "" {
+		return nil, "subway-key-required"
+	}
+	subwayArrivalMu.Lock()
+	stored, ok := subwayArrivalCache[station]
+	subwayArrivalMu.Unlock()
+	if ok && time.Since(stored.at) < subwayArrivalCacheAge {
+		return stored.data, ""
+	}
+	data, code := fetchSubwayArrival(station, key)
+	if code != "" {
+		return nil, code
+	}
+	subwayArrivalMu.Lock()
+	if len(subwayArrivalCache) >= 200 {
+		subwayArrivalCache = map[string]subwayEntry{}
+	}
+	subwayArrivalCache[station] = subwayEntry{data: data, at: time.Now()}
+	subwayArrivalMu.Unlock()
+	return data, ""
+}
+
+func fetchSubway(endpoint string) ([]byte, string) {
 	request, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, "subway-failed"
@@ -1349,6 +1532,29 @@ func main() {
 		w.Write(data)
 	})
 
+	mux.HandleFunc("/subway-arrival", func(w http.ResponseWriter, r *http.Request) {
+		if !allowedLocalHost(r) {
+			http.Error(w, "invalid-host", http.StatusForbidden)
+			return
+		}
+		station := r.URL.Query().Get("station")
+		if !validSubwayStationName(station) {
+			http.Error(w, "subway-bad-request", http.StatusBadRequest)
+			return
+		}
+		data, code := subwayArrival(station)
+		if code != "" {
+			status := http.StatusBadGateway
+			if code == "subway-key-required" {
+				status = http.StatusPreconditionRequired
+			}
+			http.Error(w, code, status)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Write(data)
+	})
+
 	mux.HandleFunc("/subway-key-status", func(w http.ResponseWriter, r *http.Request) {
 		if !allowedLocalHost(r) || r.Header.Get("X-ClassDock-Action") != "1" {
 			http.Error(w, "action-header-required", http.StatusForbidden)
@@ -1375,6 +1581,9 @@ func main() {
 			subwayCacheMu.Lock()
 			subwayCache = map[string]subwayEntry{} // 키를 지우면 그 키로 받아 둔 것도 남기지 않는다
 			subwayCacheMu.Unlock()
+			subwayArrivalMu.Lock()
+			subwayArrivalCache = map[string]subwayEntry{}
+			subwayArrivalMu.Unlock()
 			w.Write([]byte("ok"))
 			return
 		}

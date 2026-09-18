@@ -282,3 +282,54 @@ test("소식이 끊긴 열차는 화면에서 사라진다", async ({ page }) =>
   await page.waitForTimeout(800);
   await expect(trains(page)).toHaveCount(0);
 });
+
+/* 역 점을 누르면 그 역 도착 정보. 역 이름은 API 원래 이름으로 바꿔 묻고(7호선 '이수' → '총신대입구(이수)'),
+   지금 보는 노선을 맨 앞에 두며, 누른 것이 지도 클릭(표시 넣기)으로 번지지 않아야 한다. */
+test("역 점을 누르면 원래 역 이름으로 도착 정보를 묻고 보는 노선을 앞에 보인다", async ({ page }) => {
+  await openApp(page);
+  await stubLauncher(page);
+  const asked = [];
+  await page.route("**/subway-arrival**", (route) => {
+    asked.push(new URL(route.request().url()).searchParams.get("station"));
+    const row = (o) => ({ updnLine:"상행", btrainNo:"1", btrainSttus:"일반", lstcarAt:"0", arvlCd:"99",
+      recptnDt:"2026-09-18 12:40:20", barvlDt:"0", ...o });
+    return route.fulfill({ status:200, contentType:"application/json", body:JSON.stringify({
+      errorMessage:{ status:200, code:"INFO-000" },
+      realtimeArrivalList:[
+        row({ subwayId:"1004", trainLineNm:"불암산행 - 동작방면", bstatnNm:"불암산", arvlMsg2:"전역 도착", ordkey:"01001불암산0" }),
+        row({ subwayId:"1007", btrainNo:"7", trainLineNm:"장암행 - 내방방면", bstatnNm:"장암", arvlMsg2:"3분 후 (남성)",
+          ordkey:"01002장암0", lstcarAt:"1" })
+      ] }) });
+  });
+  await page.goto("/");
+  await page.evaluate(() => newMapScratch());
+  await page.locator(".map-subway-line").selectOption("7호선");
+  await page.locator(".map-subway").click();
+  const at = table.SUBWAY_LINES["7호선"].s["이수"];
+  await page.locator(".map-goto").fill(at[0] + ", " + at[1]);
+  await page.locator(".map-goto").press("Enter");
+  await page.waitForTimeout(400);
+  const before = await mapModel(page);
+
+  // 옮긴 자리가 곧 지도 가운데 — 그 역 점을 누른다.
+  const box = await page.locator(".leaflet-container").first().boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+  const panel = page.locator(".map-subway-arrival-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".map-subway-arrival-head strong")).toHaveText("이수 도착 정보");
+  expect(asked).toEqual(["총신대입구(이수)"]);
+  const groups = panel.locator(".map-subway-arrival-group");
+  await expect(groups).toHaveCount(2);
+  await expect(groups.first().locator(".map-subway-arrival-line")).toHaveText("7호선");
+  await expect(groups.first()).toContainText("장암행");
+  await expect(groups.first()).toContainText("3분 후 (남성)");
+  await expect(groups.first().locator(".map-subway-arrival-tag.is-last")).toHaveText("막차");
+  await expect(panel.locator(".map-subway-arrival-status")).toContainText("기준");
+  // 역을 누른 것이 표시 넣기로 번지지 않았다.
+  expect((await mapModel(page)).markers.length).toBe(before.markers.length);
+
+  // 끄면 도착 칸도 함께 닫힌다.
+  await page.locator(".map-subway").click();
+  await expect(panel).toBeHidden();
+});

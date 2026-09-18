@@ -17,22 +17,24 @@ function harness(){
     focus(){}
     remove(){this.removed=true;}
   }
-  const requests=[],groups=[],intervals=new Set(),frames=new Map(),pending=[];let now=1000000,frameId=0;
+  const requests=[],groups=[],circles=[],intervals=new Set(),frames=new Map(),pending=[];let now=1000000,frameId=0;
   class Clock extends Date {constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
   const doc=new Element("document");doc.createElement=tag=>new Element(tag);doc.hidden=false;
-  const map={handlers:{},createPane:()=>new Element("pane"),removeLayer(){},getZoom:()=>14,
+  const map={handlers:{},getCenter:()=>({lat:33.5,lng:126.53}),createPane:()=>new Element("pane"),removeLayer(){},getZoom:()=>14,
     fitBounds(){this.fitCount=(this.fitCount||0)+1;},on(name,fn){this.handlers[name]=fn;},off(name){delete this.handlers[name];}};
   const L={DomEvent:{disableClickPropagation(){},disableScrollPropagation(){}},latLngBounds:p=>p,divIcon:o=>o,
     layerGroup(){const group={items:[],addTo(){return this;},clearLayers(){this.items=[];},addLayer(x){this.items.push(x);},removeLayer(x){this.items=this.items.filter(i=>i!==x);}};groups.push(group);return group;},
     marker(at){const element=new Element("marker");return {at,bindTooltip(tip){this.tip=tip;return this;},setLatLng(p){this.at=p;},setOpacity(v){this.opacity=v;},getElement(){return element;}};},
-    circleMarker(){return {bindTooltip(){return this;}};},polyline:p=>({points:p})};
-  const catalogJobs=[];let catalogFile=null,catalogState={state:"idle",error:"",done:0,total:1999,found:0,busy:false};
+    circleMarker(at,options){const marker={at,options,handlers:{},bindTooltip(){return this;},on(name,fn){this.handlers[name]=fn;return this;}};circles.push(marker);return marker;},polyline:p=>({points:p})};
+  const cityList=[{code:"",name:"제주도",raw:"39"},{code:"25",name:"대전광역시",raw:"25"}];
+  const catalogJobs=[],catalogJobOptions=[],catalogLoads=[],cityCatalogs={};let catalogFile=null,catalogState={state:"idle",error:"",done:0,total:1999,found:0,busy:false};
   const fakeApi={...api,
-    loadCatalog(){return Promise.resolve(catalogFile);},
-    catalogJob(action){catalogJobs.push(action);return Promise.resolve(catalogState);},
+    loadCatalog(options={}){catalogLoads.push(options.city || "");return Promise.resolve(options.city?cityCatalogs[options.city] || null:catalogFile);},
+    catalogJob(action,options={}){catalogJobs.push(action);catalogJobOptions.push(options);return Promise.resolve(catalogState);},
     request(kind,value,options){requests.push({kind,value,options});
     if(kind==="routes")return Promise.resolve([{id:"1",number:"201",from:"A",to:"B",type:"간선"},{id:"2",number:"201",from:"B",to:"A",type:"간선"}]);
     if(kind==="route")return Promise.resolve([{id:"s",name:"stop",at:[33.3,126.5]}]);
+    if(kind==="cities")return Promise.resolve(cityList);
     const task=deferred();pending.push({task,request:requests.at(-1)});return task.promise;}};
   const confirms=[];let confirmAnswer=true;
   const context={console,Date:Clock,Map,Set,AbortController,Promise,MNJejuBusApi:fakeApi,MNJejuBusLive:live,L,document:doc,
@@ -47,7 +49,8 @@ function harness(){
   return {controller,doc:documentModel,document:doc,stage,map,groups,requests,pending,intervals,frames,form,select,
     panel,actions,start:actions.children[0],status:panel.children[6],button:toolRow.children[0],
     catalogSelect:form.children[0],input:form.children[1],catalogText:catalogRow.children[0],
-    catalogRefresh:catalogRow.children[1],catalogCancel:catalogRow.children[2],catalogJobs,confirms,
+    catalogRefresh:catalogRow.children[1],catalogCancel:catalogRow.children[2],catalogJobs,catalogJobOptions,catalogLoads,cityCatalogs,confirms,
+    citySelect:panel.children[0].children[1],stopBox:panel.children[7],circles,
     setCatalogState(state){catalogState={...catalogState,...state};},setCatalogFile(file){catalogFile=file;},
     answerConfirm(value){confirmAnswer=value;},
     tick(ms=1000){now+=ms;for(const fn of intervals)fn();},now:()=>now};
@@ -141,4 +144,58 @@ test("API 어댑터는 런처 캐시 시각과 Retry-After를 보존한다",asyn
     global.fetch=async()=>({ok:false,status:503,headers:new Headers(),text:async()=>"<html>"});
     await assert.rejects(()=>api.request("route","JJB1"),/bus-fetch-failed/);
   }finally{global.fetch=original;}
+});
+test("도시를 바꾸면 보던 노선을 끄고 그 도시 목록·검색으로 옮긴다",async()=>{
+  const h=harness();await flush();
+  assert.equal(h.citySelect.children.map(o=>o.value).join(","),",25");
+  await h.form.fire("submit");h.start.click();assert.equal(h.button.attrs["aria-pressed"],"true");
+  h.cityCatalogs["25"]={updatedAt:"2026-09-18",routes:[{number:"마을1",from:"a",to:"b",count:1}]};
+  h.citySelect.value="25";h.citySelect.fire("change");await flush();
+  assert.equal(h.button.attrs["aria-pressed"],"false");assert.equal(h.pending[0].request.options.signal.aborted,true);
+  assert.equal(h.catalogLoads.at(-1),"25");
+  assert.equal(h.catalogSelect.children.flatMap(node=>node.children || []).map(o=>o.value).join(","),"마을1");
+  h.catalogSelect.value="마을1";await h.catalogSelect.fire("change");await flush();
+  const search=h.requests.filter(r=>r.kind==="routes").at(-1);
+  assert.equal(search.value,"마을1");assert.equal(search.options.city,"25");
+  assert.equal(h.requests.filter(r=>r.kind==="route").at(-1).options.city,"25");
+  // 다른 도시는 비교할 기본 목록이 없으니 최소 1개만 찾으면 된다.
+  h.answerConfirm(true);await h.catalogRefresh.click();await flush();
+  const job=h.catalogJobOptions.at(-1);assert.equal(job.minimum,1);assert.equal(job.city,"25");
+  h.controller.destroy();
+});
+test("근처 정류장을 찾고 정류장을 누르면 그 도시로 도착 정보를 묻고, 노선을 누르면 검색한다",async()=>{
+  const h=harness();await flush();
+  const [tools,list,arrivalBox]=h.stopBox.children,nearby=tools.children[0];
+  assert.equal(nearby.disabled,false);
+  nearby.click();
+  const ask=h.pending.at(-1);assert.equal(ask.request.kind,"nearby");
+  assert.equal(JSON.stringify(ask.request.value),"[33.5,126.53]");assert.equal(JSON.stringify(ask.request.options.jejuCodes),"[\"39\"]");
+  ask.task.resolve([{id:"DJB9",name:"먼 정류장",no:"",at:[33.51,126.53],city:"25"},{id:"JEB1",name:"가까운 정류장",no:"7",at:[33.5001,126.53],city:""}]);
+  await flush();
+  assert.equal(list.children[0].textContent.startsWith("가까운 정류장 (7)"),true);
+  // 지금 도시(제주)가 아닌 정류장엔 도시 이름이 붙는다.
+  assert.match(list.children[1].textContent,/먼 정류장 · 대전광역시 · \d+m/);assert.doesNotMatch(list.children[0].textContent,/제주/);
+  assert.equal(h.circles.filter(c=>c.options.fillColor).length,2);
+  list.children[1].click();
+  const arrivals=h.pending.at(-1);assert.equal(arrivals.request.kind,"arrivals");
+  assert.equal(arrivals.request.value,"DJB9");assert.equal(arrivals.request.options.city,"25");
+  arrivals.task.resolve({fetchedAt:h.now(),items:[{routeId:"DJB1",number:"102",type:"간선버스",vehicleType:"",seconds:300,stops:2}]});
+  await flush();
+  const [head,rows]=arrivalBox.children;
+  assert.equal(arrivalBox.hidden,false);assert.equal(head.children[0].textContent,"먼 정류장");
+  const pick=rows.children[0].children[0];assert.equal(pick.children[1].textContent,"5분 후 · 2정류장 전");
+  pick.click();await flush();
+  assert.equal(h.citySelect.value,"25");assert.equal(h.input.value,"102");
+  const search=h.requests.filter(r=>r.kind==="routes").at(-1);assert.equal(search.value,"102");assert.equal(search.options.city,"25");
+  // 닫으면 정류장 점과 도착 칸을 치운다.
+  h.panel.children[0].children[2].click();assert.equal(arrivalBox.hidden,true);assert.equal(list.hidden,true);
+  h.controller.destroy();
+});
+test("도착 정보 키가 거절되면 버스도착정보 활용신청을 안내한다",async()=>{
+  const h=harness();await flush();
+  const [tools,list,arrivalBox]=h.stopBox.children;
+  tools.children[0].click();h.pending.at(-1).task.resolve([{id:"JEB1",name:"정류장",no:"",at:[33.5,126.53],city:""}]);await flush();
+  list.children[0].click();h.pending.at(-1).task.reject(new Error("bus-key-invalid"));await flush();
+  assert.match(arrivalBox.children[2].textContent,/버스도착정보/);
+  h.controller.destroy();
 });

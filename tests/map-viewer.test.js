@@ -10,6 +10,7 @@ function loadMapViewer(windowOverrides){
   const context = {
     console, Blob, URL, Map, Set, Date, Math, JSON,
     setTimeout, clearTimeout,
+    MNKoreaCoords:require("../src/js/korea-coords.js"),   // 앱에서도 map-viewer.js 앞에 실린다
     document:{}, window:Object.assign({}, windowOverrides || {}), location:{ protocol:"file:" }, navigator:{ onLine:true }
   };
   context.globalThis = context;
@@ -25,6 +26,7 @@ function loadMapViewer(windowOverrides){
       mapPolygonAreaSquareMeters, mapFormatDistance, mapFormatArea
       , mapCsvRows, mapCsvLooksLikeTimeline, mapTimelineEventsToPending
       , mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows
+      , mapProjectedAddressScore, mapProjectedConvert
       , mapGeoJsonImport, mapGeoJsonExport, mapGpxImport, mapGpxExport, mapKmlImport, mapKmlExport
       , mapPointInPolygon, mapMarkersInArea, mapClusterPixelGroups, mapKakaoRoadviewUrl, mapOpenKakaoRoadview
       , MAP_ROADVIEW_WINDOW_NAME, MAP_ROADVIEW_WINDOW_FEATURES, MAP_GEO_IMPORT_MAX_ITEMS
@@ -39,6 +41,7 @@ function loadMapViewer(windowOverrides){
       , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
       , MAP_ROUTE_TANGLE_MARKERS, MAP_ROUTE_COLOR
       , MAP_DRIVE_MAX_MARKERS, MAP_DRIVE_COLOR, MAP_DRIVE_CACHE_MAX
+      , MAP_DRIVE_FUTURE_MAX_MARKERS, mapDriveDepartValue, mapDriveDepartDate, mapDirectionsProvider
       , MAP_DRIVE_PRIORITIES, MAP_DRIVE_AVOIDS, MAP_DRIVE_FUELS, mapNormalizeDriveOptions
       , MAP_DRIVE_TRAFFIC, mapDriveTrafficInfo, mapOptimizeDriveOrder, mapDriveOrderedItems, mapSampleRoutePoints
       , mapFormatDuration, mapDirectionsSpot, mapDirectionsRoute, mapDirectionsRoutes, mapDriveGuide
@@ -1186,6 +1189,33 @@ test("좌표 없이 주소만 있는 CSV도 받아 찾을 줄로 돌려준다", 
 
 /* 좌표를 적었는데 999 같은 오타면 그건 자료 오류다. 이름을 장소로 착각해 검색을 부르면
    수업 중에 엉뚱한 자리에 표시가 생긴다 — 예전처럼 조용히 제외해야 한다. */
+/* 공공데이터는 위경도 대신 평면 좌표(미터)만 주는 일이 흔하다 — 인허가(LOCALDATA)는 '좌표정보(x)'.
+   예전에는 이런 줄이 모두 '좌표 오류' 로 빠졌다. 이제는 모아 두었다가 좌표계를 골라 바꾼다. */
+test("평면 좌표가 적힌 줄은 버리지 않고 바꿀 줄로 모은다", () => {
+  const api = loadMapViewer();
+  const localdata = api.mapMarkersFromCsv('사업장명,소재지전체주소,좌표정보(x),좌표정보(y)\r\n'
+    + '시청 앞 약국,서울특별시 중구 태평로1가 31,"197,978.1",451558.2\r\n빈 좌표,서울특별시 중구,,\r\n');
+  assert.equal(localdata.markers.length, 0);
+  assert.equal(localdata.projected.length, 1);
+  assert.equal(localdata.projected[0].x, 197978.1);    // 천 단위 쉼표도 읽는다
+  assert.equal(localdata.projected[0].y, 451558.2);
+  assert.equal(localdata.projected[0].address, "서울특별시 중구 태평로1가 31");
+  assert.equal(localdata.pending[0].query, "서울특별시 중구");   // 좌표가 빈 줄은 예전처럼 주소로 찾는다
+  // 위도·경도 열에 평면 좌표를 적은 표: 위도 = 북쪽 값(y), 경도 = 동쪽 값(x).
+  const mislabeled = api.mapMarkersFromCsv('이름,위도,경도\r\n시청,1952010,953892\r\n학교,37.5,127.0\r\n');
+  assert.equal(mislabeled.markers.length, 1);
+  assert.equal(mislabeled.projected[0].x, 953892);
+  assert.equal(mislabeled.projected[0].y, 1952010);
+  const back = api.mapProjectedConvert(mislabeled.projected, "5179", false)[0];
+  assert.ok(Math.abs(back[0] - 37.5663) < 0.0001 && Math.abs(back[1] - 126.9779) < 0.0001, String(back));
+  // 주소와 맞춰 볼 때 시도까지 맞아야 1점, '중구' 만 맞으면 반 점(중구는 여러 시에 있다).
+  const seoulJung = { sido:"서울특별시", sgg:"중구" };
+  assert.equal(api.mapProjectedAddressScore("서울 중구 세종대로 110", seoulJung), 1);
+  assert.equal(api.mapProjectedAddressScore("중구 세종대로 110", seoulJung), 0.5);
+  assert.equal(api.mapProjectedAddressScore("부산광역시 해운대구", seoulJung), 0);
+  assert.equal(api.mapProjectedAddressScore("경기 수원시 팔달구 효원로", { sido:"경기도", sgg:"수원시팔달구" }), 1);
+});
+
 test("좌표 칸을 채웠지만 값이 잘못된 줄은 검색하지 않고 제외한다", () => {
   const api = loadMapViewer();
   const parsed = api.mapMarkersFromCsv('이름,위도,경도\r\n학교,37.5,127.0\r\n오류,999,127\r\n');
@@ -2204,12 +2234,16 @@ test("자동차 길찾기 켜 둔 사실은 .map 에 남고 길 자체는 담기
   assert.equal(api.mapDocParse(JSON.stringify(old)).drive, false);
 });
 
-test("자동차 길찾기는 설정한 순서에서 표시 7개까지만 한 번에 잇는다", () => {
+test("자동차 길찾기는 설정한 순서에서 표시 32개(출발 시각을 정하면 7개)까지만 한 번에 잇는다", () => {
   const api = loadMapViewer();
-  // 카카오 경유지 상한(5)에 출발·도착을 더한 값이다.
-  assert.equal(api.MAP_DRIVE_MAX_MARKERS, 7);
+  // 다중 경유지 API 상한(30)에 출발·도착을 더한 값. 미래 길찾기는 GET 이라 경유지 5곳 + 2.
+  assert.equal(api.MAP_DRIVE_MAX_MARKERS, 32);
+  assert.equal(api.MAP_DRIVE_FUTURE_MAX_MARKERS, 7);
+  const items = Array.from({ length:40 }, (_, i) => [37 + i * 0.001, 127]);
+  assert.equal(api.mapDriveOrderedItems(items, {}).length, 32);
+  assert.equal(api.mapDriveOrderedItems(items, {}, "209901010830").length, 7);
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  assert.match(source, /const points = mapDriveOrderedItems\(allPoints, settings\)/);
+  assert.match(source, /const points = mapDriveOrderedItems\(allPoints, settings, driveDepart\)/);
   assert.match(source, /설정한 순서의 \{max\}개만 길을 찾았습니다/);
   assert.match(source, /driveTrafficLayers[\s\S]*?mapDriveTrafficInfo\(road\.trafficState\)/);
   assert.match(source, /onSaveRoute:[\s\S]*?mapSampleRoutePoints\(route\.points\)[\s\S]*?addShapeLayer\(shape\)/);
@@ -2243,10 +2277,20 @@ test("두 런처는 길찾기를 무기한 장소 캐시에서 빼고 상세 경
   const go = fs.readFileSync(path.join(__dirname, "../desktop/main.go"), "utf8");
   for (const launcher of [csharp, go]){
     assert.match(launcher, /DirectionsMaxBytes|directionsMaxBytes/);
-    assert.match(launcher, /provider != "kakao-directions"/);
+    // 다중 경유지·미래·다중 목적지도 길찾기 갈래다 — 교통이 바뀌므로 캐시하지 않는다.
+    for (const provider of ["kakao-directions", "kakao-waypoints", "kakao-future", "kakao-destinations"]) assert.ok(launcher.includes('"' + provider + '"'), provider);
   }
-  assert.match(csharp, /provider == "kakao-directions" \? DirectionsMaxBytes : GeocodeMaxBytes/);
-  assert.match(go, /if provider == "kakao-directions" \{\s*maxBytes = directionsMaxBytes/);
+  assert.match(csharp, /bool cacheable = !IsDirectionsProvider\(provider\);/);
+  assert.match(go, /cacheable := !isDirectionsProvider\(provider\)/);
+  assert.match(csharp, /IsDirectionsProvider\(provider\) \? DirectionsMaxBytes : GeocodeMaxBytes/);
+  assert.match(go, /if isDirectionsProvider\(provider\) \{\s*maxBytes = directionsMaxBytes/);
+  // 다중 경유지의 avoid 는 배열이어야 한다(문자열이면 카카오가 500). 다중 목적지는 TIME·DISTANCE 만 받는다.
+  assert.match(csharp, /KakaoAvoidJson\(spot\.Avoid\)/);
+  assert.match(go, /"avoid": kakaoAvoidList\(spot\.avoid\)/);
+  assert.match(csharp, /spot\.Priority == "DISTANCE" \? "DISTANCE" : "TIME"/);
+  // GET 길찾기(기본·미래)는 경유지 5곳까지로 자른다.
+  assert.match(csharp, /string via = ViaGet\(spot\.Via\);[\s\S]*?KakaoDirectionsEndpoint/);
+  assert.match(go, /values\.Set\("waypoints", viaGet\(spot\.via\)\)/);
 });
 
 test("두 런처는 길찾기 상세 옵션을 허용 목록으로 제한해 카카오에 전달한다", () => {
@@ -2260,4 +2304,31 @@ test("두 런처는 길찾기 상세 옵션을 허용 목록으로 제한해 카
     assert.match(launcher, /car_hipass/);
     assert.match(launcher, /alternatives/);
   }
+});
+
+test("출발 시각은 날짜로 읽히는 것만 받고, 그에 따라 카카오모빌리티 API 를 고른다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapDriveDepartValue("2026-09-19T08:30"), "202609190830");
+  assert.equal(api.mapDriveDepartValue("202609190830"), "202609190830");
+  assert.equal(api.mapDriveDepartValue(new Date(2026, 8, 19, 8, 30)), "202609190830");
+  for (const bad of ["", "2026-02-30T08:30", "2026-09-19T25:00", "abc", "20260919083"]) assert.equal(api.mapDriveDepartValue(bad), "", bad);
+  assert.equal(api.mapDriveDepartDate("202609190830").getHours(), 8);
+  assert.equal(api.mapDirectionsProvider(7, ""), "kakao-directions");       // 경유지 5곳 = 예전 그대로
+  assert.equal(api.mapDirectionsProvider(8, ""), "kakao-waypoints");        // 6곳부터 다중 경유지
+  assert.equal(api.mapDirectionsProvider(3, "209901010830"), "kakao-future");
+  const spot = api.mapDirectionsSpot([[37.5, 127], [37.51, 127.01]], {}, "2099-01-01T08:30");
+  assert.equal(spot.depart, "209901010830");
+  assert.equal("depart" in api.mapDirectionsSpot([[37.5, 127], [37.51, 127.01]], {}), false);
+});
+
+test("경유지가 많으면 가까운 곳부터 잇고 꼬인 구간을 풀어 순서를 줄인다(양 끝은 그대로)", () => {
+  const api = loadMapViewer();
+  // 한 줄로 늘어선 경유지 12곳을 뒤섞어 준다 — 제대로 풀면 원래 줄 순서로 돌아온다.
+  const line = Array.from({ length:14 }, (_, i) => ({ id:"p" + i, lat:37.5, lng:127 + i * 0.01 }));
+  const shuffled = [line[0], ...[7, 3, 11, 1, 9, 5, 12, 2, 10, 4, 8, 6].map(i => line[i]), line[13]];
+  const ordered = api.mapOptimizeDriveOrder(shuffled);
+  assert.equal(ordered[0].id, "p0");
+  assert.equal(ordered[ordered.length - 1].id, "p13");
+  assert.deepEqual(ordered.map(item => item.id).join(","), line.map(item => item.id).join(","));
+  assert.equal(new Set(ordered.map(item => item.id)).size, 14);
 });

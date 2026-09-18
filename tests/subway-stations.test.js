@@ -161,9 +161,17 @@ test("두 런처 모두 노선 이름을 허용 목록으로 거른다", () => {
   assert.match(csharp, /if \(!ValidSubwayLine\(line\)\)/);
 });
 
+test("역별 도착 정보는 역 이름 글자를 걸러서만 경로에 넣는다", () => {
+  // 역 이름도 URL 경로에 들어간다. 노선처럼 목록으로 거를 수는 없어(원래 이름이 수백 개) 글자로 거른다.
+  assert.match(go, /func validSubwayStationName\(/);
+  assert.match(go, /if !validSubwayStationName\(station\) \{/);
+  assert.match(csharp, /static bool ValidSubwayStationName\(/);
+  assert.match(csharp, /if \(!ValidSubwayStationName\(station\)\)/);
+});
+
 test("두 런처의 지하철 엔드포인트가 같은 이름으로 갖춰져 있다", () => {
   for (const [name, text] of [["main.go", go], ["launcher.cs", csharp]]) {
-    for (const route of ["/can-proxy-subway", "/subway-position", "/subway-key-status", "/subway-key"]) {
+    for (const route of ["/can-proxy-subway", "/subway-position", "/subway-arrival", "/subway-key-status", "/subway-key"]) {
       assert.ok(text.includes(route), `${name} 에 ${route} 가 없다`);
     }
   }
