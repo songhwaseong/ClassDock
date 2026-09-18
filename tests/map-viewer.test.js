@@ -939,12 +939,24 @@ test("편집 도구는 접을 수 있고 머리말 줄은 창 모드에 남는�
   assert.ok(head, "머리말 줄 append 를 찾지 못했다");
   for (const keep of ["titleInput", "searchWrap", "toolsToggleBtn", "undoBtn", "redoBtn", "saveBtn", "status"])
     assert.ok(head[1].includes(keep), keep + " 는 머리말 줄에 남아야 한다");
-  const tools = /toolRow\.append\(([\s\S]*?)\);/.exec(source);
-  assert.ok(tools, "도구 줄 append 를 찾지 못했다");
-  for (const moved of ["addBtn", "lineBtn", "areaBtn", "clearItemsBtn", "pngBtn", "taskBtn"])
-    assert.ok(tools[1].includes(moved), moved + " 는 도구 줄에 있어야 한다");
-  // 오프라인 지도 단추(런처 전용)도 머리말이 아니라 도구 줄에 붙는다.
-  assert.match(source, /toolRow\.appendChild\(prepareBtn\)/);
+  // 도구 줄 안은 두 칸이다 — 아이콘 타일(자주 쓰는 편집·보기)과 아래 칩(내보내기·연결·실시간).
+  assert.match(source, /toolRow\.append\(toolTiles, toolChips\)/);
+  const tiles = /toolTiles\.append\(([\s\S]*?)\);/.exec(source);
+  assert.ok(tiles, "타일 칸 append 를 찾지 못했다");
+  for (const moved of ["basemapTile", "addBtn", "lineBtn", "areaBtn", "csvMemoBtn"])
+    assert.ok(tiles[1].includes(moved), moved + " 는 타일 칸에 있어야 한다");
+  const chips = /toolChips\.append\(([\s\S]*?)\);/.exec(source);
+  assert.ok(chips, "칩 칸 append 를 찾지 못했다");
+  for (const moved of ["clearItemsBtn", "pngBtn", "taskBtn"])
+    assert.ok(chips[1].includes(moved), moved + " 는 칩 칸에 있어야 한다");
+  // 오프라인 지도·실시간 열차·버스(런처 전용)도 머리말이 아니라 도구 줄 칩 칸에 붙는다.
+  assert.match(source, /toolChips\.appendChild\(prepareBtn\)/);
+  assert.match(source, /toolChips\.appendChild\(subwayBtn\)/);
+  assert.match(source, /MNJejuBusMap\.mount\(\{ map, stage, toolRow:toolChips,/);
+  // 아이콘은 글자가 아니라 CSS 변수로 건다 — textContent 를 갈아 끼워도, 우클릭 메뉴가 글자를 읽어도 안전하다.
+  assert.match(source, /element\.style\.setProperty\("--map-icon", url\)/);
+  assert.match(styles, /\.has-map-icon::before\{[^}]*mask:var\(--map-icon\)/);
+  assert.match(styles, /html\.hide-tool-mapBasemap \.map-basemap-tile/);
   // 창 모드에서는 도구 줄만 접는다.
   const apply = /function applyToolbarVisible\(\)\{([\s\S]*?)\n  \}/.exec(source);
   assert.ok(apply);

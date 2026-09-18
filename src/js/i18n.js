@@ -74,6 +74,16 @@
     "노선 새로고침": "Refresh route",
     "위치는 지연될 수 있으며, 갱신 사이에는 마지막 위치를 표시합니다.": "Positions may be delayed. The last received position is shown between updates.",
     "출처: 국가대중교통정보센터(TAGO)": "Source: Korea National Transit Information Center (TAGO)",
+    "출처: 서울특별시 버스정보(공공데이터포털)": "Source: Seoul Metropolitan Government bus information (data.go.kr)",
+    "서울특별시": "Seoul",
+    "노선번호 (예: 402)": "Route number (e.g. 402)",
+    "서울시 버스정보에서 노선 목록을 받아 새로 만듭니다.": "This rebuilds the route list from Seoul bus information.",
+    "서울 정류장은 도시에서 '서울특별시'를 고른 뒤 찾아 주세요.": "For Seoul stops, choose Seoul as the city first.",
+    "출발대기": "Waiting to depart",
+    "운행종료": "Service ended",
+    "인증키가 서울 버스 노선 검색에 쓰일 수 없어요. 공공데이터포털에서 '서울특별시_노선정보조회 서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요.": "The service key was rejected for Seoul route search. Check on data.go.kr that it is approved for the Seoul route information service. New approvals can take a while to take effect.",
+    "인증키가 서울 버스 위치에 쓰일 수 없어요. 공공데이터포털에서 '서울특별시_버스위치정보조회 서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요.": "The service key was rejected for Seoul bus positions. Check on data.go.kr that it is approved for the Seoul bus location service. New approvals can take a while to take effect.",
+    "인증키가 서울 정류장 정보에 쓰일 수 없어요. 공공데이터포털에서 '서울특별시_정류소정보조회 서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요.": "The service key was rejected for Seoul stop information. Check on data.go.kr that it is approved for the Seoul stop information service. New approvals can take a while to take effect.",
     "제주 버스 표시를 껐어요.": "Jeju bus display is off.",
     "마지막 수신": "Last received",
     "버스": "Buses",
@@ -464,8 +474,8 @@
       "Works right away with ECB reference rates, no key needed. Add a free Korea Eximbank Open API key to also see official rates (base, remittance sent, remittance received). The daily limit is 1,000 requests.",
     "지도 문서의 '실시간 열차'에 필요합니다. 서울 열린데이터광장에서 무료로 발급받으며 하루 1,000회까지 조회할 수 있어, 한 번에 한 노선만 15초마다 물어봅니다.":
       "Needed for 'Live trains' in map documents. Get a free key from Seoul Open Data Plaza; it allows 1,000 requests a day, so only one line is polled every 15 seconds.",
-    "지도 문서의 '버스'에 필요합니다. 공공데이터포털에서 TAGO 버스노선정보와 TAGO 버스위치정보를 활용신청한 뒤 받은 일반 인증키를 넣어 주세요(인코딩·디코딩 키 모두 됨). 정류장 도착 정보·근처 정류장까지 보려면 TAGO 버스도착정보·버스정류소정보도 같은 키로 활용신청해 주세요. 한 노선을 30초마다 물어봅니다.":
-      "Needed for 'Buses' in map documents. On data.go.kr, apply for TAGO bus route and TAGO bus location information, then enter the general service key (encoded or decoded both work). To also see stop arrivals and nearby stops, apply for TAGO bus arrival and bus stop information with the same key. One route is polled every 30 seconds.",
+    "지도 문서의 '버스'에 필요합니다. 공공데이터포털에서 TAGO 버스노선정보와 TAGO 버스위치정보를 활용신청한 뒤 받은 일반 인증키를 넣어 주세요(인코딩·디코딩 키 모두 됨). 정류장 도착 정보·근처 정류장까지 보려면 TAGO 버스도착정보·버스정류소정보도 같은 키로 활용신청해 주세요. 서울은 TAGO에 없어 같은 키로 서울특별시 노선정보조회·버스위치정보조회·정류소정보조회를 따로 활용신청해야 합니다. 한 노선을 30초마다 물어봅니다.":
+      "Needed for 'Buses' in map documents. On data.go.kr, apply for TAGO bus route and TAGO bus location information, then enter the general service key (encoded or decoded both work). To also see stop arrivals and nearby stops, apply for TAGO bus arrival and bus stop information with the same key. Seoul is not in TAGO, so with the same key also apply for the Seoul route information, bus location and stop information services. One route is polled every 30 seconds.",
     "지도 문서의 '제주 버스'에 필요합니다. 공공데이터포털에서 TAGO 버스노선정보와 TAGO 버스위치정보를 둘 다 활용신청한 뒤 받은 일반 인증키를 넣어 주세요(인코딩·디코딩 키 모두 됨). 한 노선을 30초마다 물어봅니다.":
       "Needed for 'Jeju buses' in map documents. On data.go.kr, apply for both TAGO bus route and TAGO bus location information, then enter the general service key (encoded or decoded both work). One route is polled every 30 seconds.",
     "검색 공급자": "Search provider",
@@ -2395,6 +2405,7 @@
     "📏 거리선": "📏 Distance line",
     "지도에 점을 찍어 경로와 전체 거리를 표시": "Place points to show a route and its total distance",
     "▱ 면적 영역": "▱ Area",
+    "면적 영역": "Area",
     "지도에 점을 찍어 영역과 면적을 표시": "Place points to show a region and its area",
     "CSV 들이기": "Import CSV",
     "표 들이기": "Import table",
@@ -2678,6 +2689,8 @@
     // 편집 도구 접기(H)
     "▤ 도구 숨기기": "▤ Hide tools",
     "▤ 도구 보이기": "▤ Show tools",
+    "도구 숨기기": "Hide tools",
+    "도구 보이기": "Show tools",
     "편집 도구 줄을 접고 지도를 넓게 봅니다 (H)": "Folds the editing tool row for a wider map (H)",
     "접어 둔 편집 도구를 다시 폅니다 (H)": "Unfolds the editing tools again (H)",
     "편집 도구를 다시 폈어요.": "Editing tools are back.",

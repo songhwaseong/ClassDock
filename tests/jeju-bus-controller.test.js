@@ -147,7 +147,7 @@ test("API 어댑터는 런처 캐시 시각과 Retry-After를 보존한다",asyn
 });
 test("도시를 바꾸면 보던 노선을 끄고 그 도시 목록·검색으로 옮긴다",async()=>{
   const h=harness();await flush();
-  assert.equal(h.citySelect.children.map(o=>o.value).join(","),",25");
+  assert.equal(h.citySelect.children.map(o=>o.value).join(","),",11,25"); // 서울(11)은 TAGO 목록에 없어 늘 끼워 넣는다
   await h.form.fire("submit");h.start.click();assert.equal(h.button.attrs["aria-pressed"],"true");
   h.cityCatalogs["25"]={updatedAt:"2026-09-18",routes:[{number:"마을1",from:"a",to:"b",count:1}]};
   h.citySelect.value="25";h.citySelect.fire("change");await flush();

@@ -5541,7 +5541,14 @@ class ClassDockLauncher
                 query = "gpsLati=" + spot[0] + "&gpsLong=" + spot[1] + "&numOfRows=50"; needsCity = false; break;
             default: return false;
         }
-        city = needsCity ? (city ?? "") : "";
+        // 서울은 근처 정류장도 서울 API 로 묻는다(TAGO 좌표 조회에는 서울 정류장이 없다). 도시 목록은 TAGO 것 그대로.
+        bool seoul = city == SeoulBusCity && kind != "cities";
+        if (seoul)
+        {
+            SeoulBusOperation(kind, value, out service, out query);
+            needsCity = false;
+        }
+        city = needsCity || seoul ? (city ?? "") : "";
         if (needsCity && city.Length == 0)
         {
             try { city = TagoJejuCity(key); }
@@ -5581,7 +5588,7 @@ class ClassDockLauncher
                 try
                 {
                     int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
-                    byte[] received = TagoGetRaw(service, operation, query, key, max);
+                    byte[] received = seoul ? SeoulBusGet(service, query, key, max) : TagoGetRaw(service, operation, query, key, max);
                     entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue; entry.Error = ""; entry.Upstream = "";
                     data = entry.Data; fetchedAt = entry.FetchedAt; return true;
                 }
@@ -5641,8 +5648,19 @@ class ClassDockLauncher
     }
     static byte[] TagoGetRaw(string service, string operation, string query, string key, int max)
     {
-        try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
         string url = TagoBase + service + "/" + operation + "?serviceKey=" + TagoKeyParameter(key) + "&_type=json&" + query;
+        byte[] received = BusHttpGet(url, max, TagoResultCode, "22");
+        string code2 = TagoResultCode(received);
+        if (code2 == "00" || code2 == "03") return received;
+        string upstream2 = "HTTP 200 - " + (code2.Length > 0 ? code2 : "?");
+        if (code2 == "22") throw new TagoException("bus-quota", upstream2);
+        if (code2 == "20" || code2 == "30" || code2 == "31" || code2 == "32") throw new TagoException("bus-key-invalid", upstream2);
+        throw new TagoException("bus-invalid-data", upstream2);
+    }
+    // 버스 조회 한 번(TAGO·서울 공용). 401·403·429 는 거절 본문의 까닭 코드를 읽어 키 문제·한도 초과로 바꾼다.
+    static byte[] BusHttpGet(string url, int max, Func<byte[], string> reasonOf, string quotaReason)
+    {
+        try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
         HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
         request.Method = "GET";
         request.UserAgent = "ClassDock/1.0 (local classroom app)"; request.Accept = "application/json";
@@ -5674,21 +5692,78 @@ class ClassDockLauncher
                 {
                     byte[] buffer = new byte[8192]; int count;
                     while ((count = input.Read(buffer, 0, buffer.Length)) > 0 && output.Length < 64 * 1024) output.Write(buffer, 0, count);
-                    reason = TagoResultCode(output.ToArray());
+                    reason = reasonOf(output.ToArray());
                 }
             }
             catch { }
             finally { response.Close(); }
             string upstream = "HTTP " + code.ToString(CultureInfo.InvariantCulture) + (reason.Length > 0 ? " - " + reason : "");
-            if (reason == "22" || code == 429) throw new TagoException("bus-quota", upstream);
+            if (reason == quotaReason || code == 429) throw new TagoException("bus-quota", upstream);
             throw new TagoException("bus-key-invalid", upstream);
         }
-        string code2 = TagoResultCode(received);
-        if (code2 == "00" || code2 == "03") return received;
-        string upstream2 = "HTTP 200 - " + (code2.Length > 0 ? code2 : "?");
-        if (code2 == "22") throw new TagoException("bus-quota", upstream2);
-        if (code2 == "20" || code2 == "30" || code2 == "31" || code2 == "32") throw new TagoException("bus-key-invalid", upstream2);
-        throw new TagoException("bus-invalid-data", upstream2);
+        return received;
+    }
+
+    /* 서울 버스 = 서울특별시 버스정보(ws.bus.go.kr). TAGO 에 서울이 없어(2026-09 도시 목록 138개에 없음) 따로 묻는다.
+       키는 TAGO 와 같은 공공데이터포털 일반 인증키지만 활용신청은 넷으로 나뉜다 — 노선정보조회(routes·route)·
+       버스위치정보조회(position)·정류소정보조회(arrivals·nearby)·버스도착정보조회(지금은 안 씀).
+       신청하지 않은 서비스는 HTTP 401 {"message":"… 등록되지 않은 서비스키"} 로 거절된다(2026-09-19 실측).
+       정상 응답도 HTTP 200 에 msgHeader.headerCd 로 알린다(0 정상 · 4 결과 없음 · 5/6/7 키 문제 · 8 한도 초과).
+       도시코드 11(행정구역 코드)을 서울로 쓴다 — TAGO 도시코드에는 11 이 없다. http 만 받는다(https 는 응답 없음). */
+    const string SeoulBusCity = "11";
+    const string SeoulBusBase = "http://ws.bus.go.kr/api/rest/";
+    static byte[] SeoulBusGet(string operation, string query, string key, int max)
+    {
+        string url = SeoulBusBase + operation + "?serviceKey=" + TagoKeyParameter(key) + "&resultType=json&" + query;
+        byte[] received = BusHttpGet(url, max, SeoulBusResultCode, "8");
+        string code = SeoulBusResultCode(received);
+        if (code == "0" || code == "4") return received;
+        string upstream = "HTTP 200 - " + (code.Length > 0 ? code : "?");
+        if (code == "8") throw new TagoException("bus-quota", upstream);
+        if (code == "5" || code == "6" || code == "7") throw new TagoException("bus-key-invalid", upstream);
+        throw new TagoException("bus-invalid-data", upstream);
+    }
+    // JSON 이면 msgHeader.headerCd, XML 이면 <headerCd>. 게이트웨이 거절 본문은 글로 가린다.
+    static string SeoulBusResultCode(byte[] data)
+    {
+        string text = Encoding.UTF8.GetString(data ?? new byte[0]).Trim().TrimStart('﻿');
+        if (text.StartsWith("{", StringComparison.Ordinal))
+        {
+            try
+            {
+                var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = Math.Max(text.Length, 1024);
+                var root = parser.DeserializeObject(text) as Dictionary<string, object>;
+                object value;
+                var header = root != null && root.TryGetValue("msgHeader", out value) ? value as Dictionary<string, object> : null;
+                if (header != null && header.TryGetValue("headerCd", out value) && value != null)
+                    return Convert.ToString(value, CultureInfo.InvariantCulture).Trim();
+            }
+            catch { }
+        }
+        else
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(text, "<headerCd>\\s*(\\d+)\\s*<");
+            if (match.Success) return match.Groups[1].Value;
+        }
+        if (text.IndexOf("LIMITED_NUMBER", StringComparison.OrdinalIgnoreCase) >= 0) return "8";
+        if (text.IndexOf("SERVICE_KEY", StringComparison.OrdinalIgnoreCase) >= 0 || text.IndexOf("서비스키", StringComparison.Ordinal) >= 0) return "7";
+        return "";
+    }
+    // 서울 조회 (연산, 물음). value 검사는 ValidJejuBusValue 가 이미 했다.
+    static bool SeoulBusOperation(string kind, string value, out string operation, out string query)
+    {
+        operation = ""; query = "";
+        switch (kind)
+        {
+            case "routes": operation = "busRouteInfo/getBusRouteList"; query = "strSrch=" + Uri.EscapeDataString(value); return true;
+            case "route": operation = "busRouteInfo/getStaionByRoute"; query = "busRouteId=" + Uri.EscapeDataString(value); return true;
+            case "position": operation = "buspos/getBusPosByRtid"; query = "busRouteId=" + Uri.EscapeDataString(value); return true;
+            case "arrivals": operation = "stationinfo/getStationByUid"; query = "arsId=" + Uri.EscapeDataString(value); return true;
+            case "nearby":
+                string[] spot = value.Split(',');
+                operation = "stationinfo/getStationByPos"; query = "tmX=" + spot[1] + "&tmY=" + spot[0] + "&radius=500"; return true;
+        }
+        return false;
     }
     // JSON 이면 response.header.resultCode, 게이트웨이 XML 오류면 returnReasonCode 를 읽는다.
     static string TagoResultCode(byte[] data)
@@ -5995,6 +6070,7 @@ class ClassDockLauncher
         string key = CurrentTagoKey();
         if (key.Length == 0) { FinishJejuBusCatalog("failed", "bus-key-required"); return; }
         // 같은 노선 ID 가 여러 번호 조건에 겹쳐 나오므로(21 은 1·2 둘 다에 걸림) 세부 노선 수는 조건 하나에서만 센다.
+        if (city == SeoulBusCity) { RunSeoulBusCatalog(minimum, key); return; }
         var all = new Dictionary<string, object[]>();
         try { if (!CollectJejuBusCatalog("", key, city, all)) { FinishJejuBusCatalog("cancelled", ""); return; } }
         catch (TagoException failure)
@@ -6017,9 +6093,55 @@ class ClassDockLauncher
             }
         }
         if (result.Count < minimum) { FinishJejuBusCatalog("failed", "bus-catalog-too-few"); return; }
+        SaveJejuBusCatalog(city, "tago", result);
+    }
+    // 서울 노선 목록. 번호 검색(strSrch)이 쪽 나눔 없이 '그 글자가 든 노선'을 모두 주므로 숫자 0~9 로 열 번 묻는다.
+    // 세부 노선 수는 같은 번호의 서로 다른 busRouteId 수다.
+    static void RunSeoulBusCatalog(int minimum, string key)
+    {
+        var result = new Dictionary<string, object[]>();
+        var ids = new Dictionary<string, HashSet<string>>();
+        var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = 8 * 1024 * 1024;
+        for (int digit = 0; digit <= 9; digit++)
+        {
+            lock (JejuBusCatalogLock) { if (JejuBusCatalogCancel) { FinishJejuBusCatalog("cancelled", ""); return; } }
+            byte[] body = null;
+            for (int attempt = 0; attempt < 3 && body == null; attempt++)
+            {
+                if (attempt > 0) Thread.Sleep(3000);
+                try { body = SeoulBusGet("busRouteInfo/getBusRouteList", "strSrch=" + digit.ToString(CultureInfo.InvariantCulture), key, 8 * 1024 * 1024); }
+                catch (TagoException failure) { if (failure.Reason != "bus-invalid-data" || attempt == 2) throw; }
+                catch (WebException) { if (attempt == 2) throw; }
+            }
+            var root = parser.DeserializeObject(Encoding.UTF8.GetString(body).TrimStart('﻿')) as Dictionary<string, object>;
+            object value;
+            var msgBody = root != null && root.TryGetValue("msgBody", out value) ? value as Dictionary<string, object> : null;
+            object list = msgBody != null && msgBody.TryGetValue("itemList", out value) ? value : null;
+            var rows = list as object[] ?? (list is Dictionary<string, object> ? new object[] { list } : new object[0]);
+            foreach (object item in rows)
+            {
+                var row = item as Dictionary<string, object>;
+                if (row == null) continue;
+                string number = JejuBusField(row, "busRouteNm"), id = JejuBusField(row, "busRouteId");
+                if (!ValidBusRouteNumber(number) || id.Length == 0) continue;
+                HashSet<string> seen;
+                if (!ids.TryGetValue(number, out seen)) { seen = new HashSet<string>(); ids[number] = seen; }
+                if (!seen.Add(id)) continue;
+                object[] known;
+                if (result.TryGetValue(number, out known)) known[3] = seen.Count;
+                else result[number] = new object[] { number, JejuBusField(row, "stStationNm"), JejuBusField(row, "edStationNm"), 1 };
+            }
+            lock (JejuBusCatalogLock) { JejuBusCatalogDone = digit + 1; JejuBusCatalogFound = result.Count; }
+            Thread.Sleep(JejuBusCatalogGapMs);
+        }
+        if (result.Count < minimum) { FinishJejuBusCatalog("failed", "bus-catalog-too-few"); return; }
+        SaveJejuBusCatalog(SeoulBusCity, "seoul", result);
+    }
+    static void SaveJejuBusCatalog(string city, string source, Dictionary<string, object[]> result)
+    {
         var body = new Dictionary<string, object>();
         body["updatedAt"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
-        body["source"] = "tago";
+        body["source"] = source;
         body["city"] = city;
         body["routes"] = result.Values.ToList();
         byte[] bytes = Encoding.UTF8.GetBytes(new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(body));

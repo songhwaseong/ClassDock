@@ -93,12 +93,90 @@ const MNJejuBusApi = (() => {
         city:jejuCodes.includes(city) || !/^[0-9]{1,9}$/.test(city) ? "" : city}];
     });
   }
-  // 도착 안내 한 줄의 남은 시간 글.
+  // 도착 안내 한 줄의 남은 시간 글. 서울은 '출발대기'·'운행종료' 처럼 시간 없는 안내(message)가 온다.
   function arrivalText(item,t=v=>v){
     const parts=[];
     if (item.seconds!=null) parts.push(item.seconds<60 ? t("곧 도착") : Math.round(item.seconds/60)+t("분 후"));
     if (item.stops!=null && item.stops>0) parts.push(item.stops+t("정류장 전"));
-    return parts.join(" · ") || t("도착 정보 없음");
+    return parts.join(" · ") || (item.message ? t(item.message) : t("도착 정보 없음"));
+  }
+  /* ── 서울(ws.bus.go.kr) ── 도시코드 11. TAGO 와 모양이 달라 따로 읽는다.
+     응답: {msgHeader:{headerCd}, msgBody:{itemList:[…] 또는 null}} · headerCd 0 정상 · 4 결과 없음.
+     좌표는 gpsX(경도)·gpsY(위도). 정류장은 arsId(표지판 5자리 번호)로 도착 정보를 묻는다 — "0" 은 가상 정류장이다. */
+  const seoulCity="11";
+  const seoulTypes={"1":"공항","2":"마을","3":"간선","4":"지선","5":"순환","6":"광역","7":"인천","8":"경기","0":"공용"};
+  function seoulRows(body){
+    const header=body && typeof body==="object" ? body.msgHeader : null;
+    const code=header ? text(header.headerCd) : "";
+    if (code==="4") return [];
+    if (code!=="0") throw new Error("bus-invalid-data");
+    const list=body.msgBody && body.msgBody.itemList;
+    if (list==null || list==="") return [];
+    if (Array.isArray(list)) return list;
+    if (typeof list==="object") return [list];
+    throw new Error("bus-invalid-data");
+  }
+  const seoulAt=r=>r ? coords({gpslati:r.gpsY,gpslong:r.gpsX}) : null;
+  const seoulStop=v=>/^[0-9]{1,10}$/.test(text(v)) && !/^0+$/.test(text(v)) ? text(v) : "";
+  function seoulRoutes(body,keyword=""){
+    const seen=new Set();
+    const list=seoulRows(body).flatMap(r=>{
+      if (!r || !validId(r.busRouteId) || seen.has(text(r.busRouteId))) return [];
+      const id=text(r.busRouteId); seen.add(id);
+      return [{id,number:text(r.busRouteNm),from:text(r.stStationNm),to:text(r.edStationNm),description:"",type:seoulTypes[text(r.routeType)] || ""}];
+    });
+    const exact=list.filter(r=>r.number===text(keyword));
+    return exact.length ? exact : list;
+  }
+  // stId 는 버스 위치의 '막 지난 정류장'(lastStnId)과 맞춰 정류장 이름을 붙이는 데 쓴다.
+  function seoulRoute(body){
+    return seoulRows(body).filter(r=>r && seoulAt(r)).sort((a,b)=>Number(a.seq)-Number(b.seq))
+      .map(r=>({id:seoulStop(r.arsId),name:text(r.stationNm),at:seoulAt(r),stId:text(r.station)}));
+  }
+  function seoulPositions(body,id,fetchedAt,cacheAgeMs=0){
+    if (!validId(id) || !Number.isFinite(fetchedAt) || fetchedAt<=0) throw new Error("bus-invalid-data");
+    const source=seoulRows(body), seen=new Set();
+    const vehicles=source.flatMap(r=>{
+      const at=seoulAt(r), key=r && text(r.plainNo || r.vehId);
+      if (!at || !key || seen.has(key)) return [];
+      seen.add(key);
+      return [{id:"seoul:"+id+":"+key,label:key,at,stationId:text(r.lastStnId),stationName:"",observedAt:null}];
+    });
+    if (source.length && !vehicles.length) throw new Error("bus-invalid-data");
+    return {provider:"seoul",routeKey:"seoul:"+id,fetchedAt,cacheAgeMs,vehicles};
+  }
+  // "3분12초후[2번째 전]" · "곧 도착" · "출발대기" · "운행종료". 시간을 못 읽으면 글 그대로 둔다.
+  function seoulArrival(message){
+    const value=text(message);
+    if (!value) return null;
+    if (/곧 도착/.test(value)) return {seconds:0,stops:null,message:""};
+    const time=/(?:(\d+)분)?\s*(?:(\d+)초)?\s*후/.exec(value), stop=/\[(\d+)번째 전\]/.exec(value);
+    const seconds=time && (time[1] || time[2]) ? (Number(time[1] || 0)*60+Number(time[2] || 0)) : null;
+    const stops=stop ? Number(stop[1]) : null;
+    return {seconds,stops,message:seconds==null && stops==null ? value.replace(/\[[^\]]*\]/g,"").trim() || value : ""};
+  }
+  // 정류장 도착 예정. 한 노선에 첫째·둘째 차가 함께 오므로 두 줄로 편다(둘째 차는 시간이 있을 때만).
+  function seoulArrivals(body){
+    const lowFloor={"1":"저상","2":"굴절"};
+    return seoulRows(body).flatMap(r=>{
+      if (!r || !text(r.rtNm)) return [];
+      const base={routeId:validId(r.busRouteId)?text(r.busRouteId):"",number:text(r.rtNm),type:seoulTypes[text(r.routeType)] || ""};
+      const first=seoulArrival(r.arrmsg1), second=seoulArrival(r.arrmsg2);
+      const out=[];
+      if (first) out.push({...base,vehicleType:lowFloor[text(r.busType1)] || "",seconds:first.seconds,stops:first.stops,message:first.message});
+      if (second && (second.seconds!=null || second.stops!=null))
+        out.push({...base,vehicleType:lowFloor[text(r.busType2)] || "",seconds:second.seconds,stops:second.stops,message:""});
+      return out;
+    }).sort((a,b)=>(a.seconds==null?Infinity:a.seconds)-(b.seconds==null?Infinity:b.seconds) || a.number.localeCompare(b.number,"ko"));
+  }
+  function seoulNearby(body){
+    const seen=new Set();
+    return seoulRows(body).flatMap(r=>{
+      const at=seoulAt(r), id=seoulStop(r && r.arsId);
+      if (!at || !id || seen.has(id)) return [];
+      seen.add(id);
+      return [{id,name:text(r.stationNm),no:id,at,city:seoulCity}];
+    });
   }
   // 노선 목록 한 줄 = [번호, 기점, 종점, 세부 노선 수]. 앱에 넣어 둔 목록과 런처가 최신화한 목록이 같은 모양이다.
   function catalog(body){
@@ -169,7 +247,9 @@ const MNJejuBusApi = (() => {
     }
     else if (kind==="routes" ? !validNumber(value) : !validId(value)) throw new Error("bus-bad-request");
     else query=(kind==="routes"?"keyword":kind==="arrivals"?"nodeId":"routeId")+"="+encodeURIComponent(value);
-    const withCity=kind!=="nearby" && kind!=="cities" ? cityQuery(city) : "";
+    const seoul=text(city)===seoulCity && kind!=="cities";
+    // 근처 정류장은 도시 없이 묻지만, 서울만은 서울 API 로 물어야 해서 도시를 붙인다.
+    const withCity=seoul || (kind!=="nearby" && kind!=="cities") ? cityQuery(city) : "";
     const params=[query,withCity,refresh && kind!=="position"?"refresh=1":""].filter(Boolean).join("&");
     const response=await fetch("/jeju-bus-"+kind+(params?"?"+params:""),{signal,cache:"no-store"});
     if (!response.ok){
@@ -181,21 +261,22 @@ const MNJejuBusApi = (() => {
       throw error;
     }
     const body=await response.json();
-    if (kind==="routes") return routes(body,value);
-    if (kind==="route") return route(body);
+    if (kind==="routes") return seoul ? seoulRoutes(body,value) : routes(body,value);
+    if (kind==="route") return seoul ? seoulRoute(body) : route(body);
     if (kind==="cities") return cities(body);
-    if (kind==="nearby") return nearby(body,jejuCodes);
+    if (kind==="nearby") return seoul ? seoulNearby(body) : nearby(body,jejuCodes);
     if (kind==="arrivals"){
       const stamp=Date.parse(response.headers.get("X-ClassDock-Bus-Fetched-At") || "");
-      return {items:arrivals(body),fetchedAt:Number.isFinite(stamp)?stamp:Date.now()};
+      return {items:seoul ? seoulArrivals(body) : arrivals(body),fetchedAt:Number.isFinite(stamp)?stamp:Date.now()};
     }
     const stamp=Date.parse(response.headers.get("X-ClassDock-Bus-Fetched-At") || "");
-    const result=positions(body,value,stamp,Math.max(0,Date.now()-stamp));
+    const result=(seoul ? seoulPositions : positions)(body,value,stamp,Math.max(0,Date.now()-stamp));
     result.retryAfterMs=Math.max(0,Number(response.headers.get("Retry-After")) || 0)*1000;
     result.stale=response.headers.get("X-ClassDock-Bus-Stale")==="1";
     return result;
   }
   return {provider,coords,rows,routes,route,positions,cities,arrivals,nearby,arrivalText,validNumber,
-    request,catalog,catalogGroups,loadCatalog,catalogJob};
+    request,catalog,catalogGroups,loadCatalog,catalogJob,
+    seoulCity,seoulRows,seoulRoutes,seoulRoute,seoulPositions,seoulArrival,seoulArrivals,seoulNearby};
 })();
 if (typeof module!=="undefined" && module.exports) module.exports=MNJejuBusApi;

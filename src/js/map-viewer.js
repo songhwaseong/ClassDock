@@ -4814,6 +4814,63 @@ async function mapSaveRecovery(doc){
   }
 }
 
+/* ===== 도구막대 아이콘 =====
+   아이콘은 단추 글자 속이 아니라 CSS 변수(--map-icon)로 건다. 단추 글자는 여러 곳에서 textContent
+   로 통째로 갈아 끼우고(자료 들이기↔그만두기, 도구 숨기기↔보이기, 저장 칸), 우클릭 메뉴도 그 글자를
+   그대로 읽어 가므로 글자 칸에 SVG 를 섞으면 지워지거나 메뉴에 섞여 들어간다. 그림은 마스크로만
+   쓰므로 색은 단추의 currentColor(또는 --map-icon-color)를 따라 밝은·어두운 화면 모두에 맞는다. */
+const MAP_TOOL_ICONS = {
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.5 3.9 5.5 3.9 9s-1.3 6.5-3.9 9c-2.6-2.5-3.9-5.5-3.9-9S9.4 5.5 12 3z"/>',
+  pin: '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/>',
+  home: '<path d="M3.5 11 12 4l8.5 7"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5h4v5"/>',
+  layers: '<path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/>',
+  ruler: '<path d="m3 17 14-14 4 4L7 21z"/><path d="m7 13 2 2M10 10l2 2M13 7l2 2"/>',
+  area: '<path d="M5 7.5 12 4l7 5-2 10H7z"/><circle cx="5" cy="7.5" r="1.4" fill="#000"/><circle cx="12" cy="4" r="1.4" fill="#000"/><circle cx="19" cy="9" r="1.4" fill="#000"/><circle cx="17" cy="19" r="1.4" fill="#000"/><circle cx="7" cy="19" r="1.4" fill="#000"/>',
+  grid: '<rect x="3.5" y="3.5" width="17" height="17" rx="2" stroke-dasharray="3 2.6"/><path d="M12 3.5v17M3.5 12h17"/>',
+  eye: '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/>',
+  cluster: '<circle cx="8" cy="9" r="4"/><circle cx="16" cy="9" r="4"/><circle cx="12" cy="16" r="4"/>',
+  route: '<circle cx="5" cy="18" r="2"/><circle cx="12" cy="6.5" r="2"/><circle cx="19" cy="15" r="2"/><path d="m6.1 16.2 4.8-7.9M13.3 8.1l4.4 5.2" stroke-dasharray="2.2 2"/>',
+  car: '<path d="M4 16.5V12l2.2-5h11.6L20 12v4.5z"/><path d="M4 12h16"/><circle cx="8" cy="17.5" r="1.8" fill="#000"/><circle cx="16" cy="17.5" r="1.8" fill="#000"/>',
+  list: '<path d="M8 6h11M8 12h11M8 18h11"/><circle cx="4.5" cy="6" r="1" fill="#000"/><circle cx="4.5" cy="12" r="1" fill="#000"/><circle cx="4.5" cy="18" r="1" fill="#000"/>',
+  present: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/><path d="m10 7.8 4.2 2.2-4.2 2.2z"/>',
+  building: '<rect x="5" y="3.5" width="14" height="17" rx="1"/><path d="M9 7.5h2M13 7.5h2M9 11h2M13 11h2M9 14.5h2M13 14.5h2M10.5 20.5v-3h3v3"/>',
+  barChart: '<path d="M4 20h16M7 16.5V11M12 16.5V6M17 16.5v-8"/>',
+  palette: '<path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 1.6-2.1-.5-1.4.4-2.9 1.9-2.9H18a3 3 0 0 0 3-3c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.2" fill="#000"/><circle cx="10" cy="7" r="1.2" fill="#000"/><circle cx="15" cy="7.5" r="1.2" fill="#000"/>',
+  foldedMap: '<path d="M3 6.5 8.5 4l7 2.5L21 4v13.5L15.5 20l-7-2.5L3 20z"/><path d="M8.5 4v13.5M15.5 6.5V20"/>',
+  database: '<ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6M4.5 11.5v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/>',
+  table: '<rect x="3.5" y="5" width="17" height="14" rx="1.5"/><path d="M3.5 10h17M9 5v14"/>',
+  fileExport: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4"/><path d="M12 11v6M9.5 14.5 12 17l2.5-2.5"/>',
+  tableMemo: '<path d="M9 4h6v3H9z"/><path d="M15 5.5h2a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h2"/><path d="M8 11h8M8 15h8M12 11v7"/>',
+  eraser: '<path d="m7 18-3-3a2 2 0 0 1 0-3l6-6a2 2 0 0 1 3 0l7 7a2 2 0 0 1 0 3l-2 2H7zM7 18h13"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M4 17v3h16v-3"/>',
+  board: '<rect x="4" y="4" width="16" height="13" rx="1"/><path d="M8 21h8M12 17v4M7 9h10M7 13h6"/>',
+  memo: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 2.5v3M15 2.5v3M8.5 10h7M8.5 14h7M8.5 18h4"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 3-4 5 6"/>',
+  print: '<path d="M7 9V3.5h10V9"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v6.5H7z"/>',
+  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.8"/><circle cx="12" cy="12" r="1.5" fill="#000"/>',
+  cloud: '<path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 9.5a4 4 0 0 1 0 8.5"/><path d="M12 11v8M9.5 16.5 12 19l2.5-2.5"/>',
+  train: '<rect x="5.5" y="3" width="13" height="14" rx="3"/><path d="M5.5 10.5h13"/><circle cx="9" cy="13.8" r="1" fill="#000"/><circle cx="15" cy="13.8" r="1" fill="#000"/><path d="m8 21 1.5-4M16 21l-1.5-4"/>',
+  bus: '<rect x="4.5" y="3.5" width="15" height="14" rx="2.5"/><path d="M4.5 10h15M8 21v-3.5M16 21v-3.5"/><circle cx="8.3" cy="14" r="1" fill="#000"/><circle cx="15.7" cy="14" r="1" fill="#000"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
+  save: '<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
+  panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>'
+};
+function mapToolIconUrl(name){
+  const inner = MAP_TOOL_ICONS[name];
+  if (!inner) return "";
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+  return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+}
+function mapSetToolIcon(element, name){
+  const url = mapToolIconUrl(name);
+  if (!element || !url) return element;
+  element.style.setProperty("--map-icon", url);
+  element.classList.add("has-map-icon");
+  return element;
+}
+
 /* ===== 편집기 ===== */
 async function mountMapEditor(doc){
   const model = doc.mapDoc;
@@ -4948,7 +5005,7 @@ async function mountMapEditor(doc){
   lineBtn.setAttribute("aria-pressed", "false");
   const areaBtn = document.createElement("button");
   areaBtn.type = "button"; areaBtn.className = "map-btn map-draw-area map-toolvis-area";
-  areaBtn.textContent = "▱ 면적 영역"; areaBtn.title = "지도에 점을 찍어 영역과 면적을 표시";
+  areaBtn.textContent = "면적 영역"; areaBtn.title = "지도에 점을 찍어 영역과 면적을 표시";
   areaBtn.setAttribute("aria-pressed", "false");
 
   const csvImportBtn = document.createElement("button");
@@ -5061,7 +5118,7 @@ async function mountMapEditor(doc){
   const toolsToggleBtn = document.createElement("button");
   toolsToggleBtn.type = "button";
   toolsToggleBtn.className = "map-btn map-tools-toggle";
-  toolsToggleBtn.textContent = "▤ 도구 숨기기";     // 이름·설명은 applyToolbarVisible 이 채운다
+  toolsToggleBtn.textContent = "도구 숨기기";     // 이름·설명은 applyToolbarVisible 이 채운다
 
   const undoBtn = document.createElement("button");
   undoBtn.type = "button"; undoBtn.className = "map-btn map-undo";
@@ -5084,10 +5141,34 @@ async function mountMapEditor(doc){
   status.className = "map-status";
   const setStatus = (msg) => { status.textContent = msg || ""; };
 
-  bar.append(titleInput, searchWrap, toolsToggleBtn, undoBtn, redoBtn, saveBtn, coord, status);
-  toolRow.append(basemapSelect, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, clusterBtn, routeBtn, driveBtn, listBtn,
-    presentBtn, nearbyBtn, regionBtn, choroBtn, imageBtn, imageClearBtn, csvImportBtn, csvTemplateBtn, csvExportBtn, csvMemoBtn, clearItemsBtn,
-    geoExportBtn, boardBtn, memoBtn, pngBtn, printBtn, taskBtn);
+  bar.append(titleInput, searchWrap, saveBtn, toolsToggleBtn, undoBtn, redoBtn, coord, status);
+
+  /* 도구 줄은 다시 두 칸이다 — 지도 위에서 쓰는 편집·보기 도구는 아이콘이 위에 얹힌 큰 타일로,
+     내보내기·연결·실시간 층처럼 가끔 쓰는 것은 아래 작은 칩으로. 배경지도 고르기는 select 라
+     ::before 를 못 받으므로 타일 모양의 칸으로 한 번 감싼다(숨김 설정은 CSS 가 칸째 가린다). */
+  const basemapTile = document.createElement("div");
+  basemapTile.className = "map-tile-select map-basemap-tile";
+  basemapTile.appendChild(basemapSelect);
+  mapSetToolIcon(basemapTile, "globe");
+  const toolTiles = document.createElement("div");
+  toolTiles.className = "map-tools-main";
+  const toolChips = document.createElement("div");
+  toolChips.className = "map-tools-extra";
+  toolTiles.append(basemapTile, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, clusterBtn, routeBtn, driveBtn, listBtn,
+    presentBtn, nearbyBtn, regionBtn, choroBtn, imageBtn, csvImportBtn, csvTemplateBtn, csvExportBtn, csvMemoBtn);
+  toolChips.append(clearItemsBtn, geoExportBtn, boardBtn, memoBtn, pngBtn, printBtn, taskBtn, imageClearBtn);
+  toolRow.append(toolTiles, toolChips);
+  for (const [element, icon] of [
+    [addBtn, "pin"], [addressBtn, "home"], [spotBtn, "layers"], [lineBtn, "ruler"], [areaBtn, "area"], [gridBtn, "grid"],
+    [labelsBtn, "eye"], [clusterBtn, "cluster"], [routeBtn, "route"], [driveBtn, "car"], [listBtn, "list"], [presentBtn, "present"],
+    [nearbyBtn, "building"], [regionBtn, "barChart"], [choroBtn, "palette"], [imageBtn, "foldedMap"], [csvImportBtn, "database"],
+    [csvTemplateBtn, "table"], [csvExportBtn, "fileExport"], [csvMemoBtn, "tableMemo"],
+    [clearItemsBtn, "eraser"], [geoExportBtn, "download"], [boardBtn, "board"], [memoBtn, "memo"], [pngBtn, "image"],
+    [printBtn, "print"], [taskBtn, "target"], [imageClearBtn, "trash"], [prepareBtn, "cloud"], [subwayBtn, "train"],
+    [saveBtn, "save"], [toolsToggleBtn, "panel"], [searchBtn, "search"]
+  ]) mapSetToolIcon(element, icon);
+  mapSetToolIcon(searchWrap, "pin");               // 검색칸 왼쪽 안쪽의 핀(CSS 가 칸 안에 띄운다)
+  searchBtn.setAttribute("aria-label", "검색");     // 글자는 CSS 로 감추고 아이콘만 보인다
 
   const stage = document.createElement("div");
   stage.className = "map-stage";
@@ -5161,7 +5242,7 @@ async function mountMapEditor(doc){
     bar.hidden = fullscreenNow && !toolbarVisible;
     toolRow.hidden = !toolbarVisible;
     bar.classList.toggle("has-tools", toolbarVisible);
-    toolsToggleBtn.textContent = mapT(toolbarVisible ? "▤ 도구 숨기기" : "▤ 도구 보이기");
+    toolsToggleBtn.textContent = mapT(toolbarVisible ? "도구 숨기기" : "도구 보이기");
     toolsToggleBtn.title = mapT(toolbarVisible
       ? "편집 도구 줄을 접고 지도를 넓게 봅니다 (H)"
       : "접어 둔 편집 도구를 다시 폅니다 (H)");
@@ -5516,7 +5597,7 @@ async function mountMapEditor(doc){
   // 경우에는 아예 붙이지 않는다 — 눌러도 아무 데도 남지 않는 버튼을 보여 주지 않기 위해서다.
   if (proxyBase){
     prepareBtn.addEventListener("click", openMapOfflineStatus);
-    toolRow.appendChild(prepareBtn);
+    toolChips.appendChild(prepareBtn);
     mapTranslate(toolRow);
   }
 
@@ -5929,15 +6010,15 @@ async function mountMapEditor(doc){
       subwayPoll();
     });
 
-    toolRow.appendChild(subwayLineSelect);
-    toolRow.appendChild(subwayBtn);
+    toolChips.appendChild(subwayLineSelect);
+    toolChips.appendChild(subwayBtn);
     mapTranslate(toolRow);
 
     if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
     doc.cleanupFns.push(() => { if (subwayOn) subwayStop(); subwayArrivalPanel.remove(); });
   }
 
-  const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow, doc, t:mapT,
+  const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
 
   /* ── 되돌리기 ──
