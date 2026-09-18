@@ -40,6 +40,9 @@ const MNLazy = (() => {
        쓰는 곳은 파이썬을 처음 돌릴 때 한 번뿐이다. 앱 코드 중 가장 큰 파일이라
        시작할 때 파싱하면 .txt 하나를 열어도 0.9MB 를 읽는다. */
     kfont:       { label:"한글 글꼴(파이썬 그래프)", files:["korean-font.js"] },
+    // 일기장 손글씨 글꼴(나눔손글씨 펜·붓, OFL, WOFF2 base64 약 0.8MB 씩). 그 글꼴을 고를 때만 읽는다.
+    handPen:     { label:"손글씨 글꼴(펜)",   files:["hand-font-pen.js"] },
+    handBrush:   { label:"손글씨 글꼴(붓)",   files:["hand-font-brush.js"] },
     // SQL 정렬기(sql-formatter). DB 클라이언트 편집기에서 정렬을 누를 때만 읽는다.
     sqlFormat:   { label:"SQL 정렬",           files:["sql-formatter.min.js"] },
     officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },

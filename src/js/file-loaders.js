@@ -134,6 +134,7 @@ async function handleFiles(files, options={}){
       let made = null;
       if (ext === "pdf") await loadPdf(await file.arrayBuffer(), file.name, opts);
       else if (ext === "mnote" && typeof loadMnote === "function") made = await loadMnote(file, opts);
+      else if (ext === "diary" && typeof loadDiary === "function") made = await loadDiary(file, opts);
       else if (ext === "map" && typeof loadMapDoc === "function") made = await loadMapDoc(file, opts);
       else if (ext === "timeline" && typeof loadTimelineDoc === "function") made = await loadTimelineDoc(file, opts);
       else if (ext === "dbconn" && typeof loadDbConnDoc === "function") made = await loadDbConnDoc(file, opts);

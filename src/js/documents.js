@@ -1318,6 +1318,7 @@ function unsavedDocumentLabel(doc){
   if (doc.kind === "timeline") return "연대표";
   if (doc.kind === "concept") return "개념 관계도";
   if (doc.kind === "study") return "암기 카드";
+  if (doc.kind === "diary") return "일기장";
   if (doc.kind === "dbconn") return "접속 설정";
   if (doc.notebook) return "노트북";
   if (doc.kind === "office" && /\.(xlsx|xls|csv)$/i.test(doc.name || "")) return "스프레드시트";
@@ -1566,6 +1567,7 @@ function modeBadgeText(doc){
   if (doc.kind === "timeline") return "연대표 만들기";
   if (doc.kind === "concept") return "개념 관계도 만들기";
   if (doc.kind === "study") return "암기·오답 복습";
+  if (doc.kind === "diary") return "일기 쓰기";
   if (doc.kind === "replay") return "수업 리플레이";
   if (doc.kind === "diff") return "파일 비교";
   if (doc.kind === "image-gallery") return "이미지 모아보기";
@@ -2623,6 +2625,9 @@ function openSidebarGroupMenu(node, x, y){
   add("+Study 새 암기 카드", () => {
     if (typeof newStudyScratchInFolder === "function") newStudyScratchInFolder(node.newPythonContext);
   });
+  add("+Dia 새 일기장", () => {
+    if (typeof newDiaryScratchInFolder === "function") newDiaryScratchInFolder(node.newPythonContext);
+  });
   if (typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)){
     add("＋ 새 폴더", () => {
       if (typeof createFolderOnDisk === "function") createFolderOnDisk(node);
@@ -2960,6 +2965,13 @@ function isConceptSearchable(doc){
 function isStudyCardsSearchable(doc){
   return !!(doc && doc.studyDoc && Array.isArray(doc.studyDoc.cards));
 }
+// .diary 일기장 — 파일은 ZIP 이라 바이트를 읽으면 안 된다. 모델의 날짜·제목·본문만 검색한다.
+function isDiarySearchable(doc){
+  return !!(doc && doc.diary && Array.isArray(doc.diary.entries));
+}
+function diarySearchText(doc){
+  return isDiarySearchable(doc) && typeof diaryPlainText === "function" ? diaryPlainText(doc.diary) : null;
+}
 function mnoteSearchText(doc){
   if (!isMnoteSearchable(doc)) return null;
   return (typeof mnotePlainText === "function") ? mnotePlainText(doc.mnote) : null;
@@ -3008,6 +3020,7 @@ function hasLiveDocText(doc){
   if (isTimelineSearchable(doc)) return true;            // 사건 모델이 곧 최신 본문
   if (isConceptSearchable(doc)) return true;             // 개념 카드·관계 모델
   if (isStudyCardsSearchable(doc)) return true;          // 암기 카드 모델
+  if (isDiarySearchable(doc)) return true;               // 일기장 모델
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function") return true;
   return typeof doc.savedText === "string";
 }
@@ -3018,6 +3031,7 @@ function liveDocText(doc){
   if (isTimelineSearchable(doc)) return timelineSearchText(doc);   // 사진 base64를 빼고 사건 글자만
   if (isConceptSearchable(doc)) return conceptCardsSearchText(doc);
   if (isStudyCardsSearchable(doc)) return studyCardsSearchText(doc);
+  if (isDiarySearchable(doc)) return diarySearchText(doc);         // savedText 는 비교용 열쇠라 본문이 아니다
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
     try { return String(doc.codeEditor.getValue()); } catch(e){}
   }
@@ -3059,6 +3073,7 @@ function isTextSearchable(doc){
   if (isTimelineSearchable(doc)) return true;          // .timeline — 사건 본문(모델)로 검색
   if (isConceptSearchable(doc)) return true;           // .concept — 카드·연결 글자만
   if (isStudyCardsSearchable(doc)) return true;        // .study — 질문·정답·태그만
+  if (isDiarySearchable(doc)) return true;             // .diary — 날짜·제목·본문만(사진 바이트 제외)
   if (isOfficeSearchable(doc)) return true;            // docx·pptx·hwpx·(렌더된) hwp
   // 본문이 이미 메모리에 있으면 파일을 읽지 않으므로 크기 상한과 무관하게 여기서 바로 검색한다.
   if (hasLiveDocText(doc)) return isTextExtSearchable(doc);

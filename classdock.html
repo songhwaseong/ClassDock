@@ -237,6 +237,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/></svg>
             <span>새 블록 문서(.mnote)</span>
           </button>
+          <button class="sb-menu-item" id="sbNewDiary" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3v18M3.5 7H6M3.5 12H6M3.5 17H6M10 8h6M10 12h6"/></svg>
+            <span>새 일기장(.diary)</span>
+          </button>
           <button class="sb-menu-item" id="sbNewMusic" type="button" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 18V5l10-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>
             <span>새 악보(.msheet)</span>
@@ -410,6 +414,7 @@
               <button type="button" id="dzNewNotebook" role="menuitem">새 노트북(.ipynb)</button>
               <button type="button" id="dzNewSheet" role="menuitem">새 빈 표(엑셀)</button>
               <button type="button" id="dzNewText" role="menuitem">새 텍스트 파일</button>
+              <button type="button" id="dzNewDiary" role="menuitem">새 일기장(.diary)</button>
               <button type="button" id="dzNewJs" role="menuitem">새 자바스크립트 코드</button>
               <button type="button" id="dzNewJava" role="menuitem">새 자바 코드(.java)</button>
             </span>
@@ -444,7 +449,7 @@
           <span data-i18n="dz.cmdk">뭐든 <kbd>Ctrl</kbd><kbd>K</kbd>로 검색해 실행 — 서명·필기·화이트보드·예제까지</span>
         </button>
         <div class="dz-note" data-i18n="dz.note">모든 처리는 이 컴퓨터 안에서만 이뤄집니다. 파일은 외부로 전송되지 않아요.</div>
-        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.hwp,.hwpx,.ipynb,.msheet,.musicxml,.mxl,.map,.timeline,.concept,.study,.md,.markdown,.mdx,.txt,.html,.htm,.db,.sqlite,.sqlite3,.js,.mjs,.cjs,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.cc,.hpp,.cxx,.cs,.go,.rs,.php,.kt,.kts,.swift,.scala,.dart,.vue,.svelte,.json,.json5,.jsonc,.scss,.less,.bat,.cmd,.py,.pyi,.rb,.sh,.bash,.zsh,.ps1,.yaml,.yml,.toml,.ini,.env,.properties,.conf,.css,.sql,.xml,.xhtml,.xsl,.xslt,.xsd,.rss,.atom,.plist,.wsdl,.dbk,.docbook,.rst,.adoc,.asciidoc,.asc,.org,.textile,.tex,.latex,.sty,.cls,.wiki,.mediawiki,.r,.lua,.pl,.pm,.tcl,.awk,.groovy,.gradle,.proto,.coffee,.cmake,.mk,.tsv,.log,.diff,.patch,.zip,.tar,.gz,.tgz,.tar.gz,image/*" multiple hidden>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.pptx,.hwp,.hwpx,.ipynb,.msheet,.musicxml,.mxl,.map,.timeline,.concept,.study,.diary,.md,.markdown,.mdx,.txt,.html,.htm,.db,.sqlite,.sqlite3,.js,.mjs,.cjs,.ts,.jsx,.tsx,.java,.c,.h,.cpp,.cc,.hpp,.cxx,.cs,.go,.rs,.php,.kt,.kts,.swift,.scala,.dart,.vue,.svelte,.json,.json5,.jsonc,.scss,.less,.bat,.cmd,.py,.pyi,.rb,.sh,.bash,.zsh,.ps1,.yaml,.yml,.toml,.ini,.env,.properties,.conf,.css,.sql,.xml,.xhtml,.xsl,.xslt,.xsd,.rss,.atom,.plist,.wsdl,.dbk,.docbook,.rst,.adoc,.asciidoc,.asc,.org,.textile,.tex,.latex,.sty,.cls,.wiki,.mediawiki,.r,.lua,.pl,.pm,.tcl,.awk,.groovy,.gradle,.proto,.coffee,.cmake,.mk,.tsv,.log,.diff,.patch,.zip,.tar,.gz,.tgz,.tar.gz,image/*" multiple hidden>
         <input type="file" id="folderInput" webkitdirectory multiple hidden>
       </div>
     </div>
@@ -1090,6 +1095,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/exchange-rate-ui.js"></script>
 <script src="src/js/scratchpad.js"></script>
 <script src="src/js/mnote.js"></script>
+<script src="src/js/diary.js"></script>
 <script src="src/js/music-model.js"></script>
 <script src="src/js/music-xml.js"></script>
 <script src="src/js/music-audio.js"></script>

@@ -11,6 +11,9 @@ async function openApp(page){
   });
   await collapseSidebar(page);
   await page.goto("/");
+  // 다른 e2e 와 같이 앱이 다 뜬 뒤에 시작한다 — 곧바로 evaluate 하면 첫 로드와 겹쳐
+  // 'Execution context was destroyed' 로 가끔 깨졌다(스크립트가 늘어 로드가 길어질수록 잦음).
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
 }
 
 // docs 는 let 선언이라 window 에 안 붙는다 — 전역 스코프에서 직접 찾는다.

@@ -158,6 +158,7 @@ function wire(){
   if (byId("dzNewMap")) byId("dzNewMap").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newMapScratch === "function") newMapScratch(); });
   if (byId("dzNewTimeline")) byId("dzNewTimeline").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTimelineScratch === "function") newTimelineScratch(); });
   if (byId("dzNewConcept")) byId("dzNewConcept").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newConceptScratch === "function") newConceptScratch(); });
+  if (byId("dzNewDiary")) byId("dzNewDiary").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newDiaryScratch === "function") newDiaryScratch(); });
   if (byId("dzNewStudy")) byId("dzNewStudy").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newStudyScratch === "function") newStudyScratch(); });
   if (byId("dzNewExam")) byId("dzNewExam").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newExamPaper === "function") newExamPaper(); });
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
@@ -210,7 +211,10 @@ function wire(){
   const memoOwnsFileDrop = () => {
     const imageMemo = byId("imageMemo");
     const scratchpad = byId("scratchpad");
-    return !!((imageMemo && !imageMemo.hidden) || (scratchpad && !scratchpad.hidden));
+    if ((imageMemo && !imageMemo.hidden) || (scratchpad && !scratchpad.hidden)) return true;
+    // 일기장은 종이 위에 떨어뜨린 사진을 그 자리에 스티커로 붙인다 — 오버레이가 종이를 덮으면 안 된다.
+    // 종이 밖이나 그림이 아닌 파일은 창의 drop 처리로 흘러가 평소처럼 새 탭으로 열린다.
+    return typeof state !== "undefined" && !!state && state.kind === "diary";
   };
   window.addEventListener("dragenter", (e) => {
     if (!draggingFiles(e) || isInternalDragTransfer(e.dataTransfer, false)) return;
@@ -296,7 +300,7 @@ function wire(){
     // 화이트보드는 경고 없이 닫혀도 복원되도록, 디바운스를 건너뛰고 마지막 편집까지 즉시 저장한다.
     docs.forEach(d => {
       if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery();
-      else if (["timeline", "concept", "study"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
+      else if (["timeline", "concept", "study", "diary"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
     });
     if (typeof persistTabStateNow === "function") persistTabStateNow();
     if (suppressUnloadWarn) return;
@@ -359,6 +363,8 @@ function wire(){
     // 지도도 같다 — 화면을 그대로 찍으면 도구막대만 나오므로 캡처한 그림 한 장을 찍는다(map-viewer.js).
     if (state && state.kind === "map" && typeof state.printMap === "function"){ state.printMap(); return; }
     if (state && state.kind === "timeline" && typeof state.printTimeline === "function"){ state.printTimeline(); return; }
+    // 일기장은 이 날·이번 달·전체 중 무엇을 찍을지 먼저 고른다(diary.js 의 인쇄 전용 층).
+    if (state && state.kind === "diary" && typeof state.printDiary === "function"){ state.printDiary(); return; }
     window.print();
   };
   byId("btnFullscreen").onclick = toggleViewerFullscreen;
@@ -502,6 +508,7 @@ function wire(){
   if (byId("sbNewTimeline")) byId("sbNewTimeline").onclick = () => { if (typeof newTimelineScratch === "function") newTimelineScratch(); };
   if (byId("sbNewDbConn")) byId("sbNewDbConn").onclick = () => { if (typeof newDbConnScratch === "function") newDbConnScratch(); };
   if (byId("sbNewConcept")) byId("sbNewConcept").onclick = () => { if (typeof newConceptScratch === "function") newConceptScratch(); };
+  if (byId("sbNewDiary")) byId("sbNewDiary").onclick = () => { if (typeof newDiaryScratch === "function") newDiaryScratch(); };
   if (byId("sbNewStudy")) byId("sbNewStudy").onclick = () => { if (typeof newStudyScratch === "function") newStudyScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };

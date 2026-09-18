@@ -41,6 +41,7 @@
     C("newMap","🗺️","새 지도 (.map)", () => callFn("newMapScratch"), { kw:"map 지도 위치 좌표 마커 표시 사회 지리 답사 leaflet" }),
     C("newTimeline","⏳","새 연대표 (.timeline)", () => callFn("newTimelineScratch"), { kw:"timeline 연대표 연표 역사 사건 시대 사회 국어 과학사 chronology" }),
     C("newConcept","🕸️","새 개념 관계도 (.concept)", () => callFn("newConceptScratch"), { kw:"concept map 개념 관계도 마인드맵 원인 결과 포함 비교 연결" }),
+    C("newDiary","📔","새 일기장 (.diary)", () => callFn("newDiaryScratch"), { kw:"diary journal 일기 일기장 다이어리 달력 날짜 스티커 사진" }),
     C("newStudy","🧠","새 암기 카드 (.study)", () => callFn("newStudyScratch"), { kw:"study flashcard 암기 카드 단어장 오답 복습 빈칸" }),
     C("mapToBoard","🖊️","지도를 칠판으로", clickBtn(".map-to-board"),
       { when:hasBtn(".map-to-board"), kw:"map board 지도 칠판 화이트보드 판서 필기 스냅샷 캡처" }),

@@ -112,6 +112,7 @@
     "exchange-rate-ui.js",
     "scratchpad.js",
     "mnote.js",
+    "diary.js",
     "music-model.js",
     "music-xml.js",
     "music-audio.js",
@@ -259,6 +260,7 @@
         "exchange-rate-ui.js",
         "scratchpad.js",
         "mnote.js",
+        "diary.js",
         "music-model.js",
         "music-xml.js",
         "music-audio.js",
@@ -456,6 +458,17 @@
       "python-editor.js",
       "table-export.js"
     ],
+    "diary.js": [
+      "context-menu.js",
+      "documents.js",
+      "file-loaders.js",
+      "code-viewer.js",
+      "history.js",
+      "spellcheck.js",
+      "python-editor.js",
+      "office-doc-viewers.js",
+      "exam-paper.js"
+    ],
     "music-audio.js": [
       "music-model.js"
     ],
@@ -572,7 +585,8 @@
       "file": "context-menu.js",
       "publicApi": "MNContextMenu",
       "consumers": [
-        "python-editor.js"
+        "python-editor.js",
+        "diary.js"
       ]
     },
     {
@@ -700,6 +714,7 @@
         "image-viewer.js",
         "whiteboard.js",
         "mnote.js",
+        "diary.js",
         "music-editor.js"
       ]
     },
@@ -711,7 +726,8 @@
         "code-viewer.js",
         "notebook-cells.js",
         "scratchpad.js",
-        "mnote.js"
+        "mnote.js",
+        "diary.js"
       ]
     },
     {
@@ -930,6 +946,18 @@
       "file": "korean-font.js",
       "lazy": "kfont",
       "sha384": "sha384-7EOLoaF3oBIUqNHSPBSgCdzmCPiErkdaWkTreGfakKrql72h05iaySH2NtxEjGPY"
+    },
+    {
+      "src": "vendor/hand-font-pen.js",
+      "file": "hand-font-pen.js",
+      "lazy": "handPen",
+      "sha384": "sha384-I3N4EDYlBgCGZw3nKbdkvDYrQ+n5X03xzzZEdpxBYHjETElvgXrHjYo7Gxfja1lq"
+    },
+    {
+      "src": "vendor/hand-font-brush.js",
+      "file": "hand-font-brush.js",
+      "lazy": "handBrush",
+      "sha384": "sha384-YdwaRq7J6N05HH3jwh0/OMZbniTLrDCY5e8lB/p9OKjJ+Fb2jayYfBVbJTjRWNc7"
     },
     {
       "src": "vendor/sql-formatter.min.js",
