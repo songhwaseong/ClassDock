@@ -96,6 +96,13 @@ test("DOCX 편집 안내는 상시 배너 대신 편집 도구 옆 도움말로 
   assert.match(styles, /\.docx-edit-help\.open \.docx-edit-help-pop/);
 });
 
+test("DOCX 보기 도구막대는 문단 편집 이름을 버튼 하나로만 표시한다", () => {
+  assert.doesNotMatch(source, /docx-editor-title/);
+  assert.doesNotMatch(styles, /\.docx-editor-title/);
+  assert.match(source, /toggle\.textContent = state\.editing \? "읽기 전용" : "✎ 문단 편집"/);
+  assert.match(source, /bar\.append\(toggle, undoBtn, redoBtn, saveBtn/);
+});
+
 test("상단 DOCX 도구는 여섯 갈래 메뉴로 정리하고 실제 컨트롤은 중복 노출하지 않는다", () => {
   for (const kind of ["document", "text", "paragraph", "table", "image", "all"])
     assert.ok(source.includes(`toolLauncherButton("${kind}"`), kind + " 분류 버튼이 없다");

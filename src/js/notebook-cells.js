@@ -1132,7 +1132,7 @@ function updateNbSaveButton(ownerDoc, btn){
   const dirty = !!(ownerDoc && ownerDoc.hasUnsavedEdits);
   const autosaveState = ownerDoc && ownerDoc._nbAutosaveState;
   const target = (typeof documentSaveTarget === "function") ? documentSaveTarget(ownerDoc) : null;
-  const saveLabel = target && target.mode ? target.label : "저장";
+  const saveLabel = "저장";
   const label = autosaveState === "saving" ? "저장 중…"
     : autosaveState === "failed" ? "저장 실패"
     : dirty ? saveLabel + " *" : saveLabel;

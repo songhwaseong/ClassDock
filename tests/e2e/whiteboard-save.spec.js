@@ -53,7 +53,7 @@ test("판서해도 ● 가 켜지지 않고, 복구본은 남는다", async ({ p
 
   expect(await boardDirty(page)).toBe(false);
   await expect(page.locator("#tabBar .tab.dirty")).toHaveCount(0);
-  await expect(page.locator("#activeDocStatus")).toBeHidden();
+  await expect(page.locator("#saveStatusBadge")).toBeHidden();
 
   // 복구본(자동 저장)은 남아 있어야 한다 — ● 를 안 켜는 근거가 이것이다.
   await page.evaluate(() => {

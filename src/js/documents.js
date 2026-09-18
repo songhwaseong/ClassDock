@@ -485,7 +485,7 @@ function setActiveDoc(id){
   // 학습 화면의 고정 PDF는 이 함수 끝의 applyStudyLayout 이 다시 표시한다.
   if (prev && prev !== d) prev.el.hidden = true;
   if (d) d.el.hidden = false;
-  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; byId("activeDocStatus").hidden=true; updateOriginalSaveBadge(null); byId("tools").hidden=true; byId("officeTools").hidden=true; updateModeBadges(); renderTabs(); updateDocEmptyState(); updateSidebarActive(); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); return; }
+  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; updateSaveStatusBadge(null); byId("tools").hidden=true; byId("officeTools").hidden=true; updateModeBadges(); renderTabs(); updateDocEmptyState(); updateSidebarActive(); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); return; }
   updateDocEmptyState();
   state = d;
   viewer = d.el;
@@ -498,8 +498,7 @@ function setActiveDoc(id){
   byId("btnPages").classList.toggle("primary", !!(d.kind === "pdf" && d.pagePanelOpen));
   if (typeof updatePdfOutlineButton === "function") updatePdfOutlineButton(d);   // 목차 버튼 상태를 활성 PDF 기준으로
   updateDocumentEncoding(d);
-  updateDocumentStatus(d);
-  updateOriginalSaveBadge(d);
+  updateSaveStatusBadge(d);
   updateModeBadges();
   const hdrName = byId("activeFileName");
   hdrName.textContent = d.name;
@@ -523,7 +522,7 @@ function setActiveDoc(id){
   // 저장 버튼(=저장 동선)은 렌더가 끝나야 생기므로, 저장 위치 배지는 렌더 완료 뒤 다시 판단한다.
   const rendered = ensureRendered(d);                     // 아직 안 그렸으면 이때 처음 렌더(지연 렌더)
   if (rendered && typeof rendered.then === "function"){
-    rendered.then(() => { if (activeId === d.id){ updateOriginalSaveBadge(d); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); } }).catch(() => {});
+    rendered.then(() => { if (activeId === d.id){ updateSaveStatusBadge(d); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); } }).catch(() => {});
   }
   applyStudyLayout();
   updateSidebarActive();                                  // 전체 재생성 대신 활성 표시만 갱신(클릭 반응 향상)
@@ -1292,18 +1291,7 @@ function activateIfIdle(doc, opts){
 }
 
 function updateDocumentStatus(doc){
-  const badge = byId("activeDocStatus");
-  if (!badge || !doc || doc.id !== activeId){ if (badge) badge.hidden = true; return; }
-  // 읽기 전용 보기에서 편집으로 들어가면 그때 저장 버튼이 생긴다 — 저장 위치 안내도 같이 따라간다.
-  updateOriginalSaveBadge(doc);
-  let text = "", cls = "";
-  if (doc._pyAutosaveState === "saving"){ text = "자동 저장 중"; cls = "dirty"; }
-  else if (doc._pyAutosaveState === "failed"){ text = "자동 저장 실패"; cls = "dirty"; }
-  else if (doc.hasUnsavedEdits){ text = "저장 안 됨"; cls = "dirty"; }
-  else if (doc.kind === "pdf" && appSettings.pdfRecovery && doc.recoveryDirty){ text = "자동 저장 중"; cls = "dirty"; }
-  else if (doc.kind === "pdf" && appSettings.pdfRecovery){ text = "자동 저장됨"; cls = "saved"; }
-  if (!text){ badge.hidden = true; return; }
-  badge.textContent = (typeof window.t === "function") ? window.t(text) : text; badge.className = "doc-status " + cls; badge.hidden = false;
+  updateSaveStatusBadge(doc);
 }
 
 // 편집기 종류와 관계없이 같은 "저장 안 됨" 상태를 사용한다. 개별 뷰어가
@@ -1460,25 +1448,43 @@ function hideSaveTargetNotice(){
   delete bar.dataset.noticeKey;
 }
 
-function updateOriginalSaveBadge(doc){
-  const badge = byId("originalSaveBadge");
+function updateSaveStatusBadge(doc){
+  const badge = byId("saveStatusBadge");
   if (!badge) return;
   if (doc && doc.kind !== "pdf" && typeof workspaceBackendStatus === "function" && workspaceBackendStatus() === null
       && typeof workspaceBackendAvailable === "function" && !badge._backendProbe){
     badge._backendProbe = true;
     workspaceBackendAvailable().finally(() => {
       badge._backendProbe = false;
-      if (typeof state !== "undefined" && state === doc) updateOriginalSaveBadge(doc);
+      if (typeof state !== "undefined" && state === doc) updateSaveStatusBadge(doc);
     });
   }
   const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
   const target = documentSaveTarget(doc);
   badge.hidden = !target.mode;
-  badge.textContent = _t(target.label);
-  badge.title = target.mode ? _t(target.summary || target.title) : "";
-  badge.classList.toggle("is-copy", target.mode === "copy");
-  if (target.mode) badge.setAttribute("aria-label", _t(target.label) + " — " + _t(target.summary || target.title));
-  else badge.removeAttribute("aria-label");
+  let statusText = "", statusClass = "saved";
+  const autosaveState = doc && (doc._pyAutosaveState || doc._nbAutosaveState);
+  if (autosaveState === "saving"){ statusText = "자동 저장 중"; statusClass = "saving"; }
+  else if (autosaveState === "failed"){ statusText = "자동 저장 실패"; statusClass = "failed"; }
+  else if (doc && doc.hasUnsavedEdits){ statusText = "저장 안 됨"; statusClass = "dirty"; }
+  else if (doc && doc.kind === "pdf" && appSettings.pdfRecovery && doc.recoveryDirty){ statusText = "자동 저장 중"; statusClass = "saving"; }
+  else if (doc && doc.kind === "pdf" && appSettings.pdfRecovery){ statusText = "복구본 저장됨"; }
+  else if (target.mode === "copy"){ statusText = "사본으로 저장"; }
+  else if (target.mode){ statusText = "저장됨"; }
+  if (target.mode){
+    const targetText = target.mode === "original" ? _t("원본") : _t("사본");
+    const standaloneCopy = target.mode === "copy" && statusText === "사본으로 저장";
+    badge.textContent = standaloneCopy ? _t(statusText) : targetText + " · " + _t(statusText);
+    badge.className = "save-status-badge is-" + target.mode + " " + statusClass;
+    const explanation = _t(target.summary || target.title);
+    badge.title = explanation;
+    badge.setAttribute("aria-label", badge.textContent + " — " + explanation);
+  } else {
+    badge.textContent = "";
+    badge.className = "save-status-badge";
+    badge.title = "";
+    badge.removeAttribute("aria-label");
+  }
   const bar = byId("saveTargetBar");
   const barLabel = byId("saveTargetBarLabel");
   const barText = byId("saveTargetBarText");
@@ -1512,7 +1518,7 @@ function updateOriginalSaveBadge(doc){
     bar.classList.toggle("is-copy", target.mode === "copy");
   }
   if (!doc) return;
-  const actionLabel = target.mode ? _t(target.label) : _t("저장");
+  const actionLabel = _t("저장");
   const headerSave = byId("btnDownload");
   if (headerSave){
     const headerLabel = target.mode ? actionLabel + " · " + _t(target.title) : _t("현재 파일 저장");
@@ -4116,7 +4122,7 @@ function updateDocEmptyState(){
 function refreshChrome(){
   if (uiBatchDepth > 0){ uiBatchChromePending = true; return; }
   const has = workspaceActiveNodes().length > 0;
-  if (!workspaceActiveDocs().length){ byId("activeFileName").textContent = ""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden = true; updateOriginalSaveBadge(null); updateModeBadges(); }
+  if (!workspaceActiveDocs().length){ byId("activeFileName").textContent = ""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden = true; updateSaveStatusBadge(null); updateModeBadges(); }
   renderTabs();
   dropzone.hidden = has;
   updateDocEmptyState();

@@ -106,6 +106,7 @@ function notebookSetAutosaveState(ownerDoc, state){
   if (!ownerDoc) return;
   ownerDoc._nbAutosaveState = state || "";
   updateNbSaveButton(ownerDoc, ownerDoc._nbSaveBtn);
+  if (typeof updateDocumentStatus === "function") updateDocumentStatus(ownerDoc);
 }
 
 async function notebookWriteAutosave(text, ownerDoc, name, target){

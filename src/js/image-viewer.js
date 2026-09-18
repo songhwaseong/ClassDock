@@ -666,8 +666,8 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   freeRatioBtn.setAttribute("aria-pressed", "true");
   const dimsLabel = document.createElement("span"); dimsLabel.className = "img-dims img-tool-dims"; dimsLabel.title = "현재 이미지 픽셀 크기";
   // 원본과 같은 형식으로 저장하는 버튼에 .run-save 를 단다 — 이 클래스를 기준으로 Ctrl+S(app.js)와
-  // 저장 위치 배지·"원본/사본" 글자 바꾸기(updateOriginalSaveBadge)가 다른 편집기와 똑같이 걸린다.
-  // 그래서 첫 글자는 "저장"으로 두고(배지가 곧 원본 저장/사본 저장으로 바꾼다) 형식은 다른 버튼에 남긴다.
+  // 저장 위치와 저장 상태를 합친 상단 배지가 다른 편집기와 똑같이 갱신된다.
+  // 저장 버튼은 동작 이름인 "저장"으로 유지하고, 원본·사본 위치와 상태는 상단 통합 배지가 맡는다.
   const origExt = String((file && file.name) || "").split(".").pop().toLowerCase();
   const saveFormat = (origExt === "jpg" || origExt === "jpeg") ? "jpeg" : "png";
   const altFormat = saveFormat === "jpeg" ? "png" : "jpeg";
@@ -733,8 +733,8 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   );
   // 보통은 setActiveDoc 이 저장 버튼 글자를 맞춰 주지만, 이미 활성인 문서에서 편집기를 다시 만들면
   // 그 기회가 없다 — 그때만 직접 한 번 부른다(다른 문서가 활성이면 그 문서 배지를 건드리지 않는다).
-  if (ownerDoc && typeof activeId !== "undefined" && ownerDoc.id === activeId && typeof updateOriginalSaveBadge === "function"){
-    updateOriginalSaveBadge(ownerDoc);
+  if (ownerDoc && typeof activeId !== "undefined" && ownerDoc.id === activeId && typeof updateSaveStatusBadge === "function"){
+    updateSaveStatusBadge(ownerDoc);
   }
 
   // ===== 화질 보정 패널: 자동보정 · 슬라이더(밝기·대비·채도·선명도·노이즈) · 고화질 확대 =====

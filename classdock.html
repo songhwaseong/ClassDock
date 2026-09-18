@@ -27,7 +27,7 @@
   <span class="workspace-activity" id="workspaceActivity" hidden><span class="workspace-activity-dot"></span><span id="workspaceActivityText"></span></span>
   <span class="py-ready" id="pyReadyStatus" title="브라우저 파이썬(Pyodide) 준비 상태" hidden><span class="py-ready-ico" aria-hidden="true"></span><span class="py-ready-text" id="pyReadyText"></span></span>
   </div>
-  <div class="header-file-title"><span id="activeFileName"></span><span id="activeModeBadge" class="mode-badge" hidden></span><span id="studyPairBadge" class="study-pair-badge" hidden></span><span id="originalSaveBadge" class="original-save-badge" hidden>원본 저장</span><span id="activeDocEncoding" class="doc-encoding" hidden></span><span id="activeDocStatus" class="doc-status" hidden></span></div>
+  <div class="header-file-title"><span id="activeFileName"></span><span id="activeModeBadge" class="mode-badge" hidden></span><span id="studyPairBadge" class="study-pair-badge" hidden></span><span id="saveStatusBadge" class="save-status-badge" hidden></span><span id="activeDocEncoding" class="doc-encoding" hidden></span></div>
   <div class="header-actions">
   <div class="tools" id="tools" hidden>
     <details class="tool-menu hdr-tool-pdfedit"><summary title="PDF 편집" aria-label="PDF 편집"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10zM13.5 7.5l3 3"/></svg><span class="header-action-label">편집</span></summary><div class="tool-menu-pop">
@@ -908,7 +908,7 @@
     <ol class="welcome-steps">
       <li data-i18n="welcome.step1"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h7l2 2h9v10H3z"/></svg></span><div><b>1. 파일 열기</b><small>시작 화면의 <b>파일 열기</b>를 누르거나 파일을 끌어다 놓아요. 여러 개·폴더째도 한 번에 열려요.</small></div></li>
       <li data-i18n="welcome.step2"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M15 5l5 5-5 5M13 3l-2 14"/></svg></span><div><b>2. 파이썬 실행</b><small>코드를 쓰고 <b>▶ 실행</b>(또는 <kbd>Ctrl+Enter</kbd>)을 누르면 바로 결과가 나와요. 파이썬을 설치하지 않아도 돼요.</small></div></li>
-      <li data-i18n="welcome.step3"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg></span><div><b>3. 저장 대상 확인</b><small>파일 이름 옆의 <b>원본 저장</b> 또는 <b>사본 저장</b> 배지로 저장 위치를 확인해요. 배지에 마우스를 올리면 자세한 설명을 볼 수 있어요.</small></div></li>
+      <li data-i18n="welcome.step3"><span class="welcome-step-ico"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/></svg></span><div><b>3. 저장 상태 확인</b><small>파일 이름 옆 상태 배지에서 원본·사본 저장 위치와 저장 여부를 함께 확인해요. 저장 버튼은 언제나 <b>저장</b>으로 표시됩니다.</small></div></li>
     </ol>
     <p class="welcome-safe" data-i18n="welcome.safe">파일은 외부로 전송되지 않고, 이 컴퓨터 안에서만 처리돼요.</p>
     <div class="modal-actions">

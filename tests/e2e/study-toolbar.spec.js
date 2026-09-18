@@ -22,7 +22,7 @@ test("저장 버튼은 배지가 글자를 바꾼 뒤에도 아이콘을 잃지 
   await boot(page);
   const save = page.locator(".study-bar .run-save");
   await expect(save.locator("svg.ui-icon")).toHaveCount(1);
-  await expect(save.locator(".run-save-label")).not.toBeEmpty();   // 배지가 '사본 저장' 등으로 채운다
+  await expect(save.locator(".run-save-label")).toHaveText("저장");
 });
 
 test("1024px 창에서도 도구막대가 한 줄에 들어온다", async ({ page }) => {

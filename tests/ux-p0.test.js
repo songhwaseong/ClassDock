@@ -46,7 +46,7 @@ test("시작 화면의 다른 문서 메뉴는 실제 생성 형식을 빠짐없
 
 test("저장 대상 판단은 원본과 사본의 결과를 편집 전에 설명한다", () => {
   const start = documents.indexOf("function documentSaveTarget");
-  const end = documents.indexOf("function updateOriginalSaveBadge", start);
+  const end = documents.indexOf("function updateSaveStatusBadge", start);
   const sandbox = { workspaceBackendStatus: () => false };
   vm.runInNewContext(
     documents.slice(start, end) + "; this.documentSaveTarget = documentSaveTarget;",
@@ -74,11 +74,14 @@ test("저장 안내는 처음 또는 방식 변경 때만 잠시 표시되고 �
   assert.match(html, /class="save-target-overlay"[\s\S]*id="saveTargetBar"[\s\S]*<main>/);
   assert.match(styles, /\.save-target-overlay\{[^}]*flex:0 0 0;[^}]*height:0;[^}]*pointer-events:none/);
   assert.match(styles, /\.save-target-bar\{[^}]*position:absolute;[^}]*pointer-events:auto/);
-  assert.match(documents, /badge\.title = target\.mode \? _t\(target\.summary \|\| target\.title\)/);
+  assert.match(html, /id="saveStatusBadge" class="save-status-badge"/);
+  assert.doesNotMatch(html, /id="activeDocStatus"/);
+  assert.match(documents, /badge\.textContent = standaloneCopy \? _t\(statusText\) : targetText \+ " · " \+ _t\(statusText\)/);
   assert.match(documents, /doc\._saveTargetNoticeKey !== noticeKey/);
   assert.match(documents, /saveTargetNoticeTimer = setTimeout\([\s\S]*SAVE_TARGET_NOTICE_MS/);
   assert.match(documents, /barLabel\.textContent = _t\(target\.label\)/);
+  assert.match(documents, /const actionLabel = _t\("저장"\)/);
   assert.match(documents, /const headerSave = byId\("btnDownload"\)[\s\S]*headerSave\.title = headerLabel/);
   assert.match(documents, /querySelectorAll\("\.run-save"\)[\s\S]*button\.textContent = actionLabel/);
-  assert.match(notebook, /const saveLabel = target && target\.mode \? target\.label : "저장"/);
+  assert.match(notebook, /const saveLabel = "저장"/);
 });

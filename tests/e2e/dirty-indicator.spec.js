@@ -31,8 +31,8 @@ test("텍스트를 편집하면 상단 배지와 사이드바 표시가 함께 �
   const editor = page.locator(".code-input").first();
   await expect(editor).toBeVisible();
 
-  // 편집 전: 상단 배지도 사이드바 표시도 꺼져 있다
-  await expect(page.locator("#activeDocStatus")).toBeHidden();
+  // 편집 전: 통합 배지는 저장 위치만 안내하고 사이드바 수정 표시는 꺼져 있다
+  await expect(page.locator("#saveStatusBadge")).toHaveText("사본으로 저장");
   await expect.poll(sidebarMark).toBe("");
 
   await editor.click();
@@ -40,13 +40,13 @@ test("텍스트를 편집하면 상단 배지와 사이드바 표시가 함께 �
   await page.keyboard.type("!");
 
   // 편집 후: 둘 다 켜져야 한다 (사이드바 쪽이 핵심 — 이전에는 여기서 안 켜졌다)
-  await expect(page.locator("#activeDocStatus")).toBeVisible();
-  await expect(page.locator("#activeDocStatus")).toHaveClass(/dirty/);
+  await expect(page.locator("#saveStatusBadge")).toHaveText("사본 · 저장 안 됨");
+  await expect(page.locator("#saveStatusBadge")).toHaveClass(/dirty/);
   await expect.poll(sidebarMark).toBe("저장 후 수정됨");
 
-  // 원래 내용으로 되돌리면 둘 다 꺼져야 한다
+  // 원래 내용으로 되돌리면 통합 배지는 저장 위치 안내로 돌아가고 수정 표시는 꺼져야 한다
   await page.keyboard.press("Backspace");
-  await expect(page.locator("#activeDocStatus")).toBeHidden();
+  await expect(page.locator("#saveStatusBadge")).toHaveText("사본으로 저장");
   await expect.poll(sidebarMark).toBe("");
 
   expect(errors).toEqual([]);

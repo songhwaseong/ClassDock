@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 /* ===== Word(.docx) 문단 편집 화면 (설계: docs/워드-문단편집-설계.md) =====
    보기 모드는 docx-preview 가 그린 화면 그대로 두고, 편집 모드에서만 자체 문단 화면을 만든다.
@@ -596,9 +596,6 @@ const MNDocxEditor = (() => {
 
     const bar = document.createElement("div");
     bar.className = "docx-editor-bar";
-    const title = document.createElement("strong");
-    title.className = "docx-editor-title";
-    title.textContent = "문단 편집";
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "docx-editmode-btn";
@@ -845,7 +842,7 @@ const MNDocxEditor = (() => {
       formatButton("column-width", "열＋", "선택한 열 너비 늘리기", 240),
       formatButton("row-height", "높이−", "선택한 행 높이 줄이기", -120),
       formatButton("row-height", "높이＋", "선택한 행 높이 늘리기", 120));
-    bar.append(title, toggle, undoBtn, redoBtn, saveBtn, toolLaunchers, status,
+    bar.append(toggle, undoBtn, redoBtn, saveBtn, toolLaunchers, status,
       documentTools, textTools, paragraphTools, tableTools);
     host.insertBefore(bar, previewEl);
 
