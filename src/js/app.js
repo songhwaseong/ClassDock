@@ -1262,7 +1262,7 @@ function wire(){
   });
   refreshSubwayKeyStatus();
 
-  /* ── 버스 실시간(TAGO, 공공데이터포털 인증키) ── 지하철 키와 같은 규칙이다. */
+  /* ── 공공데이터포털 일반 인증키 ── 내부 ID·엔드포인트의 tago 이름은 기존 설치와 호환하려고 유지한다. */
   const tagoKeyInput = byId("settingTagoKey");
   const tagoRemember = byId("settingTagoRemember");
   const tagoRememberWrap = byId("settingTagoRememberWrap");
@@ -1296,17 +1296,17 @@ function wire(){
         persistentSupported:status.persistentSupported !== false };
       if (message) setTagoStatus(message, kind);
       else if (tagoKeyStatus.hasKey) setTagoStatus(tagoKeyStatus.remembered
-        ? "버스 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
-        : "버스 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
-      else setTagoStatus("인증키가 없어 지도의 '버스'를 쓸 수 없습니다.", "");
-    } catch(_){ setTagoStatus("버스 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+        ? "공공데이터포털 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "공공데이터포털 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setTagoStatus("인증키가 없어 지도에서 버스·항공 운항·여객선을 쓸 수 없습니다.", "");
+    } catch(_){ setTagoStatus("공공데이터포털 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
     syncTagoFields();
   };
   tagoTest.addEventListener("click", async () => {
     const key = tagoKeyInput.value.trim();
     if (!key){ setTagoStatus("저장할 공공데이터포털 인증키를 입력해 주세요.", "bad"); tagoKeyInput.focus(); return; }
     tagoTest.disabled = true; tagoClear.disabled = true;
-    setTagoStatus("TAGO 연결을 시험하는 중…", "");
+    setTagoStatus("공공데이터포털 인증키를 저장하는 중…", "");
     try {
       const response = await fetch("/tago-key?remember=" + (tagoRemember.checked ? "1" : "0"), {
         method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
@@ -1314,13 +1314,11 @@ function wire(){
       });
       if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
       tagoKeyInput.value = "";
-      await refreshTagoKeyStatus("TAGO 연결에 성공했고 키를 저장했습니다.", "ok");
+      await refreshTagoKeyStatus("공공데이터포털 인증키를 저장했습니다. 기능마다 필요한 서비스를 별도로 활용신청해야 합니다.", "ok");
     } catch(error){
       const reason = error && error.message;
-      setTagoStatus(reason === "tago-key-save-failed" ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
-        : reason === "tago-quota" ? "오늘 조회 한도를 다 쓴 키입니다. 내일 다시 시험해 주세요."
-        : reason === "tago-failed" ? "TAGO에 연결하지 못했습니다. 인터넷 연결을 확인하고 다시 시험해 주세요."
-        : "인증키를 확인하지 못했습니다. 공공데이터포털에서 TAGO 버스노선정보를 활용신청한 키인지 확인해 주세요. 신청 직후에는 반영까지 시간이 걸릴 수 있습니다.", "bad");
+      setTagoStatus(reason === "tago-key-save-failed" ? "공공데이터포털 인증키를 암호화하여 저장하지 못했습니다."
+        : "인증키 형식이 올바르지 않습니다. 공공데이터포털의 일반 인증키를 그대로 붙여 넣어 주세요.", "bad");
       syncTagoFields();
     }
   });
@@ -1330,7 +1328,7 @@ function wire(){
       const response = await fetch("/tago-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
       if (!response.ok) throw new Error("HTTP " + response.status);
       tagoKeyInput.value = "";
-      await refreshTagoKeyStatus("버스 인증키를 지웠습니다.", "ok");
+      await refreshTagoKeyStatus("공공데이터포털 인증키를 지웠습니다.", "ok");
     } catch(_){ setTagoStatus("인증키를 지우지 못했습니다.", "bad"); syncTagoFields(); }
   });
   refreshTagoKeyStatus();

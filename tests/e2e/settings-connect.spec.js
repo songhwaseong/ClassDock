@@ -1,4 +1,4 @@
-// 설정 '연결' 탭 — 인터넷 서비스 인증키(지도 검색·환율·지하철·버스)를 한 줄씩 접어 둔다.
+// 설정 '연결' 탭 — 인터넷 서비스 인증키(지도 검색·환율·지하철·공공데이터포털)를 한 줄씩 접어 둔다.
 const { test, expect } = require("@playwright/test");
 
 test("연결 탭은 서비스를 접힌 한 줄로 보여 주고 배지로 키 상태를 알린다", async ({ page }) => {
@@ -27,6 +27,7 @@ test("연결 탭은 서비스를 접힌 한 줄로 보여 주고 배지로 키 �
   await expect(page.locator("#settingSubwayBadge")).toHaveText("키 등록됨");
   await expect(page.locator("#settingSubwayBadge")).toHaveAttribute("data-kind", "ok");
   await expect(page.locator("#settingTagoBadge")).toHaveText("EXE에서만");
+  await expect(items.filter({ has:page.locator("#settingTagoKey") }).locator(".conn-name")).toHaveText("공공데이터포털");
   await expect(page.locator("#settingMapSearchBadge")).toHaveText("OpenStreetMap");
 
   // 펼치면 입력칸이 보이고, 다른 줄을 펼치면 앞 줄은 닫힌다(한 번에 하나).
@@ -52,4 +53,5 @@ test("영어 화면에서는 환율·지하철 키 상태 문구도 영어로 �
   await page.locator('[data-settings-tab="connect"]').click();
   await expect(page.locator("#settingExchangeRateStatus")).toHaveText("Exchange rate key settings are available in ClassDock.exe.");
   await expect(page.locator("#settingSubwayStatus")).toHaveText("The subway key is stored encrypted for this Windows user.");
+  await expect(page.locator("#settingTagoStatus")).toHaveText("Data.go.kr key settings are available in ClassDock.exe.");
 });

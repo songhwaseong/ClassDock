@@ -1237,7 +1237,7 @@ cd myOffice</code></pre>
 
 <ul>
   <li>인터넷이 연결된 <strong>ClassDock EXE</strong>에서 지도 도구막대의 <strong>🚌 버스</strong>를 누르고, 창 위쪽에서 <strong>도시</strong>를 고릅니다. 처음엔 제주가 골라져 있습니다. <strong>서울특별시</strong>는 TAGO에 없어서 서울시 버스정보에서 따로 받아 옵니다.</li>
-  <li>처음 한 번은 <strong>공공데이터포털 인증키</strong>가 필요합니다. <a href="https://www.data.go.kr/">공공데이터포털</a>에서 <strong>국토교통부_(TAGO)_버스노선정보</strong>와 <strong>국토교통부_(TAGO)_버스위치정보</strong>를 둘 다 활용신청한 뒤, 받은 일반 인증키를 <strong>설정 → 연결 → 버스 실시간</strong>에 넣고 <strong>키 저장·연결 시험</strong>을 누릅니다. 인코딩 키와 디코딩 키 어느 쪽을 넣어도 됩니다. 신청 직후에는 키가 반영되기까지 시간이 걸릴 수 있습니다.</li>
+  <li>처음 한 번은 <strong>공공데이터포털 인증키</strong>가 필요합니다. <a href="https://www.data.go.kr/">공공데이터포털</a>에서 <strong>국토교통부_(TAGO)_버스노선정보</strong>와 <strong>국토교통부_(TAGO)_버스위치정보</strong>를 둘 다 활용신청한 뒤, 받은 일반 인증키를 <strong>설정 → 연결 → 공공데이터포털</strong>에 넣고 <strong>키 저장</strong>을 누릅니다. 인코딩 키와 디코딩 키 어느 쪽을 넣어도 됩니다. 저장할 때는 키 형식만 확인하고, 버스를 열 때 해당 서비스의 활용신청 여부를 확인합니다. 신청 직후에는 키가 반영되기까지 시간이 걸릴 수 있습니다.</li>
   <li>서울은 <strong>같은 키</strong>로 <strong>서울특별시_노선정보조회</strong>·<strong>서울특별시_버스위치정보조회</strong> 서비스를, 정류장 도착·근처 정류장까지 보려면 <strong>서울특별시_정류소정보조회</strong> 서비스도 따로 활용신청해야 합니다. 신청할 서비스 전체 목록과 방법은 <a href="docs/API-인증키-안내.md">API 인증키 안내</a>에 있습니다.</li>
   <li>키는 ClassDock 런처에만 전달되며 지도 문서·작업공간에는 저장되지 않습니다. 개발 계정은 하루 조회 한도가 있으므로 한도를 다 쓰면 다음 날까지 위치를 받을 수 없습니다.</li>
   <li>노선번호(예: <strong>201</strong>)를 검색하고 출발·종점과 <strong>정류장 목록</strong>을 확인해 세부 노선을 선택한 뒤 <strong>지도에 표시</strong>를 누릅니다. 같은 번호에도 방향과 운행 경로가 여러 개 있습니다.</li>

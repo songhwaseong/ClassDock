@@ -87,7 +87,7 @@ const MNJejuBusMap = (() => {
       position:"인증키가 서울 버스 위치에 쓰일 수 없어요. 공공데이터포털에서 '서울특별시_버스위치정보조회 서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요.",
       arrivals:"인증키가 서울 정류장 정보에 쓰일 수 없어요. 공공데이터포털에서 '서울특별시_정류소정보조회 서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요."};
     seoulKeyInvalidText.route=seoulKeyInvalidText.routes;seoulKeyInvalidText.nearby=seoulKeyInvalidText.arrivals;
-    const failureText=(error,fallback,kind="",askedCity=city)=>t(error && error.message==="bus-key-required"?"설정의 '버스 실시간'에 공공데이터포털 인증키를 넣어 주세요."
+    const failureText=(error,fallback,kind="",askedCity=city)=>t(error && error.message==="bus-key-required"?"설정의 '공공데이터포털'에 인증키를 넣어 주세요."
       :error && error.message==="bus-key-invalid"?(isSeoul(askedCity)?seoulKeyInvalidText[kind || "position"]
         :keyInvalidText[kind] || "인증키가 이 조회에 쓰일 수 없어요. 공공데이터포털에서 TAGO 버스노선정보·버스위치정보 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요.")
       :error && error.message==="bus-quota"?"오늘 조회 한도를 다 썼어요. 내일 다시 이용해 주세요.":fallback);

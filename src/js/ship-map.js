@@ -74,7 +74,7 @@ const MNShipMap = (() => {
     if(!portInput.value)portInput.value="목포";
     const remember=()=>{try{localStorage.setItem("mapShipBoard",JSON.stringify({port:portInput.value.trim(),hidePast:hidePast.checked}));}catch(_){}};
 
-    const failureText=(error,fallback)=>t(error && error.message==="bus-key-required" ? "설정의 '버스 실시간'에 공공데이터포털 인증키를 넣어 주세요."
+    const failureText=(error,fallback)=>t(error && error.message==="bus-key-required" ? "설정의 '공공데이터포털'에 인증키를 넣어 주세요."
       : error && error.message==="bus-key-invalid" ? "인증키가 여객선 시간표에 쓰일 수 없어요. 공공데이터포털에서 '국토교통부_(TAGO)_국내선박운항정보' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요."
       : error && error.message==="bus-quota" ? "오늘 조회 한도를 다 썼어요. 내일 다시 이용해 주세요." : fallback);
 

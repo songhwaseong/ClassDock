@@ -77,7 +77,7 @@ const MNFlightMap = (() => {
     const remember=()=>{try{localStorage.setItem("mapFlightBoard",JSON.stringify({airport:airportSelect.value,io:ioSelect.value,line:lineSelect.value,hideDone:hideDone.checked}));}catch(_){}};
 
     // 키·한도 문제는 기다려도 풀리지 않는다. 활용신청은 API 마다 따로라 어느 것을 신청할지 알려 준다.
-    const failureText=(error,fallback,kind)=>t(error && error.message==="bus-key-required" ? "설정의 '버스 실시간'에 공공데이터포털 인증키를 넣어 주세요."
+    const failureText=(error,fallback,kind)=>t(error && error.message==="bus-key-required" ? "설정의 '공공데이터포털'에 인증키를 넣어 주세요."
       : error && error.message==="bus-key-invalid" ? (kind==="search"
         ? "인증키가 편명 찾기에 쓰일 수 없어요. 공공데이터포털에서 '한국공항공사_실시간 항공기 운항정보 검색' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요."
         : "인증키가 항공 운항 조회에 쓰일 수 없어요. 공공데이터포털에서 '한국공항공사_실시간 항공기 운항정보 조회' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 시간이 걸릴 수 있어요.")

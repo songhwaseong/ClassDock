@@ -95,7 +95,7 @@ test("서버 실패는 운행 차량 없음과 구분하고 재시도 간격을 
 test("인증키가 없으면 다시 시도한다고 하지 않고 설정을 안내한다",async()=>{
   const h=harness();await h.form.fire("submit");h.start.click();
   h.pending[0].task.reject(new Error("bus-key-required"));await flush();
-  assert.match(h.status.textContent,/버스 실시간/);assert.doesNotMatch(h.status.textContent,/다시 시도/);
+  assert.match(h.status.textContent,/공공데이터포털/);assert.doesNotMatch(h.status.textContent,/다시 시도/);
   assert.equal(h.requests.some(r=>r.kind==="shape"),false);
   h.controller.destroy();
 });

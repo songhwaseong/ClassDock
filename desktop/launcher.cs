@@ -5916,7 +5916,8 @@ class ClassDockLauncher
             && Int32.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out total) ? total : 0;
     }
 
-    // TAGO 인증키. 지하철 키와 같은 규칙 — 키 문자열은 런처에만 두고 브라우저에는 보유 여부만 알린다.
+    // 공공데이터포털 일반 인증키. tago 이름과 파일은 기존 설치와 호환하려고 유지한다.
+    // 키 문자열은 런처에만 두고 브라우저에는 보유 여부만 알린다.
     static readonly object TagoKeyLock = new object();
     static readonly byte[] TagoKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.TagoKey.v1");
     static readonly string TagoKeyFile = Path.Combine(
@@ -6002,11 +6003,8 @@ class ClassDockLauncher
         string key = (value ?? "").Trim();
         error = "tago-key-invalid";
         if (!ValidTagoKey(key)) return false;
-        // 시험 조회는 제주 201번 노선 검색. 자료 없음(03)도 키는 멀쩡하다는 뜻이다.
-        // 버스위치정보는 따로 활용신청하는 API 라, 노선 검색만 통과하고 위치에서 막히면 지도 화면이 '키가 맞지 않아요'로 알린다.
-        try { TagoGet("BusRouteInfoInqireService", "getRouteNoList", "routeNo=201&numOfRows=1", key, 1024 * 1024); }
-        catch (TagoException failure) { error = failure.Reason == "bus-quota" ? "tago-quota" : failure.Reason == "bus-key-invalid" ? "tago-key-invalid" : "tago-failed"; return false; }
-        catch { error = "tago-failed"; return false; }
+        // 어느 서비스를 신청했는지는 사용자마다 다르다. 저장할 때 TAGO를 시험하면 항공·여객선만
+        // 신청한 정상 키도 거절하므로 여기서는 형식만 확인하고, 서비스별 권한·한도는 실제 조회가 알린다.
         string previous = CurrentTagoKey();
         lock (TagoKeyLock)
         {
