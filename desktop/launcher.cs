@@ -1023,6 +1023,8 @@ class ClassDockLauncher
             if (path == "/can-proxy-rates" || path == "/exchange-rate-key-status") return true;
             if (path.StartsWith("/exchange-rate?", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-jeju-bus" || path.StartsWith("/jeju-bus-", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-flight" || path.StartsWith("/flight-", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-ship" || path.StartsWith("/ship-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
             if (path == "/tago-key-status") return true;
@@ -3318,7 +3320,7 @@ class ClassDockLauncher
                         WriteResponse(stream, error == "kakao-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
                             "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
                 }
-                else if (method == "GET" && path == "/can-proxy-jeju-bus")
+                else if (method == "GET" && (path == "/can-proxy-jeju-bus" || path == "/can-proxy-flight" || path == "/can-proxy-ship"))
                 {
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
                 }
@@ -3358,15 +3360,27 @@ class ClassDockLauncher
                     lock (JejuBusCatalogLock) { JejuBusCatalogCancel = true; }
                     WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(JejuBusCatalogStatusJson()));
                 }
-                else if (method == "GET" && path.StartsWith("/jeju-bus-", StringComparison.Ordinal))
+                else if (method == "GET" && (path.StartsWith("/jeju-bus-", StringComparison.Ordinal)
+                    || path.StartsWith("/flight-board?", StringComparison.Ordinal) || path.StartsWith("/flight-search?", StringComparison.Ordinal)
+                    || path == "/ship-ports" || path.StartsWith("/ship-ports?", StringComparison.Ordinal)
+                    || path.StartsWith("/ship-schedule?", StringComparison.Ordinal)))
                 {
+                    // 항공 운항(한국공항공사)도 같은 공공데이터포털 키·같은 캐시·같은 오류 알림을 쓴다. 조회 이름만 다르다.
                     int question = path.IndexOf('?');
-                    string kind = (question < 0 ? path : path.Substring(0, question)).Substring("/jeju-bus-".Length);
+                    string route = question < 0 ? path : path.Substring(0, question);
+                    string kind = route == "/flight-board" ? "flights" : route == "/flight-search" ? "flight"
+                        : route == "/ship-ports" ? "ports" : route == "/ship-schedule" ? "ships" : route.Substring("/jeju-bus-".Length);
                     string value = kind == "cities" ? "all"
                         : kind == "nearby" ? (QueryValue(path, "lat") ?? "").Trim() + "," + (QueryValue(path, "lng") ?? "").Trim()
+                        : kind == "flights" ? String.Join("-", new[] { "airport", "io", "line", "page" }.Select(name => (QueryValue(path, name) ?? "").Trim()))
+                        : kind == "flight" ? (QueryValue(path, "fln") ?? "").Trim().ToUpperInvariant()
+                        : kind == "ports" ? "all"
+                        : kind == "ships" ? (QueryValue(path, "port") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : (QueryValue(path, kind == "routes" ? "keyword" : kind == "arrivals" ? "nodeId" : "routeId") ?? "").Trim();
-                    string busCity = (QueryValue(path, "city") ?? "").Trim();
-                    if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby")
+                    bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships";
+                    string busCity = noCity ? "" : (QueryValue(path, "city") ?? "").Trim();
+                    if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby"
+                            || kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships")
                         || !ValidJejuBusValue(kind, value) || !ValidBusCity(busCity))
                     { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
                     byte[] result; DateTime fetchedAt; bool stale; int retry; string busError;
@@ -5501,6 +5515,18 @@ class ClassDockLauncher
         if (String.IsNullOrEmpty(value)) return false;
         if (kind == "routes") return ValidBusRouteNumber(value);
         if (kind == "cities") return value == "all";
+        // 항공: 게시판 = "공항-출도착-국내국제-쪽"(GMP-O-D-1), 편명 = KE1201·7C101·ZE781A.
+        if (kind == "flights") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[A-Z]{3}-[OI]-[DI]-[1-6]$");
+        if (kind == "flight") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[A-Z0-9]{2}[0-9]{1,4}[A-Z]?$");
+        // 여객선: 항구 목록은 통째로 한 번, 시간표는 "항구ID-날짜"(SEA10100-20260919). 날짜는 어제~열흘 뒤까지만.
+        if (kind == "ports") return value == "all";
+        if (kind == "ships")
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(value, "^SEA[0-9]{5}-([0-9]{8})$");
+            DateTime day;
+            if (!match.Success || !DateTime.TryParseExact(match.Groups[1].Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day)) return false;
+            return day >= DateTime.Today.AddDays(-1) && day <= DateTime.Today.AddDays(10);
+        }
         if (kind == "nearby")
         {
             // "위도,경도" — 대한민국 범위 안, 소수 넷째 자리(약 10m)로 잘라 캐시가 잘게 갈라지지 않게 한다.
@@ -5539,8 +5565,26 @@ class ClassDockLauncher
                 string[] spot = value.Split(',');
                 service = "BusSttnInfoInqireService"; operation = "getCrdntPrxmtSttnList";
                 query = "gpsLati=" + spot[0] + "&gpsLong=" + spot[1] + "&numOfRows=50"; needsCity = false; break;
+            case "flights":
+            {
+                // 한 쪽 100줄이 한계다(넘게 주면 HTTP 200 에 게이트웨이 오류 04). 큰 게시판은 화면이 쪽을 넘겨 묻는다.
+                string[] board = value.Split('-');
+                service = "flight-status/info"; operation = "";
+                query = "schAirCode=" + board[0] + "&schIOType=" + board[1] + "&schLineType=" + board[2] + "&numOfRows=100&pageNo=" + board[3];
+                needsCity = false; break;
+            }
+            case "flight": service = "flight-search/info"; operation = ""; query = "schFln=" + value + "&numOfRows=20"; needsCity = false; break;
+            // 여객선(TAGO 국내선박운항정보). 도시코드가 없다. 가장 붐비는 항구(목포)가 하루 138편이라 한 쪽 500줄이면 된다.
+            case "ports": service = "DmstcShipNvgInfo"; operation = "GetPortList"; query = "numOfRows=1000&pageNo=1"; needsCity = false; break;
+            case "ships":
+            {
+                string[] ship = value.Split('-');
+                service = "DmstcShipNvgInfo"; operation = "GetShipOpratInfoList";
+                query = "depNodeId=" + ship[0] + "&depPlandTime=" + ship[1] + "&numOfRows=500&pageNo=1"; needsCity = false; break;
+            }
             default: return false;
         }
+        bool kac = kind == "flights" || kind == "flight";
         // 서울은 근처 정류장도 서울 API 로 묻는다(TAGO 좌표 조회에는 서울 정류장이 없다). 도시 목록은 TAGO 것 그대로.
         bool seoul = city == SeoulBusCity && kind != "cities";
         if (seoul)
@@ -5561,8 +5605,9 @@ class ClassDockLauncher
         }
         if (needsCity) query = "cityCode=" + city + "&" + query;
         string cacheKey = kind + ":" + city + ":" + value;
-        // 도착 예정은 금방 바뀐다. 목록·정류장은 하루 두어도 된다.
-        int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : 86400;
+        // 도착 예정은 금방 바뀐다. 목록·정류장은 하루 두어도 된다. 공항 게시판은 1분이면 충분하다.
+        // 여객선 시간표는 하루 안에 거의 바뀌지 않는다(상태 필드도 없다). 10분이면 충분하다.
+        int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600 : 86400;
         lock (JejuBusGates[(cacheKey.GetHashCode() & Int32.MaxValue) % JejuBusGates.Length])
         {
             JejuBusCacheEntry entry;
@@ -5588,7 +5633,8 @@ class ClassDockLauncher
                 try
                 {
                     int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
-                    byte[] received = seoul ? SeoulBusGet(service, query, key, max) : TagoGetRaw(service, operation, query, key, max);
+                    byte[] received = seoul ? SeoulBusGet(service, query, key, max)
+                        : kac ? KacGet(service, query, key, max) : TagoGetRaw(service, operation, query, key, max);
                     entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue; entry.Error = ""; entry.Upstream = "";
                     data = entry.Data; fetchedAt = entry.FetchedAt; return true;
                 }
@@ -5656,6 +5702,21 @@ class ClassDockLauncher
         if (code2 == "22") throw new TagoException("bus-quota", upstream2);
         if (code2 == "20" || code2 == "30" || code2 == "31" || code2 == "32") throw new TagoException("bus-key-invalid", upstream2);
         throw new TagoException("bus-invalid-data", upstream2);
+    }
+    /* 항공 운항 = 한국공항공사(B551178). TAGO 와 같은 공공데이터포털 키를 쓰지만 활용신청은 따로다
+       ('실시간 항공기 운항정보 조회'·'검색'). 봉투 모양·결과 코드는 TAGO 와 같아 TagoResultCode 로 읽는다.
+       틀린 키·신청 안 한 서비스는 HTTP 403 빈 본문으로 온다(2026-09-19 실측) → BusHttpGet 이 키 문제로 바꾼다. */
+    const string KacBase = "https://apis.data.go.kr/B551178/";
+    static byte[] KacGet(string service, string query, string key, int max)
+    {
+        string url = KacBase + service + "?serviceKey=" + TagoKeyParameter(key) + "&type=json&" + query;
+        byte[] received = BusHttpGet(url, max, TagoResultCode, "22");
+        string code = TagoResultCode(received);
+        if (code == "00" || code == "03") return received;
+        string upstream = "HTTP 200 - " + (code.Length > 0 ? code : "?");
+        if (code == "22") throw new TagoException("bus-quota", upstream);
+        if (code == "20" || code == "30" || code == "31" || code == "32") throw new TagoException("bus-key-invalid", upstream);
+        throw new TagoException("bus-invalid-data", upstream);
     }
     // 버스 조회 한 번(TAGO·서울 공용). 401·403·429 는 거절 본문의 까닭 코드를 읽어 키 문제·한도 초과로 바꾼다.
     static byte[] BusHttpGet(string url, int max, Func<byte[], string> reasonOf, string quotaReason)

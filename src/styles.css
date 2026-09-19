@@ -4376,6 +4376,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapOffline .map-toolvis-offline,
   html.hide-tool-mapJejuBus .map-toolvis-jeju-bus,
   html.hide-tool-mapSubway .map-toolvis-subway,
+  html.hide-tool-mapFlight .map-toolvis-flight,
+  html.hide-tool-mapShip .map-toolvis-ship,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
   html.hide-tool-musicKey .music-toolvis-key,
@@ -7727,6 +7729,65 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-jeju-bus-arrival-kind{font-size:11px;opacity:.75}
 .map-jeju-bus-arrival-status{margin:6px 0 0;font-size:12px;opacity:.85}
 .map-jeju-bus-status{font-weight:600}.map-jeju-bus-note{font-size:12px;opacity:.8}.map-jeju-bus-panel a{color:#087f8c}
+/* 항공 운항 — 버스 칸과 같은 자리·모양. 둘을 함께 열면 겹치므로 머리를 끌어 옮긴다. */
+.map-flight-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
+.map-flight-panel[hidden],.map-flight-dests[hidden],.map-flight-list[hidden]{display:none}
+.map-flight-heading,.map-flight-board-form,.map-flight-tools,.map-flight-search{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.map-flight-heading{justify-content:space-between}
+.map-flight-board-form .map-flight-airport{flex:1 1 130px;min-width:0}
+.map-flight-hide{display:inline-flex;align-items:center;gap:4px;margin-right:auto;font-size:12px;cursor:pointer}
+.map-flight-search{margin:10px 0 6px;padding-top:10px;border-top:1px solid #98b9bd66}
+.map-flight-search input{flex:1;min-width:100px;text-transform:uppercase}
+.map-flight-summary{margin:0 0 6px;font-weight:600}
+.map-flight-dests{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;max-height:96px;overflow:auto}
+.map-flight-dests .map-flight-dest{padding:1px 8px;min-height:0;font-size:12px;border-radius:999px}
+.map-flight-dest.is-on{background:#1d6fb8;border-color:#1d6fb8;color:#fff}
+.map-flight-dest.is-delayed:not(.is-on){border-color:#d97706;color:#b45309}
+.map-flight-dest.is-cancelled:not(.is-on),.map-flight-dest.is-diverted:not(.is-on){border-color:#c0392b;color:#c0392b}
+.map-flight-list{list-style:none;margin:0 0 4px;padding:0;max-height:260px;overflow:auto;border:1px solid #98b9bd66;border-radius:8px}
+.map-flight-item{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;padding:4px 8px;border-bottom:1px solid #98b9bd33}
+.map-flight-item:last-child{border-bottom:0}
+.map-flight-item.is-departed,.map-flight-item.is-arrived{opacity:.6}
+.map-flight-time{min-width:44px;font-variant-numeric:tabular-nums;font-weight:600}
+.map-flight-changed{margin-left:4px;color:#b45309;font-weight:600}
+.map-flight-changed.is-early{color:#15803d}
+html[data-theme="dark"] .map-flight-changed{color:#fbbf24}html[data-theme="dark"] .map-flight-changed.is-early{color:#4ade80}
+html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}html[data-theme="dark"] .map-flight-dest.is-cancelled:not(.is-on),html[data-theme="dark"] .map-flight-dest.is-diverted:not(.is-on){color:#f87171}
+.map-flight-number{min-width:58px}
+.map-flight-airline{font-size:11px;opacity:.75}
+.map-flight-place{flex:1;min-width:70px;overflow-wrap:anywhere}
+.map-flight-badge{padding:0 6px;border-radius:6px;background:#64748b;color:#fff;font-size:11px;white-space:nowrap}
+.map-flight-badge.is-scheduled{background:transparent;color:inherit;border:1px solid #98b9bd;opacity:.8}
+.map-flight-badge.is-checkin{background:#0e7490}.map-flight-badge.is-boarding{background:#15803d}
+.map-flight-badge.is-departed,.map-flight-badge.is-arrived{background:#475569}
+.map-flight-badge.is-delayed{background:#d97706}.map-flight-badge.is-cancelled{background:#c0392b}.map-flight-badge.is-diverted{background:#7c3aed}
+.map-flight-gate{font-size:11px;opacity:.75}
+.map-flight-empty{padding:8px;font-size:12px;opacity:.85}
+.map-flight-status{margin:6px 0 0;font-size:12px}.map-flight-note{font-size:12px;opacity:.8}.map-flight-panel a{color:#087f8c}
+/* 여객선 시간표 — 항공 칸과 같은 자리·모양. */
+.map-ship-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
+.map-ship-panel[hidden],.map-ship-dests[hidden],.map-ship-list[hidden],.map-ship-near-list[hidden]{display:none}
+.map-ship-heading,.map-ship-form,.map-ship-tools,.map-ship-near-tools{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.map-ship-heading{justify-content:space-between}
+.map-ship-form .map-ship-port{flex:1 1 140px;min-width:0}
+.map-ship-hide{display:inline-flex;align-items:center;gap:4px;margin-right:auto;font-size:12px;cursor:pointer}
+.map-ship-near-list{display:flex;flex-wrap:wrap;gap:4px;margin:-4px 0 10px}
+.map-ship-near-list .map-ship-near{padding:1px 8px;min-height:0;font-size:12px}
+.map-ship-near-note{margin:0;font-size:12px;opacity:.85}
+.map-ship-summary{margin:0 0 6px;font-weight:600}
+.map-ship-dests{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;max-height:96px;overflow:auto}
+.map-ship-dests .map-ship-dest{padding:1px 8px;min-height:0;font-size:12px;border-radius:999px}
+.map-ship-dest.is-on{background:#0e7490;border-color:#0e7490;color:#fff}
+.map-ship-dest.is-unplaced:not(.is-on){border-style:dashed;opacity:.75}
+.map-ship-list{list-style:none;margin:0 0 4px;padding:0;max-height:280px;overflow:auto;border:1px solid #98b9bd66;border-radius:8px}
+.map-ship-item{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;padding:4px 8px;border-bottom:1px solid #98b9bd33}
+.map-ship-item:last-child{border-bottom:0}
+.map-ship-time{min-width:40px;font-variant-numeric:tabular-nums;font-weight:600}
+.map-ship-name{min-width:70px}
+.map-ship-stops{flex:1;min-width:120px;overflow-wrap:anywhere}
+.map-ship-fare{font-size:11px;opacity:.75;white-space:nowrap}
+.map-ship-empty{padding:8px;font-size:12px;opacity:.85}
+.map-ship-status{margin:6px 0 0;font-size:12px}.map-ship-note{font-size:12px;opacity:.8}.map-ship-panel a{color:#087f8c}
 .map-jeju-bus-icon{display:inline-flex;align-items:center;gap:3px;padding:2px 5px;border:2px solid white;border-radius:8px;background:#087f8c;color:white;box-shadow:0 1px 4px #0006;font:bold 11px/18px sans-serif;white-space:nowrap}
 .map-jeju-bus-number{display:none}.bus-wide-label .map-jeju-bus-number{display:inline}
 .map-jeju-bus-marker.bus-relocated .map-jeju-bus-icon{animation:jejuBusAppear .7s ease-out}

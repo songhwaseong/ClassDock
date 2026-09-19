@@ -201,6 +201,9 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
     // 캡처는 실시간 열차 층이 걸어 두는 역 이름 훅도 부른다(꺼져 있으면 빈 배열).
     subwayCaptureLabels:()=>[],
     jejuBus:{freeze(){busFrozen=true;return ()=>{busFrozen=false;};},captureNote:()=>"bus snapshot"},
+    // 항공 운항 층도 같은 자리에서 멈추고 출처 글을 붙인다(꺼져 있으면 빈 글).
+    flights:{freeze(){return ()=>{};},captureNote:()=>""},
+    ships:{freeze(){return ()=>{};},captureNote:()=>""},
     mapCaptureDataUrl:async(stage,attribution)=>{
       assert.equal(busFrozen,true); assert.match(attribution,/bus snapshot/);
       const summary=vm.runInContext("radiusExport",context);

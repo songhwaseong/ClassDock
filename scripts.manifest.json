@@ -83,6 +83,11 @@
     "jeju-bus-api.js",
     "jeju-bus-live.js",
     "jeju-bus-map.js",
+    "flight-api.js",
+    "flight-map.js",
+    "ship-ports-data.js",
+    "ship-api.js",
+    "ship-map.js",
     "korea-coords.js",
     "map-viewer.js",
     "timeline.js",
@@ -226,6 +231,11 @@
         "jeju-bus-api.js",
         "jeju-bus-live.js",
         "jeju-bus-map.js",
+        "flight-api.js",
+        "flight-map.js",
+        "ship-ports-data.js",
+        "ship-api.js",
+        "ship-map.js",
         "korea-coords.js",
         "map-viewer.js",
         "timeline.js",
@@ -391,7 +401,9 @@
       "documents.js",
       "file-loaders.js",
       "code-viewer.js",
-      "jeju-bus-map.js"
+      "jeju-bus-map.js",
+      "flight-map.js",
+      "ship-map.js"
     ],
     "timeline.js": [
       "documents.js",
@@ -561,6 +573,13 @@
       "jeju-bus-api.js",
       "jeju-bus-live.js",
       "jeju-bus-routes-data.js"
+    ],
+    "flight-map.js": [
+      "flight-api.js"
+    ],
+    "ship-map.js": [
+      "ship-api.js",
+      "ship-ports-data.js"
     ]
   },
   "moduleBoundaries": [
@@ -726,8 +745,7 @@
         "code-viewer.js",
         "notebook-cells.js",
         "scratchpad.js",
-        "mnote.js",
-        "diary.js"
+        "mnote.js"
       ]
     },
     {

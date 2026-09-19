@@ -2322,7 +2322,7 @@ async function mapStampCapture(pngUrl, attribution, labels){
    확대·이동 단추는 정지 그림에서 쓸모가 없고, 말풍선·이름표는 더 고약하다 — Leaflet 은 닫은
    말풍선을 페이드아웃으로 지워서 closePopup() 뒤에도 200ms 가량 DOM 에 남는다. 그대로 찍으면
    편집 서식이 지도 한복판에 박힌 그림이 나온다(실측 확인). display:none 이면 시점과 무관하다. */
-const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel", ".map-subway-arrival-panel", ".map-choro-hover"];
+const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel", ".map-flight-panel", ".map-ship-panel", ".map-subway-arrival-panel", ".map-choro-hover"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
    html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다.
@@ -4851,6 +4851,8 @@ const MAP_TOOL_ICONS = {
   cloud: '<path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 9.5a4 4 0 0 1 0 8.5"/><path d="M12 11v8M9.5 16.5 12 19l2.5-2.5"/>',
   train: '<rect x="5.5" y="3" width="13" height="14" rx="3"/><path d="M5.5 10.5h13"/><circle cx="9" cy="13.8" r="1" fill="#000"/><circle cx="15" cy="13.8" r="1" fill="#000"/><path d="m8 21 1.5-4M16 21l-1.5-4"/>',
   bus: '<rect x="4.5" y="3.5" width="15" height="14" rx="2.5"/><path d="M4.5 10h15M8 21v-3.5M16 21v-3.5"/><circle cx="8.3" cy="14" r="1" fill="#000"/><circle cx="15.7" cy="14" r="1" fill="#000"/>',
+  plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  ship: '<path d="M12 10.2V14M12 2v3"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M19.4 20A11.6 11.6 0 0 0 21 14l-8.2-3.6a2 2 0 0 0-1.6 0L3 14a11.6 11.6 0 0 0 2.8 7.8"/><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
   save: '<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
   panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/>',
@@ -6019,6 +6021,12 @@ async function mountMapEditor(doc){
   }
 
   const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // 항공 운항(공항 게시판 → 노선 선). 버스와 같은 공공데이터포털 키를 쓴다.
+  const flights = typeof MNFlightMap !== "undefined" ? MNFlightMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // 여객선 시간표(항구 → 도착지 점선). 같은 TAGO 키를 쓴다.
+  const ships = typeof MNShipMap !== "undefined" ? MNShipMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
 
   /* ── 되돌리기 ──
@@ -8429,7 +8437,8 @@ async function mountMapEditor(doc){
      좌표로 바꿔 넘긴다 — 화면 말풍선은 캡처에서 감추므로 그림에 직접 새겨야 남는다. */
   const captureMapPng = async () => {
     const resume = jejuBus ? jejuBus.freeze() : () => {};
-    try { return await captureMapPngFrozen(); } finally { resume(); }
+    const resumeFlights = flights ? flights.freeze() : () => {};
+    try { return await captureMapPngFrozen(); } finally { resume(); resumeFlights(); }
   };
   const captureMapPngFrozen = async () => {
     map.closePopup();
@@ -8495,7 +8504,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote()].filter(Boolean).join(" · "), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 
