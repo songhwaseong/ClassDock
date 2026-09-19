@@ -985,6 +985,7 @@ class ClassDockLauncher
             if (path.StartsWith("/subway-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/jeju-bus-catalog", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/tago-key", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/kosis-key", StringComparison.Ordinal)) return true;
         }
         if (method == "GET")
         {
@@ -1025,13 +1026,16 @@ class ClassDockLauncher
             if (path == "/can-proxy-jeju-bus" || path.StartsWith("/jeju-bus-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-flight" || path.StartsWith("/flight-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-ship" || path.StartsWith("/ship-", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-weather" || path.StartsWith("/weather-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
             if (path == "/tago-key-status") return true;
+            if (path == "/can-proxy-kosis" || path == "/kosis-key-status" || path.StartsWith("/kosis?", StringComparison.Ordinal)) return true;
         }
         if (method == "DELETE" && (path == "/map-search-key" || path == "/exchange-rate-key")) return true;
         if (method == "DELETE" && path == "/subway-key") return true;
         if (method == "DELETE" && path == "/tago-key") return true;
+        if (method == "DELETE" && path == "/kosis-key") return true;
         return false;
     }
 
@@ -3320,7 +3324,7 @@ class ClassDockLauncher
                         WriteResponse(stream, error == "kakao-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
                             "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
                 }
-                else if (method == "GET" && (path == "/can-proxy-jeju-bus" || path == "/can-proxy-flight" || path == "/can-proxy-ship"))
+                else if (method == "GET" && (path == "/can-proxy-jeju-bus" || path == "/can-proxy-flight" || path == "/can-proxy-ship" || path == "/can-proxy-weather"))
                 {
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
                 }
@@ -3363,24 +3367,32 @@ class ClassDockLauncher
                 else if (method == "GET" && (path.StartsWith("/jeju-bus-", StringComparison.Ordinal)
                     || path.StartsWith("/flight-board?", StringComparison.Ordinal) || path.StartsWith("/flight-search?", StringComparison.Ordinal)
                     || path == "/ship-ports" || path.StartsWith("/ship-ports?", StringComparison.Ordinal)
-                    || path.StartsWith("/ship-schedule?", StringComparison.Ordinal)))
+                    || path.StartsWith("/ship-schedule?", StringComparison.Ordinal)
+                    || path.StartsWith("/weather-", StringComparison.Ordinal)))
                 {
                     // 항공 운항(한국공항공사)도 같은 공공데이터포털 키·같은 캐시·같은 오류 알림을 쓴다. 조회 이름만 다르다.
                     int question = path.IndexOf('?');
                     string route = question < 0 ? path : path.Substring(0, question);
                     string kind = route == "/flight-board" ? "flights" : route == "/flight-search" ? "flight"
-                        : route == "/ship-ports" ? "ports" : route == "/ship-schedule" ? "ships" : route.Substring("/jeju-bus-".Length);
+                        : route == "/ship-ports" ? "ports" : route == "/ship-schedule" ? "ships"
+                        : route == "/weather-now" ? "wx-ncst" : route == "/weather-ultra" ? "wx-ultra" : route == "/weather-forecast" ? "wx-fcst"
+                        : route == "/weather-day" ? "wx-day" : route == "/weather-holidays" ? "holidays" : route == "/weather-terms" ? "terms"
+                        : route.StartsWith("/jeju-bus-", StringComparison.Ordinal) ? route.Substring("/jeju-bus-".Length) : "";
                     string value = kind == "cities" ? "all"
+                        : kind.StartsWith("wx-", StringComparison.Ordinal) && kind != "wx-day" ? (QueryValue(path, "nx") ?? "").Trim() + "," + (QueryValue(path, "ny") ?? "").Trim()
+                        : kind == "wx-day" ? (QueryValue(path, "stn") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
+                        : kind == "holidays" || kind == "terms" ? (QueryValue(path, "year") ?? "").Trim() + (QueryValue(path, "month") ?? "").Trim().PadLeft(2, '0')
                         : kind == "nearby" ? (QueryValue(path, "lat") ?? "").Trim() + "," + (QueryValue(path, "lng") ?? "").Trim()
                         : kind == "flights" ? String.Join("-", new[] { "airport", "io", "line", "page" }.Select(name => (QueryValue(path, name) ?? "").Trim()))
                         : kind == "flight" ? (QueryValue(path, "fln") ?? "").Trim().ToUpperInvariant()
                         : kind == "ports" ? "all"
                         : kind == "ships" ? (QueryValue(path, "port") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : (QueryValue(path, kind == "routes" ? "keyword" : kind == "arrivals" ? "nodeId" : "routeId") ?? "").Trim();
-                    bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships";
+                    bool weather = kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst" || kind == "wx-day" || kind == "holidays" || kind == "terms";
+                    bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather;
                     string busCity = noCity ? "" : (QueryValue(path, "city") ?? "").Trim();
                     if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby"
-                            || kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships")
+                            || kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather)
                         || !ValidJejuBusValue(kind, value) || !ValidBusCity(busCity))
                     { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
                     byte[] result; DateTime fetchedAt; bool stale; int retry; string busError;
@@ -3434,6 +3446,63 @@ class ClassDockLauncher
                     bool tagoKeyCleared = ClearTagoKey();
                     WriteResponse(stream, tagoKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
                         Encoding.UTF8.GetBytes(tagoKeyCleared ? "ok" : "tago-key-clear-failed"));
+                }
+                else if (method == "GET" && path == "/can-proxy-kosis")
+                {
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path.StartsWith("/kosis?", StringComparison.Ordinal))
+                {
+                    byte[] kosisData; string kosisError; DateTime kosisAt;
+                    if (TryKosis(path, out kosisData, out kosisAt, out kosisError))
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", kosisData,
+                            "X-ClassDock-Fetched-At: " + kosisAt.ToString("o", CultureInfo.InvariantCulture) + "\r\n");
+                    else
+                    {
+                        int bar = kosisError.IndexOf('|');
+                        string upstream = bar < 0 ? "" : new string(kosisError.Substring(bar + 1).Where(c => c >= ' ' && c < 127).ToArray());
+                        if (bar >= 0) kosisError = kosisError.Substring(0, bar);
+                        WriteResponse(stream,
+                            kosisError == "kosis-bad-request" ? "400 Bad Request"
+                            : kosisError == "kosis-key-required" || kosisError == "kosis-key-invalid" ? "428 Precondition Required"
+                            : kosisError == "kosis-quota" ? "429 Too Many Requests"
+                            : kosisError == "kosis-too-many" ? "413 Payload Too Large" : "503 Service Unavailable",
+                            "text/plain", Encoding.UTF8.GetBytes(kosisError),
+                            upstream.Length > 0 ? "X-ClassDock-Upstream: " + upstream + "\r\n" : "");
+                    }
+                }
+                else if (method == "GET" && path == "/kosis-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(KosisKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/kosis-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string kosisKeyError;
+                    bool kosisKeySaved = TrySetKosisKey(Encoding.UTF8.GetString(body ?? new byte[0]),
+                        QueryValue(path, "remember") == "1", out kosisKeyError);
+                    WriteResponse(stream, kosisKeySaved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(kosisKeySaved ? "ok" : kosisKeyError));
+                }
+                else if (method == "DELETE" && path == "/kosis-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool kosisKeyCleared = ClearKosisKey();
+                    WriteResponse(stream, kosisKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(kosisKeyCleared ? "ok" : "kosis-key-clear-failed"));
                 }
                 else if (method == "GET" && path == "/can-proxy-subway")
                 {
@@ -5527,6 +5596,29 @@ class ClassDockLauncher
             if (!match.Success || !DateTime.TryParseExact(match.Groups[1].Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day)) return false;
             return day >= DateTime.Today.AddDays(-1) && day <= DateTime.Today.AddDays(10);
         }
+        // 날씨: 기상청 격자 "nx,ny"(남한 격자 범위). 지난 날 관측은 "지점-날짜"(108-20260918), 어제까지만.
+        // 특일(공휴일·24절기)은 "YYYYMM".
+        if (kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst")
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(value, "^([0-9]{1,3}),([0-9]{1,3})$");
+            if (!match.Success) return false;
+            int nx = Int32.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), ny = Int32.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+            return nx >= 1 && nx <= 149 && ny >= 1 && ny <= 253;
+        }
+        if (kind == "wx-day")
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(value, "^([0-9]{2,3})-([0-9]{8})$");
+            DateTime day;
+            if (!match.Success || !DateTime.TryParseExact(match.Groups[2].Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day)) return false;
+            return day >= new DateTime(1904, 4, 1) && day <= KmaKstNow().Date.AddDays(-1);
+        }
+        if (kind == "holidays" || kind == "terms")
+        {
+            int year, month;
+            return value.Length == 6 && Int32.TryParse(value.Substring(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out year)
+                && Int32.TryParse(value.Substring(4), NumberStyles.None, CultureInfo.InvariantCulture, out month)
+                && year >= 1950 && year <= 2100 && month >= 1 && month <= 12;
+        }
         if (kind == "nearby")
         {
             // "위도,경도" — 대한민국 범위 안, 소수 넷째 자리(약 10m)로 잘라 캐시가 잘게 갈라지지 않게 한다.
@@ -5582,9 +5674,37 @@ class ClassDockLauncher
                 service = "DmstcShipNvgInfo"; operation = "GetShipOpratInfoList";
                 query = "depNodeId=" + ship[0] + "&depPlandTime=" + ship[1] + "&numOfRows=500&pageNo=1"; needsCity = false; break;
             }
+            // 날씨(기상청)·특일(한국천문연구원). 같은 공공데이터포털 키, 활용신청은 서비스마다 따로.
+            // 발표 시각은 런처가 한국 시각으로 정한다 — 화면이 고르면 아직 안 나온 발표를 물어 03(자료 없음)을 받는다.
+            case "wx-ncst": case "wx-ultra": case "wx-fcst":
+            {
+                string[] grid = value.Split(',');
+                string baseDate, baseTime;
+                KmaBaseTime(kind, KmaKstNow(), out baseDate, out baseTime);
+                service = KmaBase + "VilageFcstInfoService_2.0/"; needsCity = false;
+                operation = kind == "wx-ncst" ? "getUltraSrtNcst" : kind == "wx-ultra" ? "getUltraSrtFcst" : "getVilageFcst";
+                // 단기예보는 발표 하나에 사흘치 × 12종 ≈ 900줄이 온다.
+                query = "dataType=JSON&pageNo=1&numOfRows=" + (kind == "wx-ncst" ? "20" : kind == "wx-ultra" ? "60" : "1000")
+                    + "&base_date=" + baseDate + "&base_time=" + baseTime + "&nx=" + grid[0] + "&ny=" + grid[1];
+                // 캐시는 발표마다 따로 둔다(다음 발표가 나오면 새로 묻게).
+                value = value + "@" + baseDate + baseTime;
+                break;
+            }
+            case "wx-day":
+            {
+                string[] day = value.Split('-');
+                service = KmaBase + "AsosDalyInfoService/"; operation = "getWthrDataList"; needsCity = false;
+                query = "dataType=JSON&pageNo=1&numOfRows=1&dataCd=ASOS&dateCd=DAY&startDt=" + day[1] + "&endDt=" + day[1] + "&stnIds=" + day[0];
+                break;
+            }
+            case "holidays": case "terms":
+                service = KasiBase + "SpcdeInfoService/"; operation = kind == "holidays" ? "getRestDeInfo" : "get24DivisionsInfo"; needsCity = false;
+                query = "_type=json&numOfRows=50&solYear=" + value.Substring(0, 4) + "&solMonth=" + value.Substring(4);
+                break;
             default: return false;
         }
         bool kac = kind == "flights" || kind == "flight";
+        bool dataGo = kind.StartsWith("wx-", StringComparison.Ordinal) || kind == "holidays" || kind == "terms";
         // 서울은 근처 정류장도 서울 API 로 묻는다(TAGO 좌표 조회에는 서울 정류장이 없다). 도시 목록은 TAGO 것 그대로.
         bool seoul = city == SeoulBusCity && kind != "cities";
         if (seoul)
@@ -5607,7 +5727,10 @@ class ClassDockLauncher
         string cacheKey = kind + ":" + city + ":" + value;
         // 도착 예정은 금방 바뀐다. 목록·정류장은 하루 두어도 된다. 공항 게시판은 1분이면 충분하다.
         // 여객선 시간표는 하루 안에 거의 바뀌지 않는다(상태 필드도 없다). 10분이면 충분하다.
-        int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600 : 86400;
+        // 실황·초단기예보는 한 시간마다, 단기예보는 세 시간마다 발표된다(캐시 열쇠에 발표 시각이 들어 있다).
+        // 지난 날 관측·특일은 바뀌지 않는다.
+        int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600
+            : kind == "wx-ncst" || kind == "wx-ultra" ? 600 : kind == "wx-fcst" ? 1800 : 86400;
         lock (JejuBusGates[(cacheKey.GetHashCode() & Int32.MaxValue) % JejuBusGates.Length])
         {
             JejuBusCacheEntry entry;
@@ -5634,7 +5757,9 @@ class ClassDockLauncher
                 {
                     int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
                     byte[] received = seoul ? SeoulBusGet(service, query, key, max)
-                        : kac ? KacGet(service, query, key, max) : TagoGetRaw(service, operation, query, key, max);
+                        : kac ? KacGet(service, query, key, max)
+                        : dataGo ? DataGoGet(service + operation + "?serviceKey=" + TagoKeyParameter(key) + "&" + query, max)
+                        : TagoGetRaw(service, operation, query, key, max);
                     entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue; entry.Error = ""; entry.Upstream = "";
                     data = entry.Data; fetchedAt = entry.FetchedAt; return true;
                 }
@@ -5710,6 +5835,39 @@ class ClassDockLauncher
     static byte[] KacGet(string service, string query, string key, int max)
     {
         string url = KacBase + service + "?serviceKey=" + TagoKeyParameter(key) + "&type=json&" + query;
+        byte[] received = BusHttpGet(url, max, TagoResultCode, "22");
+        string code = TagoResultCode(received);
+        if (code == "00" || code == "03") return received;
+        string upstream = "HTTP 200 - " + (code.Length > 0 ? code : "?");
+        if (code == "22") throw new TagoException("bus-quota", upstream);
+        if (code == "20" || code == "30" || code == "31" || code == "32") throw new TagoException("bus-key-invalid", upstream);
+        throw new TagoException("bus-invalid-data", upstream);
+    }
+    /* 날씨 = 기상청(1360000) 단기예보·지상관측 일자료, 특일 = 한국천문연구원(B090041) 특일 정보.
+       봉투·결과 코드가 TAGO 와 같다(00 정상 · 03 자료 없음 · 22 한도 · 30 등 키). 신청 안 한 서비스·틀린 키는
+       HTTP 403 으로 온다(2026-09-19 실측) → BusHttpGet 이 키 문제로 바꾼다. 기상청은 dataType=JSON, 천문연은 _type=json. */
+    const string KmaBase = "https://apis.data.go.kr/1360000/";
+    const string KasiBase = "https://apis.data.go.kr/B090041/openapi/service/";
+    static DateTime KmaKstNow() { return DateTime.UtcNow.AddHours(9); }
+    // 가장 최근에 나와 있을 발표 시각. 실황은 매시 정각 발표를 40분 뒤에, 초단기예보는 매시 30분 발표를 45분 뒤에,
+    // 단기예보는 02·05·08·11·14·17·20·23시 발표를 10분 뒤에 준다(넉넉히 15분).
+    static void KmaBaseTime(string kind, DateTime kst, out string baseDate, out string baseTime)
+    {
+        DateTime at;
+        if (kind == "wx-ncst") { at = kst.AddMinutes(-40); baseTime = at.ToString("HH", CultureInfo.InvariantCulture) + "00"; }
+        else if (kind == "wx-ultra") { at = kst.AddMinutes(-45); baseTime = at.ToString("HH", CultureInfo.InvariantCulture) + "30"; }
+        else
+        {
+            at = kst.AddMinutes(-15);
+            int hour = at.Hour;
+            if (hour < 2) { at = at.AddDays(-1); hour = 23; }
+            else hour = 2 + (hour - 2) / 3 * 3;
+            baseTime = hour.ToString("00", CultureInfo.InvariantCulture) + "00";
+        }
+        baseDate = at.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+    }
+    static byte[] DataGoGet(string url, int max)
+    {
         byte[] received = BusHttpGet(url, max, TagoResultCode, "22");
         string code = TagoResultCode(received);
         if (code == "00" || code == "03") return received;
@@ -5914,6 +6072,220 @@ class ClassDockLauncher
         int total;
         return body != null && body.TryGetValue("totalCount", out value) && value != null
             && Int32.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out total) ? total : 0;
+    }
+
+    /* KOSIS 국가통계포털 공유서비스(kosis.kr/openapi). 키는 공공데이터포털과 따로다(회원 한 명에 하나, Base64 라 끝에 '=' 가 붙기도 한다).
+       원격 주소를 받지 않고 정해 둔 세 가지만 묻는다.
+         search = 통합검색(statisticsSearch)      meta = 통계표 분류·항목·주기(statisticsData getMeta)
+         data   = 통계표선택 자료(Param/statisticsParameterData)
+       jsonVD=Y 를 꼭 붙인다 — 없으면 따옴표 없는 JS 객체 글이 온다.
+       오류도 HTTP 200 에 {"err":"30","errMsg":…} 로 알린다(10·11 키 · 30 결과 없음 · 31 4만 셀 넘음 · 40~42 한도). */
+    const string KosisBase = "https://kosis.kr/openapi/";
+    class KosisCacheEntry { public byte[] Data; public DateTime FetchedAt; public DateTime UsedAt; }
+    static readonly object KosisCacheLock = new object();
+    static readonly Dictionary<string, KosisCacheEntry> KosisCache = new Dictionary<string, KosisCacheEntry>();
+    static bool KosisValue(string value, int max, string pattern)
+    {
+        return value != null && value.Length <= max && System.Text.RegularExpressions.Regex.IsMatch(value, pattern);
+    }
+    static bool TryKosis(string path, out byte[] data, out DateTime fetchedAt, out string error)
+    {
+        data = null; fetchedAt = DateTime.MinValue; error = "kosis-bad-request";
+        string op = QueryValue(path, "op") ?? "";
+        Func<string, string> q = name => (QueryValue(path, name) ?? "").Trim();
+        string url;
+        if (op == "search")
+        {
+            string words = q("q");
+            if (words.Length == 0 || words.Length > 60 || words.Any(c => c < ' ')) return false;
+            string start = q("start"); if (start.Length == 0) start = "1";
+            if (!KosisValue(start, 4, "^[0-9]+$")) return false;
+            url = KosisBase + "statisticsSearch.do?method=getList&format=json&jsonVD=Y&sort=RANK&resultCount=30&startCount=" + start
+                + "&searchNm=" + Uri.EscapeDataString(words);
+        }
+        else if (op == "meta")
+        {
+            string org = q("orgId"), tbl = q("tblId"), type = q("type");
+            if (!KosisValue(org, 6, "^[0-9]+$") || !KosisValue(tbl, 40, "^[A-Za-z0-9_]+$")
+                || !(type == "TBL" || type == "ITM" || type == "PRD" || type == "UNIT")) return false;
+            url = KosisBase + "statisticsData.do?method=getMeta&format=json&jsonVD=Y&type=" + type + "&orgId=" + org + "&tblId=" + tbl;
+        }
+        else if (op == "data")
+        {
+            string org = q("orgId"), tbl = q("tblId"), itm = q("itmId"), prd = q("prdSe");
+            if (!KosisValue(org, 6, "^[0-9]+$") || !KosisValue(tbl, 40, "^[A-Za-z0-9_]+$")
+                || !KosisValue(itm, 400, "^[A-Za-z0-9_.+ ]+$") || !KosisValue(prd, 2, "^(D|M|Q|H|Y|F|IR)$")) return false;
+            url = KosisBase + "Param/statisticsParameterData.do?method=getList&format=json&jsonVD=Y&orgId=" + org + "&tblId=" + tbl
+                + "&itmId=" + Uri.EscapeDataString(itm) + "&prdSe=" + prd;
+            bool any = false;
+            for (int i = 1; i <= 8; i++)
+            {
+                string name = "objL" + i.ToString(CultureInfo.InvariantCulture);
+                string obj = q(name);
+                if (obj.Length == 0) continue;
+                if (!KosisValue(obj, 2000, "^[A-Za-z0-9_.+ ]+$")) return false;
+                url += "&" + name + "=" + Uri.EscapeDataString(obj);
+                any = true;
+            }
+            if (!any) return false;
+            string startPrd = q("startPrdDe"), endPrd = q("endPrdDe"), latest = q("newEstPrdCnt");
+            if (latest.Length > 0)
+            {
+                if (!KosisValue(latest, 2, "^[0-9]+$")) return false;
+                url += "&newEstPrdCnt=" + latest;
+            }
+            else
+            {
+                if (!KosisValue(startPrd, 8, "^[0-9]+$") || !KosisValue(endPrd, 8, "^[0-9]+$")) return false;
+                url += "&startPrdDe=" + startPrd + "&endPrdDe=" + endPrd;
+            }
+        }
+        else return false;
+
+        string key = CurrentKosisKey();
+        if (key.Length == 0) { error = "kosis-key-required"; return false; }
+        lock (KosisCacheLock)
+        {
+            KosisCacheEntry hit;
+            // 통계는 하루에 거의 바뀌지 않는다. 검색·메타·자료 모두 하루 둔다.
+            if (KosisCache.TryGetValue(url, out hit) && DateTime.UtcNow < hit.FetchedAt.AddHours(24))
+            { hit.UsedAt = DateTime.UtcNow; data = hit.Data; fetchedAt = hit.FetchedAt; return true; }
+        }
+        byte[] received;
+        try
+        {
+            try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url + "&apiKey=" + Uri.EscapeDataString(key));
+            request.Method = "GET"; request.UserAgent = "ClassDock/1.0 (local classroom app)"; request.Accept = "application/json";
+            request.AllowAutoRedirect = false; request.Timeout = 20000; request.ReadWriteTimeout = 20000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream input = response.GetResponseStream())
+            using (MemoryStream output = new MemoryStream())
+            {
+                byte[] buffer = new byte[8192]; int count;
+                while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    if (output.Length + count > 8 * 1024 * 1024) { error = "kosis-too-many"; return false; }
+                    output.Write(buffer, 0, count);
+                }
+                received = output.ToArray();
+            }
+        }
+        catch (WebException failure)
+        {
+            var response = failure.Response as HttpWebResponse;
+            error = "kosis-fetch-failed|" + (response != null ? "HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) : failure.Status.ToString());
+            return false;
+        }
+        catch { error = "kosis-fetch-failed"; return false; }
+        string text = Encoding.UTF8.GetString(received).Trim().TrimStart('﻿');
+        var match = System.Text.RegularExpressions.Regex.Match(text, "^\\{\\s*\"err\"\\s*:\\s*\"?([0-9]+)");
+        if (match.Success)
+        {
+            string code = match.Groups[1].Value;
+            // 결과 없음은 빈 배열로 돌려준다(화면이 '자료가 없어요'로 읽는다).
+            if (code == "30") received = Encoding.UTF8.GetBytes("[]");
+            else
+            {
+                error = (code == "10" || code == "11" ? "kosis-key-invalid" : code == "31" ? "kosis-too-many"
+                    : code == "40" || code == "41" || code == "42" ? "kosis-quota"
+                    : code == "20" || code == "21" ? "kosis-bad-request" : "kosis-fetch-failed") + "|err " + code;
+                return false;
+            }
+        }
+        else if (!(text.StartsWith("[", StringComparison.Ordinal) || text.StartsWith("{", StringComparison.Ordinal)))
+        { error = "kosis-fetch-failed|not json"; return false; }
+        lock (KosisCacheLock)
+        {
+            if (KosisCache.Count >= 80) KosisCache.Remove(KosisCache.OrderBy(p => p.Value.UsedAt).First().Key);
+            KosisCache[url] = new KosisCacheEntry { Data = received, FetchedAt = DateTime.UtcNow, UsedAt = DateTime.UtcNow };
+        }
+        data = received; fetchedAt = DateTime.UtcNow;
+        return true;
+    }
+
+    static readonly object KosisKeyLock = new object();
+    static readonly byte[] KosisKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.KosisKey.v1");
+    static readonly string KosisKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "kosis-key.bin");
+    static bool KosisKeyLoaded;
+    static string KosisKey = "";
+    static bool ValidKosisKey(string value)
+    {
+        string key = (value ?? "").Trim();
+        if (key.Length < 16 || key.Length > 200) return false;
+        foreach (char ch in key)
+            if (!(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch == '+' || ch == '/' || ch == '=' || ch == '-' || ch == '_'))
+                return false;
+        return true;
+    }
+    static string CurrentKosisKey()
+    {
+        lock (KosisKeyLock)
+        {
+            if (!KosisKeyLoaded)
+            {
+                KosisKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(KosisKeyFile))
+                    {
+                        string key = Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(KosisKeyFile), KosisKeyEntropy, DataProtectionScope.CurrentUser)).Trim();
+                        if (ValidKosisKey(key)) KosisKey = key;
+                    }
+                }
+                catch { KosisKey = ""; }
+            }
+            return KosisKey;
+        }
+    }
+    static string KosisKeyStatusJson()
+    {
+        bool remembered = false;
+        try { remembered = File.Exists(KosisKeyFile) && CurrentKosisKey().Length > 0; } catch { }
+        return "{\"hasKey\":" + (CurrentKosisKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (remembered ? "true" : "false") + ",\"persistentSupported\":true}";
+    }
+    static void ClearKosisCache() { lock (KosisCacheLock) KosisCache.Clear(); }
+    static bool ClearKosisKey()
+    {
+        lock (KosisKeyLock)
+        {
+            KosisKeyLoaded = true; KosisKey = "";
+            try { if (File.Exists(KosisKeyFile)) File.Delete(KosisKeyFile); }
+            catch { return false; }
+        }
+        ClearKosisCache();
+        return true;
+    }
+    static bool TrySetKosisKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "kosis-key-invalid";
+        if (!ValidKosisKey(key)) return false;
+        string previous = CurrentKosisKey();
+        lock (KosisKeyLock)
+        {
+            try
+            {
+                if (remember)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(KosisKeyFile));
+                    byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), KosisKeyEntropy, DataProtectionScope.CurrentUser);
+                    string temp = KosisKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+                    File.WriteAllBytes(temp, encrypted);
+                    if (File.Exists(KosisKeyFile)) File.Delete(KosisKeyFile);
+                    File.Move(temp, KosisKeyFile);
+                }
+                else if (File.Exists(KosisKeyFile)) File.Delete(KosisKeyFile);
+            }
+            catch { KosisKey = previous; error = "kosis-key-save-failed"; return false; }
+            KosisKeyLoaded = true;
+            KosisKey = key;
+        }
+        ClearKosisCache();
+        error = "";
+        return true;
     }
 
     // 공공데이터포털 일반 인증키. tago 이름과 파일은 기존 설치와 호환하려고 유지한다.

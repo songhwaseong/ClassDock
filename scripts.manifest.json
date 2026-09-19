@@ -88,6 +88,10 @@
     "ship-ports-data.js",
     "ship-api.js",
     "ship-map.js",
+    "weather-api.js",
+    "weather-map.js",
+    "kosis-api.js",
+    "kosis-choro.js",
     "korea-coords.js",
     "map-viewer.js",
     "timeline.js",
@@ -236,6 +240,10 @@
         "ship-ports-data.js",
         "ship-api.js",
         "ship-map.js",
+        "weather-api.js",
+        "weather-map.js",
+        "kosis-api.js",
+        "kosis-choro.js",
         "korea-coords.js",
         "map-viewer.js",
         "timeline.js",
@@ -403,7 +411,9 @@
       "code-viewer.js",
       "jeju-bus-map.js",
       "flight-map.js",
-      "ship-map.js"
+      "ship-map.js",
+      "weather-map.js",
+      "kosis-choro.js"
     ],
     "timeline.js": [
       "documents.js",
@@ -471,6 +481,7 @@
       "table-export.js"
     ],
     "diary.js": [
+      "weather-api.js",
       "context-menu.js",
       "documents.js",
       "file-loaders.js",
@@ -580,6 +591,12 @@
     "ship-map.js": [
       "ship-api.js",
       "ship-ports-data.js"
+    ],
+    "weather-map.js": [
+      "weather-api.js"
+    ],
+    "kosis-choro.js": [
+      "kosis-api.js"
     ]
   },
   "moduleBoundaries": [

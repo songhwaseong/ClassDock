@@ -1401,6 +1401,25 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-choro-preview{display:flex;height:14px;margin:0 0 8px;border-radius:4px;overflow:hidden;border:1px solid var(--border)}
   .map-choro-preview i{flex:1}
   .map-choro-note{margin:0 0 6px;font-size:12.5px;color:var(--muted);min-height:17px;overflow-wrap:anywhere}
+  /* KOSIS에서 가져오기 — 붙여넣기 칸 위에 펼친다 */
+  .map-choro-kosis-slot[hidden],.map-choro-kosis-pane[hidden],.map-choro-kosis-results[hidden],.map-choro-kosis-table[hidden],.map-choro-kosis-open[hidden]{display:none}
+  .map-choro-kosis{margin:0 0 10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--accent) 5%,transparent)}
+  .map-choro-kosis-tabs{display:flex;gap:4px;margin-bottom:8px}
+  .map-choro-kosis-tab{min-height:28px;padding:3px 12px;font-size:12.5px;border-radius:999px}
+  .map-choro-kosis-tab.is-on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .map-choro-kosis .map-choro-row{margin-bottom:4px}
+  .map-choro-kosis .map-nearby-field .map-select{max-width:260px}
+  .map-choro-kosis-preset{min-width:220px}
+  .map-choro-kosis-hint{display:block;font-size:11.5px;color:var(--muted);min-height:15px}
+  .map-choro-kosis-q{flex:1;min-width:0;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:5px 8px;font:inherit;font-size:12.5px}
+  .map-choro-kosis-results{list-style:none;margin:6px 0;padding:0;max-height:190px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
+  .map-choro-kosis-results li+li{border-top:1px solid var(--border)}
+  .map-choro-kosis-result{display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;padding:6px 9px;border:0;border-radius:0;background:none;text-align:left;font-size:12.5px}
+  .map-choro-kosis-result:hover{background:var(--panel-hover)}
+  .map-choro-kosis-result small{color:var(--muted);font-size:11px}
+  .map-choro-kosis-picked{margin:6px 0 4px;font-size:12.5px;font-weight:700;color:var(--ink);overflow-wrap:anywhere}
+  .map-choro-kosis-status{margin:4px 0 0;font-size:12px;color:var(--muted);min-height:16px;overflow-wrap:anywhere}
+  .map-choro-kosis-source{font-size:11px;color:var(--muted)}
   /* 색칠 지도 범례 — 축척 막대처럼 지도 칸에 직접 얹어 캡처·인쇄에 남긴다. 오른쪽 위(확대 단추 반대편). */
   .map-choro-legend{position:absolute;right:8px;top:8px;z-index:800;min-width:120px;max-width:min(240px,45%);
     padding:7px 9px;border-radius:7px;background:rgba(255,255,255,.9);color:#1f2937;
@@ -4378,6 +4397,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapSubway .map-toolvis-subway,
   html.hide-tool-mapFlight .map-toolvis-flight,
   html.hide-tool-mapShip .map-toolvis-ship,
+  html.hide-tool-mapWeather .map-toolvis-weather,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
   html.hide-tool-musicKey .music-toolvis-key,
@@ -7788,6 +7808,36 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-ship-fare{font-size:11px;opacity:.75;white-space:nowrap}
 .map-ship-empty{padding:8px;font-size:12px;opacity:.85}
 .map-ship-status{margin:6px 0 0;font-size:12px}.map-ship-note{font-size:12px;opacity:.8}.map-ship-panel a{color:#087f8c}
+/* 날씨(기상청) — 항공·여객선 칸과 같은 자리·모양. */
+.map-weather-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
+.map-weather-panel[hidden],.map-weather-now[hidden],.map-weather-hours[hidden],.map-weather-days[hidden]{display:none}
+.map-weather-heading,.map-weather-tools{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.map-weather-heading{justify-content:space-between}
+.map-weather-place{margin:0 0 8px;font-size:12px;opacity:.85}
+.map-weather-place:empty{display:none}
+.map-weather-now{display:grid;grid-template-columns:auto auto 1fr;align-items:center;column-gap:10px;margin-bottom:10px;padding:10px 12px;border:1px solid #98b9bd66;border-radius:10px}
+.map-weather-now-glyph{grid-row:span 2;font-size:38px;line-height:1}
+.map-weather-now-temp{grid-row:span 2;font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+.map-weather-now-desc{font-weight:600}
+.map-weather-now-detail{grid-column:3;font-size:12px;opacity:.85}
+.map-weather-hours{display:grid;grid-template-columns:repeat(auto-fit,minmax(44px,1fr));gap:4px;margin-bottom:10px}
+.map-weather-hour{display:flex;flex-direction:column;align-items:center;gap:1px;padding:4px 2px;border-radius:8px;background:#98b9bd1f}
+.map-weather-hour-time,.map-weather-hour-pop{font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
+.map-weather-hour-glyph{font-size:18px;line-height:1.2}
+.map-weather-hour-temp{font-variant-numeric:tabular-nums}
+.map-weather-days{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px}
+.map-weather-day{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 4px;border:1px solid #98b9bd66;border-radius:8px}
+.map-weather-day-name{font-weight:700}
+.map-weather-day-glyph{font-size:22px;line-height:1.2}
+.map-weather-day-range{font-variant-numeric:tabular-nums}
+.map-weather-day-pop{font-size:11px;opacity:.8}
+.map-weather-status{margin:6px 0 0;font-size:12px}.map-weather-note{font-size:12px;opacity:.8}.map-weather-panel a{color:#087f8c}
+/* 지도 위 날씨 딱지 — 점 자리에서 오른쪽 위로 붙는다. */
+.map-weather-tag{background:none;border:0}
+.map-weather-tag>*{vertical-align:middle}
+.leaflet-marker-icon.map-weather-tag{display:inline-flex;align-items:center;gap:3px;width:auto!important;height:auto!important;padding:2px 8px 2px 4px;border:2px solid #fff;border-radius:999px;background:#1d4f73;color:#fff;box-shadow:0 1px 5px #0006;font:700 12px/18px sans-serif;white-space:nowrap}
+.leaflet-marker-icon.map-weather-tag.is-here{background:#b45309}
+.map-weather-tag-glyph{font-size:15px;line-height:1;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
 .map-jeju-bus-icon{display:inline-flex;align-items:center;gap:3px;padding:2px 5px;border:2px solid white;border-radius:8px;background:#087f8c;color:white;box-shadow:0 1px 4px #0006;font:bold 11px/18px sans-serif;white-space:nowrap}
 .map-jeju-bus-number{display:none}.bus-wide-label .map-jeju-bus-number{display:inline}
 .map-jeju-bus-marker.bus-relocated .map-jeju-bus-icon{animation:jejuBusAppear .7s ease-out}
@@ -7840,6 +7890,8 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .diary-cal-day{position:relative;aspect-ratio:1;display:flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:8px;background:none;color:var(--ink);font:inherit;font-size:13px;cursor:pointer;padding:0 0 6px}
 .diary-cal-day:hover{background:var(--panel-hover)}
 .diary-cal-day.is-sun{color:var(--diary-sun)}.diary-cal-day.is-sat{color:var(--diary-sat)}
+.diary-cal-day.is-holiday{color:var(--diary-sun);font-weight:700}
+.diary-cal-day.is-term .diary-cal-num{text-decoration:underline dotted;text-underline-offset:3px}
 .diary-cal-day.is-out{opacity:.38}
 .diary-cal-day.is-today{border-color:var(--accent);font-weight:700}
 .diary-cal-day.is-selected{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -7857,6 +7909,9 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .diary-date{margin:0 4px;font-size:18px;font-weight:700;color:var(--ink)}
 .diary-today-badge{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;height:26px;padding:0 12px 0 9px;border-radius:999px;background:linear-gradient(90deg,#f0507a,#ff6f91);color:#fff;font-size:13px;font-weight:700;line-height:1;box-shadow:0 2px 6px rgba(240,80,122,.28);white-space:nowrap}
 .diary-today-badge[hidden]{display:none}
+.diary-special{display:inline-flex;align-items:center;flex:0 1 auto;min-width:0;max-width:220px;height:24px;padding:0 10px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.diary-special.is-holiday{border-color:color-mix(in srgb,var(--diary-sun) 45%,transparent);color:var(--diary-sun)}
+.diary-special[hidden]{display:none}
 .diary-today-badge svg{width:15px;height:15px;flex:0 0 auto}
 .diary-today-sep{width:1px;height:13px;background:rgba(255,255,255,.55)}
 .diary-day-nav{width:30px;min-height:30px;padding:0}
@@ -7919,6 +7974,11 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .diary-pick-option.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent)}
 .diary-pick-option .diary-pick-emoji{font-size:24px}
 .diary-pick-clear{grid-column:1/-1;min-height:28px;font-size:12.5px}
+.diary-wx-auto{grid-column:1/-1;display:flex;flex-direction:column;gap:5px;margin-top:2px;padding-top:7px;border-top:1px solid var(--border)}
+.diary-wx-auto .diary-select{height:28px;font-size:12.5px}
+.diary-wx-fill{min-height:28px;font-size:12.5px;justify-content:center}
+.diary-wx-note{max-width:204px;font-size:11.5px;line-height:1.4;color:var(--muted)}
+.diary-wx-note:empty{display:none}
 .diary-wx{display:block;width:1.15em;height:1.15em}
 .diary-pick-option .diary-pick-emoji.has-wx{font-size:30px}
 .diary-cal-emoji.has-wx{bottom:1px}

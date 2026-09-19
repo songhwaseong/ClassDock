@@ -1332,6 +1332,85 @@ function wire(){
     } catch(_){ setTagoStatus("인증키를 지우지 못했습니다.", "bad"); syncTagoFields(); }
   });
   refreshTagoKeyStatus();
+
+  /* ── KOSIS 국가통계포털 인증키 ── 색칠 지도의 'KOSIS에서 가져오기'. 저장한 뒤 검색 한 번으로 연결을 시험한다. */
+  const kosisKeyInput = byId("settingKosisKey");
+  const kosisRemember = byId("settingKosisRemember");
+  const kosisRememberWrap = byId("settingKosisRememberWrap");
+  const kosisStatusText = byId("settingKosisStatus");
+  const kosisTest = byId("settingKosisTest");
+  const kosisClear = byId("settingKosisClear");
+  let kosisKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const setKosisStatus = (text, kind) => {
+    kosisStatusText.textContent = typeof window.t === "function" ? window.t(text) : text;
+    kosisStatusText.classList.toggle("ok", kind === "ok");
+    kosisStatusText.classList.toggle("bad", kind === "bad");
+  };
+  const syncKosisFields = () => {
+    const available = kosisKeyStatus.available;
+    connKeyBadge("settingKosisBadge", kosisKeyStatus);
+    kosisKeyInput.disabled = !available;
+    kosisTest.disabled = !available;
+    kosisClear.disabled = !available || !kosisKeyStatus.hasKey;
+    kosisRemember.disabled = !available || !kosisKeyStatus.persistentSupported;
+    kosisRememberWrap.hidden = !kosisKeyStatus.persistentSupported;
+    kosisRemember.checked = !!kosisKeyStatus.remembered;
+    kosisKeyInput.placeholder = kosisKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "인증키 입력";
+  };
+  const refreshKosisKeyStatus = async (message, kind) => {
+    kosisKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    try {
+      const response = await fetch("/kosis-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      kosisKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      if (message) setKosisStatus(message, kind);
+      else if (kosisKeyStatus.hasKey) setKosisStatus(kosisKeyStatus.remembered
+        ? "KOSIS 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "KOSIS 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setKosisStatus("인증키가 없어 색칠 지도에서 KOSIS 통계를 가져올 수 없습니다.", "");
+    } catch(_){ setKosisStatus("KOSIS 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncKosisFields();
+  };
+  kosisTest.addEventListener("click", async () => {
+    const key = kosisKeyInput.value.trim();
+    if (!key && !kosisKeyStatus.hasKey){ setKosisStatus("저장할 KOSIS 인증키를 입력해 주세요.", "bad"); kosisKeyInput.focus(); return; }
+    kosisTest.disabled = true; kosisClear.disabled = true;
+    try {
+      if (key){
+        setKosisStatus("KOSIS 인증키를 저장하는 중…", "");
+        const response = await fetch("/kosis-key?remember=" + (kosisRemember.checked ? "1" : "0"), {
+          method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+          body:key, cache:"no-store"
+        });
+        if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+        kosisKeyInput.value = "";
+      }
+      setKosisStatus("KOSIS에 연결해 보는 중…", "");
+      const probe = await fetch("/kosis?op=search&q=" + encodeURIComponent("주민등록인구"), { cache:"no-store" });
+      const reason = probe.ok ? "" : (await probe.text()).trim();
+      await refreshKosisKeyStatus(probe.ok ? "KOSIS 인증키를 저장했고 연결을 확인했습니다."
+        : reason === "kosis-key-invalid" ? "KOSIS가 이 인증키를 받지 않았습니다. 키를 통째로(끝의 '=' 까지) 붙여 넣었는지 확인해 주세요."
+        : reason === "kosis-quota" ? "KOSIS 조회 한도를 넘었습니다. 잠시 후 다시 시도해 주세요."
+        : "키는 저장했지만 KOSIS에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.", probe.ok ? "ok" : "bad");
+    } catch(error){
+      const reason = error && error.message;
+      setKosisStatus(reason === "kosis-key-save-failed" ? "KOSIS 인증키를 암호화하여 저장하지 못했습니다."
+        : "인증키 형식이 올바르지 않습니다. KOSIS에서 받은 키를 그대로 붙여 넣어 주세요.", "bad");
+      syncKosisFields();
+    }
+  });
+  kosisClear.addEventListener("click", async () => {
+    kosisClear.disabled = true;
+    try {
+      const response = await fetch("/kosis-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      kosisKeyInput.value = "";
+      await refreshKosisKeyStatus("KOSIS 인증키를 지웠습니다.", "ok");
+    } catch(_){ setKosisStatus("인증키를 지우지 못했습니다.", "bad"); syncKosisFields(); }
+  });
+  refreshKosisKeyStatus();
   const setSettingsTab = (name) => {
     document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
       const on = tab.dataset.settingsTab === name;

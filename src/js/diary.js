@@ -1143,6 +1143,10 @@ function mountDiaryEditor(doc){
     + '<g fill="var(--diary-today-ink,#f0507a)"><rect x="5" y="9" width="2.4" height="2.2" rx=".6"/><rect x="8.8" y="9" width="2.4" height="2.2" rx=".6"/><rect x="12.6" y="9" width="2.4" height="2.2" rx=".6"/>'
     + '<rect x="5" y="12.8" width="2.4" height="2.2" rx=".6"/><rect x="8.8" y="12.8" width="2.4" height="2.2" rx=".6"/></g></svg>'
     + '<span class="diary-today-sep" aria-hidden="true"></span><span class="diary-today-text"></span>';
+  // 공휴일·24절기 이름(한국천문연구원 특일 정보 — EXE 에 공공데이터포털 키가 있을 때만 보인다)
+  const specialBadge = document.createElement("span");
+  specialBadge.className = "diary-special";
+  specialBadge.hidden = true;
   const entryTitle = document.createElement("input");
   entryTitle.className = "diary-entry-title";
   entryTitle.type = "text";
@@ -1155,7 +1159,7 @@ function mountDiaryEditor(doc){
   weatherBtn.dataset.pick = "weather";
   const moodBtn = diaryButton("", "기분 고르기", "diary-btn diary-pick ui-keep-symbols");
   moodBtn.dataset.pick = "mood";
-  pageHead.append(prevDay, dateLabel, todayBadge, nextDay, weatherBtn, moodBtn, entryTitle, deleteBtn);
+  pageHead.append(prevDay, dateLabel, todayBadge, specialBadge, nextDay, weatherBtn, moodBtn, entryTitle, deleteBtn);
 
   const paper = document.createElement("div");
   paper.className = "diary-paper";
@@ -1395,6 +1399,104 @@ function mountDiaryEditor(doc){
     redoBtn.disabled = !(history && history.canRedo());
   };
 
+  /* ----- 공휴일·24절기와 기상청 날씨 -----
+     런처(EXE)가 공공데이터포털 키로 대신 묻는다. 브라우저·오프라인 HTML 에서는 아무것도 보이지 않는다.
+     특일은 보고 있는 달만 묻는다. 키 문제로 실패한 달은 이 창에서 다시 묻지 않는다(달력을 그릴 때마다 헛걸음하지 않게). */
+  const weatherApi = typeof MNWeatherApi !== "undefined" ? MNWeatherApi : null;
+  let weatherReady = false;
+  const specialFailed = new Set();
+  const specialItemsOf = (key) => {
+    if (!weatherReady) return [];
+    const items = weatherApi.cachedSpecialDays(Number(key.slice(0, 4)), Number(key.slice(5, 7)));
+    return items ? items.filter(i => i.date === key) : [];
+  };
+  function requestSpecialMonth(year, month){
+    const ym = year * 100 + month;
+    if (!weatherReady || specialFailed.has(ym) || weatherApi.cachedSpecialDays(year, month)) return;
+    weatherApi.loadSpecialDays(year, month).then(() => {
+      if (!root.isConnected) return;
+      paintSpecialDays(); renderSpecialBadge();
+    }).catch(() => { specialFailed.add(ym); });
+  }
+  function paintSpecialDays(){
+    if (!weatherReady) return;
+    if (!weatherApi.cachedSpecialDays(viewYear, viewMonth + 1)){ requestSpecialMonth(viewYear, viewMonth + 1); return; }
+    for (const b of calGrid.querySelectorAll(".diary-cal-day")){
+      if (b.dataset.special) continue;
+      const found = specialItemsOf(b.dataset.date);
+      if (!found.length) continue;
+      const names = found.map(i => i.name).join(" · ");
+      b.dataset.special = names;
+      b.classList.toggle("is-holiday", found.some(i => i.holiday));
+      b.classList.toggle("is-term", found.some(i => i.term));
+      b.title = names;
+      b.setAttribute("aria-label", b.getAttribute("aria-label") + " · " + names);
+    }
+  }
+  function renderSpecialBadge(){
+    const found = specialItemsOf(current);
+    if (weatherReady && !weatherApi.cachedSpecialDays(Number(current.slice(0, 4)), Number(current.slice(5, 7))))
+      requestSpecialMonth(Number(current.slice(0, 4)), Number(current.slice(5, 7)));
+    specialBadge.hidden = !found.length;
+    specialBadge.textContent = found.map(i => i.name).join(" · ");
+    specialBadge.classList.toggle("is-holiday", found.some(i => i.holiday));
+  }
+  // 날씨 고르개 아래 '기상청 날씨로 채우기' — 지난 날은 관측(어제까지), 오늘은 지금 실황, 앞날은 단기예보.
+  // 단기예보가 닿는 날은 발표 시각마다 다르다(2026-09 실측: 사흘 뒤까지 온전, 나흘·닷새 뒤는 일부) → 예보에 그날이 있는지로 가른다.
+  const wxNumber = v => v == null ? "" : String(Math.round(v * 10) / 10);
+  function weatherSummary(parts){ return parts.filter(Boolean).join(" · "); }
+  async function fillWeatherFromKma(place, button, note){
+    const s = weatherApi.station(place.value);
+    if (!s) return;
+    weatherApi.saveStation(s.id);
+    const key = current;
+    const ahead = Math.round((diaryDateFromKey(key) - diaryDateFromKey(today)) / 86400000);
+    if (ahead > 5){ note.textContent = diaryT("기상청 예보에 아직 이 날이 없어요."); return; }
+    button.disabled = true;
+    note.textContent = diaryT("기상청 날씨를 받는 중…");
+    let value = "", summary = "", service = ahead < 0 ? "day" : "forecast";
+    try {
+      if (ahead < 0){
+        const d = await weatherApi.loadDay(s.id, key);
+        value = d.diary;
+        summary = weatherSummary([diaryTf("{place} 관측", { place:d.station || s.name }),
+          d.max != null ? diaryTf("최고 {max}°", { max:wxNumber(d.max) }) : "",
+          d.min != null ? diaryTf("최저 {min}°", { min:wxNumber(d.min) }) : "",
+          d.rain != null && d.rain > 0 ? diaryTf("비 {mm}mm", { mm:wxNumber(d.rain) }) : ""]);
+      } else if (ahead === 0){
+        const n = await weatherApi.loadNow(s.lat, s.lng);
+        value = n.diary;
+        summary = weatherSummary([diaryTf("{place} 지금", { place:s.name }),
+          n.temp != null ? diaryTf("기온 {t}°", { t:wxNumber(n.temp) }) : "",
+          n.rain1h != null && n.rain1h > 0 ? diaryTf("비 {mm}mm", { mm:wxNumber(n.rain1h) }) : ""]);
+      } else {
+        const f = await weatherApi.loadForecast(s.lat, s.lng);
+        const day = f.days.find(d => d.date === key.replace(/-/g, "") && d.sky != null);
+        if (!day){ note.textContent = diaryT("기상청 예보에 아직 이 날이 없어요."); button.disabled = false; return; }
+        value = day.diary;
+        summary = weatherSummary([diaryTf("{place} 예보", { place:s.name }),
+          day.max != null ? diaryTf("최고 {max}°", { max:wxNumber(day.max) }) : "",
+          day.min != null ? diaryTf("최저 {min}°", { min:wxNumber(day.min) }) : "",
+          day.popMax != null ? diaryTf("강수확률 {p}%", { p:day.popMax }) : ""]);
+      }
+    } catch(error){
+      if (root.isConnected && current === key) note.textContent = diaryT(weatherApi.failureText(error, service));
+      button.disabled = false;
+      return;
+    }
+    button.disabled = false;
+    if (!root.isConnected || current !== key) return;
+    if (!value){ note.textContent = diaryT("기상청 자료로 날씨를 정하지 못했어요."); return; }
+    setEntryField("weather", value);
+    // 고르개가 아직 열려 있으면 고른 값이 보이게 다시 그리고 받은 내용을 그 아래에 남긴다.
+    if (!pickPop.hidden && pickPop.dataset.kind === "weather") openPicker("weather", weatherBtn, summary);
+  }
+  if (weatherApi) weatherApi.available().then(ok => {
+    if (!ok || !root.isConnected) return;
+    weatherReady = true;
+    paintSpecialDays(); renderSpecialBadge();
+  });
+
   /* ----- 달력 ----- */
   function renderCalendar(){
     monthLabel.textContent = diaryUiMonthLabel(viewYear, viewMonth);
@@ -1438,6 +1540,7 @@ function mountDiaryEditor(doc){
       return b;
     });
     calGrid.replaceChildren(...head, ...cells);
+    paintSpecialDays();
 
     const prefix = viewYear + "-" + String(viewMonth + 1).padStart(2, "0") + "-";
     const rows = model.entries.filter(e => e.date.startsWith(prefix) && !diaryEntryIsEmpty(e))
@@ -2157,6 +2260,7 @@ function mountDiaryEditor(doc){
     dateLabel.classList.toggle("is-today", current === today);
     todayBadge.hidden = current !== today;
     todayBadge.querySelector(".diary-today-text").textContent = diaryT("오늘");
+    renderSpecialBadge();
     entryTitle.value = entry ? entry.title : "";
     if (area.value !== (entry ? entry.text : "")) area.value = entry ? entry.text : "";
     area.placeholder = diaryT(current === today ? "오늘은 어떤 하루였나요?" : "이 날의 일기를 적어 보세요.");
@@ -2200,7 +2304,7 @@ function mountDiaryEditor(doc){
     weatherBtn.setAttribute("aria-expanded", "false");
     moodBtn.setAttribute("aria-expanded", "false");
   }
-  function openPicker(kind, anchor){
+  function openPicker(kind, anchor, wxNote){
     const options = kind === "weather" ? DIARY_WEATHERS : DIARY_MOODS;
     const entry = entryOf(current);
     const now = entry ? entry[kind] : "";
@@ -2223,6 +2327,27 @@ function mountDiaryEditor(doc){
     clear.disabled = !now;
     clear.addEventListener("click", () => { setEntryField(kind, ""); closePicker(); anchor.focus(); });
     pickPop.replaceChildren(...buttons, clear);
+    if (kind === "weather" && weatherReady){
+      const auto = document.createElement("div");
+      auto.className = "diary-wx-auto";
+      const place = document.createElement("select");
+      place.className = "diary-select diary-wx-place";
+      place.setAttribute("aria-label", diaryT("날씨 지역"));
+      const saved = weatherApi.savedStation();
+      [...weatherApi.STATIONS].sort((a, b) => a.name.localeCompare(b.name, "ko")).forEach(s => {
+        const o = document.createElement("option"); o.value = String(s.id); o.textContent = s.name; place.append(o);
+      });
+      place.value = String(saved.id);
+      const fill = diaryButton("기상청 날씨로 채우기", "고른 지역의 기상청 날씨로 이 날 날씨를 채웁니다", "diary-btn diary-wx-fill");
+      const note = document.createElement("div");
+      note.className = "diary-wx-note";
+      note.setAttribute("aria-live", "polite");
+      note.textContent = wxNote || "";
+      place.addEventListener("change", () => weatherApi.saveStation(place.value));
+      fill.addEventListener("click", () => fillWeatherFromKma(place, fill, note));
+      auto.append(place, fill, note);
+      pickPop.append(auto);
+    }
     pickPop.hidden = false;
     weatherBtn.setAttribute("aria-expanded", String(kind === "weather"));
     moodBtn.setAttribute("aria-expanded", String(kind === "mood"));

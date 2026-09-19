@@ -3256,10 +3256,12 @@ function openMapChoropleth(model, hooks){
         '<label><input type="radio" name="mapChoroSource" value="markers"> 지도에 찍은 표시 개수</label>' +
       '</div>' +
       '<div class="map-choro-table-box">' +
+        '<div class="map-choro-kosis-slot" hidden></div>' +
         '<textarea class="map-choro-paste" rows="7" spellcheck="false" placeholder="엑셀에서 지역 이름과 값 열을 함께 복사해 붙여 넣으세요.\n예)\n지역\t인구\n서울특별시\t9,386,034\n부산광역시\t3,266,598"></textarea>' +
         '<div class="map-choro-row">' +
           '<button class="btn map-choro-file" type="button">CSV·엑셀 파일 고르기</button>' +
           '<button class="btn map-choro-template" type="button" title="지금 고른 기준(시도·시군구·읍면동)에 맞는 예시 CSV 받기">양식 받기</button>' +
+          '<button class="btn map-choro-kosis-open" type="button" aria-expanded="false" title="KOSIS 국가통계포털에서 시도·시군구 통계를 받아 표에 채웁니다" hidden>KOSIS에서 가져오기</button>' +
           '<label class="map-nearby-field"><span>값 열</span><select class="map-select map-choro-column"></select></label>' +
         '</div>' +
       '</div>' +
@@ -3521,9 +3523,31 @@ function openMapChoropleth(model, hooks){
     }
   });
 
+  /* KOSIS 국가통계 — EXE 에서만 보인다(런처가 키를 들고 대신 묻는다). 받은 값은 붙여넣기 칸에 표로 들어가고
+     이름 맞추기·칠하기는 위 붙여넣기 길이 그대로 한다(kosis-choro.js). */
+  const kosisOpen = $(".map-choro-kosis-open"), kosisSlot = $(".map-choro-kosis-slot");
+  let kosisPanel = null, kosisText = "";
+  if (typeof MNKosisApi !== "undefined" && typeof MNKosisChoro !== "undefined")
+    MNKosisApi.available().then(ok => { if (ok && modal.isConnected) kosisOpen.hidden = false; });
+  kosisOpen.addEventListener("click", () => {
+    if (!kosisPanel) kosisPanel = MNKosisChoro.mount({ container:kosisSlot, t:mapT, level:() => levelSelect.value,
+      onImport:({ text, title, unit, level }) => {
+        levelSelect.value = level;
+        paste.value = kosisText = text; titleInput.value = title; unitInput.value = unit;
+        modal.querySelector('input[value="table"]').checked = true;
+        parsePaste(); render();
+      } });
+    kosisSlot.hidden = !kosisSlot.hidden;
+    kosisOpen.setAttribute("aria-expanded", String(!kosisSlot.hidden));
+    // 붙여넣기 칸이 비어 있을 때만 곧바로 받는다(손으로 붙인 표를 덮지 않게).
+    if (!kosisSlot.hidden && !paste.value.trim()) kosisPanel.start();
+    if (!kosisSlot.hidden){ const first = kosisSlot.querySelector("select"); if (first) first.focus(); }
+  });
+
   const close = () => {
     clearTimeout(parseTimer);
     window.removeEventListener("keydown", onKey, true);
+    if (kosisPanel) kosisPanel.destroy();
     modal.remove();
   };
   const onKey = (e) => {
@@ -3534,7 +3558,17 @@ function openMapChoropleth(model, hooks){
   window.addEventListener("keydown", onKey, true);
   modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); });
   $(".map-choro-close").addEventListener("click", close);
-  applyBtn.addEventListener("click", () => {
+  // KOSIS 에서 받은 표를 그대로 둔 채 기준을 바꾸면 같은 통계를 새 기준으로 다시 받는다.
+  levelSelect.addEventListener("change", () => {
+    if (kosisPanel && !kosisSlot.hidden && kosisText && paste.value === kosisText && levelSelect.value !== "emd") kosisPanel.again();
+  });
+  applyBtn.addEventListener("click", async () => {
+    // KOSIS 에서 받는 중이면 끝날 때까지 기다렸다가 칠한다.
+    if (kosisPanel && !kosisSlot.hidden){
+      applyBtn.disabled = true;
+      try { await kosisPanel.whenReady(); } finally { applyBtn.disabled = false; }
+      parsePaste();
+    }
     render();
     if (!preview || applyBtn.disabled) return;
     const settings = mapNormalizeChoropleth({
@@ -4852,6 +4886,7 @@ const MAP_TOOL_ICONS = {
   train: '<rect x="5.5" y="3" width="13" height="14" rx="3"/><path d="M5.5 10.5h13"/><circle cx="9" cy="13.8" r="1" fill="#000"/><circle cx="15" cy="13.8" r="1" fill="#000"/><path d="m8 21 1.5-4M16 21l-1.5-4"/>',
   bus: '<rect x="4.5" y="3.5" width="15" height="14" rx="2.5"/><path d="M4.5 10h15M8 21v-3.5M16 21v-3.5"/><circle cx="8.3" cy="14" r="1" fill="#000"/><circle cx="15.7" cy="14" r="1" fill="#000"/>',
   plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
+  sunCloud: '<circle cx="8" cy="8" r="3"/><path d="M8 2v1.3M2 8h1.3M3.8 3.8l.9.9M12.2 3.8l-.9.9"/><path d="M8.5 20a3.5 3.5 0 0 1-.4-7 5 5 0 0 1 9.6 1.2A3 3 0 0 1 17.5 20z"/>',
   ship: '<path d="M12 10.2V14M12 2v3"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M19.4 20A11.6 11.6 0 0 0 21 14l-8.2-3.6a2 2 0 0 0-1.6 0L3 14a11.6 11.6 0 0 0 2.8 7.8"/><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
   save: '<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
@@ -6027,6 +6062,9 @@ async function mountMapEditor(doc){
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   // 여객선 시간표(항구 → 도착지 점선). 같은 TAGO 키를 쓴다.
   const ships = typeof MNShipMap !== "undefined" ? MNShipMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // 기상청 날씨(지도 가운데·전국 주요 도시). 같은 공공데이터포털 키를 쓴다.
+  const weather = typeof MNWeatherMap !== "undefined" ? MNWeatherMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
 
   /* ── 되돌리기 ──
@@ -8504,7 +8542,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote()].filter(Boolean).join(" · "), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 

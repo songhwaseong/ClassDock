@@ -707,6 +707,15 @@
             <div class="settings-row"><span id="settingTagoStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingTagoTest" type="button">키 저장</button><button class="btn" id="settingTagoClear" type="button">키 지우기</button></span></div>
           </div>
         </details>
+        <details class="conn-item" name="settings-conn" data-conn="Kosis">
+          <summary><span class="conn-name">KOSIS 국가통계</span><span class="conn-badge" id="settingKosisBadge" aria-live="polite">확인 중</span></summary>
+          <div class="conn-body map-search-settings" id="settingKosisKeyWrap">
+            <p class="conn-hint">지도 색칠 지도의 'KOSIS에서 가져오기'에 필요합니다. KOSIS 공유서비스(kosis.kr/openapi)에서 무료로 발급받습니다. 공공데이터포털 키와는 다른 키이며, 끝의 '=' 까지 통째로 붙여 넣어 주세요.</p>
+            <label class="settings-row"><span>KOSIS 인증키</span><input type="password" id="settingKosisKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="KOSIS 인증키"></label>
+            <label class="settings-check" id="settingKosisRememberWrap"><input type="checkbox" id="settingKosisRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+            <div class="settings-row"><span id="settingKosisStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingKosisTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingKosisClear" type="button">키 지우기</button></span></div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -1071,6 +1080,10 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/ship-ports-data.js"></script>
 <script src="src/js/ship-api.js"></script>
 <script src="src/js/ship-map.js"></script>
+<script src="src/js/weather-api.js"></script>
+<script src="src/js/weather-map.js"></script>
+<script src="src/js/kosis-api.js"></script>
+<script src="src/js/kosis-choro.js"></script>
 <script src="src/js/korea-coords.js"></script>
 <script src="src/js/map-viewer.js"></script>
 <script src="src/js/timeline.js"></script>
