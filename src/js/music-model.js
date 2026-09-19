@@ -202,6 +202,27 @@ function musicClampText(value, limit){
   return String(value || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, Math.max(1, Number(limit) || 80));
 }
 
+function musicClampSourceUrl(value){
+  const text = String(value || "").trim().slice(0, 2048);
+  return /^https:\/\//i.test(text) ? text : "";
+}
+
+/* 외부 악보의 출처는 편집 내용과 함께 보존한다. 임의 JSON이 파일 안에 번지지 않도록
+   화면과 라이선스 표시에 필요한 짧은 문자열·HTTPS 주소만 받아들인다. */
+function musicNormalizeSource(value){
+  if (!value || typeof value !== "object") return null;
+  const source = {
+    provider:musicClampText(value.provider, 100),
+    license:musicClampText(value.license, 60),
+    title:musicClampText(value.title, 200),
+    composer:musicClampText(value.composer, 160),
+    url:musicClampSourceUrl(value.url),
+    projectUrl:musicClampSourceUrl(value.projectUrl),
+    imslp:musicClampSourceUrl(value.imslp)
+  };
+  return source.provider || source.license || source.url ? source : null;
+}
+
 /* ----- 가사(절) -------------------------------------------------------------
    가사는 절마다 한 줄이다. 1절은 예전과 같은 `note.lyric` 자리에 그대로 두고 2절부터를
    `note.lyrics` 배열에 담는다(`lyrics[0] === lyric`). 그래서 옛 `.msheet`·옛 판 앱·MusicXML
@@ -2075,7 +2096,7 @@ function musicParse(text){
   const activePart = parts.find((part) => part.id === raw.activePartId) || parts[0];
   const documentKey = MUSIC_KEYS[raw.key] ? raw.key : "C";
   for (const part of parts) if (!MUSIC_KEYS[part.key]) part.key = documentKey;
-  return {
+  const normalized = {
     format:MUSIC_FORMAT,
     version:MUSIC_VERSION,
     title:String(raw.title || "악보").slice(0, 200),
@@ -2103,6 +2124,9 @@ function musicParse(text){
     parts,
     activePartId:activePart.id
   };
+  const source = musicNormalizeSource(raw.source);
+  if (source) normalized.source = source;
+  return normalized;
 }
 
 function musicSerializePartMeasures(measures, grandStaff){
@@ -2193,6 +2217,8 @@ function musicSerialize(sheet){
   if (measureNumbers !== "line") out.measureNumbers = measureNumbers;
   const barsPerLine = musicClampBarsPerLine(model.barsPerLine);
   if (barsPerLine) out.barsPerLine = barsPerLine;
+  const source = musicNormalizeSource(model.source);
+  if (source) out.source = source;
   const activePart = musicActivePart(model);
   out.activePartId = activePart ? activePart.id : "";
   out.parts = musicParts(model).map((part) => ({

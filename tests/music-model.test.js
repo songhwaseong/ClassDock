@@ -15,7 +15,7 @@ function loadMusic(){
     ;globalThis.__music = {
       musicEmpty, musicExampleSheet, musicNote, musicRest, musicMeasure, musicParse, musicSerialize,
       musicPart, musicParts, musicActivePart, musicAddPart, musicRemovePart, musicSelectPart,
-      musicSyncActivePart, musicClampPartVolume, musicSynthSettings,
+      musicSyncActivePart, musicClampPartVolume, musicSynthSettings, musicNormalizeSource,
       MUSIC_SYNTH_PRESETS, MUSIC_SYNTH_WAVEFORMS,
       musicNoteTicks, musicMeasureTicks, musicMeasureUsedTicks, musicValidate, musicCanFit, musicMeasureProgress,
       musicMidiNumber, musicFrequency, musicNoteFrequency, musicNoteName,
@@ -84,6 +84,26 @@ test(".msheet는 같은 모델을 항상 같은 JSON으로 직렬화하고 그�
   assert.equal(reopened.measures[3].notes[1].rest, true);
   // 다시 저장해도 바이트가 같아야 한다(불필요한 파일 변경·diff 방지).
   assert.equal(api.musicSerialize(reopened), first);
+});
+
+test("무료 악보의 출처와 라이선스는 저장 후에도 남고 안전한 URL만 허용한다", () => {
+  const api = loadMusic();
+  const sheet = api.musicEmpty("가져온 악보");
+  sheet.source = {
+    provider:"OpenScore Lieder",
+    license:"CC0-1.0",
+    title:"Mailied",
+    composer:"Beethoven, Ludwig van",
+    url:"https://raw.githubusercontent.com/OpenScore/Lieder/example.mxl",
+    projectUrl:"https://fourscoreandmore.org/openscore/lieder/",
+    imslp:"javascript:alert(1)"
+  };
+  const reopened = api.musicParse(api.musicSerialize(sheet));
+  assert.equal(reopened.source.provider, "OpenScore Lieder");
+  assert.equal(reopened.source.license, "CC0-1.0");
+  assert.equal(reopened.source.composer, "Beethoven, Ludwig van");
+  assert.equal(reopened.source.imslp, "");
+  assert.equal(api.musicSerialize(reopened), api.musicSerialize(sheet));
 });
 
 test("두 성부와 표현 기호는 저장 후에도 독립적으로 유지된다", () => {

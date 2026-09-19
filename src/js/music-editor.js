@@ -801,6 +801,18 @@ async function mountMusicEditor(doc){
     "오른손 높은음자리표와 왼손 낮은음자리표를 함께 사용합니다");
   grandStaffBtn.addEventListener("click", () => setGrandStaff(!sheet.grandStaff));
 
+  const sourceLink = document.createElement("a");
+  sourceLink.className = "music-source-link";
+  sourceLink.target = "_blank";
+  sourceLink.rel = "noopener noreferrer";
+  if (sheet.source){
+    sourceLink.href = sheet.source.projectUrl || sheet.source.imslp || sheet.source.url;
+    sourceLink.textContent = [sheet.source.provider, sheet.source.license].filter(Boolean).join(" · ") || "악보 출처";
+    sourceLink.title = [sheet.source.composer, sheet.source.title, "출처 보기"].filter(Boolean).join(" — ");
+  } else {
+    sourceLink.hidden = true;
+  }
+
   // 도구막대 접기 단추 — 접으면 이 줄(상단 바)만 남아 다시 펴는 길이 늘 보인다.
   const toolbarToggleBtn = musicButton("▤ 도구 숨기기", "", "music-btn music-toolbar-toggle");
   toolbarToggleBtn.addEventListener("click", toggleToolbarVisibility);
@@ -828,6 +840,7 @@ async function mountMusicEditor(doc){
   // 머리말에는 늘 보여야 하는 것만 남긴다 — 제목과 악보의 뼈대(빠르기·박자·조표), 그리고
   // 되돌리기·저장·도구 접기. 나머지 도구는 아래 탭(음색/효과·악보/가사·도구)으로 내려간다.
   bar.append(titleInput, tempoWrap, timeWrap, keyWrap, toolbarToggleBtn, historyWrap, saveBtn);
+  bar.insertBefore(sourceLink, toolbarToggleBtn);
 
   /* ----- 파트별 신디사이저 ----- */
   const synthPanel = document.createElement("details");
@@ -1408,6 +1421,7 @@ async function mountMusicEditor(doc){
   transport.append(toStartBtn, prevLineBtn, playHereBtn, pauseBtn, stopBtn, nextLineBtn, toEndBtn);
   const musicXmlImportBtn = musicButton("MusicXML 열기",
     ".musicxml 또는 압축형 .mxl 파일을 새 편집용 악보로 가져옵니다");
+  const freeScoreBtn = musicButton("무료 악보", "OpenScore의 CC0 악보를 검색해 편집용 악보로 가져옵니다");
   const musicXmlBtn = musicButton("MusicXML 저장", "다른 악보 프로그램에서 열 수 있는 .musicxml 파일로 저장");
   const midiInputBtn = musicButton("🎹 MIDI 입력", "연결된 MIDI 건반으로 음표와 화음을 입력합니다");
   const midiExportBtn = musicButton("MIDI 저장", "재생 가능한 표준 MIDI(.mid) 파일로 저장합니다");
@@ -1443,6 +1457,7 @@ async function mountMusicEditor(doc){
   earWrap.classList.add("music-toolvis-ear");
   volumeWrap.classList.add("music-toolvis-volume");
   musicXmlImportBtn.classList.add("music-toolvis-xml");
+  freeScoreBtn.classList.add("music-toolvis-xml");
   musicXmlBtn.classList.add("music-toolvis-xml");
   midiInputBtn.classList.add("music-toolvis-midi-input");
   midiExportBtn.classList.add("music-toolvis-midi-export");
@@ -1588,6 +1603,7 @@ async function mountMusicEditor(doc){
 
   const extraPane = document.createElement("div");
   extraPane.className = "music-pane music-extra-tools";
+  extraPane.append(freeScoreBtn);
   extraPane.append(musicXmlImportBtn, musicXmlBtn, midiInputBtn, midiExportBtn, imageReferenceBtn,
     wavBtn, memoBtn, printBtn, practiceWrap, earWrap);
 
@@ -4106,6 +4122,7 @@ async function mountMusicEditor(doc){
       ] },
       { label:"저장·내보내기", children:[
         { label:"악보 저장 (Ctrl+S)", action:() => saveMusicSheet(doc) },
+        { label:"무료 악보 가져오기…", action:() => freeScoreBtn.click() },
         { label:"MusicXML 가져오기…", action:() => musicXmlInput.click() },
         { label:targetLine >= 0 ? `이 단(${musicRangeLabel(scoreLines[targetLine])})을 메모로` : "이 단을 메모로",
           action:() => sendScoreToMemo(targetLine), disabled:targetLine < 0 },
@@ -5260,6 +5277,10 @@ async function mountMusicEditor(doc){
     }
   }
   musicXmlImportBtn.addEventListener("click", () => musicXmlInput.click());
+  freeScoreBtn.addEventListener("click", () => {
+    if (typeof MNMusicLibrary === "object" && MNMusicLibrary) MNMusicLibrary.open();
+    else if (typeof toast === "function") toast("무료 악보 목록을 준비하지 못했어요.", 3000, { type:"error" });
+  });
   musicXmlInput.addEventListener("change", async () => {
     const file = musicXmlInput.files && musicXmlInput.files[0];
     musicXmlInput.value = "";

@@ -695,9 +695,11 @@ async function loadMusicXml(file, opts = {}){
       ? { sheet:recovered.sheet, warnings:[], fromClassDock:recovered.owned }
       : musicParseXmlText(text, file.name);
     if (opts.importAsSheet){
+      const source = typeof musicNormalizeSource === "function" ? musicNormalizeSource(opts.sourceMetadata) : null;
+      if (source) imported.sheet.source = source;
       const derived = new File([musicSerialize(imported.sheet)], musicXmlSourceTitle(file.name) + ".msheet",
         { type:"application/json" });
-      const { importAsSheet, ...rest } = opts;
+      const { importAsSheet, sourceMetadata, ...rest } = opts;
       const made = await loadMusicSheet(derived, { ...rest, isScratch:true, sourceKey:opts.sourceKey || file.name });
       if (made) made.musicImportWarnings = imported.warnings;
       if (typeof toast === "function"){

@@ -1,6 +1,6 @@
 # JavaScript 파일별 기능 안내
 
-**최종 업데이트: 2026년 9월 12일**
+**최종 업데이트: 2026년 9월 19일**
 
 이 문서는 ClassDock의 JavaScript 파일이 각각 어떤 기능을 담당하는지 빠르게 찾기 위한 유지보수용 색인입니다. 기능을 추가하거나 파일 책임이 바뀌면 해당 행과 날짜를 함께 갱신합니다.
 
@@ -12,6 +12,14 @@
 - 수정 후 `node build-offline.js`를 실행하면 모든 로컬·vendor JS가 오프라인 HTML 하나로 합쳐집니다.
 - 각 파일은 ES module이 아닌 전역 스크립트입니다. 이름 충돌과 로딩 순서가 중요하므로 `npm run check`로 전역 선언·의존성 계약을 확인합니다.
 - 자동 생성 파일인 `src/js/korean-font.js`는 직접 수정하지 않습니다.
+
+### 무료 악보 카탈로그
+
+| 파일 | 책임 | 함께 보는 곳 |
+|---|---|---|
+| `music-library-data.js` | OpenScore Lieder 공식 카탈로그에서 만든 CC0 악보 1,462곡의 로컬 검색 색인입니다. 검색은 오프라인에서도 되도록 앱에 포함하며 직접 고치지 않습니다. | `tools/update-openscore-catalog.mjs`, `music-library.js`, `tests/music-library.test.js` |
+| `music-library.js` | 음악 화면의 무료 악보 검색 창(`MNMusicLibrary`)입니다. 제목·작곡가·가사 언어 및 주요 작곡가 한글 이름으로 찾고, 선택한 MXL만 온라인에서 내려받아 기존 MusicXML 가져오기 경로로 넘깁니다. | `music-library-data.js`, `music-xml.js`, `music-editor.js`, `tests/music-library.test.js` |
+| `tools/update-openscore-catalog.mjs` | OpenScore의 공식 CC0 카탈로그 HTML을 읽어 `music-library-data.js`를 다시 만드는 유지보수 도구입니다. 1,000곡 미만이면 잘못된 응답으로 보고 생성을 중단합니다. | OpenScore Lieder 공식 GitHub 저장소 |
 
 ## 앱 로딩 구조
 
@@ -364,7 +372,7 @@ flowchart LR
 | 파일 비교(diff)·여러 파일 찾아 바꾸기 | `diff-viewer.js`, `batch-replace.js`, `office-replace.js`, `command-palette.js` |
 | 블록 문서(`.mnote`) | `mnote.js`, `documents.js`, `file-loaders.js` |
 | 일기장(`.diary`) | `diary.js`, `documents.js`, `file-loaders.js`, `docs/일기장-설계.md` |
-| 악보(`.msheet`)·MusicXML 호환·소리·WAV 저장 | `music-model.js`, `music-xml.js`, `music-audio.js`, `music-eartest.js`, `music-pitch.js`, `music-editor.js`, `docs/악보-설계.md` |
+| 악보(`.msheet`)·무료 CC0 악보·MusicXML 호환·소리·WAV 저장 | `music-model.js`, `music-xml.js`, `music-library-data.js`, `music-library.js`, `music-audio.js`, `music-eartest.js`, `music-pitch.js`, `music-editor.js`, `docs/악보-설계.md` |
 | 화이트보드 도구·우클릭 메뉴·집중 도구 | `whiteboard.js`, `board-render.js`, `docs/화이트보드-집중도구-설계.md` |
 | 과제(`.task`)·시험지(`.exam`) | `task-package.js`, `exam-paper.js`, `docs/시험지-설계.md` |
 | 대기 화면(화면보호기)·웹 주소 | `screensaver.js`, `state.js`(설정·주소 정규화), `app.js`(설정 화면) |

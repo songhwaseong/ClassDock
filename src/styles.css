@@ -1468,6 +1468,36 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-doc{display:flex;flex-direction:column;height:100%;min-height:0}
   .music-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;
     border-bottom:1px solid var(--border);background:var(--panel)}
+  .music-source-link{display:inline-flex;align-items:center;padding:5px 8px;border:1px solid color-mix(in srgb,var(--accent) 42%,var(--border));
+    border-radius:999px;background:color-mix(in srgb,var(--accent) 8%,var(--field));color:var(--accent);
+    font-size:11.5px;font-weight:700;text-decoration:none;white-space:nowrap}
+  .music-source-link:hover{background:color-mix(in srgb,var(--accent) 15%,var(--field));text-decoration:underline}
+  /* OpenScore CC0 악보 검색 창 — 카탈로그는 앱에 들어 있고, 선택한 곡만 온라인에서 받는다. */
+  .music-library-card{width:min(900px,96%);height:min(86vh,760px);max-height:calc(100vh - 20px);
+    display:flex;flex-direction:column;overflow:hidden}
+  .music-library-sub{flex:none}
+  .music-library-controls{display:flex;gap:8px;flex:none;margin-bottom:8px}
+  .music-library-controls input,.music-library-controls select{border:1px solid var(--border);border-radius:8px;
+    background:var(--field);color:var(--ink);padding:9px 11px;font:inherit}
+  .music-library-controls input{flex:1;min-width:180px}
+  .music-library-controls input:focus,.music-library-controls select:focus{outline:2px solid color-mix(in srgb,var(--accent) 38%,transparent);border-color:var(--accent)}
+  .music-library-summary{flex:none;color:var(--muted);font-size:12px;margin-bottom:6px;font-variant-numeric:tabular-nums}
+  .music-library-results{flex:1;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:10px;background:var(--field)}
+  .music-library-item{display:flex;align-items:center;gap:12px;padding:9px 11px;border-bottom:1px solid var(--border)}
+  .music-library-item:last-child{border-bottom:0}
+  .music-library-item:hover{background:var(--panel-hover)}
+  .music-library-item-text{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}
+  .music-library-item-text strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+  .music-library-item-text>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11.5px}
+  .music-library-links a,.music-library-foot a{color:var(--accent)}
+  .music-library-item>.btn{flex:none}
+  .music-library-more{display:block;margin:10px auto}
+  .music-library-empty{padding:28px 16px;text-align:center;color:var(--muted)}
+  .music-library-status{flex:none;min-height:18px;margin-top:7px;color:var(--muted);font-size:12px}
+  .music-library-status.is-error{color:var(--danger)}
+  .music-library-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;margin-top:4px;
+    color:var(--muted);font-size:11.5px}
+  .music-library-foot>.btn{flex:none}
   /* 도구 탭 — 예전 네 줄(편집·쉬운 입력·재생·음색)을 다섯 칸으로 나눠 한 번에 한 칸만 보여준다.
      안 보이는 칸은 display:none 이 아니라 hidden 이라 요소·설정값이 그대로 살아 있다. */
   .music-toolbox{border-bottom:1px solid var(--border);background:var(--panel)}

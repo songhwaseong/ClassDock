@@ -125,6 +125,8 @@
     "diary.js",
     "music-model.js",
     "music-xml.js",
+    "music-library-data.js",
+    "music-library.js",
     "music-audio.js",
     "music-eartest.js",
     "music-pitch.js",
@@ -283,6 +285,8 @@
         "diary.js",
         "music-model.js",
         "music-xml.js",
+        "music-library-data.js",
+        "music-library.js",
         "music-audio.js",
         "music-eartest.js",
         "music-pitch.js",
@@ -508,6 +512,11 @@
       "lazy.js",
       "music-model.js"
     ],
+    "music-library-data.js": [],
+    "music-library.js": [
+      "music-library-data.js",
+      "music-xml.js"
+    ],
     "music-editor.js": [
       "documents.js",
       "file-loaders.js",
@@ -515,6 +524,7 @@
       "lazy.js",
       "music-model.js",
       "music-xml.js",
+      "music-library.js",
       "music-audio.js",
       "music-eartest.js",
       "music-pitch.js"
@@ -766,6 +776,14 @@
         "notebook-cells.js",
         "scratchpad.js",
         "mnote.js"
+      ]
+    },
+    {
+      "name": "music-library",
+      "file": "music-library.js",
+      "publicApi": "MNMusicLibrary",
+      "consumers": [
+        "music-editor.js"
       ]
     },
     {
