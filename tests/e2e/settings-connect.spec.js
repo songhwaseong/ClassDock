@@ -1,4 +1,4 @@
-// 설정 '연결' 탭 — 인터넷 서비스 인증키(지도 검색·환율·지하철·공공데이터포털·KOSIS)를 한 줄씩 접어 둔다.
+// 설정 '연결' 탭 — 인터넷 서비스 인증키(지도 검색·환율·지하철·공공데이터포털·KOSIS·NEIS)를 한 줄씩 접어 둔다.
 const { test, expect } = require("@playwright/test");
 
 test("연결 탭은 서비스를 접힌 한 줄로 보여 주고 배지로 키 상태를 알린다", async ({ page }) => {
@@ -20,7 +20,7 @@ test("연결 탭은 서비스를 접힌 한 줄로 보여 주고 배지로 키 �
   const panel = page.locator('[data-settings-panel="connect"]');
   await expect(panel).toBeVisible();
   const items = panel.locator("details.conn-item");
-  await expect(items).toHaveCount(5);
+  await expect(items).toHaveCount(6);
   await expect(panel.locator("details.conn-item[open]")).toHaveCount(0);
   await expect(page.locator("#settingSubwayKey")).toBeHidden();
 
@@ -31,6 +31,8 @@ test("연결 탭은 서비스를 접힌 한 줄로 보여 주고 배지로 키 �
   await expect(page.locator("#settingMapSearchBadge")).toHaveText("OpenStreetMap");
   await expect(page.locator("#settingKosisBadge")).toHaveText("EXE에서만");
   await expect(items.filter({ has:page.locator("#settingKosisKey") }).locator(".conn-name")).toHaveText("KOSIS 국가통계");
+  await expect(page.locator("#settingNeisBadge")).toHaveText("EXE에서만");
+  await expect(items.filter({ has:page.locator("#settingNeisKey") }).locator(".conn-name")).toHaveText("NEIS 교육정보");
 
   // 펼치면 입력칸이 보이고, 다른 줄을 펼치면 앞 줄은 닫힌다(한 번에 하나).
   await items.filter({ has:page.locator("#settingSubwayKey") }).locator("summary").click();
@@ -57,4 +59,5 @@ test("영어 화면에서는 환율·지하철 키 상태 문구도 영어로 �
   await expect(page.locator("#settingSubwayStatus")).toHaveText("The subway key is stored encrypted for this Windows user.");
   await expect(page.locator("#settingTagoStatus")).toHaveText("Data.go.kr key settings are available in ClassDock.exe.");
   await expect(page.locator("#settingKosisStatus")).toHaveText("KOSIS key settings are available in ClassDock.exe.");
+  await expect(page.locator("#settingNeisStatus")).toHaveText("NEIS key settings are available in ClassDock.exe.");
 });

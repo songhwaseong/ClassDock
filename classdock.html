@@ -716,6 +716,15 @@
             <div class="settings-row"><span id="settingKosisStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingKosisTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingKosisClear" type="button">키 지우기</button></span></div>
           </div>
         </details>
+        <details class="conn-item" name="settings-conn" data-conn="Neis">
+          <summary><span class="conn-name">NEIS 교육정보</span><span class="conn-badge" id="settingNeisBadge" aria-live="polite">확인 중</span></summary>
+          <div class="conn-body map-search-settings" id="settingNeisKeyWrap">
+            <p class="conn-hint">일기장의 '우리 학교'(급식·학사일정·시간표)에 씁니다. 나이스 교육정보 개방 포털(open.neis.go.kr)에서 무료로 발급받습니다. 키가 없어도 한 번에 5줄까지는 볼 수 있습니다.</p>
+            <label class="settings-row"><span>NEIS 인증키</span><input type="password" id="settingNeisKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="NEIS 인증키"></label>
+            <label class="settings-check" id="settingNeisRememberWrap"><input type="checkbox" id="settingNeisRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+            <div class="settings-row"><span id="settingNeisStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingNeisTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingNeisClear" type="button">키 지우기</button></span></div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -1113,6 +1122,7 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/exchange-rate-ui.js"></script>
 <script src="src/js/scratchpad.js"></script>
 <script src="src/js/mnote.js"></script>
+<script src="src/js/neis-api.js"></script>
 <script src="src/js/diary.js"></script>
 <script src="src/js/music-model.js"></script>
 <script src="src/js/music-xml.js"></script>

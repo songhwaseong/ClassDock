@@ -32,6 +32,7 @@
     image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 3-4 5 6"/>',
     chart: '<path d="M4 20V5M4 20h17M8 16v-4M13 16V8M18 16v-7"/>',
     calendar: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/>',
+    school: '<path d="M2.5 9.5 12 5l9.5 4.5L12 14z"/><path d="M6.5 11.5v4.2c3 2.4 8 2.4 11 0v-4.2M21.5 9.5v5"/>',
     task: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
     play: '<path d="m8 5 11 7-11 7z"/>',
     check: '<path d="m5 12 4 4L19 6"/>',

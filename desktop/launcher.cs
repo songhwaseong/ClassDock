@@ -986,6 +986,7 @@ class ClassDockLauncher
             if (path.StartsWith("/jeju-bus-catalog", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/tago-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/kosis-key", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/neis-key", StringComparison.Ordinal)) return true;
         }
         if (method == "GET")
         {
@@ -1031,11 +1032,13 @@ class ClassDockLauncher
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
             if (path == "/tago-key-status") return true;
             if (path == "/can-proxy-kosis" || path == "/kosis-key-status" || path.StartsWith("/kosis?", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-neis" || path == "/neis-key-status" || path.StartsWith("/neis?", StringComparison.Ordinal)) return true;
         }
         if (method == "DELETE" && (path == "/map-search-key" || path == "/exchange-rate-key")) return true;
         if (method == "DELETE" && path == "/subway-key") return true;
         if (method == "DELETE" && path == "/tago-key") return true;
         if (method == "DELETE" && path == "/kosis-key") return true;
+        if (method == "DELETE" && path == "/neis-key") return true;
         return false;
     }
 
@@ -3503,6 +3506,63 @@ class ClassDockLauncher
                     bool kosisKeyCleared = ClearKosisKey();
                     WriteResponse(stream, kosisKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
                         Encoding.UTF8.GetBytes(kosisKeyCleared ? "ok" : "kosis-key-clear-failed"));
+                }
+                else if (method == "GET" && path == "/can-proxy-neis")
+                {
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path.StartsWith("/neis?", StringComparison.Ordinal))
+                {
+                    byte[] neisData; string neisError; DateTime neisAt; bool neisSample;
+                    if (TryNeis(path, out neisData, out neisAt, out neisSample, out neisError))
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", neisData,
+                            "X-ClassDock-Fetched-At: " + neisAt.ToString("o", CultureInfo.InvariantCulture) + "\r\n"
+                            + "X-ClassDock-Neis-Sample: " + (neisSample ? "1" : "0") + "\r\n");
+                    else
+                    {
+                        int bar = neisError.IndexOf('|');
+                        string upstream = bar < 0 ? "" : new string(neisError.Substring(bar + 1).Where(c => c >= ' ' && c < 127).ToArray());
+                        if (bar >= 0) neisError = neisError.Substring(0, bar);
+                        WriteResponse(stream,
+                            neisError == "neis-bad-request" ? "400 Bad Request"
+                            : neisError == "neis-key-invalid" ? "428 Precondition Required"
+                            : neisError == "neis-quota" ? "429 Too Many Requests" : "503 Service Unavailable",
+                            "text/plain", Encoding.UTF8.GetBytes(neisError),
+                            upstream.Length > 0 ? "X-ClassDock-Upstream: " + upstream + "\r\n" : "");
+                    }
+                }
+                else if (method == "GET" && path == "/neis-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(NeisKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/neis-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string neisKeyError;
+                    bool neisKeySaved = TrySetNeisKey(Encoding.UTF8.GetString(body ?? new byte[0]),
+                        QueryValue(path, "remember") == "1", out neisKeyError);
+                    WriteResponse(stream, neisKeySaved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(neisKeySaved ? "ok" : neisKeyError));
+                }
+                else if (method == "DELETE" && path == "/neis-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool neisKeyCleared = ClearNeisKey();
+                    WriteResponse(stream, neisKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(neisKeyCleared ? "ok" : "neis-key-clear-failed"));
                 }
                 else if (method == "GET" && path == "/can-proxy-subway")
                 {
@@ -6072,6 +6132,197 @@ class ClassDockLauncher
         int total;
         return body != null && body.TryGetValue("totalCount", out value) && value != null
             && Int32.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out total) ? total : 0;
+    }
+
+    /* NEIS 교육정보 개방 포털(open.neis.go.kr/hub). 키는 따로(나이스 포털 마이페이지). 원격 주소를 받지 않고
+       정해 둔 서비스·요청 변수만 넘긴다. 키가 없어도 한 번에 5줄까지는 준다 → 키 없이도 묻되 화면에 '샘플'이라 알린다.
+       오류도 HTTP 200 본문으로 온다(2026-09-19 실측): {"RESULT":{"CODE":"INFO-200"}} 자료 없음 · ERROR-290 키 무효 ·
+       ERROR-337 하루 한도 · ERROR-300/333/336 요청 변수 문제. 정상 응답은 {"서비스":[{"head":…},{"row":[…]}]}. */
+    const string NeisBase = "https://open.neis.go.kr/hub/";
+    class NeisCacheEntry { public byte[] Data; public DateTime FetchedAt; public DateTime UsedAt; public bool Sample; }
+    static readonly object NeisCacheLock = new object();
+    static readonly Dictionary<string, NeisCacheEntry> NeisCache = new Dictionary<string, NeisCacheEntry>();
+    static readonly Dictionary<string, string[]> NeisServiceParams = new Dictionary<string, string[]>
+    {
+        { "schoolInfo", new[] { "SCHUL_NM", "ATPT_OFCDC_SC_CODE" } },
+        { "mealServiceDietInfo", new[] { "ATPT_OFCDC_SC_CODE", "SD_SCHUL_CODE", "MLSV_FROM_YMD", "MLSV_TO_YMD" } },
+        { "SchoolSchedule", new[] { "ATPT_OFCDC_SC_CODE", "SD_SCHUL_CODE", "AA_FROM_YMD", "AA_TO_YMD" } },
+        { "elsTimetable", new[] { "ATPT_OFCDC_SC_CODE", "SD_SCHUL_CODE", "TI_FROM_YMD", "TI_TO_YMD", "GRADE", "CLASS_NM" } },
+        { "misTimetable", new[] { "ATPT_OFCDC_SC_CODE", "SD_SCHUL_CODE", "TI_FROM_YMD", "TI_TO_YMD", "GRADE", "CLASS_NM" } },
+        { "hisTimetable", new[] { "ATPT_OFCDC_SC_CODE", "SD_SCHUL_CODE", "TI_FROM_YMD", "TI_TO_YMD", "GRADE", "CLASS_NM" } },
+        { "classInfo", new[] { "ATPT_OFCDC_SC_CODE", "SD_SCHUL_CODE", "AY", "GRADE" } }
+    };
+    static bool ValidNeisParam(string name, string value)
+    {
+        if (value.Length == 0) return true;
+        switch (name)
+        {
+            case "SCHUL_NM": return value.Length <= 40 && value.All(c => c >= ' ') && !value.Any(c => c == '&' || c == '=' || c == '?' || c == '#');
+            case "ATPT_OFCDC_SC_CODE": return System.Text.RegularExpressions.Regex.IsMatch(value, "^[A-Z][0-9]{2}$");
+            case "SD_SCHUL_CODE": return System.Text.RegularExpressions.Regex.IsMatch(value, "^[0-9]{7,10}$");
+            case "GRADE": return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-6]$");
+            case "AY": return System.Text.RegularExpressions.Regex.IsMatch(value, "^20[0-9]{2}$");   // 학년도
+            case "CLASS_NM": return value.Length <= 6 && value.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '가' && c <= '힣'));
+            default: return System.Text.RegularExpressions.Regex.IsMatch(value, "^[0-9]{8}$");   // 날짜
+        }
+    }
+    static bool TryNeis(string path, out byte[] data, out DateTime fetchedAt, out bool sample, out string error)
+    {
+        data = null; fetchedAt = DateTime.MinValue; sample = false; error = "neis-bad-request";
+        string service = QueryValue(path, "svc") ?? "";
+        string[] allowed;
+        if (!NeisServiceParams.TryGetValue(service, out allowed)) return false;
+        string query = "";
+        foreach (string name in allowed)
+        {
+            string value = (QueryValue(path, name) ?? "").Trim();
+            if (!ValidNeisParam(name, value)) return false;
+            if (value.Length > 0) query += "&" + name + "=" + Uri.EscapeDataString(value);
+        }
+        if (service == "schoolInfo" && query.IndexOf("SCHUL_NM=", StringComparison.Ordinal) < 0) return false;
+        if (service != "schoolInfo" && (query.IndexOf("SD_SCHUL_CODE=", StringComparison.Ordinal) < 0 || query.IndexOf("ATPT_OFCDC_SC_CODE=", StringComparison.Ordinal) < 0)) return false;
+        string key = CurrentNeisKey();
+        sample = key.Length == 0;
+        // 키가 없으면 5줄이 한계다(더 달라면 오류). 한 달 학사일정·일주일 급식도 한 쪽 1000줄이면 넉넉하다.
+        string url = NeisBase + service + "?Type=json&pIndex=1&pSize=" + (sample ? "5" : "1000") + query;
+        // 급식·시간표는 바뀔 수 있어 몇 시간만, 학교 정보는 하루 둔다.
+        int ttlMinutes = service == "schoolInfo" || service == "classInfo" ? 1440 : service == "SchoolSchedule" ? 720 : 180;
+        string cacheKey = (sample ? "S|" : "K|") + url;
+        lock (NeisCacheLock)
+        {
+            NeisCacheEntry hit;
+            if (NeisCache.TryGetValue(cacheKey, out hit) && DateTime.UtcNow < hit.FetchedAt.AddMinutes(ttlMinutes))
+            { hit.UsedAt = DateTime.UtcNow; data = hit.Data; fetchedAt = hit.FetchedAt; return true; }
+        }
+        byte[] received;
+        try
+        {
+            try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url + (sample ? "" : "&KEY=" + Uri.EscapeDataString(key)));
+            // Accept: application/json 을 붙이면 NEIS 가 HTTP 500 을 준다(2026-09-19 실측) — 받는 형식은 Type=json 으로만 정한다.
+            request.Method = "GET"; request.UserAgent = "ClassDock/1.0 (local classroom app)";
+            request.AllowAutoRedirect = false; request.Timeout = 15000; request.ReadWriteTimeout = 15000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream input = response.GetResponseStream())
+            using (MemoryStream output = new MemoryStream())
+            {
+                byte[] buffer = new byte[8192]; int count;
+                while ((count = input.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    if (output.Length + count > 4 * 1024 * 1024) { error = "neis-fetch-failed|too large"; return false; }
+                    output.Write(buffer, 0, count);
+                }
+                received = output.ToArray();
+            }
+        }
+        catch (WebException failure)
+        {
+            var response = failure.Response as HttpWebResponse;
+            error = "neis-fetch-failed|" + (response != null ? "HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) : failure.Status.ToString());
+            return false;
+        }
+        catch { error = "neis-fetch-failed"; return false; }
+        string text = Encoding.UTF8.GetString(received).Trim().TrimStart('﻿');
+        var match = System.Text.RegularExpressions.Regex.Match(text, "^\\{\\s*\"RESULT\"\\s*:\\s*\\{\\s*\"CODE\"\\s*:\\s*\"([A-Z]+-[0-9]+)\"");
+        if (match.Success)
+        {
+            string code = match.Groups[1].Value;
+            if (code == "INFO-200") received = Encoding.UTF8.GetBytes("{}");   // 자료 없음 → 빈 결과
+            else
+            {
+                error = (code == "ERROR-290" ? "neis-key-invalid" : code == "ERROR-337" ? "neis-quota"
+                    : code.StartsWith("ERROR-3", StringComparison.Ordinal) ? "neis-bad-request" : "neis-fetch-failed") + "|" + code;
+                return false;
+            }
+        }
+        else if (!text.StartsWith("{", StringComparison.Ordinal)) { error = "neis-fetch-failed|not json"; return false; }
+        lock (NeisCacheLock)
+        {
+            if (NeisCache.Count >= 80) NeisCache.Remove(NeisCache.OrderBy(p => p.Value.UsedAt).First().Key);
+            NeisCache[cacheKey] = new NeisCacheEntry { Data = received, FetchedAt = DateTime.UtcNow, UsedAt = DateTime.UtcNow, Sample = sample };
+        }
+        data = received; fetchedAt = DateTime.UtcNow;
+        return true;
+    }
+
+    static readonly object NeisKeyLock = new object();
+    static readonly byte[] NeisKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.NeisKey.v1");
+    static readonly string NeisKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "neis-key.bin");
+    static bool NeisKeyLoaded;
+    static string NeisKey = "";
+    static bool ValidNeisKey(string value)
+    {
+        string key = (value ?? "").Trim();
+        return key.Length >= 16 && key.Length <= 80 && key.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
+    }
+    static string CurrentNeisKey()
+    {
+        lock (NeisKeyLock)
+        {
+            if (!NeisKeyLoaded)
+            {
+                NeisKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(NeisKeyFile))
+                    {
+                        string key = Encoding.UTF8.GetString(ProtectedData.Unprotect(File.ReadAllBytes(NeisKeyFile), NeisKeyEntropy, DataProtectionScope.CurrentUser)).Trim();
+                        if (ValidNeisKey(key)) NeisKey = key;
+                    }
+                }
+                catch { NeisKey = ""; }
+            }
+            return NeisKey;
+        }
+    }
+    static string NeisKeyStatusJson()
+    {
+        bool remembered = false;
+        try { remembered = File.Exists(NeisKeyFile) && CurrentNeisKey().Length > 0; } catch { }
+        return "{\"hasKey\":" + (CurrentNeisKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (remembered ? "true" : "false") + ",\"persistentSupported\":true}";
+    }
+    static void ClearNeisCache() { lock (NeisCacheLock) NeisCache.Clear(); }
+    static bool ClearNeisKey()
+    {
+        lock (NeisKeyLock)
+        {
+            NeisKeyLoaded = true; NeisKey = "";
+            try { if (File.Exists(NeisKeyFile)) File.Delete(NeisKeyFile); }
+            catch { return false; }
+        }
+        ClearNeisCache();
+        return true;
+    }
+    static bool TrySetNeisKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "neis-key-invalid";
+        if (!ValidNeisKey(key)) return false;
+        string previous = CurrentNeisKey();
+        lock (NeisKeyLock)
+        {
+            try
+            {
+                if (remember)
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(NeisKeyFile));
+                    byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), NeisKeyEntropy, DataProtectionScope.CurrentUser);
+                    string temp = NeisKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+                    File.WriteAllBytes(temp, encrypted);
+                    if (File.Exists(NeisKeyFile)) File.Delete(NeisKeyFile);
+                    File.Move(temp, NeisKeyFile);
+                }
+                else if (File.Exists(NeisKeyFile)) File.Delete(NeisKeyFile);
+            }
+            catch { NeisKey = previous; error = "neis-key-save-failed"; return false; }
+            NeisKeyLoaded = true;
+            NeisKey = key;
+        }
+        ClearNeisCache();
+        error = "";
+        return true;
     }
 
     /* KOSIS 국가통계포털 공유서비스(kosis.kr/openapi). 키는 공공데이터포털과 따로다(회원 한 명에 하나, Base64 라 끝에 '=' 가 붙기도 한다).

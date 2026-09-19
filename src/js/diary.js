@@ -1497,6 +1497,336 @@ function mountDiaryEditor(doc){
     paintSpecialDays(); renderSpecialBadge();
   });
 
+  /* ----- 우리 학교(NEIS 급식·학사일정·시간표) -----
+     EXE 에서만 보인다(런처가 NEIS 키를 들고 대신 묻는다). 고른 학교는 이 브라우저에 남고 일기장 파일에는 담지 않는다.
+     보고 있는 달의 급식·학사일정을 한 번에 받아 두고(달력 표시·날짜 줄에 같이 쓴다), 시간표는 그날만 묻는다. */
+  const neisApi = typeof MNNeisApi !== "undefined" ? MNNeisApi : null;
+  // 한두 낱말(급식·반·학년)은 i18n 사전에 넣지 않는다 — 사전은 같은 글 조각을 화면 어디서나 바꾼다.
+  const schoolWord = (ko, en) => diaryIsEn() ? en : ko;
+  let neisReady = false, school = neisApi ? neisApi.savedSchool() : null;
+  const schoolMonths = new Map(), schoolLoading = new Set(), schoolFailed = new Map();
+  // 학교마다 학년·반 목록(NEIS 학급정보) — 한 번 받은 것은 이 창에서 다시 묻지 않는다.
+  const schoolClasses = new Map();
+  // 학교 정보 카드(학교 찾기 응답의 자세한 칸) — 학교마다 한 번.
+  const schoolDetails = new Map();
+  function renderSchoolCard(card){
+    const asked = schoolKey();
+    let task = schoolDetails.get(asked);
+    if (!task){
+      task = neisApi.loadSchoolDetail(school);
+      schoolDetails.set(asked, task);
+      task.catch(() => schoolDetails.delete(asked));
+    }
+    card.textContent = diaryT("학교 정보를 받는 중…");
+    task.then(info => {
+      if (asked !== schoolKey() || !card.isConnected) return;
+      card.replaceChildren();
+      if (!info){ card.textContent = diaryT("학교 정보를 찾지 못했어요."); return; }
+      const en = diaryIsEn();
+      const date = (p, withYear) => !p ? "" : en
+        ? new Date(p.y || 2000, p.m - 1, p.d).toLocaleDateString("en-US", withYear ? { year:"numeric", month:"short", day:"numeric" } : { month:"short", day:"numeric" })
+        : (withYear && p.y ? p.y + "년 " : "") + p.m + "월 " + p.d + "일";
+      const rows = [
+        [schoolWord("구분", "Type"), [info.kind, info.found, info.coed, info.highKind].filter(Boolean).join(" · ")],
+        [schoolWord("주소", "Address"), [info.zip ? "(" + info.zip + ")" : "", info.address].filter(Boolean).join(" ")],
+        [schoolWord("전화", "Phone"), [info.phone, info.fax ? schoolWord("팩스", "Fax") + " " + info.fax : ""].filter(Boolean).join(" · ")],
+        [schoolWord("홈페이지", "Website"), info.homepage],
+        [schoolWord("관할", "Office"), info.office],
+        [schoolWord("개교기념일", "Founding day"), date(info.anniversary, false)],
+        [schoolWord("설립일", "Established"), date(info.founded, true)]
+      ].filter(([, value]) => value);
+      for (const [label, value] of rows){
+        const row = document.createElement("div"); row.className = "diary-school-card-row";
+        const head = document.createElement("span"); head.className = "diary-school-card-label"; head.textContent = label;
+        let body;
+        if (value === info.homepage){
+          // 새 창으로 연다(일기장을 떠나지 않게). 주소는 http(s) 만 받는다(neis-api.js homepage).
+          body = document.createElement("a");
+          body.href = value; body.target = "_blank"; body.rel = "noopener noreferrer";
+          body.textContent = value.replace(/^https?:\/\//, "").replace(/\/$/, "");
+        } else {
+          body = document.createElement("span"); body.textContent = value;
+        }
+        body.classList.add("diary-school-card-value");
+        row.append(head, body);
+        card.append(row);
+      }
+    }, error => {
+      if (asked === schoolKey() && card.isConnected) card.textContent = diaryT(neisApi.failureText(error));
+    });
+  }
+  const schoolBtn = diaryButton("", "우리 학교 — 급식·학사일정·시간표", "diary-btn diary-school-btn", "school");
+  schoolBtn.hidden = true;
+  schoolBtn.setAttribute("aria-haspopup", "dialog");
+  schoolBtn.setAttribute("aria-expanded", "false");
+  bar.insertBefore(schoolBtn, saveBtn);
+  const schoolStrip = document.createElement("div");
+  schoolStrip.className = "diary-school";
+  schoolStrip.hidden = true;
+  main.insertBefore(schoolStrip, paper);
+  const schoolPanel = document.createElement("div");
+  schoolPanel.className = "diary-school-panel";
+  schoolPanel.hidden = true;
+  schoolPanel.setAttribute("role", "dialog");
+  schoolPanel.setAttribute("aria-label", schoolWord("우리 학교", "My school"));
+  root.append(schoolPanel);
+
+  const schoolYm = (key) => key.slice(0, 7);
+  const schoolKey = () => school ? school.office + school.code : "";
+  function schoolMonth(key){ return schoolMonths.get(schoolKey() + "|" + schoolYm(key)) || null; }
+  function requestSchoolMonth(year, month){
+    if (!neisReady || !school) return;
+    const ym = year + "-" + String(month).padStart(2, "0"), id = schoolKey() + "|" + ym;
+    if (schoolMonths.has(id) || schoolLoading.has(id) || schoolFailed.has(id)) return;
+    schoolLoading.add(id);
+    const asked = schoolKey();
+    neisApi.loadMonth(school, year, month).then(data => {
+      schoolMonths.set(id, data);
+    }, error => { schoolFailed.set(id, error); }).finally(() => {
+      schoolLoading.delete(id);
+      if (!root.isConnected || asked !== schoolKey()) return;
+      paintSchoolDays(); renderSchoolStrip();
+    });
+  }
+  function paintSchoolDays(){
+    if (!neisReady || !school) return;
+    requestSchoolMonth(viewYear, viewMonth + 1);
+    const data = schoolMonths.get(schoolKey() + "|" + viewYear + "-" + String(viewMonth + 1).padStart(2, "0"));
+    if (!data) return;
+    for (const b of calGrid.querySelectorAll(".diary-cal-day")){
+      if (b.dataset.school) continue;
+      const events = data.schedule.get(b.dataset.date) || [];
+      if (!events.length) continue;
+      const names = events.map(e => e.name).join(" · ");
+      b.dataset.school = names;
+      b.classList.add("has-school-event");
+      b.classList.toggle("is-school-off", events.some(e => e.off));
+      b.title = [b.title, names].filter(Boolean).join(" · ");
+      b.setAttribute("aria-label", b.getAttribute("aria-label") + " · " + names);
+    }
+  }
+  let timetableSeq = 0;
+  function renderSchoolStrip(){
+    schoolStrip.hidden = !neisReady || !school;
+    schoolBtn.classList.toggle("is-set", !!school);
+    if (schoolStrip.hidden){ schoolStrip.replaceChildren(); return; }
+    const key = current;
+    requestSchoolMonth(Number(key.slice(0, 4)), Number(key.slice(5, 7)));
+    const data = schoolMonth(key);
+    const failed = schoolFailed.get(schoolKey() + "|" + schoolYm(key));
+    const line = (label, cls) => {
+      const row = document.createElement("div"); row.className = "diary-school-row " + cls;
+      const head = document.createElement("span"); head.className = "diary-school-label"; head.textContent = label;
+      const body = document.createElement("span"); body.className = "diary-school-text";
+      row.append(head, body);
+      return { row, body };
+    };
+    const title = document.createElement("div");
+    title.className = "diary-school-name";
+    title.textContent = school.name + (school.grade && school.cls ? " · " + (diaryIsEn() ? "Grade " + school.grade + ", class " + school.cls : school.grade + "학년 " + school.cls + "반") : "");
+    const rows = [title];
+    if (failed && !data){
+      const note = document.createElement("div"); note.className = "diary-school-note ui-keep-symbols";
+      note.textContent = diaryT(neisApi.failureText(failed));
+      rows.push(note);
+    } else if (!data){
+      const note = document.createElement("div"); note.className = "diary-school-note";
+      note.textContent = diaryT("학교 정보를 받는 중…");
+      rows.push(note);
+    } else {
+      const meals = data.meals.get(key) || [];
+      const events = data.schedule.get(key) || [];
+      const meal = line(schoolWord("급식", "Lunch"), "is-meal");
+      if (meals.length){
+        meal.body.textContent = meals.map(m => (meals.length > 1 ? m.type + " " : "") + m.dishes.join(", ")).join(" / ");
+        const insert = diaryButton("일기에 넣기", "급식 메뉴를 일기 끝에 한 줄로 넣기", "diary-btn diary-school-insert");
+        insert.addEventListener("click", () => {
+          const text = neisApi.mealLine(meals);
+          if (!text) return;
+          area.value = area.value + (area.value && !area.value.endsWith("\n") ? "\n" : "") + text;
+          area.dispatchEvent(new Event("input", { bubbles:true }));
+          area.focus();
+        });
+        meal.row.append(insert);
+      } else meal.body.textContent = diaryT("급식 정보가 없어요");
+      rows.push(meal.row);
+      if (events.length){
+        const ev = line(schoolWord("일정", "Events"), "is-event");
+        ev.body.textContent = events.map(e => e.name).join(" · ");
+        rows.push(ev.row);
+      }
+      const tt = line(schoolWord("시간표", "Timetable"), "is-timetable");
+      tt.body.textContent = school.grade && school.cls ? diaryT("시간표를 받는 중…") : diaryT("학년·반을 고르면 시간표가 보여요");
+      rows.push(tt.row);
+      if (school.grade && school.cls){
+        const seq = ++timetableSeq, asked = schoolKey();
+        neisApi.loadTimetable(school, key).then(list => {
+          if (seq !== timetableSeq || key !== current || asked !== schoolKey()) return;
+          tt.body.textContent = list.length ? list.map(p => p.period + "교시 " + p.subject).join(" · ") : diaryT("시간표가 없어요");
+        }, error => {
+          if (seq !== timetableSeq || key !== current) return;
+          tt.body.textContent = diaryT(neisApi.failureText(error));
+        });
+      }
+      if (data.truncated){
+        const note = document.createElement("div"); note.className = "diary-school-note ui-keep-symbols";
+        note.textContent = diaryT("NEIS 인증키가 없어 일부(5줄)만 보여요. 설정 → 연결에서 'NEIS 교육정보' 키를 넣어 주세요.");
+        rows.push(note);
+      }
+    }
+    schoolStrip.replaceChildren(...rows);
+  }
+
+  // 학교 고르기 창
+  function renderSchoolPanel(results, status){
+    const head = document.createElement("div"); head.className = "diary-style-label"; head.textContent = schoolWord("우리 학교", "My school");
+    const now = document.createElement("div"); now.className = "diary-school-current";
+    now.textContent = school ? school.name + (school.kind ? " (" + school.kind + ")" : "") : diaryT("아직 고른 학교가 없어요");
+    const form = document.createElement("form"); form.className = "diary-school-form";
+    const input = document.createElement("input");
+    input.type = "search"; input.className = "diary-school-q"; input.maxLength = 40;
+    input.placeholder = diaryT("학교 이름 (예: 가락초)"); input.setAttribute("aria-label", schoolWord("학교 이름", "School name"));
+    const find = diaryButton("찾기", "학교 찾기", "diary-btn");
+    find.type = "submit";
+    form.append(input, find);
+    const list = document.createElement("div"); list.className = "diary-school-results";
+    for (const s of results || []){
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "diary-school-result";
+      const name = document.createElement("strong"); name.textContent = s.name;
+      const meta = document.createElement("small"); meta.textContent = [s.kind, s.address || s.region].filter(Boolean).join(" · ");
+      b.append(name, meta);
+      b.addEventListener("click", () => {
+        school = { office:s.office, code:s.code, name:s.name, kind:s.kind, grade:"", cls:"" };
+        neisApi.saveSchool(school);
+        schoolMonths.clear(); schoolFailed.clear();
+        renderCalendar(); renderSchoolStrip(); renderSchoolPanel([], "");
+      });
+      list.append(b);
+    }
+    const note = document.createElement("div"); note.className = "diary-school-note ui-keep-symbols"; note.textContent = status || "";
+    const parts = [head, now];
+    if (school){
+      const card = document.createElement("div");
+      card.className = "diary-school-card ui-keep-symbols";
+      parts.push(card);
+      renderSchoolCard(card);
+    }
+    parts.push(form, list);
+    if (school){
+      /* 시간표는 학년·반이 있어야 묻는다. 학년·반은 NEIS 학급정보의 실제 목록에서 고른다.
+         목록을 받기 전·못 받았을 때(키 없는 5줄 샘플 포함)는 학년 1~3(초등 1~6)과 반 직접 입력으로 둔다. */
+      const row = document.createElement("div"); row.className = "diary-school-class";
+      const grade = document.createElement("select"); grade.className = "diary-select diary-school-grade"; grade.setAttribute("aria-label", schoolWord("학년", "Grade"));
+      const clsPick = document.createElement("select"); clsPick.className = "diary-select diary-school-cls-pick"; clsPick.setAttribute("aria-label", schoolWord("반", "Class"));
+      clsPick.hidden = true;
+      const cls = document.createElement("input"); cls.className = "diary-school-cls"; cls.maxLength = 6; cls.setAttribute("aria-label", schoolWord("반", "Class"));
+      cls.value = school.cls; cls.placeholder = schoolWord("반", "Class");
+      const option = (value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
+      const gradeLabel = g => diaryIsEn() ? "Grade " + g : g + "학년";
+      const classLabel = c => /^\d+$/.test(c) ? (diaryIsEn() ? "Class " + c : c + "반") : c;
+      let listed = null;   // { byGrade, complete } — 받은 학년·반 목록
+      const fillGrades = (grades) => {
+        grade.replaceChildren(option("", schoolWord("학년", "Grade")), ...grades.map(g => option(g, gradeLabel(g))));
+        // 목록에 없는 저장값(지난 학년도의 반 등)도 보이게 남긴다.
+        if (school.grade && !grades.includes(school.grade)) grade.append(option(school.grade, gradeLabel(school.grade)));
+        grade.value = school.grade;
+      };
+      const fillClasses = () => {
+        const list = (listed && listed.byGrade[grade.value]) || [];
+        clsPick.replaceChildren(option("", schoolWord("반", "Class")), ...list.map(c => option(c, classLabel(c))));
+        if (school.cls && grade.value === school.grade && !list.includes(school.cls)) clsPick.append(option(school.cls, classLabel(school.cls)));
+        clsPick.value = grade.value === school.grade ? school.cls : "";
+        clsPick.disabled = !grade.value;
+      };
+      const useList = () => listed && listed.complete && Object.keys(listed.byGrade).length > 0;
+      const syncControls = () => {
+        const on = useList();
+        clsPick.hidden = !on; cls.hidden = on;
+        if (on) fillClasses();
+      };
+      fillGrades(Array.from({ length:/초등/.test(school.kind) ? 6 : 3 }, (_, i) => String(i + 1)));
+      const apply = () => {
+        const c = (useList() ? clsPick.value : cls.value).trim();
+        school = { ...school, grade:grade.value, cls:/^[0-9A-Za-z가-힣]{1,6}$/.test(c) ? c : "" };
+        neisApi.saveSchool(school);
+        renderSchoolStrip();
+      };
+      grade.addEventListener("change", () => {
+        // 학년을 바꾸면 그 학년의 반 목록으로 — 전 학년의 반이 새 학년에 없으면 비운다.
+        if (useList()){
+          const list = listed.byGrade[grade.value] || [];
+          if (!list.includes(clsPick.value)) clsPick.value = "";
+          school = { ...school, grade:grade.value, cls:list.includes(school.cls) ? school.cls : "" };
+          fillClasses();
+        }
+        apply();
+      });
+      clsPick.addEventListener("change", apply);
+      cls.addEventListener("change", apply);
+      const asked = schoolKey();
+      let task = schoolClasses.get(asked);
+      if (!task){
+        task = neisApi.loadClasses(school);
+        schoolClasses.set(asked, task);
+        task.catch(() => schoolClasses.delete(asked));   // 실패는 다음에 창을 열 때 다시 묻는다
+      }
+      task.then(result => {
+        if (asked !== schoolKey() || !grade.isConnected) return;
+        listed = result;
+        if (useList()) fillGrades(Object.keys(result.byGrade).sort());
+        syncControls();
+      }, () => {});
+      row.append(grade, clsPick, cls);
+      const forget = diaryButton("학교 빼기", "고른 학교를 지우기", "diary-btn");
+      forget.addEventListener("click", () => {
+        school = null; neisApi.saveSchool(null);
+        schoolMonths.clear(); schoolFailed.clear();
+        renderCalendar(); renderSchoolStrip(); renderSchoolPanel([], "");
+      });
+      parts.push(row, forget);
+    }
+    parts.push(note);
+    schoolPanel.replaceChildren(...parts);
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const q = input.value.trim();
+      if (!q){ input.focus(); return; }
+      find.disabled = true; note.textContent = diaryT("학교를 찾는 중…");
+      try {
+        const found = await neisApi.searchSchools(q);
+        const message = !found.schools.length ? diaryT("찾은 학교가 없어요. 이름 일부로 다시 찾아 보세요.")
+          : found.sample && found.total > found.schools.length ? diaryT("NEIS 인증키가 없어 앞의 5곳만 보여요.") : "";
+        renderSchoolPanel(found.schools, message);
+        const again = schoolPanel.querySelector(".diary-school-q"); if (again) again.value = q;
+      } catch(error){ note.textContent = diaryT(neisApi.failureText(error)); find.disabled = false; }
+    });
+  }
+  const setSchoolOpen = (open) => {
+    schoolPanel.hidden = !open;
+    schoolBtn.setAttribute("aria-expanded", String(open));
+    schoolBtn.classList.toggle("is-on", open);
+    if (open){
+      renderSchoolPanel([], "");
+      const input = schoolPanel.querySelector(".diary-school-q"); if (input) input.focus();
+    }
+  };
+  schoolBtn.addEventListener("click", (e) => { e.stopPropagation(); setSchoolOpen(schoolPanel.hidden); });
+  schoolPanel.addEventListener("keydown", (e) => { if (e.key === "Escape"){ e.preventDefault(); setSchoolOpen(false); schoolBtn.focus(); } });
+  const onSchoolOutside = (e) => {
+    if (schoolPanel.hidden || schoolPanel.contains(e.target) || schoolBtn.contains(e.target)) return;
+    setSchoolOpen(false);
+  };
+  document.addEventListener("pointerdown", onSchoolOutside, true);
+  if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+  doc.cleanupFns.push(() => document.removeEventListener("pointerdown", onSchoolOutside, true));
+  if (neisApi) neisApi.available().then(ok => {
+    if (!ok || !root.isConnected) return;
+    neisReady = true;
+    schoolBtn.hidden = false;
+    paintSchoolDays(); renderSchoolStrip();
+  });
+
   /* ----- 달력 ----- */
   function renderCalendar(){
     monthLabel.textContent = diaryUiMonthLabel(viewYear, viewMonth);
@@ -1541,6 +1871,7 @@ function mountDiaryEditor(doc){
     });
     calGrid.replaceChildren(...head, ...cells);
     paintSpecialDays();
+    paintSchoolDays();
 
     const prefix = viewYear + "-" + String(viewMonth + 1).padStart(2, "0") + "-";
     const rows = model.entries.filter(e => e.date.startsWith(prefix) && !diaryEntryIsEmpty(e))
@@ -2261,6 +2592,7 @@ function mountDiaryEditor(doc){
     todayBadge.hidden = current !== today;
     todayBadge.querySelector(".diary-today-text").textContent = diaryT("오늘");
     renderSpecialBadge();
+    renderSchoolStrip();
     entryTitle.value = entry ? entry.title : "";
     if (area.value !== (entry ? entry.text : "")) area.value = entry ? entry.text : "";
     area.placeholder = diaryT(current === today ? "오늘은 어떤 하루였나요?" : "이 날의 일기를 적어 보세요.");

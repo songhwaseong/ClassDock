@@ -1411,6 +1411,85 @@ function wire(){
     } catch(_){ setKosisStatus("인증키를 지우지 못했습니다.", "bad"); syncKosisFields(); }
   });
   refreshKosisKeyStatus();
+
+  /* ── NEIS 교육정보 개방 포털 인증키 ── 일기장 '우리 학교'. 저장한 뒤 학교 찾기 한 번으로 연결을 시험한다. */
+  const neisKeyInput = byId("settingNeisKey");
+  const neisRemember = byId("settingNeisRemember");
+  const neisRememberWrap = byId("settingNeisRememberWrap");
+  const neisStatusText = byId("settingNeisStatus");
+  const neisTest = byId("settingNeisTest");
+  const neisClear = byId("settingNeisClear");
+  let neisKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const setNeisStatus = (text, kind) => {
+    neisStatusText.textContent = typeof window.t === "function" ? window.t(text) : text;
+    neisStatusText.classList.toggle("ok", kind === "ok");
+    neisStatusText.classList.toggle("bad", kind === "bad");
+  };
+  const syncNeisFields = () => {
+    const available = neisKeyStatus.available;
+    connKeyBadge("settingNeisBadge", neisKeyStatus);
+    neisKeyInput.disabled = !available;
+    neisTest.disabled = !available;
+    neisClear.disabled = !available || !neisKeyStatus.hasKey;
+    neisRemember.disabled = !available || !neisKeyStatus.persistentSupported;
+    neisRememberWrap.hidden = !neisKeyStatus.persistentSupported;
+    neisRemember.checked = !!neisKeyStatus.remembered;
+    neisKeyInput.placeholder = neisKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "인증키 입력";
+  };
+  const refreshNeisKeyStatus = async (message, kind) => {
+    neisKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    try {
+      const response = await fetch("/neis-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      neisKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      if (message) setNeisStatus(message, kind);
+      else if (neisKeyStatus.hasKey) setNeisStatus(neisKeyStatus.remembered
+        ? "NEIS 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "NEIS 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setNeisStatus("인증키가 없어 일기장 '우리 학교'는 한 번에 5줄까지만 보입니다.", "");
+    } catch(_){ setNeisStatus("NEIS 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncNeisFields();
+  };
+  neisTest.addEventListener("click", async () => {
+    const key = neisKeyInput.value.trim();
+    if (!key && !neisKeyStatus.hasKey){ setNeisStatus("저장할 NEIS 인증키를 입력해 주세요.", "bad"); neisKeyInput.focus(); return; }
+    neisTest.disabled = true; neisClear.disabled = true;
+    try {
+      if (key){
+        setNeisStatus("NEIS 인증키를 저장하는 중…", "");
+        const response = await fetch("/neis-key?remember=" + (neisRemember.checked ? "1" : "0"), {
+          method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+          body:key, cache:"no-store"
+        });
+        if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+        neisKeyInput.value = "";
+      }
+      setNeisStatus("NEIS에 연결해 보는 중…", "");
+      const probe = await fetch("/neis?svc=schoolInfo&SCHUL_NM=" + encodeURIComponent("서울"), { cache:"no-store" });
+      const reason = probe.ok ? "" : (await probe.text()).trim();
+      await refreshNeisKeyStatus(probe.ok ? "NEIS 인증키를 저장했고 연결을 확인했습니다."
+        : reason === "neis-key-invalid" ? "NEIS가 이 인증키를 받지 않았습니다. 나이스 포털 마이페이지의 키를 그대로 붙여 넣었는지 확인해 주세요."
+        : reason === "neis-quota" ? "NEIS 조회 한도를 넘었습니다. 잠시 후 다시 시도해 주세요."
+        : "키는 저장했지만 NEIS에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.", probe.ok ? "ok" : "bad");
+    } catch(error){
+      const reason = error && error.message;
+      setNeisStatus(reason === "neis-key-save-failed" ? "NEIS 인증키를 암호화하여 저장하지 못했습니다."
+        : "인증키 형식이 올바르지 않습니다. 나이스 포털에서 받은 키를 그대로 붙여 넣어 주세요.", "bad");
+      syncNeisFields();
+    }
+  });
+  neisClear.addEventListener("click", async () => {
+    neisClear.disabled = true;
+    try {
+      const response = await fetch("/neis-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      neisKeyInput.value = "";
+      await refreshNeisKeyStatus("NEIS 인증키를 지웠습니다.", "ok");
+    } catch(_){ setNeisStatus("인증키를 지우지 못했습니다.", "bad"); syncNeisFields(); }
+  });
+  refreshNeisKeyStatus();
   const setSettingsTab = (name) => {
     document.querySelectorAll("#settingsTabs .settings-tab").forEach((tab) => {
       const on = tab.dataset.settingsTab === name;
