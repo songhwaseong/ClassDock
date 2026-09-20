@@ -516,6 +516,533 @@ function newTripScratchInFolder(folder, purpose){
     name => tripStarterBytes(name, kind), "application/zip", "새 여행일지를");
 }
 
+/* ---------- 문서 열고 닫기 ---------- */
+
+function tripAttachDoc(doc, unpacked){
+  doc.trip = unpacked.model;
+  doc.tripAssets = unpacked.assets;
+  doc.savedText = tripContentKey(unpacked.model);
+  doc.render = async () => {
+    if (doc._tripMounted) return;               // 편집 상태를 잃지 않도록 한 번만 마운트
+    doc._tripMounted = true;
+    doc.el.innerHTML = "";
+    mountTripEditor(doc);
+  };
+}
+
+async function loadTrip(file, opts = {}){
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let unpacked;
+  try { unpacked = await tripUnpack(bytes); }
+  catch(error){
+    console.warn("trip open failed:", error);
+    if (typeof toast === "function") toast(tripT("여행일지(.trip)를 읽지 못했어요. 파일이 손상됐을 수 있어요."), 4200, { type:"error" });
+    return null;
+  }
+  const doc = makeDoc("trip", file.name, opts);
+  doc.sourceFile = file;
+  tripAttachDoc(doc, unpacked);
+  if (typeof refreshChrome === "function") refreshChrome();
+  if (typeof activateIfIdle === "function") activateIfIdle(doc, opts);
+  return doc;
+}
+
+async function saveTrip(doc){
+  if (!doc || !doc.trip || doc._tripSaving) return false;
+  doc._tripSaving = true;
+  try {
+    const now = Date.now();
+    const savedKey = tripContentKey(doc.trip);         // await 앞에서 모델을 고정한다(저장 중 입력과 섞이지 않게)
+    let bytes;
+    try { bytes = tripPack(doc.trip, doc.tripAssets, now); }
+    catch(error){
+      console.warn("trip pack failed:", error);
+      if (typeof toast === "function") toast(tripT("여행일지가 너무 커서 저장하지 못했어요(4GB 제한)."), 4200, { type:"error" });
+      return false;
+    }
+    const ok = (typeof saveTextDoc === "function") ? await saveTextDoc(bytes, doc, doc.name) : false;
+    if (ok){
+      doc.trip.updatedAt = now;
+      if (typeof markDocumentSavedSnapshot === "function") await markDocumentSavedSnapshot(doc, bytes, "application/zip");
+      doc.savedText = savedKey;
+      // 디스크에 쓰는 동안에도 입력할 수 있다 — 쓴 내용과 지금 내용을 다시 견줘 '저장 안 됨'을 정한다.
+      if (typeof markDocumentDirty === "function") markDocumentDirty(doc, tripContentKey(doc.trip) !== savedKey);
+    }
+    return ok;
+  } finally { doc._tripSaving = false; }
+}
+
+/* 통합 검색에 줄 글. savedText 는 비교용 열쇠(JSON)라 본문이 아니다. */
+function tripPlainText(model){
+  const parts = [model.title || ""];
+  for (const day of (model.days || [])){
+    parts.push([day.date, day.title].filter(Boolean).join(" "));
+    parts.push(day.text || "");
+    for (const p of (day.prompts || [])) parts.push([p.q, p.a].filter(Boolean).join(" "));
+    for (const s of (day.spots || [])){
+      parts.push([s.at, s.name, s.address, s.note].filter(Boolean).join(" "));
+      for (const f of (s.fields || [])) parts.push([f.k, f.v].filter(Boolean).join(" "));
+    }
+  }
+  return parts.filter(Boolean).join("\n");
+}
+
+/* ---------- 종이 뼈대 ---------- */
+
+/* 종이 층은 일기장과 똑같이 만들고 클래스도 그대로 쓴다 — 같은 종이라 스타일을 새로 쓸 까닭이 없다.
+   여행일지 고유한 칸(여정 띠·장소 목록)만 trip-* 를 쓴다. */
+function tripBuildPaperEls(main){
+  const el = (tag, cls) => { const node = document.createElement(tag); if (cls) node.className = cls; return node; };
+  const paper = el("div", "diary-paper");
+  const artBgLayer = el("div", "diary-paper-art");
+  const bgLayer = el("div", "diary-paper-bg");
+  const veilLayer = el("div", "diary-paper-veil");
+  const area = el("textarea", "diary-text");
+  area.spellcheck = false;
+  area.setAttribute("aria-label", "여행일지 본문");
+  const stickerLayer = el("div", "diary-stickers");
+
+  const pictureBox = el("div", "diary-picture-box");
+  pictureBox.hidden = true;
+  const pictureHint = el("div", "diary-picture-hint");
+  const pictureHintText = el("span");
+  pictureHintText.textContent = "그림 칸 — 사진을 넣거나(끌어다 놓아도 돼요) 직접 그려요.";
+  const pictureBtn = diaryButton("", "그림 칸에 사진 넣기", "diary-btn diary-picture-photo", "image");
+  const pictureInput = el("input");
+  pictureInput.type = "file"; pictureInput.accept = "image/*"; pictureInput.multiple = true; pictureInput.hidden = true;
+  const pictureDrawBtn = diaryButton("", "그림 칸에 그리기", "diary-btn diary-picture-draw", "pen");
+  const pictureHintBtns = el("div", "diary-picture-hint-btns");
+  pictureHintBtns.append(pictureBtn, pictureDrawBtn);
+  pictureHint.append(pictureHintText, pictureHintBtns, pictureInput);
+  pictureBox.append(pictureHint);
+
+  const drawLayer = el("div", "diary-draw-layer");
+  drawLayer.hidden = true;
+  const drawCanvas = el("canvas", "diary-draw-canvas");
+  const drawBar = el("div", "diary-draw-bar");
+  drawBar.hidden = true;
+  drawBar.setAttribute("role", "toolbar");
+  drawLayer.append(drawCanvas, drawBar);
+
+  const genkoLayer = el("div", "diary-genko");
+  genkoLayer.hidden = true;
+  const genkoGrid = el("div", "diary-genko-grid");
+  const genkoCaret = el("div", "diary-genko-caret");
+  genkoLayer.append(genkoGrid, genkoCaret);
+
+  paper.append(artBgLayer, bgLayer, veilLayer, area, genkoLayer, pictureBox, stickerLayer, drawLayer);
+  return { paper, area, bgLayer, veilLayer, genkoLayer, genkoCaret, genkoGrid, stickerLayer, artBgLayer,
+    drawLayer, drawCanvas, pictureBox, pictureHint, main,
+    // 종이 엔진이 받지 않는 것(바깥이 배선한다)
+    drawBar, pictureBtn, pictureInput, pictureDrawBtn };
+}
+
+/* ---------- 편집기 ---------- */
+
+const TRIP_RECOVERY_DELAY = 1500;
+
+function tripDayLabel(model, day){
+  const at = (model.days || []).indexOf(day);
+  const nth = tripWordf(model.purpose, "dayNth", { n:at + 1 });
+  return day && day.date ? day.date + " " + nth : nth;
+}
+
+function mountTripEditor(doc){
+  const model = doc.trip;
+  const assets = doc.tripAssets;
+  const root = document.createElement("div");
+  // diary-doc 은 종이 색·줄 색 변수를 담은 껍데기다(CSS 전용, JS 선택자로는 쓰이지 않는다).
+  // 같은 종이를 쓰기로 했으니 그대로 두르고, 여행일지 고유한 칸만 trip-* 로 꾸민다.
+  root.className = "trip-root diary-doc";
+  doc.el.append(root);
+
+  let current = model.days.length ? model.days[0].id : "";
+  let history = null;
+  let recoveryTimer = 0;
+
+  /* 사진 주소는 한 번 만들어 두고 다시 쓴다(문서에 썸네일을 따로 담지 않는다). */
+  const urls = new Map();
+  const assetUrl = (name) => {
+    if (!name || !assets.has(name)) return "";
+    if (!urls.has(name)){
+      const asset = assets.get(name);
+      urls.set(name, URL.createObjectURL(new Blob([asset.bytes], { type:diaryAssetMime(name) })));
+    }
+    return urls.get(name);
+  };
+
+  const dayOf = (id) => (model.days || []).find(d => d.id === id) || null;
+  const ensureDay = (id) => {
+    let day = dayOf(id);
+    if (!day){
+      day = tripNormalizeDay({ id:id || tripDayId(), title:"" });
+      model.days.push(day);
+      current = day.id;
+    }
+    return day;
+  };
+
+  /* ----- 도구막대 ----- */
+  const bar = document.createElement("div");
+  bar.className = "trip-bar";
+  const titleInput = document.createElement("input");
+  titleInput.type = "text";
+  titleInput.className = "trip-title";
+  titleInput.maxLength = 200;
+  titleInput.value = model.title || "";
+  const purposeSelect = document.createElement("select");
+  purposeSelect.className = "trip-select trip-purpose-select";
+  for (const value of TRIP_PURPOSES){
+    const option = document.createElement("option");
+    option.value = value;
+    option.selected = tripPurpose(model.purpose) === value;
+    purposeSelect.appendChild(option);
+  }
+  const status = document.createElement("span");
+  status.className = "trip-status";
+  const undoBtn = diaryButton("", "실행 취소 (Ctrl+Z)", "diary-btn trip-undo-btn", "undo");
+  const redoBtn = diaryButton("", "다시 실행 (Ctrl+Shift+Z)", "diary-btn trip-redo-btn", "redo");
+  const photoBtn = diaryButton("사진", "사진 붙이기", "diary-btn trip-photo-btn", "image");
+  const photoInput = document.createElement("input");
+  photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
+  const saveBtn = diaryButton("저장", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
+  bar.append(titleInput, purposeSelect, status, undoBtn, redoBtn, photoBtn, photoInput, saveBtn);
+
+  /* ----- 본문: 여정 띠 + 종이 ----- */
+  const body = document.createElement("div");
+  body.className = "trip-body";
+  const rail = document.createElement("div");
+  rail.className = "trip-rail";
+  const railHead = document.createElement("div");
+  railHead.className = "trip-rail-head";
+  const railList = document.createElement("div");
+  railList.className = "trip-rail-list";
+  const addDayBtn = document.createElement("button");
+  addDayBtn.type = "button";
+  addDayBtn.className = "diary-btn trip-add-day";
+  rail.append(railHead, railList, addDayBtn);
+
+  const main = document.createElement("div");
+  main.className = "trip-main diary-main";
+  const pageHead = document.createElement("div");
+  pageHead.className = "trip-page-head diary-page-head";
+  const dayTitle = document.createElement("input");
+  dayTitle.type = "text";
+  dayTitle.className = "trip-day-title";
+  dayTitle.maxLength = 200;
+  const dayDate = document.createElement("input");
+  dayDate.type = "date";
+  dayDate.className = "trip-day-date";
+  const deleteBtn = diaryButton("", "이 날 지우기", "diary-btn trip-day-delete", "delete");
+  pageHead.append(dayDate, dayTitle, deleteBtn);
+
+  const els = tripBuildPaperEls(main);
+  main.append(pageHead, els.paper);
+  body.append(rail, main);
+  root.append(bar, body);
+
+  /* ----- 저장 여부·복구본 ----- */
+  const setStatus = (msg) => { status.textContent = msg || ""; };
+  const refreshDirty = () => {
+    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, tripContentKey(model) !== doc.savedText);
+  };
+  const scheduleRecovery = () => {
+    clearTimeout(recoveryTimer);
+    if (typeof appSettings === "object" && appSettings && appSettings.pdfRecovery === false) return;
+    recoveryTimer = setTimeout(() => { recoveryTimer = 0; flushRecovery(); }, TRIP_RECOVERY_DELAY);
+  };
+  const flushRecovery = async () => {
+    clearTimeout(recoveryTimer); recoveryTimer = 0;
+    if (!doc.hasUnsavedEdits && !(doc.isScratch && !doc._named)) return true;
+    if (typeof rememberWorkspace !== "function" || typeof recoverySnapshotFile !== "function") return false;
+    try {
+      const file = recoverySnapshotFile(doc, tripPack(model, assets, Date.now()), "application/zip");
+      if (!file) return false;
+      doc.savedInWorkspace = await rememberWorkspace([file], false, { silent:true });
+      return !!doc.savedInWorkspace;
+    } catch(error){ console.warn("여행일지 복구본을 남기지 못했어요:", error); return false; }
+  };
+  doc.flushBackupRecovery = flushRecovery;
+  function touch(immediate){
+    refreshDirty();
+    scheduleRecovery();
+    if (history){ if (immediate) history.commit(); else history.commitSoon(400); }
+  }
+  const updateHistoryButtons = () => {
+    undoBtn.disabled = !(history && history.canUndo());
+    redoBtn.disabled = !(history && history.canRedo());
+  };
+
+  /* ----- 그리기 바(펜은 바가 가진 상태 — 종이는 획을 시작할 때만 읽는다) ----- */
+  let eraser = false;
+  let penColor = DIARY_PENS[0][0], penSize = "mid";
+  try {
+    const saved = JSON.parse(localStorage.getItem("mn.diaryPen") || "null");
+    if (saved && DIARY_HEX_RE.test(String(saved.color || ""))) penColor = String(saved.color).toLowerCase();
+    if (saved && DIARY_PEN_SIZES.some(x => x[0] === saved.size)) penSize = saved.size;
+  } catch(_){}
+  const rememberPen = () => { try { localStorage.setItem("mn.diaryPen", JSON.stringify({ color:penColor, size:penSize })); } catch(_){} };
+  const penButtons = DIARY_PENS.map(([color]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-pen"; b.dataset.color = color;
+    b.style.setProperty("--pen", color);
+    els.drawBar.append(b);
+    return b;
+  });
+  const penCustomColor = diaryColorInput("diary-pen-custom", (color, live) => setPenColor(color, live));
+  els.drawBar.append(penCustomColor);
+  const sizeButtons = DIARY_PEN_SIZES.map(([id, w]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-pen-size"; b.dataset.size = id;
+    const dot = document.createElement("span");
+    dot.style.width = dot.style.height = Math.round(4 + w * 300) + "px";
+    b.append(dot);
+    els.drawBar.append(b);
+    return b;
+  });
+  const eraserBtn = diaryButton("", "지우개", "diary-draw-tool", "eraser");
+  const drawClearBtn = diaryButton("", "그림 전체 지우기", "diary-draw-tool", "delete");
+  const drawDoneBtn = diaryButton("다 그렸어요", "그리기 끝내기 (Esc)", "diary-btn diary-primary", "check", "diary-draw-done-label");
+  els.drawBar.append(eraserBtn, drawClearBtn, drawDoneBtn);
+  function syncDrawBar(){
+    penButtons.forEach(b => {
+      const on = !eraser && b.dataset.color === penColor;
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+    });
+    penCustomColor.value = penColor;
+    penCustomColor.classList.toggle("is-on", !eraser && !DIARY_PENS.some(x => x[0] === penColor));
+    sizeButtons.forEach(b => {
+      const on = b.dataset.size === penSize;
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+    });
+    eraserBtn.classList.toggle("is-on", eraser);
+    eraserBtn.setAttribute("aria-pressed", String(eraser));
+    const day = dayOf(current);
+    drawClearBtn.disabled = !(day && day.drawing && day.drawing.length);
+  }
+  function setPenColor(color, live){
+    penColor = color; eraser = false;
+    if (!live) rememberPen();
+    syncDrawBar();
+  }
+
+  /* ----- 종이 엔진 ----- */
+  const paperApi = mountDiaryPaper(els, {
+    model, assets,
+    assetUrl:(...a) => assetUrl(...a),
+    currentLabel:() => tripDayLabel(model, dayOf(current)),
+    entryOf:(...a) => dayOf(...a),
+    ensureEntry:(...a) => ensureDay(...a),
+    onDrawModeChange:(on) => { els.drawBar.hidden = !on; },
+    onEntryChange:() => { deleteBtn.disabled = !dayOf(current); },
+    onStickerSelect:() => {},                 // 스티커 창은 다음 단계
+    openStickerColorPicker:() => {},
+    refreshCurrentLabel:() => renderRail(),
+    refreshDirty:(...a) => refreshDirty(...a),
+    renderCalendar:() => renderRail(),        // 여행일지의 달력 자리는 여정 띠다
+    repaintCardPapers:() => {},
+    scheduleRecovery:(...a) => scheduleRecovery(...a),
+    setStatus:(...a) => setStatus(...a),
+    syncDrawBar:(...a) => syncDrawBar(...a),
+    syncPanel:() => {},                       // 꾸미기 창은 다음 단계
+    touch:(...a) => touch(...a),
+    translateUi:(node) => { if (typeof MNI18N !== "undefined" && MNI18N && typeof MNI18N.translateTree === "function") MNI18N.translateTree(node); },
+    current:() => current,
+    history:() => history,
+    penColor:() => penColor,
+    penSize:() => penSize,
+    eraser:() => eraser
+  });
+  const { addStickers, applyStyle, layout, redrawDrawing, renderStickers, setDrawMode, clearSelection } = paperApi;
+
+  penButtons.forEach(b => b.addEventListener("click", () => setPenColor(b.dataset.color)));
+  sizeButtons.forEach(b => b.addEventListener("click", () => { penSize = b.dataset.size; rememberPen(); syncDrawBar(); }));
+  eraserBtn.addEventListener("click", () => { eraser = !eraser; syncDrawBar(); });
+  drawClearBtn.addEventListener("click", () => {
+    const day = dayOf(current);
+    if (!day || !day.drawing || !day.drawing.length) return;
+    if (history) history.flush();
+    day.drawing = [];
+    redrawDrawing(); syncDrawBar(); renderRail();
+    touch(true);
+    setStatus(tripT("그림을 모두 지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
+  });
+  drawDoneBtn.addEventListener("click", () => setDrawMode(false));
+  els.pictureDrawBtn.addEventListener("click", (e) => { e.stopPropagation(); setDrawMode(true); });
+  els.pictureBtn.addEventListener("click", (e) => { e.stopPropagation(); els.pictureInput.click(); });
+  els.pictureInput.addEventListener("change", async () => {
+    const files = [...(els.pictureInput.files || [])]; els.pictureInput.value = "";
+    if (files.length) await addStickers(files, null, true);
+  });
+  photoBtn.addEventListener("click", () => photoInput.click());
+  photoInput.addEventListener("change", async () => {
+    const files = [...(photoInput.files || [])]; photoInput.value = "";
+    if (files.length) await addStickers(files);
+  });
+
+  /* ----- 여정 띠 ----- */
+  function renderRail(){
+    railList.innerHTML = "";
+    railHead.textContent = tripWordf(model.purpose, "dayCount", { n:(model.days || []).length });
+    for (const day of (model.days || [])){
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "trip-day-chip" + (day.id === current ? " is-on" : "");
+      chip.dataset.id = day.id;
+      const head = document.createElement("span");
+      head.className = "trip-day-chip-head";
+      head.textContent = tripDayLabel(model, day);
+      const sub = document.createElement("span");
+      sub.className = "trip-day-chip-sub";
+      const spots = (day.spots || []).length;
+      sub.textContent = day.title || (spots ? tripWord(model.purpose, "spot") + " " + spots : tripWord(model.purpose, "dayEmpty"));
+      chip.append(head, sub);
+      chip.addEventListener("click", () => goTo(day.id));
+      railList.append(chip);
+    }
+    addDayBtn.textContent = tripWord(model.purpose, "dayAdd");
+  }
+
+  function goTo(id){
+    if (history) history.flush();
+    setDrawMode(false);
+    clearSelection();
+    current = id;
+    renderRail();
+    renderPage();
+  }
+
+  function renderPage(){
+    const day = dayOf(current);
+    deleteBtn.disabled = !day;
+    dayTitle.value = day ? (day.title || "") : "";
+    dayTitle.placeholder = tripWord(model.purpose, "dayTitleHint");
+    dayTitle.disabled = !day;
+    dayDate.value = day ? (day.date || "") : "";
+    dayDate.disabled = !day;
+    els.area.value = day ? (day.text || "") : "";
+    els.area.disabled = !day;
+    applyStyle();
+    renderStickers();
+    layout();
+    syncDrawBar();
+  }
+
+  addDayBtn.addEventListener("click", () => {
+    if (history) history.flush();
+    const day = tripNormalizeDay({ title:"" });
+    day.title = "";
+    model.days.push(day);
+    current = day.id;
+    renderRail(); renderPage();
+    touch(true);
+    dayTitle.focus();
+  });
+  deleteBtn.addEventListener("click", () => {
+    const day = dayOf(current);
+    if (!day) return;
+    if (history) history.flush();
+    const at = model.days.indexOf(day);
+    model.days.splice(at, 1);
+    current = model.days.length ? model.days[Math.min(at, model.days.length - 1)].id : "";
+    renderRail(); renderPage();
+    touch(true);
+    setStatus(tripT("지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
+  });
+  dayTitle.addEventListener("input", () => {
+    const day = dayOf(current);
+    if (!day) return;
+    day.title = dayTitle.value;
+    renderRail();
+    touch();
+  });
+  dayDate.addEventListener("change", () => {
+    const day = dayOf(current);
+    if (!day) return;
+    day.date = tripIsDateKey(dayDate.value) ? dayDate.value : "";
+    renderRail();
+    touch(true);
+  });
+  titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });
+
+  /* ----- 갈래 바꾸기 — 말과 기본값만 바뀌고 자료는 그대로다(설계 3장) ----- */
+  function applyPurposeLabels(){
+    const p = tripPurpose(model.purpose);
+    root.dataset.purpose = p;
+    titleInput.placeholder = tripWord(p, "titleHint");
+    titleInput.setAttribute("aria-label", titleInput.placeholder);
+    purposeSelect.title = tripWord(p, "purposeLabel");
+    for (const option of purposeSelect.options) option.textContent = tripWord(option.value, "docName");
+    deleteBtn.title = tripWord(p, "dayDelete");
+    deleteBtn.setAttribute("aria-label", deleteBtn.title);
+    addDayBtn.textContent = tripWord(p, "dayAdd");
+    renderRail();
+    renderPage();
+  }
+  purposeSelect.addEventListener("change", () => {
+    if (history) history.flush();
+    model.purpose = tripPurpose(purposeSelect.value);
+    applyPurposeLabels();
+    touch(true);
+  });
+
+  /* ----- 되돌리기 ----- */
+  const snapshot = () => JSON.stringify({ title:model.title, purpose:model.purpose, style:model.style, days:model.days });
+  history = MNEditHistory.create({
+    limit:80,
+    sizeOf:(s) => s.length,
+    maxBytes:24 * 1024 * 1024,
+    capture:snapshot,
+    isEqual:(a, b) => a === b,
+    apply:(state) => {
+      let parsed; try { parsed = JSON.parse(state); } catch(_){ return; }
+      model.title = parsed.title;
+      model.purpose = tripPurpose(parsed.purpose);
+      model.style = parsed.style;
+      model.days = parsed.days;
+      if (!dayOf(current)) current = model.days.length ? model.days[0].id : "";
+      titleInput.value = model.title || "";
+      purposeSelect.value = model.purpose;
+      applyPurposeLabels();
+      refreshDirty();
+      scheduleRecovery();
+    },
+    onChange:updateHistoryButtons
+  });
+  undoBtn.addEventListener("click", () => history.undo());
+  redoBtn.addEventListener("click", () => history.redo());
+  saveBtn.addEventListener("click", () => saveTrip(doc));
+
+  const onKey = (e) => {
+    if (!root.isConnected || !doc.el.contains(document.activeElement) && !root.contains(e.target)) return;
+    if ((e.ctrlKey || e.metaKey) && String(e.key || "").toLowerCase() === "s"){
+      e.preventDefault(); saveTrip(doc); return;
+    }
+    const inField = /^(input|textarea|select)$/i.test(String(e.target && e.target.tagName || ""));
+    if ((e.ctrlKey || e.metaKey) && !inField && String(e.key || "").toLowerCase() === "z"){
+      e.preventDefault();
+      if (e.shiftKey) history.redo(); else history.undo();
+    }
+  };
+  document.addEventListener("keydown", onKey, true);
+
+  if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+  doc.cleanupFns.push(() => {
+    clearTimeout(recoveryTimer);
+    document.removeEventListener("keydown", onKey, true);
+    if (typeof paperApi.destroyPaper === "function") paperApi.destroyPaper();
+    if (history) history.cancel();
+    for (const url of urls.values()) URL.revokeObjectURL(url);
+    urls.clear();
+    if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
+  });
+
+  applyPurposeLabels();
+  history.reset();
+  updateHistoryButtons();
+  refreshDirty();
+}
+
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     TRIP_FORMAT, TRIP_VERSION, TRIP_JSON_NAME, TRIP_PURPOSES, TRIP_MAX_DAYS, TRIP_MAX_SPOTS,
@@ -525,7 +1052,7 @@ if (typeof module !== "undefined" && module.exports){
     tripIsDateKey, tripNormalizeTime, tripNormalizeSpot, tripNormalizeDay, tripDayIsEmpty,
     tripNormalizePairs, tripNormalizePrompts, tripNormalizeCost, tripNormalizeMap, tripNormalizeBudget,
     tripEmpty, tripNormalize, tripCleanDays, tripCleanSpot, tripModelJson, tripContentKey,
-    tripReferencedAssets, tripPack, tripUnpack, tripIsDomestic,
+    tripReferencedAssets, tripPack, tripUnpack, tripIsDomestic, tripPlainText,
     tripScratchFileName, tripStarterBytes
   };
 }

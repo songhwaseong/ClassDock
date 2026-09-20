@@ -1883,7 +1883,7 @@ function diaryColorInput(className, onPick){
    달력이 아니라 여정 띠를 두르기 때문이다. 바뀌는 값(날짜·되돌리기·펜)은 ctx 의 창구로 그때그때 읽는다. */
 function mountDiaryPaper(els, paperEnv){
   const { paper, area, bgLayer, veilLayer, genkoLayer, genkoCaret, genkoGrid, stickerLayer, artBgLayer, drawLayer, drawCanvas, pictureBox, pictureHint, main } = els;
-  const { model, assets, assetUrl, ensureEntry, entryOf, onDrawModeChange, onEntryChange, onStickerSelect, openStickerColorPicker, refreshCurrentLabel, refreshDirty, renderCalendar, repaintCardPapers, scheduleRecovery, setStatus, syncDrawBar, syncPanel, touch, translateUi } = paperEnv;
+  const { model, assets, assetUrl, currentLabel, ensureEntry, entryOf, onDrawModeChange, onEntryChange, onStickerSelect, openStickerColorPicker, refreshCurrentLabel, refreshDirty, renderCalendar, repaintCardPapers, scheduleRecovery, setStatus, syncDrawBar, syncPanel, touch, translateUi } = paperEnv;
   /* ----- 종이 ----- */
   // 고른 스티커는 종이의 것이다. 바깥은 selectionIds()·clearSelection() 으로만 본다.
   let selection = [];
@@ -2378,7 +2378,7 @@ function mountDiaryPaper(els, paperEnv){
     const photos = entry.stickers.filter(s => diaryStickerKind(s) === "photo" && assetUrl(s.asset));
     if (!photos.length) return false;
     const at = Math.max(0, photos.findIndex(s => s.id === id));
-    const label = diaryUiDateLabel(paperEnv.current());
+    const label = currentLabel();
     window.openImageLightbox(photos.map((s, i) => ({
       src:assetUrl(s.asset),
       alt:photos.length > 1 ? label + " (" + (i + 1) + "/" + photos.length + ")" : label
@@ -4409,7 +4409,7 @@ function mountDiaryEditor(doc){
   // 종이 한 장은 mountDiaryPaper 가 맡는다. 바깥은 창구로만 주고받는다(위 주석 참고).
   const paperApi = mountDiaryPaper(
     { paper, area, bgLayer, veilLayer, genkoLayer, genkoCaret, genkoGrid, stickerLayer, artBgLayer, drawLayer, drawCanvas, pictureBox, pictureHint, main },
-    { model, assets, assetUrl:(...a) => assetUrl(...a), ensureEntry:(...a) => ensureEntry(...a), entryOf:(...a) => entryOf(...a), onDrawModeChange:(...a) => onDrawModeChange(...a), onEntryChange:(...a) => onEntryChange(...a), onStickerSelect:(...a) => onStickerSelect(...a), openStickerColorPicker:(...a) => openStickerColorPicker(...a), refreshCurrentLabel:(...a) => refreshCurrentLabel(...a), refreshDirty:(...a) => refreshDirty(...a), renderCalendar:(...a) => renderCalendar(...a), repaintCardPapers:(...a) => repaintCardPapers(...a), scheduleRecovery:(...a) => scheduleRecovery(...a), setStatus:(...a) => setStatus(...a), syncDrawBar:(...a) => syncDrawBar(...a), syncPanel:(...a) => syncPanel(...a), touch:(...a) => touch(...a), translateUi:(...a) => translateUi(...a), current:() => current, history:() => history, penColor:() => penColor, penSize:() => penSize, eraser:() => eraser }
+    { model, assets, assetUrl:(...a) => assetUrl(...a), currentLabel:() => diaryUiDateLabel(current), ensureEntry:(...a) => ensureEntry(...a), entryOf:(...a) => entryOf(...a), onDrawModeChange:(...a) => onDrawModeChange(...a), onEntryChange:(...a) => onEntryChange(...a), onStickerSelect:(...a) => onStickerSelect(...a), openStickerColorPicker:(...a) => openStickerColorPicker(...a), refreshCurrentLabel:(...a) => refreshCurrentLabel(...a), refreshDirty:(...a) => refreshDirty(...a), renderCalendar:(...a) => renderCalendar(...a), repaintCardPapers:(...a) => repaintCardPapers(...a), scheduleRecovery:(...a) => scheduleRecovery(...a), setStatus:(...a) => setStatus(...a), syncDrawBar:(...a) => syncDrawBar(...a), syncPanel:(...a) => syncPanel(...a), touch:(...a) => touch(...a), translateUi:(...a) => translateUi(...a), current:() => current, history:() => history, penColor:() => penColor, penSize:() => penSize, eraser:() => eraser }
   );
   const { addArtSticker, addAsset, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow } = paperApi;
 

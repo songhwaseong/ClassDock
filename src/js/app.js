@@ -214,7 +214,7 @@ function wire(){
     if ((imageMemo && !imageMemo.hidden) || (scratchpad && !scratchpad.hidden)) return true;
     // 일기장은 종이 위에 떨어뜨린 사진을 그 자리에 스티커로 붙인다 — 오버레이가 종이를 덮으면 안 된다.
     // 종이 밖이나 그림이 아닌 파일은 창의 drop 처리로 흘러가 평소처럼 새 탭으로 열린다.
-    return typeof state !== "undefined" && !!state && state.kind === "diary";
+    return typeof state !== "undefined" && !!state && (state.kind === "diary" || state.kind === "trip");
   };
   window.addEventListener("dragenter", (e) => {
     if (!draggingFiles(e) || isInternalDragTransfer(e.dataTransfer, false)) return;

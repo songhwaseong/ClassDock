@@ -7887,6 +7887,27 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
   --diary-paper:#1c2330;--diary-ink:#e5e9f0;--diary-line:#34435a;--diary-dot:#4d5f7a;--diary-margin:#7f3b46;
   --diary-sun:#f87171;--diary-sat:#60a5fa;--diary-mark:#f472b6
 }
+/* ===== 여행일지(.trip) ===== 종이는 일기장 것을 그대로 쓰고(diary-doc·diary-paper), 여기서는 둘레만 꾸민다. */
+.trip-root{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg)}
+.trip-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border);z-index:20}
+.trip-title{flex:1;min-width:120px;max-width:420px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px;font-weight:600}
+.trip-select{padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
+.trip-status{flex:1;min-width:0;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trip-body{flex:1;min-height:0;display:grid;grid-template-columns:var(--trip-rail,240px) minmax(0,1fr)}
+.trip-rail{display:flex;flex-direction:column;gap:6px;min-height:0;padding:10px;border-right:1px solid var(--border);background:var(--panel);overflow:auto}
+.trip-rail-head{color:var(--muted);font-size:12px;font-weight:600;padding:0 2px 2px}
+.trip-rail-list{display:flex;flex-direction:column;gap:6px}
+.trip-day-chip{display:flex;flex-direction:column;gap:2px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--ink);text-align:left}
+.trip-day-chip:hover{border-color:var(--accent)}
+.trip-day-chip.is-on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.trip-day-chip-head{font-size:13px;font-weight:600}
+.trip-day-chip-sub{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trip-add-day{margin-top:2px}
+.trip-page-head{flex-direction:row;align-items:center;gap:8px}
+.trip-day-title{flex:1;min-width:0;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px;font-weight:600}
+.trip-day-date{padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
+@media (max-width:760px){.trip-body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .trip-rail{border-right:0;border-bottom:1px solid var(--border);max-height:34vh}}
 .diary-bar{display:flex;align-items:center;gap:12px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border);z-index:20}
 .diary-bar-identity{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
 .diary-bar-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}
