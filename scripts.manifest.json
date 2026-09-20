@@ -123,6 +123,7 @@
     "mnote.js",
     "neis-api.js",
     "diary.js",
+    "trip.js",
     "music-model.js",
     "music-xml.js",
     "music-library-data.js",
@@ -283,6 +284,7 @@
         "mnote.js",
         "neis-api.js",
         "diary.js",
+        "trip.js",
         "music-model.js",
         "music-xml.js",
         "music-library-data.js",
@@ -610,6 +612,15 @@
     ],
     "kosis-choro.js": [
       "kosis-api.js"
+    ],
+    "trip.js": [
+      "diary.js",
+      "documents.js",
+      "file-loaders.js",
+      "code-viewer.js",
+      "history.js",
+      "context-menu.js",
+      "korea-coords.js"
     ]
   },
   "moduleBoundaries": [
