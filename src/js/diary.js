@@ -13,9 +13,9 @@
 
 const DIARY_FORMAT = "classdock-diary";
 // 2: 날씨·기분·스티커 회전/뒤집기·그림일기·글꼴 · 3: 원고지 줄 무늬 · 4: 그림 칸에 그린 그림(drawing) · 5: 손글씨 글꼴
-// · 6: 원고지 한 줄 칸 수(genkoCols).
+// · 6: 원고지 한 줄 칸 수(genkoCols) · 7: 태그·즐겨찾기 · 8: 스티커 갈래(kind) — 내장 그림(art)·글상자(text).
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 7;
+const DIARY_VERSION = 8;
 const DIARY_JSON_NAME = "diary.json";
 const DIARY_LINES = ["ruled", "grid", "dots", "blank", "picture", "genko"];
 const DIARY_LINE_LABELS = { ruled:"줄 공책", grid:"모눈", dots:"점", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
@@ -147,6 +147,8 @@ const DIARY_FIT_LABELS = { cover:"꽉 채우기", contain:"전체 보이기", ti
 const DIARY_FIT_LABELS_EN = { cover:"Fill", contain:"Fit", tile:"Tile" };
 const DIARY_MAX_ENTRIES = 5000;
 const DIARY_MAX_STICKERS = 80;
+const DIARY_ART_DEFAULT_COLOR = "#ef4444";
+const DIARY_TEXT_DEFAULT_COLOR = "#1f2937";
 const DIARY_MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 const DIARY_MAX_IMAGE_BYTES = 40 * 1024 * 1024;     // 넣기 전 원본 한 장(넣을 때 줄여서 담는다)
 const DIARY_STICKER_MAX_DIM = 1600;
@@ -340,15 +342,79 @@ function diaryNormalizeStyle(raw, hasAsset){
     genkoCols:DIARY_GENKO_COLS.includes(Number(raw.genkoCols)) ? Number(raw.genkoCols) : base.genkoCols
   };
 }
+/* ---------- 내장 스티커(그림) ----------
+   사진과 달리 ZIP 에 바이트를 싣지 않는다 — 이름과 색만 저장하고 그릴 때마다 SVG 로 그린다.
+   그래서 크게 늘려도 선명하고, 같은 스티커를 여든 장 붙여도 파일은 한 줄씩만 는다(그림 획과 같은 생각).
+   [id, 한글 이름, English, 높이÷폭, SVG 속(viewBox 는 "0 0 100 <높이>"), 반투명(테이프)] */
+const DIARY_ART = [
+  ["heart", "하트", "Heart", 0.90,
+    '<path d="M50 86C18 62 6 46 6 30 6 15 17 5 30 5c9 0 16 4 20 12 4-8 11-12 20-12 13 0 24 10 24 25 0 16-12 32-44 56z"/>'],
+  ["star", "별", "Star", 0.92,
+    '<path d="M50 5 60.9 35 92.8 36.1 67.6 55.7 76.4 86.4 50 68.5 23.6 86.4 32.4 55.7 7.2 36.1 39.1 35z"/>'],
+  ["flower", "꽃", "Flower", 1,
+    '<g><circle cx="50" cy="23" r="21"/><circle cx="75.7" cy="41.6" r="21"/><circle cx="65.9" cy="71.8" r="21"/>'
+    + '<circle cx="34.1" cy="71.8" r="21"/><circle cx="24.3" cy="41.6" r="21"/></g><circle cx="50" cy="50" r="13" fill="#fff" fill-opacity=".85"/>'],
+  ["sparkle", "반짝", "Sparkle", 1,
+    '<path d="M50 4c4 26 20 42 46 46-26 4-42 20-46 46-4-26-20-42-46-46 26-4 42-20 46-46z"/>'],
+  ["ribbon", "리본", "Ribbon", 0.72,
+    '<path d="M50 30C40 12 20 8 12 20 4 32 20 44 50 40 80 44 96 32 88 20 80 8 60 12 50 30z"/>'
+    + '<path d="M44 42 30 68l16-6zM56 42l14 26-16-6z"/><circle cx="50" cy="37" r="9"/>'],
+  ["crown", "왕관", "Crown", 0.72,
+    '<path d="M10 62 17 16 34 37 50 8 66 37 83 16 90 62z"/><rect x="10" y="60" width="80" height="10" rx="4"/>'],
+  ["leaf", "잎", "Leaf", 1,
+    '<path d="M88 12c0 42-30 76-72 76C16 46 46 12 88 12z"/>'
+    + '<path d="M16 90C40 71 60 51 79 26" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="5" stroke-linecap="round"/>'],
+  ["paw", "발자국", "Paw", 0.95,
+    '<ellipse cx="50" cy="68" rx="27" ry="22"/><circle cx="22" cy="42" r="11"/><circle cx="40" cy="26" r="12"/>'
+    + '<circle cx="62" cy="26" r="12"/><circle cx="80" cy="44" r="11"/>'],
+  ["check", "체크", "Check", 0.78,
+    '<path d="M10 44 36 70 90 12" fill="none" stroke="currentColor" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>'],
+  ["arrow", "화살표", "Arrow", 0.56,
+    '<path d="M2 20h60V4l36 24-36 24V36H2z"/>'],
+  ["circle", "동그라미", "Circle", 0.74,
+    '<ellipse cx="50" cy="37" rx="45" ry="32" fill="none" stroke="currentColor" stroke-width="6" transform="rotate(-5 50 37)"/>'],
+  ["underline", "밑줄", "Underline", 0.2,
+    '<path d="M3 12C20 4 34 18 50 11 66 4 80 18 97 9" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>'],
+  ["speech", "말풍선", "Speech bubble", 0.82,
+    '<path d="M50 4C22 4 4 18 4 34c0 16 18 28 40 29L30 78l28-15.5c24-2.5 38-14.5 38-28.5C96 18 78 4 50 4z"/>'],
+  ["flag", "깃발", "Flag", 1,
+    '<rect x="10" y="4" width="7" height="92" rx="3"/><path d="M17 10c23-8 43 16 67 6v36c-24 10-44-14-67-6z"/>'],
+  ["tape", "마스킹테이프", "Washi tape", 0.3,
+    '<path d="M3 5 8 8 3 11 8 14 3 17 8 20 3 24 96 27 91 23 96 19 91 15 96 11 91 7 96 3z"/>', true],
+  ["cloud", "구름", "Cloud", 0.62,
+    '<circle cx="28" cy="36" r="18"/><circle cx="50" cy="28" r="24"/><circle cx="72" cy="38" r="16"/><rect x="10" y="38" width="80" height="16" rx="8"/>']
+];
+const DIARY_ART_IDS = DIARY_ART.map(a => a[0]);
+function diaryArtInfo(id){ return DIARY_ART.find(a => a[0] === id) || null; }
+function diaryArtName(info){ return info ? (diaryIsEn() ? info[2] : info[1]) : ""; }
+// 내장 그림 한 장의 SVG. 색은 currentColor 라 바깥 요소의 color 만 바꾸면 된다.
+function diaryArtSvg(id, cls){
+  const info = diaryArtInfo(id);
+  if (!info) return "";
+  return `<svg class="${cls || "diary-art"}" viewBox="0 0 100 ${Math.round(info[3] * 100)}" fill="currentColor"`
+    + ` aria-hidden="true" focusable="false"${info[5] ? ' opacity=".55"' : ""}>${info[4]}</svg>`;
+}
+
+/* ---------- 글상자 스티커 ----------
+   글자 크기를 종이 폭에 대한 비율로 둔다(그림 획과 같은 생각) — 그래야 창 폭이 바뀌어도, 인쇄 폭(680px)에서도
+   줄바꿈 자리가 같다. 높이(ar)는 글에서 나오므로 파일에 저장하지 않고 그릴 때마다 재서 채운다. */
+const DIARY_TEXT_ALIGNS = ["left", "center", "right"];
+const DIARY_TEXT_SIZES = [["small", 0.034, "작게", "Small"], ["mid", 0.048, "보통", "Medium"], ["big", 0.072, "크게", "Large"]];
+const DIARY_TEXT_MAX = 500;
+const DIARY_STICKER_KINDS = ["photo", "art", "text"];
+function diaryStickerKind(raw){
+  const kind = String(raw && raw.kind || "");
+  if (DIARY_STICKER_KINDS.includes(kind)) return kind;
+  return raw && raw.art ? "art" : (raw && raw.text != null && !raw.asset) ? "text" : "photo";   // kind 가 없던 옛 파일
+}
 function diaryStickerId(){ return "st-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8); }
 function diaryNormalizeSticker(raw, hasAsset){
   if (!raw || typeof raw !== "object") return null;
-  const asset = String(raw.asset || "");
-  if (!DIARY_ASSET_RE.test(asset) || (hasAsset && !hasAsset(asset))) return null;
   const num = (v, lo, hi, dflt) => { const n = Number(v); return v === "" || v == null || !Number.isFinite(n) ? dflt : Math.max(lo, Math.min(hi, n)); };
-  return {
+  const kind = diaryStickerKind(raw);
+  const base = {
     id:String(raw.id || "").slice(0, 60) || diaryStickerId(),
-    asset,
+    kind,
     x:num(raw.x, -1, 2, 0.1),
     y:num(raw.y, -1, 60, 0.1),
     w:num(raw.w, 0.03, 1.5, 0.3),
@@ -356,6 +422,24 @@ function diaryNormalizeSticker(raw, hasAsset){
     rot:diaryNormalizeAngle(num(raw.rot, -3600, 3600, 0)),
     flip:raw.flip === true
   };
+  const color = /^#[0-9a-f]{6}$/i.test(String(raw.color || "")) ? String(raw.color).toLowerCase() : "";
+  if (kind === "art"){
+    const info = diaryArtInfo(String(raw.art || ""));
+    if (!info) return null;                                   // 모르는 그림은 버린다(앱이 그릴 수 없다)
+    return { ...base, art:info[0], color:color || DIARY_ART_DEFAULT_COLOR, ar:num(raw.ar, 0.02, 50, info[3]) };
+  }
+  if (kind === "text"){
+    const text = String(raw.text == null ? "" : raw.text).replace(/\r\n?/g, "\n").slice(0, DIARY_TEXT_MAX);
+    if (!text.trim()) return null;                            // 빈 글상자는 남기지 않는다
+    return { ...base, text, color:color || DIARY_TEXT_DEFAULT_COLOR,
+      font:DIARY_FONTS.includes(raw.font) ? raw.font : "gothic",
+      size:num(raw.size, 0.012, 0.3, 0.048),
+      align:DIARY_TEXT_ALIGNS.includes(raw.align) ? raw.align : "left",
+      w:num(raw.w, 0.03, 1.5, 0.4) };
+  }
+  const asset = String(raw.asset || "");
+  if (!DIARY_ASSET_RE.test(asset) || (hasAsset && !hasAsset(asset))) return null;
+  return { ...base, asset };
 }
 // 각도는 -180 초과 ~ 180 이하로 모은다(돌리기를 여러 바퀴 해도 같은 값이 저장되게).
 function diaryNormalizeAngle(deg){
@@ -482,8 +566,21 @@ function diaryCleanEntries(model){
     .map(e => ({ date:e.date, title:e.title || "", text:e.text || "", style:e.style || null,
       weather:e.weather || "", mood:e.mood || "", favorite:!!e.favorite, tags:diaryNormalizeTags(e.tags),
       drawing:(e.drawing || []).map(st => st.e ? { c:st.c, w:st.w, p:st.p, e:true } : { c:st.c, w:st.w, p:st.p }),
-      stickers:(e.stickers || []).map(s => ({ id:s.id, asset:s.asset, x:s.x, y:s.y, w:s.w, ar:s.ar,
-        rot:diaryNormalizeAngle(s.rot), flip:!!s.flip })) }));
+      stickers:(e.stickers || []).map(diaryCleanSticker).filter(Boolean) }));
+}
+// 스티커 한 장을 저장할 모양으로. 글상자의 높이(ar)는 글에서 나오므로 담지 않는다 —
+// 담으면 창 폭에 따라 잰 값이 달라져 고치지도 않은 일기장이 '저장 안 됨'으로 보인다(diaryContentKey 가 이걸 읽는다).
+function diaryCleanSticker(s){
+  if (!s) return null;
+  const kind = diaryStickerKind(s);
+  const box = { id:s.id, x:s.x, y:s.y, w:s.w, rot:diaryNormalizeAngle(s.rot), flip:!!s.flip };
+  if (kind === "art") return { ...box, kind:"art", art:s.art, color:s.color || DIARY_ART_DEFAULT_COLOR, ar:s.ar };
+  if (kind === "text"){
+    if (!String(s.text || "").trim()) return null;
+    return { ...box, kind:"text", text:s.text, color:s.color || DIARY_TEXT_DEFAULT_COLOR,
+      font:s.font || "gothic", size:s.size, align:s.align || "left", flip:false };
+  }
+  return { ...box, kind:"photo", asset:s.asset, ar:s.ar };
 }
 // 저장본과 같은지 가르는 열쇠 — 시각(updatedAt)은 빼야 저장 → 편집 → 되돌리기 뒤 다시 '깨끗'이 된다.
 function diaryContentKey(model){
@@ -504,7 +601,7 @@ function diaryReferencedAssets(model){
   if (model.style && model.style.bg) used.add(model.style.bg);
   for (const e of diaryCleanEntries(model)){
     if (e.style && e.style.bg) used.add(e.style.bg);
-    for (const s of e.stickers) used.add(s.asset);
+    for (const s of e.stickers) if (s.asset) used.add(s.asset);      // 내장 그림·글상자는 사진 바이트가 없다
   }
   return used;
 }
@@ -514,20 +611,35 @@ function diaryEntryLabel(entry){
   if (title) return title;
   const line = String(entry.text || "").split("\n").map(s => s.trim()).find(Boolean);
   if (line) return line.length > 40 ? line.slice(0, 40) + "…" : line;
-  if (entry.stickers && entry.stickers.length) return diaryTf("사진 {n}장", { n:entry.stickers.length });
+  // 본문이 비어도 글상자에 쓴 글이 있으면 그것을 이름으로 쓴다(종이에 보이는 글이니까).
+  const boxed = diaryStickerText(entry).split("\n").map(s => s.trim()).find(Boolean);
+  if (boxed) return boxed.length > 40 ? boxed.slice(0, 40) + "…" : boxed;
+  if (entry.stickers && entry.stickers.length) return diaryStickerCountLabel(entry.stickers);
   if (entry.tags && entry.tags.length) return entry.tags.map(t => "#" + t).join(" ");
   if (entry.favorite) return diaryT("즐겨찾기한 날");
   const mood = diaryMoodInfo(entry.mood), weather = diaryWeatherInfo(entry.weather);
   if (mood || weather) return [diaryName(weather), diaryName(mood)].filter(Boolean).join(" · ");
   return diaryT("꾸미기만 한 날");
 }
+// 종이 위 글상자에 쓴 글을 모은 것 — 목록 이름·검색·통합 검색이 본문과 함께 읽는다.
+function diaryStickerText(entry){
+  return ((entry && entry.stickers) || []).filter(s => diaryStickerKind(s) === "text").map(s => String(s.text || "")).filter(Boolean).join("\n");
+}
+// "사진 2장 · 스티커 3개" — 갈래가 섞여 있으므로 사진만 세던 이름을 쪼갠다.
+function diaryStickerCountLabel(stickers){
+  const list = stickers || [];
+  const photos = list.filter(s => diaryStickerKind(s) === "photo").length;
+  const arts = list.filter(s => diaryStickerKind(s) === "art").length;
+  return [photos && diaryTf("사진 {n}장", { n:photos }), arts && diaryTf("스티커 {n}개", { n:arts })].filter(Boolean).join(" · ")
+    || diaryTf("스티커 {n}개", { n:list.length });
+}
 function diaryPlainText(model){
-  return diaryCleanEntries(model).map(e => [diaryDateLabel(e.date), diaryWeatherMoodLabel(e), ...(e.tags || []).map(t => "#" + t), e.title, e.text].filter(Boolean).join("\n")).join("\n\n");
+  return diaryCleanEntries(model).map(e => [diaryDateLabel(e.date), diaryWeatherMoodLabel(e), ...(e.tags || []).map(t => "#" + t), e.title, e.text, diaryStickerText(e)].filter(Boolean).join("\n")).join("\n\n");
 }
 function diaryEntryMatches(entry, query){
   const q = String(query || "").trim().toLowerCase();
   if (!q || !entry) return false;
-  return [entry.date, diaryDateLabel(entry.date), diaryWeatherMoodLabel(entry), ...(entry.tags || []), entry.title, entry.text].join("\n").toLowerCase().includes(q);
+  return [entry.date, diaryDateLabel(entry.date), diaryWeatherMoodLabel(entry), ...(entry.tags || []), entry.title, entry.text, diaryStickerText(entry)].join("\n").toLowerCase().includes(q);
 }
 // 검색·목록용 "날씨 맑음 · 기분 기쁨" — 그림 글자 없이 이름만.
 function diaryWeatherMoodLabel(entry){
@@ -1130,10 +1242,20 @@ function mountDiaryEditor(doc){
   titleInput.value = model.title || "";
   titleInput.placeholder = "일기장 이름";
   titleInput.setAttribute("aria-label", "일기장 이름");
-  const undoBtn = diaryButton("", "되돌리기 (Ctrl+Z)", "diary-btn", "undo");
-  const redoBtn = diaryButton("", "다시 실행 (Ctrl+Y)", "diary-btn", "redo");
+  const undoBtn = diaryButton("", "되돌리기 (Ctrl+Z)", "diary-btn diary-undo-btn", "undo");
+  const redoBtn = diaryButton("", "다시 실행 (Ctrl+Y)", "diary-btn diary-redo-btn", "redo");
   const photoBtn = diaryButton("", "사진을 스티커처럼 붙이기 — 종이 위로 끌어다 놓아도 돼요", "diary-btn", "image");
-  const styleBtn = diaryButton("", "줄 무늬·배경 그림 바꾸기", "diary-btn", "sliders");
+  // 보기 묶음 — 양옆 칸 접기와 몰입 모드. 글자는 applyPanels 가 상태·언어에 맞춰 다시 쓴다.
+  const sideToggleBtn = diaryButton("", "달력·찾기 칸 감추기", "diary-btn diary-view-btn diary-side-toggle", "calendar");
+  const railToggleBtn = diaryButton("", "일기 목록 감추기", "diary-btn diary-view-btn diary-rail-toggle", "list");
+  const focusBtn = diaryButton("", "몰입 모드", "diary-btn diary-view-btn diary-focus-btn", "fit");
+  const barViewSep = document.createElement("span");
+  barViewSep.className = "diary-bar-sep";
+  barViewSep.setAttribute("aria-hidden", "true");
+  const stickerBtn = diaryButton("", "스티커 붙이기 — 내장 그림과 글상자", "diary-btn diary-sticker-btn", "sticker");
+  stickerBtn.setAttribute("aria-haspopup", "dialog");
+  stickerBtn.setAttribute("aria-expanded", "false");
+  const styleBtn = diaryButton("", "줄 무늬·배경 그림 바꾸기", "diary-btn diary-style-btn", "sliders");
   styleBtn.setAttribute("aria-haspopup", "dialog");
   styleBtn.setAttribute("aria-expanded", "false");
   const protectBtn = diaryButton("", "파일 암호 설정·변경", "diary-btn", "lock");
@@ -1150,10 +1272,10 @@ function mountDiaryEditor(doc){
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
   const barIdentity = document.createElement("div");
   barIdentity.className = "diary-bar-identity";
-  barIdentity.append(titleInput, status);
+  barIdentity.append(sideToggleBtn, railToggleBtn, focusBtn, barViewSep, titleInput, status);
   const barActions = document.createElement("div");
   barActions.className = "diary-bar-actions";
-  barActions.append(undoBtn, redoBtn, photoBtn, styleBtn, protectBtn, saveBtn);
+  barActions.append(undoBtn, redoBtn, photoBtn, stickerBtn, styleBtn, protectBtn, saveBtn);
   bar.append(barIdentity, barActions, photoInput, bgInput);
 
   const body = document.createElement("div");
@@ -1165,8 +1287,10 @@ function mountDiaryEditor(doc){
   const sideTabs = document.createElement("div");
   sideTabs.className = "diary-side-tabs";
   sideTabs.setAttribute("role", "tablist");
+  // 탭은 아이콘만 보인다(이름 span 은 CSS 가 감춘다) — 이름은 툴팁·aria-label 로 남는다.
   const makeSideTab = (id, ko, en, icon) => {
-    const b = diaryButton(diaryIsEn() ? en : ko, ko, "diary-side-tab", icon);
+    const name = diaryIsEn() ? en : ko;
+    const b = diaryButton(name, name, "diary-side-tab", icon);
     b.dataset.sideTab = id; b.setAttribute("role", "tab");
     return b;
   };
@@ -1437,6 +1561,49 @@ function mountDiaryEditor(doc){
   veilValue.className = "diary-veil-value";
   veilControls.append(veilRange, veilValue);
 
+  /* ----- 스티커 창 ----- */
+  const artPanel = document.createElement("div");
+  artPanel.className = "diary-art-panel";      // 꾸미기 창과 모양은 같지만 클래스는 따로 — 선택자가 둘을 가려야 한다
+  artPanel.hidden = true;
+  artPanel.setAttribute("role", "dialog");
+  artPanel.setAttribute("aria-label", "스티커");
+  const artSection = (label) => {
+    const wrap = document.createElement("div"); wrap.className = "diary-style-row";
+    const head = document.createElement("div"); head.className = "diary-style-label"; head.textContent = label;
+    const content = document.createElement("div"); content.className = "diary-style-controls";
+    wrap.append(head, content); artPanel.append(wrap);
+    return content;
+  };
+  const artColorChips = artSection("색");
+  const artColorButtons = DIARY_PENS.map(([color, ko, en]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-art-color"; b.dataset.color = color;
+    b.style.setProperty("--pen", color);
+    b.title = diaryIsEn() ? en : ko;
+    b.setAttribute("aria-label", b.title);
+    b.addEventListener("click", () => applyStickerColor(color));
+    artColorChips.append(b);
+    return b;
+  });
+  const artGrid = artSection("그림");
+  artGrid.classList.add("diary-art-grid");
+  const artButtons = DIARY_ART.map(info => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-art-chip"; b.dataset.art = info[0];
+    b.innerHTML = diaryArtSvg(info[0], "diary-art diary-art-chip-svg");
+    b.title = diaryArtName(info);
+    b.setAttribute("aria-label", b.title);
+    b.addEventListener("click", () => addArtSticker(info[0]));
+    artGrid.append(b);
+    return b;
+  });
+  const artTextRow = artSection("글상자");
+  const artTextBtn = diaryButton("글상자 넣기", "종이 위 아무 데나 글을 얹어요 — 두 번 누르면 고쳐 써요", "diary-btn", "text");
+  artTextBtn.addEventListener("click", () => { setArtPanelOpen(false); addTextSticker(); });
+  const artTextNote = document.createElement("span");
+  artTextNote.className = "diary-style-note";
+  artTextRow.append(artTextBtn, artTextNote);
+
   // 날씨·기분 고르개(머리줄 단추 아래에 뜬다)
   const pickPop = document.createElement("div");
   pickPop.className = "diary-pick-pop ui-keep-symbols";
@@ -1456,7 +1623,7 @@ function mountDiaryEditor(doc){
   const lockNote = document.createElement("p"); lockNote.textContent = "내용을 다시 보려면 파일 암호를 입력하세요.";
   const unlockBtn = diaryButton("잠금 풀기", "일기장 화면 잠금 풀기", "diary-btn diary-primary", "lock");
   lockScreen.append(lockIcon, lockTitle, lockNote, unlockBtn);
-  root.append(bar, body, panel, pickPop, templatePanel, lockScreen);
+  root.append(bar, body, panel, artPanel, pickPop, templatePanel, lockScreen);
   doc.el.appendChild(root);
 
   /* ----- 상태 표시·되돌리기·복구본 ----- */
@@ -2006,11 +2173,20 @@ function mountDiaryEditor(doc){
     }
     button.append(content);
     const firstSticker = entry.stickers && entry.stickers.find(sticker => assetUrl(sticker.asset));
+    // 사진이 없어도 내장 그림을 붙였으면 그 그림을 보여 준다(꾸민 날이 빈 칸으로 보이지 않게).
+    const firstArt = !firstSticker && entry.stickers
+      ? entry.stickers.find(sticker => diaryStickerKind(sticker) === "art" && diaryArtInfo(sticker.art)) : null;
     const hasDrawing = !!(entry.drawing && entry.drawing.length);
     const thumb = document.createElement("span");
-    thumb.className = "diary-entry-card-thumb" + (!firstSticker && !hasDrawing ? " is-empty" : "");
+    thumb.className = "diary-entry-card-thumb" + (!firstSticker && !firstArt && !hasDrawing ? " is-empty" : "");
     if (firstSticker){
       const img = document.createElement("img"); img.src = assetUrl(firstSticker.asset); img.alt = ""; thumb.append(img); button.append(thumb);
+    } else if (firstArt && !hasDrawing){
+      const art = document.createElement("span");
+      art.className = "diary-entry-card-art";
+      art.innerHTML = diaryArtSvg(firstArt.art);
+      art.style.color = firstArt.color || DIARY_ART_DEFAULT_COLOR;
+      thumb.append(art);
     }
     if (hasDrawing){
       // 그림 칸의 가로·세로 비율을 유지한 별도 레이어라 사진이 있어도 지우개 획이 사진까지 지우지 않는다.
@@ -2022,7 +2198,7 @@ function mountDiaryEditor(doc){
       canvas.height = Math.max(1, Math.round(canvas.width * box.height / sourceWidth));
       diaryDrawStrokes(canvas.getContext("2d"), entry.drawing, canvas.width);
       thumb.append(canvas);
-    } else if (!firstSticker && mark){
+    } else if (!firstSticker && !firstArt && mark){
       const em = document.createElement("span"); em.className = "diary-entry-card-mark"; diaryMarkFill(em, mark); thumb.append(em);
     }
     if (!firstSticker) button.append(thumb);
@@ -2109,9 +2285,13 @@ function mountDiaryEditor(doc){
     reviewPane.replaceChildren(heading, cards, insights, heatTitle, heat, memoryTitle, memoryBox);
   }
   function refreshSideLanguage(){
-    calendarTab.querySelector("span:last-child").textContent = diaryIsEn() ? "Calendar" : "달력";
-    searchTab.querySelector("span:last-child").textContent = diaryIsEn() ? "Find" : "찾기";
-    reviewTab.querySelector("span:last-child").textContent = diaryIsEn() ? "Review" : "돌아보기";
+    // 탭은 아이콘만 보이므로 이름은 툴팁·aria-label 까지 함께 바꿔야 한다(감춘 span 도 맞춰 둔다).
+    for (const [tab, ko, en] of [[calendarTab, "달력", "Calendar"], [searchTab, "찾기", "Find"], [reviewTab, "돌아보기", "Review"]]){
+      const name = diaryIsEn() ? en : ko;
+      tab.querySelector("span:last-child").textContent = name;
+      tab.title = name;
+      tab.setAttribute("aria-label", name);
+    }
     searchInput.placeholder = diaryIsEn() ? "Search this diary" : "이 일기장에서 찾기";
     entryRail.setAttribute("aria-label", diaryIsEn() ? "Diary card list" : "일기 카드 목록");
     sideMobileToggle.querySelector("span:last-child").textContent = diaryIsEn() ? "Calendar · Find" : "달력·검색";
@@ -2257,6 +2437,7 @@ function mountDiaryEditor(doc){
     const width = paper.clientWidth;
     if (!width) return;
     paperWidth = width;
+    measureTextStickers(width);            // 글상자 높이를 먼저 채워야 아래의 stickerBottom 이 맞는다
     const effective = diaryEffectiveStyle(model, entryOf(current));
     if (diaryUsesGenko(effective)){ layoutGenko(width, effective); positionStickers(); return; }
     const m = diaryLineMetrics(effective, width);
@@ -2274,8 +2455,30 @@ function mountDiaryEditor(doc){
     main.scrollTop = top;
     positionStickers();
   }
+  /* 글상자 높이는 글에서 나온다 — 파일에 담지 않고 그릴 때마다 잰다.
+     글자 크기가 종이 폭에 대한 비율이라 어느 폭에서도 줄바꿈 자리가 같고, 잰 높이를 ar 에 채워 두면
+     종이 길이(layout)·인쇄가 사진과 똑같은 식으로 잰다. 재기는 종이 길이를 셈하기 전에 끝나야 한다. */
+  function measureTextStickers(w){
+    const entry = entryOf(current);
+    if (!w || !entry) return;
+    for (const node of stickerLayer.children){
+      if (node.dataset.kind !== "text") continue;
+      const s = entry.stickers.find(item => item.id === node.dataset.id);
+      const body = s && node.querySelector(".diary-sticker-body");
+      if (!body) continue;
+      node.style.width = (s.w * w) + "px";
+      node.style.height = "auto";
+      body.style.fontSize = (s.size * w) + "px";
+      body.style.fontFamily = DIARY_FONT_STACKS[s.font] || "";
+      body.style.color = s.color || DIARY_TEXT_DEFAULT_COLOR;
+      body.style.textAlign = s.align || "left";
+      const h = node.offsetHeight;
+      if (h > 0) s.ar = h / Math.max(1, s.w * w);
+    }
+  }
   function positionStickers(){
     const w = paperWidth || paper.clientWidth;
+    measureTextStickers(w);
     for (const node of stickerLayer.children){
       const entry = entryOf(current);
       const s = entry && entry.stickers.find(item => item.id === node.dataset.id);
@@ -2283,10 +2486,11 @@ function mountDiaryEditor(doc){
       node.style.left = (s.x * w) + "px";
       node.style.top = (s.y * w) + "px";
       node.style.width = (s.w * w) + "px";
-      node.style.height = (s.w * s.ar * w) + "px";
+      // 글상자만 높이를 글에 맡긴다(measureTextStickers 가 이미 auto 로 두고 잰 뒤다).
+      if (node.dataset.kind !== "text") node.style.height = (s.w * s.ar * w) + "px";
       node.style.transform = s.rot ? `rotate(${s.rot}deg)` : "";
-      const img = node.querySelector("img");
-      if (img) img.style.transform = s.flip ? "scaleX(-1)" : "";
+      const body = node.querySelector(".diary-sticker-body");
+      if (body && node.dataset.kind !== "text") body.style.transform = s.flip ? "scaleX(-1)" : "";
     }
     // 사진이나 그림이 있으면 안내 문장만 감추고 가운데 아이콘은 남긴다.
     // 오른쪽 위에 별도 연필 단추를 두지 않으므로, 이 아이콘이 다시 그리기로 들어가는 길이기도 하다.
@@ -2491,24 +2695,46 @@ function mountDiaryEditor(doc){
     // 다시 그리면 스티커 요소가 새로 생겨 포커스가 빠진다 — 같은 스티커에 되돌려야 방향키·단축키가 이어진다.
     const focusedId = document.activeElement && stickerLayer.contains(document.activeElement)
       ? document.activeElement.dataset.id : "";
+    // 글상자에 손글씨 글꼴을 골랐으면 미리 읽어 둔다 — 다 읽으면 줄바꿈 자리가 달라지므로 다시 재야 한다.
+    const handFonts = [...new Set(list.filter(s => diaryStickerKind(s) === "text").map(s => s.font))].filter(f => DIARY_HAND_FONTS[f]);
+    if (handFonts.length) Promise.all(handFonts.map(diaryEnsureFont)).then(() => { if (stickerLayer.isConnected) layout(); });
     stickerLayer.replaceChildren(...list.map(s => {
+      const kind = diaryStickerKind(s);
       const node = document.createElement("div");
-      node.className = "diary-sticker" + (selection.includes(s.id) ? " is-selected" : "");
+      node.className = "diary-sticker diary-sticker-is-" + kind + (selection.includes(s.id) ? " is-selected" : "");
       node.dataset.id = s.id;
+      node.dataset.kind = kind;
       node.tabIndex = 0;
-      node.setAttribute("role", "img");
-      node.setAttribute("aria-label", "붙인 사진 — 끌어서 옮기기, 모서리로 크기, 위 손잡이로 돌리기, 우클릭으로 순서·뒤집기");
-      const img = document.createElement("img");
-      img.src = assetUrl(s.asset);
-      img.alt = "";
-      img.draggable = false;
+      node.setAttribute("role", kind === "text" ? "group" : "img");
+      node.setAttribute("aria-label", kind === "text"
+        ? "글상자 — 두 번 누르면 고쳐 쓰기, 끌어서 옮기기, 모서리로 너비, 우클릭으로 글자 크기·맞춤"
+        : kind === "art"
+          ? "붙인 스티커 — 끌어서 옮기기, 모서리로 크기, 위 손잡이로 돌리기, 우클릭으로 순서·색"
+          : "붙인 사진 — 끌어서 옮기기, 모서리로 크기, 위 손잡이로 돌리기, 우클릭으로 순서·뒤집기");
+      let body;
+      if (kind === "art"){
+        body = document.createElement("span");
+        body.className = "diary-sticker-body diary-sticker-art";
+        body.innerHTML = diaryArtSvg(s.art);                       // 앱이 만든 고정 SVG 표에서만 나온다(사용자 입력 아님)
+        body.style.color = s.color || DIARY_ART_DEFAULT_COLOR;
+      } else if (kind === "text"){
+        body = document.createElement("div");
+        body.className = "diary-sticker-body diary-sticker-text";
+        body.textContent = s.text;                                  // 글은 반드시 textContent 로(HTML 로 새지 않게)
+      } else {
+        body = document.createElement("img");
+        body.className = "diary-sticker-body";
+        body.src = assetUrl(s.asset);
+        body.alt = "";
+        body.draggable = false;
+      }
       const handle = document.createElement("span");
       handle.className = "diary-sticker-handle";
-      handle.title = "크기 바꾸기";
+      handle.title = kind === "text" ? "너비 바꾸기" : "크기 바꾸기";
       const rotor = document.createElement("span");
       rotor.className = "diary-sticker-rotate";
       rotor.title = "돌리기 (Shift: 15°씩)";
-      const remove = diaryButton("", "사진 떼기", "diary-sticker-remove", "close");
+      const remove = diaryButton("", kind === "photo" ? "사진 떼기" : "스티커 떼기", "diary-sticker-remove", "close");
       remove.addEventListener("pointerdown", e => e.stopPropagation());
       remove.addEventListener("click", (e) => { e.stopPropagation(); removeSticker(s.id); });
       const more = diaryButton("", "순서·돌리기·뒤집기", "diary-sticker-more", "more");
@@ -2518,8 +2744,18 @@ function mountDiaryEditor(doc){
         const r = more.getBoundingClientRect();
         openStickerMenu(s.id, r.left, r.bottom + 4);
       });
-      node.append(img, handle, rotor, remove, more);
-      node.addEventListener("pointerdown", (e) => startStickerDrag(e, s, node, e.target === handle ? "resize" : e.target === rotor ? "rotate" : "move"));
+      node.append(body, handle, rotor, remove, more);
+      if (kind === "text"){
+        node.addEventListener("dblclick", (e) => { e.preventDefault(); e.stopPropagation(); editTextSticker(s.id); });
+        node.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" || e.target !== node) return;
+          e.preventDefault(); e.stopPropagation(); editTextSticker(s.id);
+        });
+      }
+      node.addEventListener("pointerdown", (e) => {
+        if (node.classList.contains("is-editing")) return;       // 고쳐 쓰는 중엔 끌기가 글칸 누르기를 가로채면 안 된다
+        startStickerDrag(e, s, node, e.target === handle ? "resize" : e.target === rotor ? "rotate" : "move");
+      });
       node.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -2538,13 +2774,14 @@ function mountDiaryEditor(doc){
   function syncSelection(){
     for (const node of stickerLayer.children) node.classList.toggle("is-selected", selection.includes(node.dataset.id));
     stickerLayer.classList.toggle("is-multi", selection.length > 1);
+    if (!artPanel.hidden) syncArtPanel();              // 스티커 창이 열려 있으면 고른 것의 색을 비춘다
   }
   function setSelection(ids){
     const before = selection.join("|");
     selection = [...new Set(ids.filter(Boolean))];
     if (selection.join("|") === before) return;
     syncSelection();
-    if (selection.length > 1) setStatus(diaryTf("사진 {n}장을 골랐어요 — 함께 옮기고 돌리고 뗄 수 있어요", { n:selection.length }));
+    if (selection.length > 1) setStatus(diaryTf("스티커 {n}개를 골랐어요 — 함께 옮기고 돌리고 뗄 수 있어요", { n:selection.length }));
   }
   function selectSticker(id){ setSelection(id ? [id] : []); }
   function toggleSticker(id){
@@ -2672,11 +2909,34 @@ function mountDiaryEditor(doc){
     const entry = entryOf(current);
     const list = selectedStickers();
     const many = list.length > 1;
+    const kind = diaryStickerKind(s);
     // 이미 맨 앞/맨 뒤인지 — 여러 장이면 고른 것이 모두 그 끝에 붙어 있을 때
     const n = entry.stickers.length, k = list.length;
     const atFront = entry.stickers.slice(n - k).every(x => selection.includes(x.id));
     const atBack = entry.stickers.slice(0, k).every(x => selection.includes(x.id));
+    // 그림·글상자만 색을 바꾼다(사진은 바꿀 색이 없다). 고른 것에 사진이 섞여 있으면 사진만 그대로 둔다.
+    const colorful = list.some(item => diaryStickerKind(item) !== "photo");
+    const colorChildren = DIARY_PENS.map(([color, ko, en]) => ({
+      label:diaryIsEn() ? en : ko, active:list.every(item => item.color === color), action:() => applyStickerColor(color)
+    }));
+    const textItems = kind !== "text" || many ? [] : [
+      { label:diaryT("글 고쳐 쓰기"), icon:"pen", title:"Enter", action:() => editTextSticker(id) },
+      { label:diaryT("글자 크기"), children:DIARY_TEXT_SIZES.map(([, value, ko, en]) => ({
+        label:diaryIsEn() ? en : ko, active:Math.abs((s.size || 0) - value) < 0.0005,
+        action:() => setTextStickerField({ size:value })
+      })) },
+      { label:diaryT("글 맞춤"), children:[["left", "왼쪽", "Left"], ["center", "가운데", "Center"], ["right", "오른쪽", "Right"]]
+        .map(([align, ko, en]) => ({ label:diaryIsEn() ? en : ko, active:(s.align || "left") === align, action:() => setTextStickerField({ align }) })) },
+      { label:diaryT("글꼴"), children:DIARY_FONTS.map(font => ({
+        label:diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, font), active:(s.font || "gothic") === font,
+        action:() => setTextStickerField({ font })
+      })) },
+      { separator:true }
+    ];
     MNContextMenu.open(x, y, [
+      ...textItems,
+      colorful ? { label:diaryT("색 바꾸기"), children:colorChildren } : null,
+      colorful ? { separator:true } : null,
       { label:diaryT("맨 앞으로"), title:"Ctrl+Shift+]", disabled:atFront, action:() => reorderStickers("front") },
       { label:diaryT("한 칸 앞으로"), title:"Ctrl+]", disabled:atFront, action:() => reorderStickers("forward") },
       { label:diaryT("한 칸 뒤로"), title:"Ctrl+[", disabled:atBack, action:() => reorderStickers("backward") },
@@ -2685,14 +2945,16 @@ function mountDiaryEditor(doc){
       { label:diaryT("왼쪽으로 15° 돌리기"), icon:"rotateLeft", title:"[ (Shift: 15°)", action:() => rotateStickers(-15) },
       { label:diaryT("오른쪽으로 15° 돌리기"), icon:"rotateRight", title:"] (Shift: 15°)", action:() => rotateStickers(15) },
       { label:diaryT("돌리기 되돌리기"), disabled:!list.some(x => x.rot), action:() => rotateStickers(0, true) },
-      { label:diaryT("좌우 뒤집기"), icon:"flipH", active:list.every(x => x.flip), action:() => flipStickers() },
-      (pictureBox.hidden || many) ? null : { label:diaryT("그림 칸에 꼭 맞추기"), icon:"fit", action:() => {
+      // 글상자는 뒤집지 않는다 — 거울 글씨가 될 뿐이다.
+      list.every(x => diaryStickerKind(x) === "text") ? null
+        : { label:diaryT("좌우 뒤집기"), icon:"flipH", active:list.every(x => x.flip), action:() => flipStickers() },
+      (pictureBox.hidden || many || kind === "text") ? null : { label:diaryT("그림 칸에 꼭 맞추기"), icon:"fit", action:() => {
         if (history) history.flush();
         if (fitStickerToBox(s)){ positionStickers(); layout(); touch(true); }
       } },
       { separator:true },
       many ? { label:diaryT("모두 고르기"), title:"Ctrl+A", disabled:k === n, action:() => setSelection(entry.stickers.map(x => x.id)) } : null,
-      { label:many ? diaryTf("사진 {n}장 떼기", { n:k }) : diaryT("사진 떼기"), icon:"delete", action:() => removeStickers(selection) }
+      { label:many ? diaryTf("스티커 {n}개 떼기", { n:k }) : diaryT(kind === "photo" ? "사진 떼기" : "스티커 떼기"), icon:"delete", action:() => removeStickers(selection) }
     ], { onClose:() => { const node = stickerLayer.querySelector(`[data-id="${id}"]`); if (node) node.focus({ preventScroll:true }); } });
   }
   function removeSticker(id){ removeStickers([id]); }
@@ -2710,7 +2972,7 @@ function mountDiaryEditor(doc){
     layout();
     renderCalendar();
     touch(true);
-    setStatus(count > 1 ? diaryTf("사진 {n}장을 뗐어요. Ctrl+Z 로 되돌릴 수 있어요.", { n:count }) : diaryT("사진을 뗐어요. Ctrl+Z 로 되돌릴 수 있어요."));
+    setStatus(count > 1 ? diaryTf("스티커 {n}개를 뗐어요. Ctrl+Z 로 되돌릴 수 있어요.", { n:count }) : diaryT("스티커를 뗐어요. Ctrl+Z 로 되돌릴 수 있어요."));
   }
   /* Ctrl(⌘)+끌기 = 네모를 그려 한꺼번에 고르기. 종이 대부분이 글칸이라 그냥 끌기·Shift+끌기는 글 고르기로 남겨 둔다.
      네모에 조금이라도 걸친 스티커를 고른다(돌린 스티커는 돌리기 전 상자로 잰다). Shift 를 함께 누르면 지금 고른 것에 더한다. */
@@ -2769,12 +3031,7 @@ function mountDiaryEditor(doc){
     const targetBox = fit ? pictureBoxRect() : null;
     setStatus(diaryT("사진을 붙이는 중…"));
     const w = paperWidth || paper.clientWidth || 600;
-    let origin = at;
-    if (!origin){
-      const rect = paper.getBoundingClientRect(), view = main.getBoundingClientRect();
-      const visibleTop = Math.max(0, view.top - rect.top);
-      origin = { x:w * 0.5, y:visibleTop + Math.min(view.height, rect.height) * 0.35 };
-    }
+    const origin = at || stickerOrigin();
     // 사진을 모두 준비한 뒤 현재 모델에 한 번에 넣는다. 날짜 이동·되돌리기로 교체된 entry 를 붙잡지 않는다.
     const prepared = [];
     let added = 0, skipped = 0;
@@ -2811,6 +3068,129 @@ function mountDiaryEditor(doc){
     }
     if (skipped) setStatus((added ? diaryTf("사진 {n}장을 붙였어요.", { n:added }) + " " : "") + diaryTf("{n}장은 붙이지 못했어요(그림 파일이 아니거나 너무 크거나 한 날 {max}장을 넘었어요).", { n:skipped, max:DIARY_MAX_STICKERS }));
     else refreshDirty();
+  }
+
+  /* ----- 내장 스티커·글상자 붙이기 -----
+     사진과 달리 ZIP 에 담을 바이트가 없어서 기다릴 것도, 줄일 것도 없다 — 곧바로 모델에 한 줄을 더한다. */
+  let artColor = DIARY_ART_DEFAULT_COLOR;        // 다음에 붙일 그림 색(고른 스티커가 있으면 그쪽을 바꾼다)
+  // 종이에서 지금 보이는 데의 한가운데 — 사진 붙이기와 같은 자리 규칙.
+  function stickerOrigin(){
+    const w = paperWidth || paper.clientWidth || 600;
+    const rect = paper.getBoundingClientRect(), view = main.getBoundingClientRect();
+    const visibleTop = Math.max(0, view.top - rect.top);
+    return { x:w * 0.5, y:visibleTop + Math.min(view.height, rect.height) * 0.35, w };
+  }
+  // 같은 자리에 똑같이 겹쳐 쌓이면 위의 것만 잡힌다 — 한 장씩 조금씩 어긋내 놓는다
+  // (사진을 여러 장 한꺼번에 붙일 때 쓰던 규칙과 같다).
+  function cascadeOffset(){
+    const entry = entryOf(current);
+    return ((entry ? entry.stickers.length : 0) % 8) * 0.025;
+  }
+  function pushSticker(sticker){
+    const entry = ensureEntry(current);
+    if (entry.stickers.length >= DIARY_MAX_STICKERS){
+      setStatus(diaryTf("한 날에 스티커는 {max}개까지예요.", { max:DIARY_MAX_STICKERS }));
+      return null;
+    }
+    if (history) history.flush();
+    entry.stickers.push(sticker);
+    selection = [sticker.id];
+    renderStickers();
+    layout();
+    renderCalendar();
+    deleteBtn.disabled = false;
+    touch(true);
+    return sticker;
+  }
+  function addArtSticker(id){
+    const info = diaryArtInfo(id);
+    if (!info) return;
+    const o = stickerOrigin(), width = 0.18, off = cascadeOffset();
+    const s = pushSticker({ id:diaryStickerId(), kind:"art", art:info[0], color:artColor, w:width, ar:info[3],
+      x:Math.max(0, Math.min(1 - width, o.x / o.w - width / 2 + off)), y:Math.max(0, o.y / o.w - (width * info[3]) / 2 + off),
+      rot:0, flip:false });
+    if (s) setStatus(diaryTf("{name} 스티커를 붙였어요 — 끌어서 옮기고 모서리로 크기를 바꿔요.", { name:diaryArtName(info) }));
+  }
+  function addTextSticker(){
+    const o = stickerOrigin(), width = 0.42, off = cascadeOffset();
+    const s = pushSticker({ id:diaryStickerId(), kind:"text", text:diaryT("여기에 쓰세요"), color:DIARY_TEXT_DEFAULT_COLOR,
+      font:diaryEffectiveStyle(model, entryOf(current)).font, size:0.048, align:"left", w:width, ar:0.2,
+      x:Math.max(0, Math.min(1 - width, o.x / o.w - width / 2 + off)), y:Math.max(0, o.y / o.w + off), rot:0, flip:false });
+    if (s) editTextSticker(s.id, true);          // 붙이자마자 바로 쓰게 — 견본 글은 모두 골라 둔다
+  }
+  /* 글상자 고쳐 쓰기 — 종이 위 그 자리에 같은 글꼴·크기의 textarea 를 잠깐 얹는다.
+     contenteditable 은 쓰지 않는다(.mnote 설계 때 커서·IME 로 데인 길이라 일기장도 같은 결정이다).
+     Esc 는 되돌리고, 글을 모두 지우면 글상자가 사라진다(빈 상자는 저장되지도 않는다). */
+  let textEditing = "";
+  function editTextSticker(id, selectAll){
+    if (textEditing) return;
+    const s = stickerOf(id);
+    if (!s || diaryStickerKind(s) !== "text") return;
+    const node = stickerLayer.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    const body = node && node.querySelector(".diary-sticker-body");
+    if (!body) return;
+    textEditing = id;
+    node.classList.add("is-editing");
+    const before = s.text;
+    const w = paperWidth || paper.clientWidth || 600;
+    const ta = document.createElement("textarea");
+    ta.className = "diary-sticker-edit";
+    ta.value = s.text;
+    ta.maxLength = DIARY_TEXT_MAX;
+    ta.spellcheck = false;
+    ta.setAttribute("aria-label", "글상자 글");
+    Object.assign(ta.style, { fontSize:(s.size * w) + "px", fontFamily:DIARY_FONT_STACKS[s.font] || "",
+      color:s.color || DIARY_TEXT_DEFAULT_COLOR, textAlign:s.align || "left" });
+    body.hidden = true;
+    node.append(ta);
+    const grow = () => { ta.style.height = "0px"; ta.style.height = ta.scrollHeight + "px"; };
+    grow();
+    ta.addEventListener("input", () => { grow(); layout(); });
+    let cancelled = false;
+    ta.addEventListener("keydown", (e) => {
+      if (e.isComposing) return;
+      if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); cancelled = true; ta.blur(); }
+      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); e.stopPropagation(); ta.blur(); }
+    });
+    ta.addEventListener("blur", () => {
+      if (textEditing !== id) return;
+      textEditing = "";
+      const next = cancelled ? before : ta.value;
+      ta.remove();
+      body.hidden = false;
+      node.classList.remove("is-editing");
+      const live = stickerOf(id);
+      if (!live) return;
+      if (next === before){ renderStickers(); layout(); return; }
+      if (history) history.flush();
+      if (!String(next).trim()){
+        removeStickers([id]);
+        setStatus(diaryT("글이 비어서 글상자를 뺐어요. Ctrl+Z 로 되돌릴 수 있어요."));
+        return;
+      }
+      live.text = String(next).slice(0, DIARY_TEXT_MAX);
+      renderStickers(); layout(); renderCalendar(); touch(true);
+    });
+    ta.focus({ preventScroll:true });
+    if (selectAll) ta.select(); else ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+  // 고른 글상자의 글자 크기·맞춤·글꼴 바꾸기(여럿을 골랐으면 글상자만 골라 함께).
+  function setTextStickerField(patch){
+    const list = selectedStickers().filter(s => diaryStickerKind(s) === "text");
+    if (!list.length) return;
+    if (history) history.flush();
+    for (const s of list) Object.assign(s, patch);
+    if (patch.font && DIARY_HAND_FONTS[patch.font]) diaryEnsureFont(patch.font).then(() => layout());
+    renderStickers(); layout(); touch(true);
+  }
+  // 고른 스티커의 색 바꾸기. 고른 게 없으면 다음에 붙일 그림 색만 기억한다.
+  function applyStickerColor(color){
+    const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
+    artColor = color;
+    if (!list.length){ syncArtPanel(); setStatus(diaryT("다음에 붙일 스티커 색을 바꿨어요.")); return; }
+    if (history) history.flush();
+    for (const s of list) s.color = color;
+    renderStickers(); touch(true); syncArtPanel();
   }
 
   /* ----- 꾸미기 바꾸기 ----- */
@@ -2858,16 +3238,92 @@ function mountDiaryEditor(doc){
       for (const id of Object.keys(DIARY_HAND_FONTS)) diaryEnsureFont(id);
     }
   };
-  styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setPanelOpen(panel.hidden); });
+  styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setArtPanelOpen(false); setPanelOpen(panel.hidden); });
+  // 고른 스티커의 색을 색 칸에 비춘다(여럿을 골라 색이 섞여 있으면 아무것도 켜지 않는다).
+  function syncArtPanel(){
+    const picked = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
+    const colors = new Set(picked.map(s => s.color));
+    const shown = picked.length ? (colors.size === 1 ? [...colors][0] : "") : artColor;
+    artColorButtons.forEach(b => {
+      const on = b.dataset.color === shown;
+      b.classList.toggle("is-on", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    artTextNote.textContent = picked.length
+      ? diaryTf("고른 스티커 {n}개의 색을 바꿔요.", { n:picked.length })
+      : diaryT("색을 먼저 고르면 그 색으로 붙어요.");
+    artButtons.forEach(b => { b.title = diaryArtName(diaryArtInfo(b.dataset.art)); b.setAttribute("aria-label", b.title); });
+    artColorButtons.forEach(b => {
+      const info = DIARY_PENS.find(p => p[0] === b.dataset.color);
+      b.title = info ? (diaryIsEn() ? info[2] : info[1]) : "";
+      b.setAttribute("aria-label", b.title);
+    });
+  }
+  const setArtPanelOpen = (open) => {
+    artPanel.hidden = !open;
+    stickerBtn.setAttribute("aria-expanded", String(open));
+    stickerBtn.classList.toggle("is-on", open);
+    if (open) syncArtPanel();
+  };
+  stickerBtn.addEventListener("click", (e) => { e.stopPropagation(); setPanelOpen(false); setArtPanelOpen(artPanel.hidden); });
   const onOutside = (e) => {
     if (!pickPop.hidden && !pickPop.contains(e.target) && !weatherBtn.contains(e.target) && !moodBtn.contains(e.target)) closePicker();
     if (!templatePanel.hidden && !templatePanel.contains(e.target) && !templateBtn.contains(e.target)) setTemplateOpen(false);
+    // 스티커 창은 종이 위 스티커를 고르며 색을 바꾸는 창이라, 종이를 눌렀다고 닫지 않는다.
+    if (!artPanel.hidden && !artPanel.contains(e.target) && !stickerBtn.contains(e.target) && !paper.contains(e.target)) setArtPanelOpen(false);
     if (panel.hidden) return;
     if (panel.contains(e.target) || styleBtn.contains(e.target)) return;
     setPanelOpen(false);
   };
   document.addEventListener("pointerdown", onOutside, true);
   panel.addEventListener("keydown", (e) => { if (e.key === "Escape"){ e.preventDefault(); setPanelOpen(false); styleBtn.focus(); } });
+  artPanel.addEventListener("keydown", (e) => { if (e.key === "Escape"){ e.preventDefault(); setArtPanelOpen(false); stickerBtn.focus(); } });
+
+  /* ----- 보기: 양옆 칸 접기 · 몰입 모드 -----
+     왼쪽 두 칸이 늘 524px 를 먹어 1280px 화면에서도 종이가 제 폭(780px)을 못 찾았다.
+     접기 상태는 보는 사람 편의라 파일이 아니라 localStorage 에만 둔다(펜 색과 같은 자리).
+     몰입 모드는 접기와 따로 둔다 — 나갈 때 사용자가 접어 둔 상태가 그대로 돌아와야 한다.
+     종이 폭(max-width:780px)은 모드에 따라 바꾸지 않는다. 바꾸면 줄바꿈 자리가 흔들린다. */
+  let sideCollapsed = false, railCollapsed = false, focusMode = false;
+  try {
+    const saved = JSON.parse(localStorage.getItem("mn.diaryPanels") || "null");
+    if (saved && typeof saved === "object"){ sideCollapsed = !!saved.side; railCollapsed = !!saved.rail; }
+  } catch(_){}
+  const rememberPanels = () => {
+    try { localStorage.setItem("mn.diaryPanels", JSON.stringify({ side:sideCollapsed, rail:railCollapsed })); } catch(_){}
+  };
+  function applyPanels(){
+    root.classList.toggle("is-side-collapsed", sideCollapsed);
+    root.classList.toggle("is-rail-collapsed", railCollapsed);
+    root.classList.toggle("is-focus", focusMode);
+    const mark = (btn, hidden, showKo, hideKo, showEn, hideEn) => {
+      btn.title = diaryIsEn() ? (hidden ? showEn : hideEn) : (hidden ? showKo : hideKo);
+      btn.setAttribute("aria-label", btn.title);
+      btn.setAttribute("aria-pressed", String(!hidden));
+      btn.classList.toggle("is-on", !hidden);
+      btn.disabled = focusMode;                     // 몰입 중엔 양옆이 이미 없다
+    };
+    mark(sideToggleBtn, sideCollapsed, "달력·찾기 칸 보이기", "달력·찾기 칸 감추기", "Show the calendar panel", "Hide the calendar panel");
+    mark(railToggleBtn, railCollapsed, "일기 목록 보이기", "일기 목록 감추기", "Show the entry list", "Hide the entry list");
+    focusBtn.title = diaryIsEn()
+      ? (focusMode ? "Leave focus mode (Esc)" : "Focus mode — hide both side panels")
+      : (focusMode ? "몰입 모드 나가기 (Esc)" : "몰입 모드 — 양옆을 감추고 종이만");
+    focusBtn.setAttribute("aria-label", focusBtn.title);
+    focusBtn.setAttribute("aria-pressed", String(focusMode));
+    focusBtn.classList.toggle("is-on", focusMode);
+    layout();                                       // 종이 폭이 바뀌었으니 줄·스티커를 다시 잰다
+  }
+  function setFocusMode(on){
+    if (focusMode === !!on) return;
+    focusMode = !!on;
+    applyPanels();
+    setStatus(focusMode
+      ? diaryT("몰입 모드 — Esc 를 누르면 돌아와요.")
+      : diaryT("몰입 모드를 껐어요."));
+  }
+  sideToggleBtn.addEventListener("click", () => { sideCollapsed = !sideCollapsed; rememberPanels(); applyPanels(); });
+  railToggleBtn.addEventListener("click", () => { railCollapsed = !railCollapsed; rememberPanels(); applyPanels(); });
+  focusBtn.addEventListener("click", () => setFocusMode(!focusMode));
 
   /* ----- 즐겨찾기 · 태그 · 글감 ----- */
   const templates = [
@@ -3405,6 +3861,16 @@ function mountDiaryEditor(doc){
     const target = e.target;
     const inField = !!(target && target.closest && target.closest('input,textarea,select,[contenteditable="true"]'));
     if (drawMode && e.key === "Escape" && !inField){ e.preventDefault(); setDrawMode(false); return; }
+    /* 몰입 모드는 Esc 로 나간다. 글을 쓰다가도 나갈 수 있어야 하므로 일기 본문 칸은 예외로 받아 주되,
+       글상자 고쳐 쓰기(Esc = 고치기 취소)·다른 입력칸·열린 창·고른 스티커가 먼저다.
+       이 처리기는 capture 라 글상자 textarea 의 Esc 보다 먼저 온다 — 그래서 여기서 걸러야 한다. */
+    if (e.key === "Escape" && focusMode && !selection.length
+      && (!inField || target === area)
+      && panel.hidden && artPanel.hidden && pickPop.hidden && templatePanel.hidden){
+      e.preventDefault();
+      setFocusMode(false);
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && !e.altKey){
       // Ctrl+] / Ctrl+[ 한 칸 앞·뒤, Shift 를 더하면 맨 앞·맨 뒤(파워포인트와 같은 자리).
       if (selection.length && !inField && root.contains(target) && (e.code === "BracketRight" || e.code === "BracketLeft")){
@@ -3531,16 +3997,36 @@ function mountDiaryEditor(doc){
       paperEl.append(text);
     }
     for (const st of e.stickers){
+      const kind = diaryStickerKind(st);
       const node = document.createElement("div");
-      node.className = "diary-print-sticker";
-      Object.assign(node.style, { left:st.x * W + "px", top:st.y * W + "px", width:st.w * W + "px", height:st.w * st.ar * W + "px",
+      node.className = "diary-print-sticker diary-sticker-is-" + kind;
+      Object.assign(node.style, { left:st.x * W + "px", top:st.y * W + "px", width:st.w * W + "px",
         transform:st.rot ? `rotate(${st.rot}deg)` : "" });
-      const img = document.createElement("img");
-      img.src = assetUrl(st.asset);
-      img.alt = "";
-      if (st.flip) img.style.transform = "scaleX(-1)";
-      if (img.decode) waits.push(img.decode().catch(() => {}));
-      node.append(img);
+      // 글상자만 높이를 글에 맡긴다 — 글자 크기가 종이 폭 비율이라 680px 에서도 화면과 같은 자리에서 줄이 바뀐다.
+      if (kind !== "text") node.style.height = st.w * st.ar * W + "px";
+      if (kind === "art"){
+        const art = document.createElement("span");
+        art.className = "diary-sticker-body diary-sticker-art";
+        art.innerHTML = diaryArtSvg(st.art);
+        art.style.color = st.color || DIARY_ART_DEFAULT_COLOR;
+        if (st.flip) art.style.transform = "scaleX(-1)";
+        node.append(art);
+      } else if (kind === "text"){
+        const box = document.createElement("div");
+        box.className = "diary-sticker-body diary-sticker-text";
+        box.textContent = st.text;
+        Object.assign(box.style, { fontSize:(st.size * W) + "px", fontFamily:DIARY_FONT_STACKS[st.font] || "",
+          color:st.color || DIARY_TEXT_DEFAULT_COLOR, textAlign:st.align || "left" });
+        node.append(box);
+      } else {
+        const img = document.createElement("img");
+        img.className = "diary-sticker-body";
+        img.src = assetUrl(st.asset);
+        img.alt = "";
+        if (st.flip) img.style.transform = "scaleX(-1)";
+        if (img.decode) waits.push(img.decode().catch(() => {}));
+        node.append(img);
+      }
       paperEl.append(node);
     }
     const pbox = diaryUsesGenko(style) ? diaryLineMetrics(style, W).box : null;
@@ -3564,7 +4050,10 @@ function mountDiaryEditor(doc){
   }
   async function printEntries(list, heading){
     if (!list.length) return false;
-    await Promise.all([...new Set(list.map(e => diaryEffectiveStyle(model, e).font))].map(diaryEnsureFont));
+    // 종이 글꼴과 글상자 글꼴을 모두 미리 읽는다 — 손글씨가 늦게 오면 줄바꿈 자리가 달라진 채로 찍힌다.
+    const fonts = new Set(list.map(e => diaryEffectiveStyle(model, e).font));
+    for (const e of list) for (const st of e.stickers) if (diaryStickerKind(st) === "text") fonts.add(st.font);
+    await Promise.all([...fonts].map(diaryEnsureFont));
     const old = document.getElementById("diaryPrintLayer");
     if (old) old.remove();
     const layer = document.createElement("div");
@@ -3614,7 +4103,7 @@ function mountDiaryEditor(doc){
     if (typeof MNI18N !== "undefined" && MNI18N && typeof MNI18N.translateTree === "function") MNI18N.translateTree(node);
   }
   const onLangChange = () => {
-    closePicker(); setTemplateOpen(false); refreshSideLanguage(); renderCalendar(); renderPage(); syncPanel(); syncProtectionButton(); refreshDirty();
+    closePicker(); setTemplateOpen(false); refreshSideLanguage(); renderCalendar(); renderPage(); syncPanel(); applyPanels(); syncProtectionButton(); refreshDirty();
     if (screenLocked){ lockTitle.textContent = diaryIsEn() ? "Diary locked" : "일기장이 잠겼어요"; lockNote.textContent = diaryIsEn() ? "Enter the file password to view it again." : "내용을 다시 보려면 파일 암호를 입력하세요."; }
   };
   window.addEventListener("mni18nchange", onLangChange);
@@ -3653,6 +4142,7 @@ function mountDiaryEditor(doc){
   renderCalendar();
   renderPage();
   translateUi(bar); translateUi(pageHead); translateUi(panel); translateUi(pictureBox); translateUi(side);
+  applyPanels();            // translateUi 다음에 — 단추 글자는 상태까지 봐야 해서 여기서 확정한다
   history.reset();
   updateHistoryButtons();
   // 첫 마운트는 탭이 아직 안 보일 수 있다 — 보인 다음 프레임에 한 번 더 잰다.
@@ -3667,6 +4157,8 @@ if (typeof module !== "undefined" && module.exports){
     diaryEmpty, diaryNormalize, diaryContentKey, diaryModelJson, diaryEffectiveStyle, diaryReferencedAssets,
     DIARY_FONTS, DIARY_HAND_FONTS, DIARY_FONT_STACKS, diaryFontScale, diaryEnsureFont, DIARY_WEATHERS, DIARY_MOODS, diaryNormalizeAngle, diaryWeatherInfo, diaryMoodInfo, diaryWeatherMoodLabel,
     DIARY_PENS, DIARY_PEN_SIZES, diaryNormalizeStroke, diaryDrawStrokes,
+    DIARY_ART, DIARY_ART_IDS, DIARY_TEXT_SIZES, DIARY_TEXT_ALIGNS, DIARY_TEXT_MAX, DIARY_ART_DEFAULT_COLOR, DIARY_TEXT_DEFAULT_COLOR,
+    diaryArtInfo, diaryArtName, diaryArtSvg, diaryStickerKind, diaryCleanSticker, diaryStickerText, diaryStickerCountLabel,
     diaryReorder, DIARY_GENKO_COLS, diaryGenkoGrid, diaryPictureBox, diaryUsesGenko, diaryStickerBottom, diaryGenkoMetrics, diaryGenkoLayout, diaryGenkoIndexAt,
     diaryUiDateLabel, diaryUiHeadDate, diaryUiMonthLabel, diaryUiWeekday, diaryT, diaryTf,
     diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryReviewStats, diaryLineMetrics, diaryLineBackground,

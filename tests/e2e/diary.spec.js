@@ -121,7 +121,7 @@ test("종이에 떨어뜨린 사진은 새 탭이 아니라 그 자리의 스티
 test("꾸미기: 일기장 전체 줄 무늬와 그 날만 따로 꾸미기", async ({ page }) => {
   await boot(page);
   const paper = page.locator(".diary-paper");
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   const panel = page.locator(".diary-style-panel");
   await expect(panel).toBeVisible();
   await panel.locator('.diary-line-chip[data-lines="grid"]').click();
@@ -144,7 +144,7 @@ test("꾸미기: 일기장 전체 줄 무늬와 그 날만 따로 꾸미기", as
   await expect(paper).toHaveAttribute("data-lines", "dots");
 
   // 배경 그림 넣기 → 종이 뒤에 깔리고 흐리게 조절이 켜진다
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   const bg = bandPng(64, 64, [250, 200, 0], [0, 160, 90]);
   await page.locator(".diary-bar input[type=file]").nth(1).setInputFiles({ name:"배경.png", mimeType:"image/png", buffer:bg });
   await expect(page.locator(".diary-paper-bg")).toBeVisible();
@@ -314,7 +314,7 @@ test("날씨·기분을 고르면 머리줄과 달력에 그림이 뜨고, 다�
   await weather.click();
   await page.keyboard.press("Escape");
   await expect(pop).toBeHidden();
-  await page.locator(".diary-bar .diary-btn").first().click();          // 되돌리기 단추 — 기분 지운 것을 되살린다
+  await page.locator(".diary-bar .diary-undo-btn").click();             // 되돌리기 단추 — 기분 지운 것을 되살린다
   await expect(cell.locator(".diary-cal-emoji")).toHaveAttribute("data-mark", "happy");
 });
 
@@ -370,7 +370,7 @@ test("스티커를 손잡이·키로 돌리고, 우클릭 메뉴로 뒤집고 �
 
 test("그림일기: 위에 그림 칸, 아래는 원고지 — 사진 넣기는 칸에 꼭 맞는다", async ({ page }) => {
   await boot(page);
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   await page.locator('.diary-line-chip[data-lines="picture"]').click();
   await page.keyboard.press("Escape");
   const box = page.locator(".diary-picture-box");
@@ -404,7 +404,7 @@ test("그림일기: 위에 그림 칸, 아래는 원고지 — 사진 넣기는 
 
 test("글꼴을 바꾸면 본문 글꼴이 바뀐다", async ({ page }) => {
   await boot(page);
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   await page.locator('.diary-font-chip[data-font="myeongjo"]').click();
   expect(await page.locator(".diary-text").evaluate(el => getComputedStyle(el).fontFamily)).toContain("Batang");
   await expect(page.locator(".diary-paper")).toHaveAttribute("data-font", "myeongjo");
@@ -415,7 +415,7 @@ test("글꼴을 바꾸면 본문 글꼴이 바뀐다", async ({ page }) => {
 /* ---------- 3단계 ---------- */
 
 async function chooseLines(page, id, onlyThisDay){
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   if (onlyThisDay) await page.locator(".diary-style-scope input").check();
   await page.locator(`.diary-line-chip[data-lines="${id}"]`).click();
   await page.keyboard.press("Escape");
@@ -533,7 +533,7 @@ test("영어 화면: 단추·날짜·달력·날씨가 영어로 나오고, 한�
   await expect(page.locator(".diary-cal-month")).toHaveText(now.toLocaleDateString("en-US", { year:"numeric", month:"long" }));
   await expect(page.locator(".diary-cal-wd").first()).toHaveText("Su");
   await expect(page.locator(".diary-bar .run-save-label")).toHaveText("Save");   // 단추는 그림만 — 감춘 글자 칸·설명만 영어로
-  await expect(page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)")).not.toHaveAttribute("title", /[가-힣]/);
+  await expect(page.locator(".diary-bar .diary-style-btn")).not.toHaveAttribute("title", /[가-힣]/);
   await expect(page.locator(".diary-text")).toHaveAttribute("placeholder", "How was your day?");
   await expect(page.locator(".diary-month-list-head")).toHaveText("No entries this month yet");
 
@@ -542,7 +542,7 @@ test("영어 화면: 단추·날짜·달력·날씨가 영어로 나오고, 한�
   await expect(page.locator('.diary-pick[data-pick="weather"]')).toContainText("Rainy");
   await expect(page.locator(".diary-month-list-head")).toHaveText("1 entry this month");
 
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   await expect(page.locator(".diary-style-panel")).toContainText("Apply to this day only");
   await expect(page.locator('.diary-line-chip[data-lines="genko"]')).toContainText("Manuscript");
   await page.keyboard.press("Escape");
@@ -629,7 +629,7 @@ test("손글씨 글꼴을 고르면 그때 글꼴을 읽어 본문과 원고지 
   await page.locator(".diary-text").fill("오늘은 손글씨로 쓴다");
   // 고르기 전에는 글꼴 파일을 읽지 않는다(시작 비용 없음)
   expect(await page.evaluate(() => MNLazy.isLoaded("handPen"))).toBe(false);
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   await page.locator('.diary-font-chip[data-font="pen"]').click();
   await page.keyboard.press("Escape");
 
@@ -648,7 +648,7 @@ test("손글씨 글꼴을 고르면 그때 글꼴을 읽어 본문과 원고지 
   expect(Math.abs(widths.hand - widths.plain)).toBeGreaterThan(5);
 
   // 원고지 칸 글자도 같은 글꼴
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   await page.locator('.diary-line-chip[data-lines="genko"]').click();
   await page.keyboard.press("Escape");
   await expect(page.locator(".diary-genko-ch").first()).toHaveText("오");
@@ -689,7 +689,7 @@ test("스티커 여러 장: Shift+클릭·Ctrl+끌기·Ctrl+A 로 고르고, 함
   await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(2);
   await expect(page.locator(".diary-stickers")).toHaveClass(/is-multi/);
   await expect(stickers.nth(1).locator(".diary-sticker-handle")).toBeHidden();
-  await expect(page.locator(".diary-status")).toContainText("사진 2장을 골랐어요");
+  await expect(page.locator(".diary-status")).toContainText("스티커 2개를 골랐어요");
 
   // 고른 것 하나를 끌면 둘이 함께, 셋째는 그대로
   const before = await model();
@@ -745,15 +745,230 @@ test("스티커 여러 장: Shift+클릭·Ctrl+끌기·Ctrl+A 로 고르고, 함
   await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(3);
   await stickers.nth(0).click({ button:"right" });
   const menu = page.locator(".text-context-menu");
-  await menu.locator("button", { hasText:"사진 3장 떼기" }).click();
+  await menu.locator("button", { hasText:"스티커 3개 떼기" }).click();
   await expect(stickers).toHaveCount(0);
   await page.keyboard.press("Control+z");
   await expect(stickers).toHaveCount(3);
 });
 
+test("내장 스티커: 색을 골라 붙이면 그림으로 그려지고, 고른 뒤 색을 바꾸면 그 스티커만 바뀐다", async ({ page }) => {
+  await boot(page);
+  const entry = () => page.evaluate(() => {
+    const e = docs.find(d => d.kind === "diary").diary.entries[0];
+    return e ? e.stickers.map(s => ({ kind:s.kind, art:s.art, color:s.color })) : [];
+  });
+  await page.locator(".diary-bar .diary-sticker-btn").click();
+  const panel = page.locator(".diary-art-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".diary-art-chip")).toHaveCount(16);
+
+  // 파랑을 고르고 하트를 붙인다 → 사진이 아니라 SVG 로 그려진다(파일에 바이트가 없다)
+  await panel.locator('.diary-art-color[data-color="#3b82f6"]').click();
+  await panel.locator('.diary-art-chip[data-art="heart"]').click();
+  await expect(page.locator(".diary-sticker")).toHaveCount(1);
+  await expect(page.locator(".diary-sticker-art svg")).toBeVisible();
+  await expect(page.locator(".diary-sticker img")).toHaveCount(0);
+  assertArt(await entry(), [{ kind:"art", art:"heart", color:"#3b82f6" }]);
+
+  // 둘째로 별을 붙인 뒤, 하트만 골라 빨강으로 → 별은 그대로
+  await panel.locator('.diary-art-chip[data-art="star"]').click();
+  await expect(page.locator(".diary-sticker")).toHaveCount(2);
+  // 새로 붙인 스티커는 조금 어긋나 쌓이므로, 아래의 하트는 겹치지 않는 왼쪽 위 모서리로 고른다
+  await page.locator(".diary-sticker").nth(0).click({ position:{ x:4, y:4 } });
+  await expect(page.locator(".diary-sticker").nth(0)).toHaveClass(/is-selected/);
+  await panel.locator('.diary-art-color[data-color="#ef4444"]').click();
+  assertArt(await entry(), [{ kind:"art", art:"heart", color:"#ef4444" }, { kind:"art", art:"star", color:"#3b82f6" }]);
+
+  // 저장한 .diary 안에는 사진이 하나도 들어가지 않는다
+  const names = await page.evaluate(async () => {
+    const doc = docs.find(d => d.kind === "diary");
+    const zip = await diaryZipRead(diaryPack(doc.diary, doc.diaryAssets || new Map()));
+    return [...zip.keys()];
+  });
+  expect(names).toEqual(["diary.json"]);
+});
+
+function assertArt(rows, want){
+  expect(rows.length).toBe(want.length);
+  rows.forEach((row, i) => {
+    expect(row.kind).toBe(want[i].kind);
+    expect(row.art).toBe(want[i].art);
+    expect(row.color).toBe(want[i].color);
+  });
+}
+
+test("글상자: 종이에 글을 얹고 두 번 눌러 고쳐 쓰며, 비우면 사라지고 검색에도 잡힌다", async ({ page }) => {
+  await boot(page);
+  const boxes = () => page.evaluate(() => {
+    const e = docs.find(d => d.kind === "diary").diary.entries[0];
+    return e ? e.stickers.filter(s => s.kind === "text").map(s => ({ text:s.text, align:s.align, size:s.size })) : [];
+  });
+  await page.locator(".diary-bar .diary-sticker-btn").click();
+  await page.locator(".diary-art-panel .diary-btn").click();          // 글상자 넣기
+
+  // 붙자마자 고쳐 쓰는 칸이 열리고 견본 글이 모두 골라져 있다 → 바로 덮어쓴다
+  const edit = page.locator(".diary-sticker-edit");
+  await expect(edit).toBeFocused();
+  await page.keyboard.type("바다에 갔다");
+  await page.keyboard.press("Control+Enter");
+  await expect(edit).toHaveCount(0);
+  await expect(page.locator(".diary-sticker-text")).toHaveText("바다에 갔다");
+  expect((await boxes())[0].text).toBe("바다에 갔다");
+
+  // 본문이 비어도 목록 이름과 검색은 글상자 글을 읽는다
+  await expect(page.locator(".diary-month-item-label")).toHaveText("바다에 갔다");
+  await page.locator('.diary-side-tab[data-side-tab="search"]').click();
+  await page.locator(".diary-search-input").fill("바다");
+  await expect(page.locator(".diary-search-count")).toHaveText("1개의 일기");   // 카드는 가운데 목록에 그려진다
+  await expect(page.locator(".diary-month-list .diary-month-item")).toHaveCount(1);
+
+  // 두 번 눌러 고쳐 쓰기 — Esc 는 고치기 전으로 되돌린다
+  await page.locator(".diary-sticker").dblclick();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("산에 갔다");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".diary-sticker-text")).toHaveText("바다에 갔다");
+
+  // 글을 모두 지우면 글상자가 사라지고, 되돌리기로 돌아온다
+  await page.locator(".diary-sticker").dblclick();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Delete");
+  await page.locator(".diary-text").click();
+  await expect(page.locator(".diary-sticker")).toHaveCount(0);
+  expect(await boxes()).toEqual([]);
+});
+
+test("글상자 글자 크기는 종이 폭 비율이라 창이 좁아져도 줄바꿈 자리가 같다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-bar .diary-sticker-btn").click();
+  await page.locator(".diary-art-panel .diary-btn").click();
+  await page.keyboard.type("한 줄에 담기지 않을 만큼 제법 기다란 문장이다");
+  await page.keyboard.press("Control+Enter");
+  const box = page.locator(".diary-sticker-text");
+  const ratio = async () => page.evaluate(() => {
+    const el = document.querySelector(".diary-sticker-text");
+    const paper = document.querySelector(".diary-paper");
+    return parseFloat(getComputedStyle(el).fontSize) / paper.clientWidth;
+  });
+  const lines = async () => {
+    const r = await stableBox(box);
+    const fs = await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector(".diary-sticker-text")).fontSize));
+    return Math.round(r.height / (fs * 1.35));
+  };
+  const before = { ratio:await ratio(), lines:await lines() };
+  expect(before.lines).toBeGreaterThan(1);                 // 줄이 실제로 바뀌는 길이여야 의미가 있다
+  await page.setViewportSize({ width:900, height:800 });
+  await expect(box).toBeVisible();
+  // 종이 폭이 바뀌면 ResizeObserver 가 다시 배치한다 — 그 뒤의 값을 본다
+  await expect.poll(ratio, { timeout:5000 }).toBeCloseTo(before.ratio, 3);   // 글자 크기는 폭에 대한 비율 그대로
+  expect(await lines()).toBe(before.lines);                                  // 줄바꿈 자리도 그대로
+});
+
+test("접기: 양옆 칸을 따로 접으면 종이가 제 폭을 찾고, 접은 상태는 다음에도 남는다", async ({ page }) => {
+  await boot(page);
+  const paperWidth = async () => Math.round((await stableBox(page.locator(".diary-paper"))).width);
+  const side = page.locator(".diary-side"), rail = page.locator(".diary-entry-rail");
+  const narrowed = await paperWidth();
+  expect(narrowed).toBeLessThan(780);                       // 왼쪽 두 칸이 종이를 밀고 있다
+
+  await page.locator(".diary-side-toggle").click();
+  await expect(side).toBeHidden();
+  await expect(rail).toBeVisible();                         // 둘은 따로 접힌다
+  await page.locator(".diary-rail-toggle").click();
+  await expect(rail).toBeHidden();
+  expect(await paperWidth()).toBe(780);                     // 종이가 제 폭(max-width)을 찾는다
+  expect(await paperWidth()).toBeGreaterThan(narrowed);
+
+  // 접은 상태는 보는 사람 편의라 localStorage 에만 — 파일이 더러워지지 않는다
+  await expect(page.locator(".diary-status")).not.toContainText("저장 안 됨");
+  expect(await page.evaluate(() => localStorage.getItem("mn.diaryPanels"))).toBe('{"side":true,"rail":true}');
+
+  // 새로 연 일기장도 접힌 채로 시작한다(앞 탭도 DOM 에 남으므로 새로 붙은 쪽만 본다)
+  await page.evaluate(() => window.newDiaryScratch && window.newDiaryScratch());
+  await expect(page.locator(".diary-doc")).toHaveCount(2);
+  const fresh = page.locator(".diary-doc").last();
+  await expect(fresh.locator(".diary-side")).toBeHidden();
+  await expect(fresh.locator(".diary-entry-rail")).toBeHidden();
+
+  await fresh.locator(".diary-side-toggle").click();
+  await fresh.locator(".diary-rail-toggle").click();
+  await expect(fresh.locator(".diary-side")).toBeVisible();
+  await expect(fresh.locator(".diary-entry-rail")).toBeVisible();
+});
+
+test("몰입 모드: 양옆을 감추고 Esc 로 나오며, 접어 둔 상태는 그대로 돌아온다", async ({ page }) => {
+  await boot(page);
+  // 목록만 접어 둔 채로 들어간다 → 나올 때 이 상태 그대로여야 한다
+  await page.locator(".diary-rail-toggle").click();
+  await expect(page.locator(".diary-entry-rail")).toBeHidden();
+
+  await page.locator(".diary-focus-btn").click();
+  await expect(page.locator(".diary-side")).toBeHidden();
+  await expect(page.locator(".diary-entry-rail")).toBeHidden();
+  await expect(page.locator(".diary-focus-btn")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".diary-side-toggle")).toBeDisabled();      // 몰입 중엔 접을 게 없다
+  await expect(page.locator(".diary-status")).toContainText("Esc");
+
+  // 글을 쓰다가도 Esc 로 나올 수 있다(본문 칸은 예외로 받는다)
+  await page.locator(".diary-text").click();
+  await page.keyboard.type("몰입해서 쓴 글");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".diary-focus-btn")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".diary-side")).toBeVisible();
+  await expect(page.locator(".diary-entry-rail")).toBeHidden();         // 접어 둔 목록은 접힌 채로
+  await expect(page.locator(".diary-text")).toHaveValue("몰입해서 쓴 글");
+});
+
+test("몰입 모드는 종이를 위아래로 움직이지 않는다", async ({ page }) => {
+  await boot(page);
+  // 양옆을 이미 접어 둔 채로 들어가면 여백 차이가 유일하게 눈에 띄어 화면이 툭 내려간 것처럼 보인다.
+  await page.locator(".diary-side-toggle").click();
+  await page.locator(".diary-rail-toggle").click();
+  const head = page.locator(".diary-page-head");
+  const y = async () => Math.round((await stableBox(head)).y);
+  const before = await y();
+
+  await page.locator(".diary-focus-btn").click();
+  await expect(page.locator(".diary-side")).toBeHidden();
+  expect(await y()).toBe(before);
+  await page.locator(".diary-focus-btn").click();
+  await expect(page.locator(".diary-focus-btn")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".diary-side")).toBeHidden();               // 접어 둔 칸은 접힌 채로 돌아온다
+  expect(await y()).toBe(before);
+});
+
+test("몰입 중 Esc 는 글상자 고치기·열린 창·고른 스티커를 먼저 처리한다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-bar .diary-sticker-btn").click();
+  await page.locator(".diary-art-panel .diary-btn").click();            // 글상자 넣기
+  await page.keyboard.type("쪽지");
+  await page.keyboard.press("Control+Enter");
+  await page.locator(".diary-focus-btn").click();
+  const focused = page.locator(".diary-focus-btn");
+
+  // 글상자를 고쳐 쓰는 중의 Esc 는 '고치기 취소'다 — 몰입에서 나가면 안 된다
+  await page.locator(".diary-sticker").dblclick();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.type("바뀐 글");
+  await page.keyboard.press("Escape");
+  await expect(focused).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".diary-sticker-text")).toHaveText("쪽지");
+
+  // 스티커를 고른 채의 Esc 는 '고르기 풀기'다
+  await page.locator(".diary-sticker").click();
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(0);
+  await expect(focused).toHaveAttribute("aria-pressed", "true");
+
+  // 아무것도 안 걸렸을 때에야 몰입에서 나간다
+  await page.keyboard.press("Escape");
+  await expect(focused).toHaveAttribute("aria-pressed", "false");
+});
+
 test("원고지 칸 수: 원고지·그림일기일 때만 고를 수 있고, 10칸을 고르면 한 줄에 10자씩", async ({ page }) => {
   await boot(page);
-  await page.locator(".diary-bar .diary-btn[aria-haspopup=dialog]:not(.diary-school-btn)").click();
+  await page.locator(".diary-bar .diary-style-btn").click();
   const panel = page.locator(".diary-style-panel");
   const colsRow = panel.locator(".diary-cols-chip").first().locator("xpath=../..");
   await expect(colsRow).toBeHidden();                               // 줄 공책에선 감춘다

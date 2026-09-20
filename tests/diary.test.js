@@ -76,7 +76,7 @@ test("일기장을 저장했다 열면 글·꾸미기·스티커·사진이 그�
   assert.deepEqual(back.model.style, { lines:"grid", gap:"wide", bg:"assets/bg000001.jpg", fit:"tile", veil:0.25, font:"gothic", genkoCols:0 });
   assert.equal(back.model.entries.length, 1);
   assert.equal(back.model.entries[0].text, "우산을 챙겼다.\n저녁엔 개었다.");
-  assert.deepEqual(back.model.entries[0].stickers, [{ id:"st-a", asset:"assets/st000001.png", x:0.2, y:0.5, w:0.3, ar:0.75, rot:0, flip:false }]);
+  assert.deepEqual(back.model.entries[0].stickers, [{ id:"st-a", kind:"photo", asset:"assets/st000001.png", x:0.2, y:0.5, w:0.3, ar:0.75, rot:0, flip:false }]);
   assert.deepEqual([...back.assets.get("assets/st000001.png").bytes], [...png(2)]);
   assert.equal(diary.diaryContentKey(back.model), diary.diaryContentKey(model));
 });
@@ -210,7 +210,14 @@ test(".diary 는 파일 열기·새로 만들기 메뉴·manifest·검색에 연
   assert.match(diarySource, /body\.append\(side, entryRail, main\)/);       // 달력 · 카드 목록 · 편집기 3단
   assert.match(diarySource, /firstSticker[\s\S]{0,300}diary-entry-card-thumb/);
   assert.match(diarySource, /diary-entry-card-drawing/);                    // 카드에서도 펜 그림을 축소 렌더링
-  assert.match(read("src/styles.css"), /grid-template-columns:224px 300px minmax\(0,1fr\)/);
+  const css = read("src/styles.css");
+  assert.match(css, /--diary-c-side:224px;--diary-c-rail:300px/);                 // 3단 폭은 변수로 두고
+  assert.match(css, /grid-template-columns:var\(--diary-c-side\) var\(--diary-c-rail\) minmax\(0,1fr\)/);
+  // 접으면 남은 칸이 앞 칸 폭을 물려받아 짜부라지므로 틀을 다시 정해야 한다
+  assert.match(css, /is-side-collapsed \.diary-body\{grid-template-columns:var\(--diary-c-rail\) minmax\(0,1fr\)\}/);
+  assert.match(css, /is-rail-collapsed \.diary-body\{grid-template-columns:var\(--diary-c-side\) minmax\(0,1fr\)\}/);
+  assert.match(css, /is-side-collapsed\.is-rail-collapsed \.diary-body\{grid-template-columns:minmax\(0,1fr\)\}/);
+  assert.match(css, /\.diary-doc\.is-focus \.diary-side,\.diary-doc\.is-focus \.diary-entry-rail\{display:none\}/);
   // 종이에 떨어뜨린 사진이 새 탭으로 새지 않게 전역 드롭 오버레이가 일기장을 비켜 간다.
   assert.match(read("src/js/app.js"), /state\.kind === "diary"/);
   const types = require("../src/js/document-types.js");
@@ -232,7 +239,7 @@ test("2단계 필드(날씨·기분·돌리기·뒤집기·글꼴·그림일기)
   assert.equal(back.style.font, "myeongjo");
   assert.equal(back.entries[0].weather, "sunny");
   assert.equal(back.entries[0].mood, "happy");
-  assert.deepEqual(back.entries[0].stickers[0], { id:"st-b", asset:"assets/st000002.png", x:0.1, y:0.2, w:0.4, ar:0.5, rot:-30, flip:true });
+  assert.deepEqual(back.entries[0].stickers[0], { id:"st-b", kind:"photo", asset:"assets/st000002.png", x:0.1, y:0.2, w:0.4, ar:0.5, rot:-30, flip:true });
   assert.equal(diary.diaryContentKey(back), diary.diaryContentKey(model));
 });
 
@@ -413,6 +420,119 @@ test("일기장 화면 글자는 모두 영어 사전(i18n.js)에 있다", () =>
 });
 
 /* ---------- 그림 칸 그리기 ---------- */
+
+/* ---------- 내장 스티커(그림) · 글상자 ---------- */
+
+test("내장 그림 스티커는 이름과 색만 저장하고, 모르는 이름은 버린다", () => {
+  const ok = diary.diaryNormalizeSticker({ kind:"art", art:"heart", color:"#EF4444", x:0.2, y:0.3, w:0.25 });
+  assert.equal(ok.kind, "art");
+  assert.equal(ok.art, "heart");
+  assert.equal(ok.color, "#ef4444");                       // 색은 소문자로 모은다
+  assert.equal(ok.asset, undefined);                       // 사진 바이트를 가리키지 않는다
+  assert.equal(ok.ar, diary.diaryArtInfo("heart")[3]);     // 높이는 그림 본래 비율이 기본
+  assert.equal(diary.diaryNormalizeSticker({ kind:"art", art:"없는그림" }), null);
+  assert.equal(diary.diaryNormalizeSticker({ kind:"art", art:"heart", color:"red; background:url(x)" }).color, diary.DIARY_ART_DEFAULT_COLOR);
+});
+
+test("모든 내장 그림은 이름·영어 이름·그릴 SVG 를 갖춘다", () => {
+  assert.ok(diary.DIARY_ART.length >= 12, "그림이 너무 적다: " + diary.DIARY_ART.length);
+  assert.equal(new Set(diary.DIARY_ART_IDS).size, diary.DIARY_ART.length);      // id 가 겹치지 않는다
+  for (const [id, ko, en, ar, body] of diary.DIARY_ART){
+    assert.match(id, /^[a-z]+$/, id);
+    assert.ok(ko && en && ko !== en, id);
+    assert.ok(ar > 0.05 && ar <= 2, id + " 비율: " + ar);
+    assert.ok(body.startsWith("<"), id);
+    const svg = diary.diaryArtSvg(id);
+    assert.match(svg, /^<svg class="diary-art" viewBox="0 0 100 \d+"/, id);
+    assert.ok(svg.includes(body), id);
+  }
+  assert.equal(diary.diaryArtSvg("없는그림"), "");
+});
+
+test("글상자는 글·글자 크기·맞춤을 저장하고 높이(ar)는 저장하지 않는다", () => {
+  const crlf = String.fromCharCode(13, 10), lf = String.fromCharCode(10);
+  const s = diary.diaryNormalizeSticker({ kind:"text", text:"오늘 최고!" + crlf + "둘째 줄", size:0.06, align:"center", font:"pen" });
+  assert.equal(s.kind, "text");
+  assert.equal(s.text, "오늘 최고!" + lf + "둘째 줄");        // 줄 끝은 한 가지로 모은다
+  assert.equal(s.align, "center");
+  assert.equal(s.font, "pen");
+  // 높이는 글에서 나오므로 저장 모양에는 없다 — 있으면 창 폭에 따라 잰 값이 달라져 안 고친 일기장이 '저장 안 됨'이 된다.
+  const clean = diary.diaryCleanSticker({ ...s, ar:3.14 });
+  assert.equal(clean.ar, undefined);
+  assert.equal(clean.flip, false);                              // 거울 글씨가 되지 않게 뒤집기는 늘 꺼 둔다
+  assert.equal(diary.diaryNormalizeSticker({ kind:"text", text:"   " }), null);   // 빈 글상자는 남기지 않는다
+  assert.equal(diary.diaryNormalizeSticker({ kind:"text", text:"가".repeat(diary.DIARY_TEXT_MAX + 50) }).text.length, diary.DIARY_TEXT_MAX);
+});
+
+test("kind 가 없던 옛 스티커는 사진으로 읽고, 갈래는 필드로도 가른다", () => {
+  assert.equal(diary.diaryStickerKind({ asset:"assets/a000.png" }), "photo");
+  assert.equal(diary.diaryStickerKind({ art:"heart" }), "art");
+  assert.equal(diary.diaryStickerKind({ text:"안녕" }), "text");
+  assert.equal(diary.diaryStickerKind({ kind:"이상한값", asset:"assets/a000.png" }), "photo");
+});
+
+test("세 갈래 스티커를 저장했다 열면 그대로고, 사진 바이트는 사진만 챙긴다", async () => {
+  const model = diary.diaryEmpty("꾸민 일기");
+  model.entries.push(diary.diaryNormalizeEntry({ date:"2026-09-20", text:"", stickers:[
+    { id:"st-p", asset:"assets/st000009.png", x:0.1, y:0.1, w:0.3, ar:0.75 },
+    { id:"st-a", kind:"art", art:"star", color:"#3b82f6", x:0.5, y:0.2, w:0.2, rot:15 },
+    { id:"st-t", kind:"text", text:"좋은 하루", color:"#1f2937", size:0.05, align:"right", x:0.2, y:0.8, w:0.5 }
+  ] }, () => true));
+  // 저장에 담을 사진은 사진 스티커 하나뿐이다(내장 그림·글상자는 바이트가 없다).
+  assert.deepEqual([...diary.diaryReferencedAssets(model)], ["assets/st000009.png"]);
+  const bytes = diary.diaryPack(model, new Map([["assets/st000009.png", { bytes:png(7) }]]));
+  assert.deepEqual([...(await diary.diaryZipRead(bytes)).keys()], ["diary.json", "assets/st000009.png"]);
+  const { model:back } = await diary.diaryUnpack(bytes);
+  const [photo, art, text] = back.entries[0].stickers;
+  assert.equal(photo.kind, "photo");
+  assert.equal(photo.asset, "assets/st000009.png");
+  assert.equal(art.art, "star");
+  assert.equal(art.color, "#3b82f6");
+  assert.equal(art.rot, 15);
+  assert.equal(text.text, "좋은 하루");
+  assert.equal(text.align, "right");
+  assert.equal(diary.diaryContentKey(back), diary.diaryContentKey(model));
+});
+
+test("글상자 높이를 재어 채워도 저장본과 같다고 본다", () => {
+  const model = diary.diaryEmpty("글상자");
+  model.entries.push(diary.diaryNormalizeEntry({ date:"2026-09-20", stickers:[
+    { id:"st-t", kind:"text", text:"창 폭마다 높이가 달라지는 글", w:0.4 }] }, () => true));
+  const before = diary.diaryContentKey(model);
+  model.entries[0].stickers[0].ar = 0.37;          // 화면에서 잰 높이를 채워 넣는다(measureTextStickers 가 하는 일)
+  assert.equal(diary.diaryContentKey(model), before);
+});
+
+test("글상자 글은 목록 이름과 검색에 함께 잡힌다", () => {
+  const entry = diary.diaryNormalizeEntry({ date:"2026-09-20", text:"", stickers:[
+    { id:"st-t", kind:"text", text:"바다에 갔다" }] }, () => true);
+  assert.equal(diary.diaryStickerText(entry), "바다에 갔다");
+  assert.equal(diary.diaryEntryLabel(entry), "바다에 갔다");     // 본문이 비어도 종이에 보이는 글을 쓴다
+  assert.equal(diary.diaryEntryMatches(entry, "바다"), true);
+  const model = diary.diaryEmpty("검색");
+  model.entries.push(entry);
+  assert.ok(diary.diaryPlainText(model).includes("바다에 갔다"));
+});
+
+test("사진·스티커가 섞인 날의 이름은 갈래를 나눠 센다", () => {
+  const entry = diary.diaryNormalizeEntry({ date:"2026-09-20", stickers:[
+    { id:"a", asset:"assets/p0001.png" }, { id:"b", asset:"assets/p0002.png" },
+    { id:"c", kind:"art", art:"heart" }] }, () => true);
+  assert.equal(diary.diaryEntryLabel(entry), "사진 2장 · 스티커 1개");
+});
+
+test("내장 그림·글상자만 붙인 날도 빈 날로 버리지 않는다", () => {
+  for (const sticker of [{ kind:"art", art:"heart" }, { kind:"text", text:"한 줄" }]){
+    const entry = diary.diaryNormalizeEntry({ date:"2026-09-20", stickers:[{ id:"x", ...sticker }] }, () => true);
+    assert.equal(diary.diaryEntryIsEmpty(entry), false, JSON.stringify(sticker));
+  }
+});
+
+test("스티커가 늘어난 파일은 version 8 이고 옛 앱은 거절한다", () => {
+  assert.equal(diary.DIARY_VERSION, 8);
+  const json = JSON.stringify({ format:"classdock-diary", version:9, title:"미래", entries:[] });
+  assert.throws(() => diary.diaryNormalize(JSON.parse(json)), /diary-version/);
+});
 
 test("그림 획은 색·굵기·점을 걸러 담고, 이상한 값은 버리거나 기본값으로", () => {
   const ok = diary.diaryNormalizeStroke({ c:"#EF4444", w:0.012, p:[0.1, 0.2, 0.3, 0.4, 0.5], e:true });
@@ -630,8 +750,14 @@ function diaryStickerHarness(){
   let id = 0, commits = 0;
   const ctx = vm.createContext({
     current:"2026-09-18", model:{ entries:[] }, paperWidth:600,
-    paper:{ clientWidth:600 }, selection:[], deleteBtn:{ disabled:true },
-    DIARY_MAX_STICKERS:80, DIARY_STICKER_MAX_DIM:1600,
+    paper:{ clientWidth:600, getBoundingClientRect:() => ({ top:0, height:600 }) }, selection:[], deleteBtn:{ disabled:true },
+    DIARY_MAX_STICKERS:80, DIARY_STICKER_MAX_DIM:1600, DIARY_TEXT_MAX:diary.DIARY_TEXT_MAX,
+    DIARY_ART_DEFAULT_COLOR:diary.DIARY_ART_DEFAULT_COLOR, DIARY_TEXT_DEFAULT_COLOR:diary.DIARY_TEXT_DEFAULT_COLOR,
+    DIARY_FONT_STACKS:diary.DIARY_FONT_STACKS, DIARY_HAND_FONTS:diary.DIARY_HAND_FONTS,
+    diaryArtInfo:diary.diaryArtInfo, diaryArtName:diary.diaryArtName, diaryStickerKind:diary.diaryStickerKind,
+    diaryEffectiveStyle:diary.diaryEffectiveStyle, diaryEnsureFont:() => Promise.resolve(true),
+    main:{ getBoundingClientRect:() => ({ top:0, height:600 }) },
+    stickerLayer:{ querySelector:() => null, children:[] }, selectedStickers:() => [],
     pictureBoxRect:() => ({ left:32, top:34, width:536, height:330 }),
     diaryT:value => value, diaryTf:value => value, setStatus:() => {},
     diaryStickerId:() => "st-test-" + (++id),

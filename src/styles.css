@@ -7890,6 +7890,8 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .diary-bar{display:flex;align-items:center;gap:12px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border);z-index:20}
 .diary-bar-identity{display:flex;align-items:center;gap:9px;flex:1;min-width:0}
 .diary-bar-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+.diary-view-btn{flex:0 0 auto}
+.diary-bar-sep{flex:0 0 auto;width:1px;height:20px;margin:0 3px;background:var(--border)}
 .diary-title{flex:1 1 180px;min-width:120px;max-width:360px;height:32px;padding:4px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ink);font:inherit;font-weight:700}
 .diary-title:hover,.diary-title:focus{border-color:var(--border);background:var(--field);outline:0}
 .diary-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:32px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:5px 10px;font:inherit;cursor:pointer}
@@ -7914,13 +7916,17 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .diary-screen-lock{position:absolute;inset:0;z-index:90;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;background:var(--bg);color:var(--ink);text-align:center}
 .diary-screen-lock[hidden]{display:none}.diary-screen-lock-icon{display:flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:50%;background:color-mix(in srgb,var(--accent) 12%,var(--panel));color:var(--accent)}
 .diary-screen-lock-icon .ui-icon{width:30px;height:30px}.diary-screen-lock strong{font-size:18px}.diary-screen-lock p{margin:0;color:var(--muted);font-size:13px}
-.diary-doc.is-screen-locked>.diary-bar,.diary-doc.is-screen-locked>.diary-body,.diary-doc.is-screen-locked>.diary-style-panel,.diary-doc.is-screen-locked>.diary-pick-pop,.diary-doc.is-screen-locked>.diary-template-panel,.diary-doc.is-screen-locked>.diary-school-panel{visibility:hidden}
-.diary-body{display:grid;grid-template-columns:224px 300px minmax(0,1fr);flex:1;min-height:0}
+.diary-doc.is-screen-locked>.diary-bar,.diary-doc.is-screen-locked>.diary-body,.diary-doc.is-screen-locked>.diary-style-panel,.diary-doc.is-screen-locked>.diary-art-panel,.diary-doc.is-screen-locked>.diary-pick-pop,.diary-doc.is-screen-locked>.diary-template-panel,.diary-doc.is-screen-locked>.diary-school-panel{visibility:hidden}
+/* 칸 폭을 변수로 둔다 — 접으면 칸 수가 줄어드는데, 틀을 그대로 두면 남은 칸이 앞 칸의 폭을 물려받아 짜부라진다. */
+.diary-body{--diary-c-side:224px;--diary-c-rail:300px;display:grid;
+  grid-template-columns:var(--diary-c-side) var(--diary-c-rail) minmax(0,1fr);flex:1;min-height:0}
 .diary-side{min-width:0;display:flex;flex-direction:column;gap:10px;padding:10px;border-right:1px solid var(--border);background:var(--panel);overflow:auto}
 .diary-side-mobile-toggle{display:none}
 .diary-side-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:3px;border-radius:9px;background:var(--panel-2)}
-.diary-side-tab{min-width:0;min-height:30px;padding:4px 6px;border-color:transparent;background:transparent;font-size:12px}
-.diary-side-tab .ui-icon{width:14px;height:14px}
+/* 탭은 아이콘만 — "돌아보기"가 좁은 칸에서 두 줄로 접혀 탭 높이가 들쭉날쭉했다. 이름은 툴팁·aria-label 로 남는다. */
+.diary-side-tab{min-width:0;min-height:32px;padding:5px 4px;border-color:transparent;background:transparent;font-size:12px}
+.diary-side-tab>span{display:none}
+.diary-side-tab .ui-icon{width:17px;height:17px}
 .diary-side-tab.is-on{border-color:var(--border);background:var(--field);color:var(--accent);box-shadow:0 1px 2px rgba(15,23,42,.08)}
 .diary-side-pane{display:flex;flex-direction:column;gap:10px;min-height:0}
 .diary-side-pane[hidden]{display:none}
@@ -8059,7 +8065,30 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-sticker-remove .ui-icon{width:12px;height:12px}
 .diary-sticker.is-selected .diary-sticker-handle{display:block}
 .diary-sticker.is-selected .diary-sticker-remove{display:inline-flex}
-.diary-style-panel{position:absolute;top:52px;right:12px;z-index:40;width:min(340px,calc(100% - 24px));max-height:calc(100% - 64px);overflow:auto;display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
+/* 내장 스티커(그림)·글상자 — 사진과 같은 상자 안에 들어가고 손잡이·메뉴도 그대로 쓴다. */
+.diary-sticker-art{display:block;width:100%;height:100%;pointer-events:none}
+.diary-sticker-art .diary-art{display:block;width:100%;height:100%;filter:drop-shadow(0 1px 2px rgba(0,0,0,.22))}
+.diary-sticker-is-text{cursor:grab}
+.diary-sticker-text{display:block;width:100%;padding:2px 4px;line-height:1.35;white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none;
+  text-shadow:0 1px 0 color-mix(in srgb,var(--diary-paper) 70%,transparent)}
+.diary-sticker-is-text.is-editing{cursor:text}
+.diary-sticker-edit{display:block;width:100%;box-sizing:border-box;margin:0;padding:2px 4px;border:1px dashed var(--accent);border-radius:4px;
+  background:color-mix(in srgb,var(--diary-paper) 92%,var(--accent));line-height:1.35;overflow:hidden;resize:none;outline:none}
+/* 스티커 창 — 꾸미기 창과 같은 자리·모양. 색 칸과 그림 타일 두 줄이다. */
+.diary-art-panel{width:min(320px,calc(100% - 24px))}
+.diary-art-panel[hidden]{display:none}
+.diary-art-color{width:24px;height:24px;padding:0;border:2px solid var(--border);border-radius:50%;background:var(--pen);cursor:pointer}
+.diary-art-color:hover{border-color:var(--accent)}
+.diary-art-color.is-on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
+.diary-art-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+.diary-art-chip{display:flex;align-items:center;justify-content:center;aspect-ratio:1;padding:4px;border:1px solid var(--border);border-radius:8px;
+  background:var(--field);color:var(--ink);cursor:pointer}
+.diary-art-chip:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--field))}
+.diary-art-chip-svg{width:100%;height:100%;object-fit:contain}
+.diary-entry-card-art{display:flex;align-items:center;justify-content:center;width:64%;height:64%}
+.diary-entry-card-art .diary-art{width:100%;height:100%}
+.diary-print-sticker.diary-sticker-is-text .diary-sticker-text{text-shadow:none}
+.diary-style-panel,.diary-art-panel{position:absolute;top:52px;right:12px;z-index:40;width:min(340px,calc(100% - 24px));max-height:calc(100% - 64px);overflow:auto;display:flex;flex-direction:column;gap:12px;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
 .diary-style-panel[hidden]{display:none}
 .diary-style-scope{display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer}
 .diary-style-note{margin-top:-6px;color:var(--muted);font-size:12px;line-height:1.45}
@@ -8075,8 +8104,24 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-select{height:32px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;padding:0 8px}
 .diary-style-controls input[type="range"]{flex:1;min-width:120px;accent-color:var(--accent)}
 .diary-veil-value{min-width:38px;text-align:right;font-size:12.5px;color:var(--muted)}
+/* 접기 — 좁은 화면은 이미 세로로 쌓이고 제 접기 단추(.diary-side-mobile-toggle)가 있으므로 넓은 화면에서만. */
+@media(min-width:761px){
+  .diary-doc.is-side-collapsed .diary-side{display:none}
+  .diary-doc.is-rail-collapsed .diary-entry-rail{display:none}
+  .diary-doc.is-side-collapsed .diary-body{grid-template-columns:var(--diary-c-rail) minmax(0,1fr)}
+  .diary-doc.is-rail-collapsed .diary-body{grid-template-columns:var(--diary-c-side) minmax(0,1fr)}
+  .diary-doc.is-side-collapsed.is-rail-collapsed .diary-body{grid-template-columns:minmax(0,1fr)}
+}
+/* 몰입 모드 — 접기와 따로 걸어야 나갈 때 사용자가 접어 둔 상태가 그대로 돌아온다. 좁은 화면에서도 된다. */
+.diary-doc.is-focus .diary-side,.diary-doc.is-focus .diary-entry-rail{display:none}
+.diary-doc.is-focus .diary-body{display:grid;grid-template-columns:minmax(0,1fr)}
+/* 종이의 위아래 여백은 건드리지 않는다 — 양옆을 이미 접어 둔 채로 몰입에 들면 여백 차이만 눈에 띄어 화면이 툭 내려간다. */
+/* 도구막대는 남긴다(저장·되돌리기가 필요하다) — 대신 흐려 두고 다가가면 진해진다. */
+.diary-doc.is-focus>.diary-bar{opacity:.4;transition:opacity .18s ease}
+.diary-doc.is-focus>.diary-bar:hover,.diary-doc.is-focus>.diary-bar:focus-within{opacity:1}
+@media(prefers-reduced-motion:reduce){ .diary-doc.is-focus>.diary-bar{transition:none} }
 @media(max-width:1180px) and (min-width:761px){
-  .diary-body{grid-template-columns:210px 258px minmax(0,1fr)}
+  .diary-body{--diary-c-side:210px;--diary-c-rail:258px}
   .diary-entry-card-thumb{flex-basis:66px;width:66px;height:66px}
   .diary-month-item{min-height:86px;padding:8px}
 }
