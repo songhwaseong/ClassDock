@@ -171,6 +171,61 @@ test("학습지 질문을 넣고 답을 적으면 그 날에 담긴다", async (
   expect(model.days[0].prompts).toEqual([{ q:"가장 기억에 남는 것은?", a:"바다" }]);
 });
 
+test("꾸미기 창이 여행일지에서도 돈다 — 줄 무늬·글꼴을 바꾸면 종이가 따라간다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-style-btn").click();
+  const panel = page.locator(".diary-style-panel");
+  await expect(panel).toBeVisible();
+
+  await panel.locator('.diary-chip[data-lines="genko"]').click();
+  await expect(page.locator(".diary-paper")).toHaveAttribute("data-lines", "genko");
+  await expect(page.locator(".diary-genko")).toBeVisible();
+
+  await panel.locator('.diary-chip[data-font="gungseo"]').click();
+  await expect(page.locator(".diary-paper")).toHaveAttribute("data-font", "gungseo");
+
+  const model = await modelOf(page);
+  expect(model.style.lines).toBe("genko");
+  expect(model.style.font).toBe("gungseo");
+});
+
+test("스티커 창이 여행일지에서도 돈다 — 내장 그림을 붙이면 종이에 그려진다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-sticker-btn").click();
+  const panel = page.locator(".diary-art-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".diary-art-chip")).toHaveCount(144);
+
+  await panel.locator('.diary-art-color[data-color="#3b82f6"]').click();
+  await panel.locator('.diary-art-chip[data-art="heart"]').click();
+  await expect(page.locator(".diary-sticker")).toHaveCount(1);
+  await expect(page.locator(".diary-sticker-art svg")).toBeVisible();
+
+  const model = await modelOf(page);
+  expect(model.days[0].stickers.map(s => [s.kind, s.art, s.color])).toEqual([["art", "heart", "#3b82f6"]]);
+});
+
+test("이 날짜에만 꾸미기도 여행일지에서 그대로다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-chip").nth(0).click();
+  await page.locator(".trip-style-btn").click();
+  const panel = page.locator(".diary-style-panel");
+  await panel.locator(".diary-style-scope input").check();
+  await panel.locator('.diary-chip[data-lines="dots"]').click();
+  await expect(page.locator(".diary-paper")).toHaveAttribute("data-lines", "dots");
+
+  // 둘째 날은 전체 꾸미기 그대로다
+  await page.locator(".trip-day-chip").nth(1).click();
+  await expect(page.locator(".diary-paper")).toHaveAttribute("data-lines", "ruled");
+  const model = await modelOf(page);
+  expect(model.days[0].style.lines).toBe("dots");
+  expect(model.days[1].style).toBe(null);
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

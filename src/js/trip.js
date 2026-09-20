@@ -705,8 +705,13 @@ function mountTripEditor(doc){
   const photoBtn = diaryButton("사진", "사진 붙이기", "diary-btn trip-photo-btn", "image");
   const photoInput = document.createElement("input");
   photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
+  const stickerBtn = diaryButton("스티커", "그림·글상자 붙이기", "diary-btn trip-sticker-btn", "sticker");
+  const styleBtn = diaryButton("꾸미기", "종이 꾸미기", "diary-btn trip-style-btn", "palette");
+  const bgInput = document.createElement("input");
+  bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
   const saveBtn = diaryButton("저장", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
-  bar.append(titleInput, purposeSelect, status, undoBtn, redoBtn, photoBtn, photoInput, saveBtn);
+  bar.append(titleInput, purposeSelect, status, undoBtn, redoBtn, photoBtn, photoInput,
+    stickerBtn, styleBtn, bgInput, saveBtn);
 
   /* ----- 본문: 여정 띠 + 종이 ----- */
   const body = document.createElement("div");
@@ -868,8 +873,14 @@ function mountTripEditor(doc){
     ensureEntry:(...a) => ensureDay(...a),
     onDrawModeChange:(on) => { els.drawBar.hidden = !on; },
     onEntryChange:() => { deleteBtn.disabled = !dayOf(current); },
-    onStickerSelect:() => {},                 // 스티커 창은 다음 단계
-    openStickerColorPicker:() => {},
+    // 창은 종이 뒤에 세우므로 그때그때 짚는다(창이 종이의 색·투명도를 되비춘다).
+    onStickerSelect:() => { if (panels) panels.syncArtPanel(); },
+    openStickerColorPicker:() => {
+      if (!panels) return;
+      panels.setArtPanelOpen(true);
+      panels.artCustomColor.focus({ preventScroll:true });
+      panels.artCustomColor.click();
+    },
     refreshCurrentLabel:() => renderRail(),
     refreshDirty:(...a) => refreshDirty(...a),
     renderCalendar:() => renderRail(),        // 여행일지의 달력 자리는 여정 띠다
@@ -877,7 +888,7 @@ function mountTripEditor(doc){
     scheduleRecovery:(...a) => scheduleRecovery(...a),
     setStatus:(...a) => setStatus(...a),
     syncDrawBar:(...a) => syncDrawBar(...a),
-    syncPanel:() => {},                       // 꾸미기 창은 다음 단계
+    syncPanel:() => { if (panels) panels.syncPanel(); },
     touch:(...a) => touch(...a),
     translateUi:(node) => { if (typeof MNI18N !== "undefined" && MNI18N && typeof MNI18N.translateTree === "function") MNI18N.translateTree(node); },
     current:() => current,
@@ -886,7 +897,42 @@ function mountTripEditor(doc){
     penSize:() => penSize,
     eraser:() => eraser
   });
-  const { addStickers, applyStyle, layout, redrawDrawing, renderStickers, setDrawMode, clearSelection } = paperApi;
+  const { addStickers, addAsset, applyStyle, layout, redrawDrawing, renderStickers, setDrawMode, clearSelection,
+    addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers,
+    stickerColorNow, stickerOpacityNow } = paperApi;
+
+  /* ----- 꾸미기 창·스티커 창 ----- */
+  // 일기장과 같은 창을 그대로 쓴다. 종이가 같으니 꾸밀 거리도 같다.
+  const panels = mountDiaryPanels({
+    model, assets, bgInput, styleBtn, stickerBtn,
+    assetUrl:(...a) => assetUrl(...a),
+    addAsset:(...a) => addAsset(...a),
+    entryOf:(...a) => dayOf(...a),
+    ensureEntry:(...a) => ensureDay(...a),
+    touch:(...a) => touch(...a),
+    setStatus:(...a) => setStatus(...a),
+    applyStyle:(...a) => applyStyle(...a),
+    layout:(...a) => layout(...a),
+    renderCalendar:() => renderRail(),
+    addArtSticker:(...a) => addArtSticker(...a),
+    addTextSticker:(...a) => addTextSticker(...a),
+    applyStickerColor:(...a) => applyStickerColor(...a),
+    applyStickerOpacity:(...a) => applyStickerOpacity(...a),
+    selectedStickers:(...a) => selectedStickers(...a),
+    stickerColorNow:(...a) => stickerColorNow(...a),
+    stickerOpacityNow:(...a) => stickerOpacityNow(...a),
+    current:() => current,
+    history:() => history
+  });
+  root.append(panels.panel, panels.artPanel);
+  // 창 바깥을 누르면 닫는다. 스티커 창은 종이 위 스티커를 고르며 쓰는 창이라 종이를 눌러도 안 닫는다.
+  const onOutside = (e) => {
+    if (!root.isConnected) return;
+    if (!panels.panel.hidden && !panels.panel.contains(e.target) && !styleBtn.contains(e.target)) panels.setPanelOpen(false);
+    if (!panels.artPanel.hidden && !panels.artPanel.contains(e.target) && !stickerBtn.contains(e.target)
+      && !els.paper.contains(e.target)) panels.setArtPanelOpen(false);
+  };
+  document.addEventListener("pointerdown", onOutside, true);
 
   penButtons.forEach(b => b.addEventListener("click", () => setPenColor(b.dataset.color)));
   sizeButtons.forEach(b => b.addEventListener("click", () => { penSize = b.dataset.size; rememberPen(); syncDrawBar(); }));
@@ -1268,6 +1314,7 @@ function mountTripEditor(doc){
   doc.cleanupFns.push(() => {
     clearTimeout(recoveryTimer);
     document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("pointerdown", onOutside, true);
     if (typeof paperApi.destroyPaper === "function") paperApi.destroyPaper();
     if (history) history.cancel();
     for (const url of urls.values()) URL.revokeObjectURL(url);

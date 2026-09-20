@@ -2945,6 +2945,346 @@ function mountDiaryPaper(els, paperEnv){
   return { addArtSticker, addAsset, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow };
 }
 
+/* ===== 꾸미기 창·스티커 창(일기장·여행일지 공용) =====
+   종이 엔진과 같은 생각이다 — 창을 만들고 붙이는 일만 여기서 하고, 무엇을 꾸미는지(model·날짜)와
+   무엇을 할지(종이 다시 그리기·스티커 색 바꾸기)는 부르는 쪽이 panelEnv 로 내준다.
+   창을 화면에 붙이는 것도 부르는 쪽 몫이다 — 일기장은 잠금 덮개 아래, 여행일지는 다른 자리다.
+   (매개변수를 ctx 로 지으면 안 된다 — 그리기 코드가 캔버스 컨텍스트 이름으로 쓴다.) */
+function mountDiaryPanels(panelEnv){
+  const { model, assets, assetUrl, addAsset, entryOf, ensureEntry, touch, setStatus, applyStyle, layout, renderCalendar, bgInput, styleBtn, stickerBtn, addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers, stickerColorNow, stickerOpacityNow } = panelEnv;
+  /* ----- 꾸미기 창 ----- */
+  const panel = document.createElement("div");
+  panel.className = "diary-style-panel";
+  panel.hidden = true;
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "꾸미기");
+  const section = (label) => {
+    const wrap = document.createElement("div"); wrap.className = "diary-style-row";
+    const head = document.createElement("div"); head.className = "diary-style-label"; head.textContent = label;
+    const content = document.createElement("div"); content.className = "diary-style-controls";
+    wrap.append(head, content); panel.append(wrap);
+    return content;
+  };
+  const scopeRow = document.createElement("label");
+  scopeRow.className = "diary-style-scope";
+  const scopeBox = document.createElement("input");
+  scopeBox.type = "checkbox";
+  const scopeText = document.createElement("span");
+  scopeText.textContent = "이 날짜에만 적용";
+  scopeRow.append(scopeBox, scopeText);
+  const scopeNote = document.createElement("div");
+  scopeNote.className = "diary-style-note";
+  panel.append(scopeRow, scopeNote);
+  const lineChips = section("줄 무늬");
+  const lineButtons = DIARY_LINES.map(id => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-chip diary-line-chip"; b.dataset.lines = id;
+    const sample = document.createElement("span"); sample.className = "diary-line-sample";
+    const bgc = diaryLineBackground({ lines:id, gap:"narrow" });
+    // 원고지·그림일기 견본은 CSS 가 그린다 — 여기서 background-image:none 을 박으면 그 견본을 덮어 빈 칩이 된다.
+    if (bgc.image !== "none") Object.assign(sample.style, { backgroundImage:bgc.image, backgroundSize:bgc.size, backgroundPosition:bgc.position, backgroundRepeat:bgc.repeat });
+    const label = document.createElement("span"); label.className = "diary-chip-label"; label.textContent = DIARY_LINE_LABELS[id];
+    b.append(sample, label);
+    b.addEventListener("click", () => changeStyle({ lines:id }, true));
+    lineChips.append(b);
+    return b;
+  });
+  const gapChips = section("줄 간격");
+  const gapButtons = Object.keys(DIARY_GAPS).map(id => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-chip"; b.dataset.gap = id; b.textContent = DIARY_GAP_LABELS[id];   // 글자는 syncPanel 이 언어에 맞춰 다시 쓴다
+    b.addEventListener("click", () => changeStyle({ gap:id }, true));
+    gapChips.append(b);
+    return b;
+  });
+  // 원고지 칸 — 원고지·그림일기일 때만 보인다.
+  const colsChips = section("원고지 칸");
+  const colsRow = colsChips.parentElement;
+  const colsButtons = DIARY_GENKO_COLS.map(n => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-chip diary-cols-chip"; b.dataset.cols = String(n);
+    b.addEventListener("click", () => changeStyle({ genkoCols:n }, true));
+    colsChips.append(b);
+    return b;
+  });
+  const fontChips = section("글꼴");
+  const fontButtons = DIARY_FONTS.map(id => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-chip diary-font-chip"; b.dataset.font = id;
+    const sample = document.createElement("span"); sample.className = "diary-font-sample"; sample.textContent = "가나다";
+    if (DIARY_FONT_STACKS[id]) sample.style.fontFamily = DIARY_FONT_STACKS[id];
+    const label = document.createElement("span"); label.className = "diary-chip-label"; label.textContent = DIARY_FONT_LABELS[id];
+    b.append(sample, label);
+    b.addEventListener("click", () => changeStyle({ font:id }, true));
+    fontChips.append(b);
+    return b;
+  });
+  // 배경 효과 — 파일에 바이트를 싣지 않는 종이 무늬. 사진 배경과 함께 쓰면 효과가 아래, 사진이 위다.
+  const paperChips = section("배경 효과");
+  paperChips.classList.add("diary-paper-grid");
+  const paperButtons = DIARY_PAPERS.map(id => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-chip diary-paper-chip"; b.dataset.paper = id;
+    const sample = document.createElement("span"); sample.className = "diary-paper-sample";
+    const label = document.createElement("span"); label.className = "diary-chip-label"; label.textContent = DIARY_PAPER_LABELS[id];
+    b.append(sample, label);
+    b.addEventListener("click", () => changeStyle({ paper:id }, true));
+    paperChips.append(b);
+    return b;
+  });
+  const paperToneControls = section("효과 색·진하기");
+  const paperColorPick = diaryColorInput("diary-paper-color", (color, live) => changeStyle({ paperColor:color }, !live));
+  paperColorPick.title = "배경 효과에 쓸 색";
+  paperColorPick.setAttribute("aria-label", paperColorPick.title);
+  const paperToneRange = document.createElement("input");
+  paperToneRange.type = "range"; paperToneRange.min = "0"; paperToneRange.max = "100"; paperToneRange.step = "5";
+  paperToneRange.className = "diary-paper-tone";
+  paperToneRange.setAttribute("aria-label", "배경 효과를 얼마나 진하게 할지");
+  const paperToneValue = document.createElement("span");
+  paperToneValue.className = "diary-veil-value";
+  paperToneControls.append(paperColorPick, paperToneRange, paperToneValue);
+  const bgControls = section("배경 그림");
+  const bgThumb = document.createElement("span");
+  bgThumb.className = "diary-bg-thumb";
+  const bgPick = diaryButton("배경 고르기", "배경으로 깔 그림 고르기", "diary-btn", "image");
+  const bgClear = diaryButton("그림 빼기", "배경 그림 빼기", "diary-btn");
+  bgControls.append(bgThumb, bgPick, bgClear);
+  const fitControls = section("그림 맞춤");
+  const fitSelect = document.createElement("select");
+  fitSelect.className = "diary-select";
+  fitSelect.setAttribute("aria-label", "배경 그림 맞춤");
+  DIARY_FITS.forEach(id => { const o = document.createElement("option"); o.value = id; o.textContent = DIARY_FIT_LABELS[id]; fitSelect.append(o); });
+  fitControls.append(fitSelect);
+  const veilControls = section("그림 흐리게");
+  const veilRange = document.createElement("input");
+  veilRange.type = "range"; veilRange.min = "0"; veilRange.max = "90"; veilRange.step = "5";
+  veilRange.className = "diary-veil-range";
+  veilRange.setAttribute("aria-label", "배경 그림을 종이색으로 덮는 정도");
+  const veilValue = document.createElement("span");
+  veilValue.className = "diary-veil-value";
+  veilControls.append(veilRange, veilValue);
+
+  // 인쇄할 땐 배경 빼기 — 날짜별 꾸미기가 아니라 일기장 전체 설정이라 '이 날짜에만'과 상관없이 하나다.
+  const printPlainRow = document.createElement("label");
+  // 클래스를 '이 날짜에만'과 나눠 둔다 — 같이 쓰면 두 체크상자가 한 선택자에 걸린다(e2e 가 먼저 깨진다).
+  printPlainRow.className = "diary-print-plain";
+  const printPlainBox = document.createElement("input");
+  printPlainBox.type = "checkbox";
+  const printPlainText = document.createElement("span");
+  printPlainText.textContent = "인쇄할 땐 배경 빼기";
+  printPlainRow.append(printPlainBox, printPlainText);
+  const printPlainNote = document.createElement("div");
+  printPlainNote.className = "diary-style-note";
+  printPlainNote.textContent = "배경 효과와 배경 그림을 빼고 인쇄해요(잉크를 아껴요). 일기장 전체에 적용돼요.";
+  panel.append(printPlainRow, printPlainNote);
+
+  // 꾸미기 창의 칩·칸을 지금 꾸미기로 맞춘다. 종이를 그리는 일과는 상관이 없어 창 곁에 둔다.
+  function syncPanel(){
+    const entry = entryOf(panelEnv.current());
+    const own = !!(entry && entry.style);
+    const style = diaryEffectiveStyle(model, entry);
+    scopeBox.checked = own;
+    scopeNote.textContent = diaryT(own
+      ? "이 날짜만 따로 꾸몄어요. 체크를 풀면 일기장 전체 꾸미기로 돌아가요."
+      : "바꾸면 따로 꾸민 날을 뺀 일기장 전체에 적용돼요.");
+    lineButtons.forEach(b => { const on = b.dataset.lines === style.lines; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
+    gapButtons.forEach(b => { const on = b.dataset.gap === style.gap; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
+    fontButtons.forEach(b => { const on = b.dataset.font === style.font; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
+    lineButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_LINE_LABELS, DIARY_LINE_LABELS_EN, b.dataset.lines); });
+    gapButtons.forEach(b => { b.textContent = diaryLabel(DIARY_GAP_LABELS, DIARY_GAP_LABELS_EN, b.dataset.gap); });
+    fontButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, b.dataset.font); });
+    for (const option of fitSelect.options) option.textContent = diaryLabel(DIARY_FIT_LABELS, DIARY_FIT_LABELS_EN, option.value);
+    colsRow.hidden = !diaryUsesGenko(style);
+    colsButtons.forEach(b => {
+      const n = Number(b.dataset.cols), on = n === (style.genkoCols || 0);
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+      b.textContent = n ? (diaryIsEn() ? n + " / row" : n + "칸") : (diaryIsEn() ? "Auto" : "자동");
+      b.title = n ? (diaryIsEn() ? n + " cells per row" : "한 줄에 " + n + "칸") : (diaryIsEn() ? "Cell size follows the line spacing" : "칸 크기를 줄 간격에 맞춰요");
+    });
+    paperButtons.forEach(b => {
+      const on = b.dataset.paper === style.paper;
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+      b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_PAPER_LABELS, DIARY_PAPER_LABELS_EN, b.dataset.paper);
+      // 견본도 지금 고른 색·진하기로 그린다 — 칩만 봐도 그 색이 어떻게 깔릴지 보인다.
+      diaryPaintPaper(b.querySelector(".diary-paper-sample"), { paper:b.dataset.paper, paperColor:style.paperColor, paperTone:style.paperTone });
+    });
+    printPlainBox.checked = !!model.printPlain;
+    paperColorPick.value = style.paperColor;
+    paperColorPick.disabled = paperToneRange.disabled = style.paper === "none";
+    paperToneRange.value = String(Math.round(style.paperTone * 100));
+    paperToneValue.textContent = Math.round(style.paperTone * 100) + "%";
+    const url = assetUrl(style.bg);
+    bgThumb.style.backgroundImage = url ? `url("${url}")` : "none";
+    bgThumb.classList.toggle("is-empty", !url);
+    bgClear.disabled = !style.bg;
+    fitSelect.value = style.fit;
+    fitSelect.disabled = veilRange.disabled = !style.bg;
+    veilRange.value = String(Math.round(style.veil * 100));
+    veilValue.textContent = Math.round(style.veil * 100) + "%";
+  }
+
+  /* ----- 스티커 창 ----- */
+  const artPanel = document.createElement("div");
+  artPanel.className = "diary-art-panel";      // 꾸미기 창과 모양은 같지만 클래스는 따로 — 선택자가 둘을 가려야 한다
+  artPanel.hidden = true;
+  artPanel.setAttribute("role", "dialog");
+  artPanel.setAttribute("aria-label", "스티커");
+  const artSection = (label) => {
+    const wrap = document.createElement("div"); wrap.className = "diary-style-row";
+    const head = document.createElement("div"); head.className = "diary-style-label"; head.textContent = label;
+    const content = document.createElement("div"); content.className = "diary-style-controls";
+    wrap.append(head, content); artPanel.append(wrap);
+    return content;
+  };
+  const artColorChips = artSection("색");
+  const artColorButtons = DIARY_PENS.map(([color, ko, en]) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-art-color"; b.dataset.color = color;
+    b.style.setProperty("--pen", color);
+    b.title = diaryIsEn() ? en : ko;
+    b.setAttribute("aria-label", b.title);
+    b.addEventListener("click", () => applyStickerColor(color));
+    artColorChips.append(b);
+    return b;
+  });
+  // 팔레트 밖 색 — 고른 스티커가 있으면 그 스티커를, 없으면 다음에 붙일 색을 바꾼다(칩과 같은 규칙).
+  const artCustomColor = diaryColorInput("diary-art-color-custom", (color, live) => applyStickerColor(color, live));
+  artColorChips.append(artCustomColor);
+  const artOpacityControls = artSection("투명도");
+  const artOpacityRange = document.createElement("input");
+  artOpacityRange.type = "range"; artOpacityRange.min = "10"; artOpacityRange.max = "100"; artOpacityRange.step = "5";
+  artOpacityRange.className = "diary-art-opacity";
+  artOpacityRange.title = "스티커 투명도"; artOpacityRange.setAttribute("aria-label", artOpacityRange.title);
+  const artOpacityValue = document.createElement("span");
+  artOpacityValue.className = "diary-veil-value";
+  let artOpacityGesture = false;
+  const beginArtOpacity = () => {
+    if (artOpacityGesture) return;
+    if (selectedStickers().some(s => diaryStickerKind(s) !== "photo") && panelEnv.history()) panelEnv.history().flush();
+    artOpacityGesture = true;
+  };
+  artOpacityRange.addEventListener("pointerdown", beginArtOpacity);
+  artOpacityRange.addEventListener("input", () => {
+    beginArtOpacity(); applyStickerOpacity(Number(artOpacityRange.value) / 100, true);
+  });
+  artOpacityRange.addEventListener("change", () => {
+    applyStickerOpacity(Number(artOpacityRange.value) / 100, false); artOpacityGesture = false;
+  });
+  artOpacityControls.append(artOpacityRange, artOpacityValue);
+  const artGrid = artSection("그림");
+  artGrid.classList.add("diary-art-grid");
+  const artButtons = DIARY_ART.map(info => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "diary-art-chip"; b.dataset.art = info[0];
+    b.innerHTML = diaryArtSvg(info[0], "diary-art diary-art-chip-svg");
+    b.title = diaryArtName(info);
+    b.setAttribute("aria-label", b.title);
+    b.addEventListener("click", () => addArtSticker(info[0]));
+    artGrid.append(b);
+    return b;
+  });
+  const artTextRow = artSection("글상자");
+  const artTextBtn = diaryButton("글상자 넣기", "종이 위 아무 데나 글을 얹어요 — 두 번 누르면 고쳐 써요", "diary-btn", "text");
+  artTextBtn.addEventListener("click", () => { setArtPanelOpen(false); addTextSticker(); });
+  const artTextNote = document.createElement("span");
+  artTextNote.className = "diary-style-note";
+  artTextRow.append(artTextBtn, artTextNote);
+
+  // 날씨·기분 고르개(머리줄 단추 아래에 뜬다)
+
+  function changeStyle(patch, immediate){
+    if (panelEnv.history() && immediate) panelEnv.history().flush();
+    const entry = entryOf(panelEnv.current());
+    if (entry && entry.style) entry.style = diaryNormalizeStyle({ ...entry.style, ...patch }, name => assets.has(name));
+    else model.style = diaryNormalizeStyle({ ...model.style, ...patch }, name => assets.has(name));
+    applyStyle();
+    layout();
+    touch(immediate);
+  }
+  scopeBox.addEventListener("change", () => {
+    if (panelEnv.history()) panelEnv.history().flush();
+    if (scopeBox.checked){
+      const entry = ensureEntry(panelEnv.current());
+      entry.style = { ...model.style };
+    } else {
+      const entry = entryOf(panelEnv.current());
+      if (entry) entry.style = null;
+    }
+    applyStyle(); layout(); renderCalendar(); touch(true);
+  });
+  bgPick.addEventListener("click", () => bgInput.click());
+  bgInput.addEventListener("change", async () => {
+    const file = bgInput.files && bgInput.files[0];
+    bgInput.value = "";
+    if (!file) return;
+    setStatus(diaryT("배경 그림을 넣는 중…"));
+    const asset = await addAsset(file, DIARY_BG_MAX_DIM);
+    if (!asset){ setStatus(diaryT("그림을 읽지 못했어요.")); return; }
+    changeStyle({ bg:asset.name }, true);
+  });
+  bgClear.addEventListener("click", () => changeStyle({ bg:"" }, true));
+  fitSelect.addEventListener("change", () => changeStyle({ fit:fitSelect.value }, true));
+  veilRange.addEventListener("input", () => changeStyle({ veil:Number(veilRange.value) / 100 }, false));
+  paperToneRange.addEventListener("input", () => changeStyle({ paperTone:Number(paperToneRange.value) / 100 }, false));
+  printPlainBox.addEventListener("change", () => {
+    if (panelEnv.history()) panelEnv.history().flush();
+    model.printPlain = printPlainBox.checked;
+    touch(true);
+  });
+
+  const setPanelOpen = (open) => {
+    panel.hidden = !open;
+    styleBtn.setAttribute("aria-expanded", String(open));
+    styleBtn.classList.toggle("is-on", open);
+    if (open){
+      syncPanel();
+      // 글꼴 칩 견본도 손글씨로 보이도록 창을 열 때 미리 읽는다(처음 한 번만 무겁다).
+      for (const id of Object.keys(DIARY_HAND_FONTS)) diaryEnsureFont(id);
+    }
+  };
+  styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setArtPanelOpen(false); setPanelOpen(panel.hidden); });
+  // 고른 스티커의 색을 색 칸에 비춘다(여럿을 골라 색이 섞여 있으면 아무것도 켜지 않는다).
+  function syncArtPanel(){
+    const picked = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
+    const colors = new Set(picked.map(s => s.color));
+    const shown = picked.length ? (colors.size === 1 ? [...colors][0] : "") : stickerColorNow();
+    artColorButtons.forEach(b => {
+      const on = b.dataset.color === shown;
+      b.classList.toggle("is-on", on);
+      b.setAttribute("aria-pressed", String(on));
+    });
+    // 팔레트에 없는 색(직접 고른 색)이면 칩은 모두 꺼지고 색 칸만 켜진다.
+    if (shown) artCustomColor.value = shown;
+    artCustomColor.classList.toggle("is-on", !!shown && !DIARY_PENS.some(p => p[0] === shown));
+    artCustomColor.title = diaryT("색 직접 고르기");
+    artCustomColor.setAttribute("aria-label", artCustomColor.title);
+    const opacities = new Set(picked.map(s => s.opacity == null ? 1 : s.opacity));
+    const shownOpacity = picked.length ? (opacities.size === 1 ? [...opacities][0] : null) : stickerOpacityNow();
+    artOpacityRange.value = String(Math.round((shownOpacity == null ? 1 : shownOpacity) * 100));
+    artOpacityValue.textContent = shownOpacity == null ? "—" : Math.round(shownOpacity * 100) + "%";
+    artOpacityRange.title = diaryT("스티커 투명도");
+    artOpacityRange.setAttribute("aria-label", artOpacityRange.title);
+    artTextNote.textContent = picked.length
+      ? diaryTf("고른 스티커 {n}개의 색을 바꿔요.", { n:picked.length })
+      : diaryT("색을 먼저 고르면 그림도 글상자도 그 색으로 붙어요.");
+    artButtons.forEach(b => { b.title = diaryArtName(diaryArtInfo(b.dataset.art)); b.setAttribute("aria-label", b.title); });
+    artColorButtons.forEach(b => {
+      const info = DIARY_PENS.find(p => p[0] === b.dataset.color);
+      b.title = info ? (diaryIsEn() ? info[2] : info[1]) : "";
+      b.setAttribute("aria-label", b.title);
+    });
+  }
+  const setArtPanelOpen = (open) => {
+    artPanel.hidden = !open;
+    stickerBtn.setAttribute("aria-expanded", String(open));
+    stickerBtn.classList.toggle("is-on", open);
+    if (open) syncArtPanel();
+  };
+  stickerBtn.addEventListener("click", (e) => { e.stopPropagation(); setPanelOpen(false); setArtPanelOpen(artPanel.hidden); });
+
+  return { panel, artPanel, artCustomColor, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen, changeStyle };
+}
+
 function mountDiaryEditor(doc){
   const model = doc.diary;
   const assets = doc.diaryAssets || (doc.diaryAssets = new Map());
@@ -3231,245 +3571,6 @@ function mountDiaryEditor(doc){
   main.append(pageHead, paper);
   body.append(side, entryRail, main);
 
-  /* ----- 꾸미기 창 ----- */
-  const panel = document.createElement("div");
-  panel.className = "diary-style-panel";
-  panel.hidden = true;
-  panel.setAttribute("role", "dialog");
-  panel.setAttribute("aria-label", "꾸미기");
-  const section = (label) => {
-    const wrap = document.createElement("div"); wrap.className = "diary-style-row";
-    const head = document.createElement("div"); head.className = "diary-style-label"; head.textContent = label;
-    const content = document.createElement("div"); content.className = "diary-style-controls";
-    wrap.append(head, content); panel.append(wrap);
-    return content;
-  };
-  const scopeRow = document.createElement("label");
-  scopeRow.className = "diary-style-scope";
-  const scopeBox = document.createElement("input");
-  scopeBox.type = "checkbox";
-  const scopeText = document.createElement("span");
-  scopeText.textContent = "이 날짜에만 적용";
-  scopeRow.append(scopeBox, scopeText);
-  const scopeNote = document.createElement("div");
-  scopeNote.className = "diary-style-note";
-  panel.append(scopeRow, scopeNote);
-  const lineChips = section("줄 무늬");
-  const lineButtons = DIARY_LINES.map(id => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "diary-chip diary-line-chip"; b.dataset.lines = id;
-    const sample = document.createElement("span"); sample.className = "diary-line-sample";
-    const bgc = diaryLineBackground({ lines:id, gap:"narrow" });
-    // 원고지·그림일기 견본은 CSS 가 그린다 — 여기서 background-image:none 을 박으면 그 견본을 덮어 빈 칩이 된다.
-    if (bgc.image !== "none") Object.assign(sample.style, { backgroundImage:bgc.image, backgroundSize:bgc.size, backgroundPosition:bgc.position, backgroundRepeat:bgc.repeat });
-    const label = document.createElement("span"); label.className = "diary-chip-label"; label.textContent = DIARY_LINE_LABELS[id];
-    b.append(sample, label);
-    b.addEventListener("click", () => changeStyle({ lines:id }, true));
-    lineChips.append(b);
-    return b;
-  });
-  const gapChips = section("줄 간격");
-  const gapButtons = Object.keys(DIARY_GAPS).map(id => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "diary-chip"; b.dataset.gap = id; b.textContent = DIARY_GAP_LABELS[id];   // 글자는 syncPanel 이 언어에 맞춰 다시 쓴다
-    b.addEventListener("click", () => changeStyle({ gap:id }, true));
-    gapChips.append(b);
-    return b;
-  });
-  // 원고지 칸 — 원고지·그림일기일 때만 보인다.
-  const colsChips = section("원고지 칸");
-  const colsRow = colsChips.parentElement;
-  const colsButtons = DIARY_GENKO_COLS.map(n => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "diary-chip diary-cols-chip"; b.dataset.cols = String(n);
-    b.addEventListener("click", () => changeStyle({ genkoCols:n }, true));
-    colsChips.append(b);
-    return b;
-  });
-  const fontChips = section("글꼴");
-  const fontButtons = DIARY_FONTS.map(id => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "diary-chip diary-font-chip"; b.dataset.font = id;
-    const sample = document.createElement("span"); sample.className = "diary-font-sample"; sample.textContent = "가나다";
-    if (DIARY_FONT_STACKS[id]) sample.style.fontFamily = DIARY_FONT_STACKS[id];
-    const label = document.createElement("span"); label.className = "diary-chip-label"; label.textContent = DIARY_FONT_LABELS[id];
-    b.append(sample, label);
-    b.addEventListener("click", () => changeStyle({ font:id }, true));
-    fontChips.append(b);
-    return b;
-  });
-  // 배경 효과 — 파일에 바이트를 싣지 않는 종이 무늬. 사진 배경과 함께 쓰면 효과가 아래, 사진이 위다.
-  const paperChips = section("배경 효과");
-  paperChips.classList.add("diary-paper-grid");
-  const paperButtons = DIARY_PAPERS.map(id => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "diary-chip diary-paper-chip"; b.dataset.paper = id;
-    const sample = document.createElement("span"); sample.className = "diary-paper-sample";
-    const label = document.createElement("span"); label.className = "diary-chip-label"; label.textContent = DIARY_PAPER_LABELS[id];
-    b.append(sample, label);
-    b.addEventListener("click", () => changeStyle({ paper:id }, true));
-    paperChips.append(b);
-    return b;
-  });
-  const paperToneControls = section("효과 색·진하기");
-  const paperColorPick = diaryColorInput("diary-paper-color", (color, live) => changeStyle({ paperColor:color }, !live));
-  paperColorPick.title = "배경 효과에 쓸 색";
-  paperColorPick.setAttribute("aria-label", paperColorPick.title);
-  const paperToneRange = document.createElement("input");
-  paperToneRange.type = "range"; paperToneRange.min = "0"; paperToneRange.max = "100"; paperToneRange.step = "5";
-  paperToneRange.className = "diary-paper-tone";
-  paperToneRange.setAttribute("aria-label", "배경 효과를 얼마나 진하게 할지");
-  const paperToneValue = document.createElement("span");
-  paperToneValue.className = "diary-veil-value";
-  paperToneControls.append(paperColorPick, paperToneRange, paperToneValue);
-  const bgControls = section("배경 그림");
-  const bgThumb = document.createElement("span");
-  bgThumb.className = "diary-bg-thumb";
-  const bgPick = diaryButton("배경 고르기", "배경으로 깔 그림 고르기", "diary-btn", "image");
-  const bgClear = diaryButton("그림 빼기", "배경 그림 빼기", "diary-btn");
-  bgControls.append(bgThumb, bgPick, bgClear);
-  const fitControls = section("그림 맞춤");
-  const fitSelect = document.createElement("select");
-  fitSelect.className = "diary-select";
-  fitSelect.setAttribute("aria-label", "배경 그림 맞춤");
-  DIARY_FITS.forEach(id => { const o = document.createElement("option"); o.value = id; o.textContent = DIARY_FIT_LABELS[id]; fitSelect.append(o); });
-  fitControls.append(fitSelect);
-  const veilControls = section("그림 흐리게");
-  const veilRange = document.createElement("input");
-  veilRange.type = "range"; veilRange.min = "0"; veilRange.max = "90"; veilRange.step = "5";
-  veilRange.className = "diary-veil-range";
-  veilRange.setAttribute("aria-label", "배경 그림을 종이색으로 덮는 정도");
-  const veilValue = document.createElement("span");
-  veilValue.className = "diary-veil-value";
-  veilControls.append(veilRange, veilValue);
-
-  // 인쇄할 땐 배경 빼기 — 날짜별 꾸미기가 아니라 일기장 전체 설정이라 '이 날짜에만'과 상관없이 하나다.
-  const printPlainRow = document.createElement("label");
-  // 클래스를 '이 날짜에만'과 나눠 둔다 — 같이 쓰면 두 체크상자가 한 선택자에 걸린다(e2e 가 먼저 깨진다).
-  printPlainRow.className = "diary-print-plain";
-  const printPlainBox = document.createElement("input");
-  printPlainBox.type = "checkbox";
-  const printPlainText = document.createElement("span");
-  printPlainText.textContent = "인쇄할 땐 배경 빼기";
-  printPlainRow.append(printPlainBox, printPlainText);
-  const printPlainNote = document.createElement("div");
-  printPlainNote.className = "diary-style-note";
-  printPlainNote.textContent = "배경 효과와 배경 그림을 빼고 인쇄해요(잉크를 아껴요). 일기장 전체에 적용돼요.";
-  panel.append(printPlainRow, printPlainNote);
-
-  // 꾸미기 창의 칩·칸을 지금 꾸미기로 맞춘다. 종이를 그리는 일과는 상관이 없어 창 곁에 둔다.
-  function syncPanel(){
-    const entry = entryOf(current);
-    const own = !!(entry && entry.style);
-    const style = diaryEffectiveStyle(model, entry);
-    scopeBox.checked = own;
-    scopeNote.textContent = diaryT(own
-      ? "이 날짜만 따로 꾸몄어요. 체크를 풀면 일기장 전체 꾸미기로 돌아가요."
-      : "바꾸면 따로 꾸민 날을 뺀 일기장 전체에 적용돼요.");
-    lineButtons.forEach(b => { const on = b.dataset.lines === style.lines; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
-    gapButtons.forEach(b => { const on = b.dataset.gap === style.gap; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
-    fontButtons.forEach(b => { const on = b.dataset.font === style.font; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
-    lineButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_LINE_LABELS, DIARY_LINE_LABELS_EN, b.dataset.lines); });
-    gapButtons.forEach(b => { b.textContent = diaryLabel(DIARY_GAP_LABELS, DIARY_GAP_LABELS_EN, b.dataset.gap); });
-    fontButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, b.dataset.font); });
-    for (const option of fitSelect.options) option.textContent = diaryLabel(DIARY_FIT_LABELS, DIARY_FIT_LABELS_EN, option.value);
-    colsRow.hidden = !diaryUsesGenko(style);
-    colsButtons.forEach(b => {
-      const n = Number(b.dataset.cols), on = n === (style.genkoCols || 0);
-      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
-      b.textContent = n ? (diaryIsEn() ? n + " / row" : n + "칸") : (diaryIsEn() ? "Auto" : "자동");
-      b.title = n ? (diaryIsEn() ? n + " cells per row" : "한 줄에 " + n + "칸") : (diaryIsEn() ? "Cell size follows the line spacing" : "칸 크기를 줄 간격에 맞춰요");
-    });
-    paperButtons.forEach(b => {
-      const on = b.dataset.paper === style.paper;
-      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
-      b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_PAPER_LABELS, DIARY_PAPER_LABELS_EN, b.dataset.paper);
-      // 견본도 지금 고른 색·진하기로 그린다 — 칩만 봐도 그 색이 어떻게 깔릴지 보인다.
-      diaryPaintPaper(b.querySelector(".diary-paper-sample"), { paper:b.dataset.paper, paperColor:style.paperColor, paperTone:style.paperTone });
-    });
-    printPlainBox.checked = !!model.printPlain;
-    paperColorPick.value = style.paperColor;
-    paperColorPick.disabled = paperToneRange.disabled = style.paper === "none";
-    paperToneRange.value = String(Math.round(style.paperTone * 100));
-    paperToneValue.textContent = Math.round(style.paperTone * 100) + "%";
-    const url = assetUrl(style.bg);
-    bgThumb.style.backgroundImage = url ? `url("${url}")` : "none";
-    bgThumb.classList.toggle("is-empty", !url);
-    bgClear.disabled = !style.bg;
-    fitSelect.value = style.fit;
-    fitSelect.disabled = veilRange.disabled = !style.bg;
-    veilRange.value = String(Math.round(style.veil * 100));
-    veilValue.textContent = Math.round(style.veil * 100) + "%";
-  }
-
-  /* ----- 스티커 창 ----- */
-  const artPanel = document.createElement("div");
-  artPanel.className = "diary-art-panel";      // 꾸미기 창과 모양은 같지만 클래스는 따로 — 선택자가 둘을 가려야 한다
-  artPanel.hidden = true;
-  artPanel.setAttribute("role", "dialog");
-  artPanel.setAttribute("aria-label", "스티커");
-  const artSection = (label) => {
-    const wrap = document.createElement("div"); wrap.className = "diary-style-row";
-    const head = document.createElement("div"); head.className = "diary-style-label"; head.textContent = label;
-    const content = document.createElement("div"); content.className = "diary-style-controls";
-    wrap.append(head, content); artPanel.append(wrap);
-    return content;
-  };
-  const artColorChips = artSection("색");
-  const artColorButtons = DIARY_PENS.map(([color, ko, en]) => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "diary-art-color"; b.dataset.color = color;
-    b.style.setProperty("--pen", color);
-    b.title = diaryIsEn() ? en : ko;
-    b.setAttribute("aria-label", b.title);
-    b.addEventListener("click", () => applyStickerColor(color));
-    artColorChips.append(b);
-    return b;
-  });
-  // 팔레트 밖 색 — 고른 스티커가 있으면 그 스티커를, 없으면 다음에 붙일 색을 바꾼다(칩과 같은 규칙).
-  const artCustomColor = diaryColorInput("diary-art-color-custom", (color, live) => applyStickerColor(color, live));
-  artColorChips.append(artCustomColor);
-  const artOpacityControls = artSection("투명도");
-  const artOpacityRange = document.createElement("input");
-  artOpacityRange.type = "range"; artOpacityRange.min = "10"; artOpacityRange.max = "100"; artOpacityRange.step = "5";
-  artOpacityRange.className = "diary-art-opacity";
-  artOpacityRange.title = "스티커 투명도"; artOpacityRange.setAttribute("aria-label", artOpacityRange.title);
-  const artOpacityValue = document.createElement("span");
-  artOpacityValue.className = "diary-veil-value";
-  let artOpacityGesture = false;
-  const beginArtOpacity = () => {
-    if (artOpacityGesture) return;
-    if (selectedStickers().some(s => diaryStickerKind(s) !== "photo") && history) history.flush();
-    artOpacityGesture = true;
-  };
-  artOpacityRange.addEventListener("pointerdown", beginArtOpacity);
-  artOpacityRange.addEventListener("input", () => {
-    beginArtOpacity(); applyStickerOpacity(Number(artOpacityRange.value) / 100, true);
-  });
-  artOpacityRange.addEventListener("change", () => {
-    applyStickerOpacity(Number(artOpacityRange.value) / 100, false); artOpacityGesture = false;
-  });
-  artOpacityControls.append(artOpacityRange, artOpacityValue);
-  const artGrid = artSection("그림");
-  artGrid.classList.add("diary-art-grid");
-  const artButtons = DIARY_ART.map(info => {
-    const b = document.createElement("button");
-    b.type = "button"; b.className = "diary-art-chip"; b.dataset.art = info[0];
-    b.innerHTML = diaryArtSvg(info[0], "diary-art diary-art-chip-svg");
-    b.title = diaryArtName(info);
-    b.setAttribute("aria-label", b.title);
-    b.addEventListener("click", () => addArtSticker(info[0]));
-    artGrid.append(b);
-    return b;
-  });
-  const artTextRow = artSection("글상자");
-  const artTextBtn = diaryButton("글상자 넣기", "종이 위 아무 데나 글을 얹어요 — 두 번 누르면 고쳐 써요", "diary-btn", "text");
-  artTextBtn.addEventListener("click", () => { setArtPanelOpen(false); addTextSticker(); });
-  const artTextNote = document.createElement("span");
-  artTextNote.className = "diary-style-note";
-  artTextRow.append(artTextBtn, artTextNote);
-
-  // 날씨·기분 고르개(머리줄 단추 아래에 뜬다)
   const pickPop = document.createElement("div");
   pickPop.className = "diary-pick-pop ui-keep-symbols";
   pickPop.hidden = true;
@@ -3488,7 +3589,7 @@ function mountDiaryEditor(doc){
   const lockNote = document.createElement("p"); lockNote.textContent = "내용을 다시 보려면 파일 암호를 입력하세요.";
   const unlockBtn = diaryButton("잠금 풀기", "일기장 화면 잠금 풀기", "diary-btn diary-primary", "lock");
   lockScreen.append(lockIcon, lockTitle, lockNote, unlockBtn);
-  root.append(bar, body, panel, artPanel, pickPop, templatePanel, lockScreen);
+  root.append(bar, body, pickPop, templatePanel, lockScreen);
   doc.el.appendChild(root);
 
   /* ----- 상태 표시·되돌리기·복구본 ----- */
@@ -4414,95 +4515,14 @@ function mountDiaryEditor(doc){
   const { addArtSticker, addAsset, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow } = paperApi;
 
   /* ----- 꾸미기 바꾸기 ----- */
-  function changeStyle(patch, immediate){
-    if (history && immediate) history.flush();
-    const entry = entryOf(current);
-    if (entry && entry.style) entry.style = diaryNormalizeStyle({ ...entry.style, ...patch }, name => assets.has(name));
-    else model.style = diaryNormalizeStyle({ ...model.style, ...patch }, name => assets.has(name));
-    applyStyle();
-    layout();
-    touch(immediate);
-  }
-  scopeBox.addEventListener("change", () => {
-    if (history) history.flush();
-    if (scopeBox.checked){
-      const entry = ensureEntry(current);
-      entry.style = { ...model.style };
-    } else {
-      const entry = entryOf(current);
-      if (entry) entry.style = null;
-    }
-    applyStyle(); layout(); renderCalendar(); touch(true);
-  });
-  bgPick.addEventListener("click", () => bgInput.click());
-  bgInput.addEventListener("change", async () => {
-    const file = bgInput.files && bgInput.files[0];
-    bgInput.value = "";
-    if (!file) return;
-    setStatus(diaryT("배경 그림을 넣는 중…"));
-    const asset = await addAsset(file, DIARY_BG_MAX_DIM);
-    if (!asset){ setStatus(diaryT("그림을 읽지 못했어요.")); return; }
-    changeStyle({ bg:asset.name }, true);
-  });
-  bgClear.addEventListener("click", () => changeStyle({ bg:"" }, true));
-  fitSelect.addEventListener("change", () => changeStyle({ fit:fitSelect.value }, true));
-  veilRange.addEventListener("input", () => changeStyle({ veil:Number(veilRange.value) / 100 }, false));
-  paperToneRange.addEventListener("input", () => changeStyle({ paperTone:Number(paperToneRange.value) / 100 }, false));
-  printPlainBox.addEventListener("change", () => {
-    if (history) history.flush();
-    model.printPlain = printPlainBox.checked;
-    touch(true);
-  });
+  /* ----- 꾸미기 창·스티커 창 ----- */
+  // 창은 종이 뒤에 세운다 — 창이 종이의 스티커 색·투명도를 되비추기 때문이다.
+  const panels = mountDiaryPanels({ model, assets, assetUrl:(...a) => assetUrl(...a), addAsset:(...a) => addAsset(...a), entryOf:(...a) => entryOf(...a), ensureEntry:(...a) => ensureEntry(...a), touch:(...a) => touch(...a), setStatus:(...a) => setStatus(...a), applyStyle:(...a) => applyStyle(...a), layout:(...a) => layout(...a), renderCalendar:(...a) => renderCalendar(...a), bgInput, styleBtn, stickerBtn, addArtSticker:(...a) => addArtSticker(...a), addTextSticker:(...a) => addTextSticker(...a), applyStickerColor:(...a) => applyStickerColor(...a), applyStickerOpacity:(...a) => applyStickerOpacity(...a), selectedStickers:(...a) => selectedStickers(...a), stickerColorNow:(...a) => stickerColorNow(...a), stickerOpacityNow:(...a) => stickerOpacityNow(...a), current:() => current, history:() => history });
+  const { panel, artPanel, artCustomColor, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen } = panels;
+  // 덮개(잠금)보다 아래에 오도록 자리를 지켜 끼운다.
+  root.insertBefore(panel, pickPop);
+  root.insertBefore(artPanel, pickPop);
 
-  const setPanelOpen = (open) => {
-    panel.hidden = !open;
-    styleBtn.setAttribute("aria-expanded", String(open));
-    styleBtn.classList.toggle("is-on", open);
-    if (open){
-      syncPanel();
-      // 글꼴 칩 견본도 손글씨로 보이도록 창을 열 때 미리 읽는다(처음 한 번만 무겁다).
-      for (const id of Object.keys(DIARY_HAND_FONTS)) diaryEnsureFont(id);
-    }
-  };
-  styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setArtPanelOpen(false); setPanelOpen(panel.hidden); });
-  // 고른 스티커의 색을 색 칸에 비춘다(여럿을 골라 색이 섞여 있으면 아무것도 켜지 않는다).
-  function syncArtPanel(){
-    const picked = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
-    const colors = new Set(picked.map(s => s.color));
-    const shown = picked.length ? (colors.size === 1 ? [...colors][0] : "") : stickerColorNow();
-    artColorButtons.forEach(b => {
-      const on = b.dataset.color === shown;
-      b.classList.toggle("is-on", on);
-      b.setAttribute("aria-pressed", String(on));
-    });
-    // 팔레트에 없는 색(직접 고른 색)이면 칩은 모두 꺼지고 색 칸만 켜진다.
-    if (shown) artCustomColor.value = shown;
-    artCustomColor.classList.toggle("is-on", !!shown && !DIARY_PENS.some(p => p[0] === shown));
-    artCustomColor.title = diaryT("색 직접 고르기");
-    artCustomColor.setAttribute("aria-label", artCustomColor.title);
-    const opacities = new Set(picked.map(s => s.opacity == null ? 1 : s.opacity));
-    const shownOpacity = picked.length ? (opacities.size === 1 ? [...opacities][0] : null) : stickerOpacityNow();
-    artOpacityRange.value = String(Math.round((shownOpacity == null ? 1 : shownOpacity) * 100));
-    artOpacityValue.textContent = shownOpacity == null ? "—" : Math.round(shownOpacity * 100) + "%";
-    artOpacityRange.title = diaryT("스티커 투명도");
-    artOpacityRange.setAttribute("aria-label", artOpacityRange.title);
-    artTextNote.textContent = picked.length
-      ? diaryTf("고른 스티커 {n}개의 색을 바꿔요.", { n:picked.length })
-      : diaryT("색을 먼저 고르면 그림도 글상자도 그 색으로 붙어요.");
-    artButtons.forEach(b => { b.title = diaryArtName(diaryArtInfo(b.dataset.art)); b.setAttribute("aria-label", b.title); });
-    artColorButtons.forEach(b => {
-      const info = DIARY_PENS.find(p => p[0] === b.dataset.color);
-      b.title = info ? (diaryIsEn() ? info[2] : info[1]) : "";
-      b.setAttribute("aria-label", b.title);
-    });
-  }
-  const setArtPanelOpen = (open) => {
-    artPanel.hidden = !open;
-    stickerBtn.setAttribute("aria-expanded", String(open));
-    stickerBtn.classList.toggle("is-on", open);
-    if (open) syncArtPanel();
-  };
-  stickerBtn.addEventListener("click", (e) => { e.stopPropagation(); setPanelOpen(false); setArtPanelOpen(artPanel.hidden); });
   const onOutside = (e) => {
     if (!pickPop.hidden && !pickPop.contains(e.target) && !weatherBtn.contains(e.target) && !moodBtn.contains(e.target)) closePicker();
     if (!templatePanel.hidden && !templatePanel.contains(e.target) && !templateBtn.contains(e.target)) setTemplateOpen(false);
