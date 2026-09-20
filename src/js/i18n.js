@@ -1584,6 +1584,7 @@
     "달력": "Calendar",
     "달력·검색": "Calendar · Find",
     "달력과 일기 찾기 열기": "Open calendar and diary search",
+    "일기 카드 목록": "Diary card list",
     "검색 조건": "Search filter",
     "태그 추가": "Add tag",
     "기억하고 싶은 날로 표시": "Add to favorites",

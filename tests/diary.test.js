@@ -206,6 +206,11 @@ test(".diary 는 파일 열기·새로 만들기 메뉴·manifest·검색에 연
   assert.match(read("scripts.manifest.json"), /"diary\.js"/);
   assert.match(read("src/js/documents.js"), /isDiarySearchable\(doc\)\) return diarySearchText\(doc\)/);
   assert.match(read("src/js/command-palette.js"), /newDiaryScratch/);
+  const diarySource = read("src/js/diary.js");
+  assert.match(diarySource, /body\.append\(side, entryRail, main\)/);       // 달력 · 카드 목록 · 편집기 3단
+  assert.match(diarySource, /firstSticker[\s\S]{0,300}diary-entry-card-thumb/);
+  assert.match(diarySource, /diary-entry-card-drawing/);                    // 카드에서도 펜 그림을 축소 렌더링
+  assert.match(read("src/styles.css"), /grid-template-columns:224px 300px minmax\(0,1fr\)/);
   // 종이에 떨어뜨린 사진이 새 탭으로 새지 않게 전역 드롭 오버레이가 일기장을 비켜 간다.
   assert.match(read("src/js/app.js"), /state\.kind === "diary"/);
   const types = require("../src/js/document-types.js");
