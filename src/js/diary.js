@@ -3516,6 +3516,90 @@ function mountDiaryEditor(doc){
     redrawDrawing();
   }
 
+  /* ----- 본문 입력·떨어뜨리기 -----
+     종이의 textarea·종이 판을 듣는 자리라 종이 구역 안에 둔다. 바깥 창·바에는 되부름으로만 알린다. */
+  area.addEventListener("input", () => {
+    const entry = ensureEntry(current);
+    const wasEmpty = diaryEntryIsEmpty(entry);
+    entry.text = area.value;
+    layout();
+    onEntryChange();
+    refreshCurrentLabel(wasEmpty);
+    touch();
+  });
+  area.addEventListener("pointerdown", () => selectSticker(""));
+  area.addEventListener("paste", async (event) => {
+    const imgs = [...((event.clipboardData && event.clipboardData.items) || [])]
+      .filter(it => it.kind === "file" && /^image\//i.test(it.type || ""))
+      .map(it => it.getAsFile()).filter(Boolean);
+    if (!imgs.length) return;
+    event.preventDefault();
+    await addStickers(imgs);
+  });
+  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
+  paper.addEventListener("pointerdown", (e) => { if (!e.target.closest(".diary-sticker")) selectSticker(""); });
+  genkoLayer.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !genkoLay) return;
+    e.preventDefault();
+    const idx = genkoIndexFromPoint(e);
+    const wasFocused = document.activeElement === area;
+    const anchor = e.shiftKey && wasFocused ? (area.selectionDirection === "backward" ? area.selectionEnd : area.selectionStart) : idx;
+    area.focus({ preventScroll:true });
+    setGenkoSelection(anchor, idx);
+    refreshGenkoSelection(true);
+    const move = (ev) => { if (genkoLay){ setGenkoSelection(anchor, genkoIndexFromPoint(ev)); refreshGenkoSelection(); } };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+  // 원고지는 줄이 칸으로 정해져 textarea 의 위·아래·처음·끝 이동이 맞지 않는다 — 칸 기준으로 직접 옮긴다.
+  area.addEventListener("keydown", (e) => {
+    if (!genkoLay || e.isComposing || e.altKey) return;
+    const key = e.key;
+    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(key)) return;
+    if ((key === "Home" || key === "End") && (e.ctrlKey || e.metaKey)) return;   // 글 처음·끝은 textarea 그대로
+    e.preventDefault();
+    const back = area.selectionDirection === "backward";
+    const head = back ? area.selectionStart : area.selectionEnd;
+    const anchor = back ? area.selectionEnd : area.selectionStart;
+    const p = genkoLay.pos[head] || { row:0, col:0 };
+    const lastRow = genkoLay.pos[genkoLay.pos.length - 1].row;
+    let idx;
+    if (key === "ArrowUp") idx = p.row === 0 ? 0 : diaryGenkoIndexAt(genkoLay, p.row - 1, p.col);
+    else if (key === "ArrowDown") idx = p.row >= lastRow ? area.value.length : diaryGenkoIndexAt(genkoLay, p.row + 1, p.col);
+    else if (key === "Home") idx = diaryGenkoIndexAt(genkoLay, p.row, 0);
+    else idx = diaryGenkoIndexAt(genkoLay, p.row, genkoGm.cols + 1);
+    if (e.shiftKey) setGenkoSelection(anchor, idx); else area.setSelectionRange(idx, idx);
+    refreshGenkoSelection();
+  });
+  const onSelectionChange = () => { if (genkoLay && document.activeElement === area) refreshGenkoSelection(); };
+  document.addEventListener("selectionchange", onSelectionChange);
+  area.addEventListener("keyup", () => { if (genkoLay) refreshGenkoSelection(); });
+  area.addEventListener("focus", () => { if (genkoLay) refreshGenkoSelection(true); });
+  area.addEventListener("blur", () => { if (genkoLay) refreshGenkoSelection(true); });
+  // 사진을 종이 위에 떨어뜨리면 그 자리에 붙인다. 그림이 아닌 파일은 흘려보내 평소처럼 새 탭으로 열린다.
+  const hasImageFiles = (dt) => !!dt && [...(dt.items || [])].some(it => it.kind === "file" && /^image\//i.test(it.type || ""));
+  paper.addEventListener("dragover", (e) => {
+    if (!hasImageFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    paper.classList.add("is-drop");
+  });
+  paper.addEventListener("dragleave", (e) => { if (!paper.contains(e.relatedTarget)) paper.classList.remove("is-drop"); });
+  paper.addEventListener("drop", async (e) => {
+    paper.classList.remove("is-drop");
+    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    const images = files.filter(f => /^image\//i.test(f.type || ""));
+    if (!images.length) return;
+    e.preventDefault();
+    if (images.length === files.length) e.stopPropagation();
+    const rect = paper.getBoundingClientRect();
+    const at = { x:e.clientX - rect.left, y:e.clientY - rect.top };
+    const box = pictureBox.hidden ? null : pictureBoxRect();
+    const inBox = !!(box && at.x >= box.left && at.x <= box.left + box.width && at.y >= box.top && at.y <= box.top + box.height);
+    await addStickers(images, at, inBox);
+  });
+
   /* ----- 그림 칸 그리기 ----- */
   let drawMode = false;
   function setDrawMode(on){
@@ -4691,87 +4775,6 @@ function mountDiaryEditor(doc){
       const excerpt = card.querySelector(".diary-entry-card-excerpt"); if (excerpt) excerpt.textContent = entryExcerpt(entry);
     }
   };
-  area.addEventListener("input", () => {
-    const entry = ensureEntry(current);
-    const wasEmpty = diaryEntryIsEmpty(entry);
-    entry.text = area.value;
-    layout();
-    deleteBtn.disabled = diaryEntryIsEmpty(entry);
-    refreshCurrentLabel(wasEmpty);
-    touch();
-  });
-  area.addEventListener("pointerdown", () => selectSticker(""));
-  area.addEventListener("paste", async (event) => {
-    const imgs = [...((event.clipboardData && event.clipboardData.items) || [])]
-      .filter(it => it.kind === "file" && /^image\//i.test(it.type || ""))
-      .map(it => it.getAsFile()).filter(Boolean);
-    if (!imgs.length) return;
-    event.preventDefault();
-    await addStickers(imgs);
-  });
-  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
-  paper.addEventListener("pointerdown", (e) => { if (!e.target.closest(".diary-sticker")) selectSticker(""); });
-  genkoLayer.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || !genkoLay) return;
-    e.preventDefault();
-    const idx = genkoIndexFromPoint(e);
-    const wasFocused = document.activeElement === area;
-    const anchor = e.shiftKey && wasFocused ? (area.selectionDirection === "backward" ? area.selectionEnd : area.selectionStart) : idx;
-    area.focus({ preventScroll:true });
-    setGenkoSelection(anchor, idx);
-    refreshGenkoSelection(true);
-    const move = (ev) => { if (genkoLay){ setGenkoSelection(anchor, genkoIndexFromPoint(ev)); refreshGenkoSelection(); } };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  });
-  // 원고지는 줄이 칸으로 정해져 textarea 의 위·아래·처음·끝 이동이 맞지 않는다 — 칸 기준으로 직접 옮긴다.
-  area.addEventListener("keydown", (e) => {
-    if (!genkoLay || e.isComposing || e.altKey) return;
-    const key = e.key;
-    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(key)) return;
-    if ((key === "Home" || key === "End") && (e.ctrlKey || e.metaKey)) return;   // 글 처음·끝은 textarea 그대로
-    e.preventDefault();
-    const back = area.selectionDirection === "backward";
-    const head = back ? area.selectionStart : area.selectionEnd;
-    const anchor = back ? area.selectionEnd : area.selectionStart;
-    const p = genkoLay.pos[head] || { row:0, col:0 };
-    const lastRow = genkoLay.pos[genkoLay.pos.length - 1].row;
-    let idx;
-    if (key === "ArrowUp") idx = p.row === 0 ? 0 : diaryGenkoIndexAt(genkoLay, p.row - 1, p.col);
-    else if (key === "ArrowDown") idx = p.row >= lastRow ? area.value.length : diaryGenkoIndexAt(genkoLay, p.row + 1, p.col);
-    else if (key === "Home") idx = diaryGenkoIndexAt(genkoLay, p.row, 0);
-    else idx = diaryGenkoIndexAt(genkoLay, p.row, genkoGm.cols + 1);
-    if (e.shiftKey) setGenkoSelection(anchor, idx); else area.setSelectionRange(idx, idx);
-    refreshGenkoSelection();
-  });
-  const onSelectionChange = () => { if (genkoLay && document.activeElement === area) refreshGenkoSelection(); };
-  document.addEventListener("selectionchange", onSelectionChange);
-  area.addEventListener("keyup", () => { if (genkoLay) refreshGenkoSelection(); });
-  area.addEventListener("focus", () => { if (genkoLay) refreshGenkoSelection(true); });
-  area.addEventListener("blur", () => { if (genkoLay) refreshGenkoSelection(true); });
-  // 사진을 종이 위에 떨어뜨리면 그 자리에 붙인다. 그림이 아닌 파일은 흘려보내 평소처럼 새 탭으로 열린다.
-  const hasImageFiles = (dt) => !!dt && [...(dt.items || [])].some(it => it.kind === "file" && /^image\//i.test(it.type || ""));
-  paper.addEventListener("dragover", (e) => {
-    if (!hasImageFiles(e.dataTransfer)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-    paper.classList.add("is-drop");
-  });
-  paper.addEventListener("dragleave", (e) => { if (!paper.contains(e.relatedTarget)) paper.classList.remove("is-drop"); });
-  paper.addEventListener("drop", async (e) => {
-    paper.classList.remove("is-drop");
-    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
-    const images = files.filter(f => /^image\//i.test(f.type || ""));
-    if (!images.length) return;
-    e.preventDefault();
-    if (images.length === files.length) e.stopPropagation();
-    const rect = paper.getBoundingClientRect();
-    const at = { x:e.clientX - rect.left, y:e.clientY - rect.top };
-    const box = pictureBox.hidden ? null : pictureBoxRect();
-    const inBox = !!(box && at.x >= box.left && at.x <= box.left + box.width && at.y >= box.top && at.y <= box.top + box.height);
-    await addStickers(images, at, inBox);
-  });
   photoBtn.addEventListener("click", () => photoInput.click());
   pictureBtn.addEventListener("click", (e) => { e.stopPropagation(); pictureInput.click(); });
   pictureInput.addEventListener("change", async () => { const files = [...(pictureInput.files || [])]; pictureInput.value = ""; await addStickers(files, null, true); });
