@@ -737,7 +737,40 @@ function mountTripEditor(doc){
   pageHead.append(dayDate, dayTitle, deleteBtn);
 
   const els = tripBuildPaperEls(main);
-  main.append(pageHead, els.paper);
+
+  /* 장소 칸 — 종이 아래에 둔다. 스티커와 달리 지도·일정·경비가 함께 읽는 자료다(설계 2장). */
+  const spotsBox = document.createElement("section");
+  spotsBox.className = "trip-spots";
+  const spotsHead = document.createElement("div");
+  spotsHead.className = "trip-spots-head";
+  const spotsTitle = document.createElement("span");
+  spotsTitle.className = "trip-spots-title";
+  const addSpotBtn = document.createElement("button");
+  addSpotBtn.type = "button";
+  addSpotBtn.className = "diary-btn trip-add-spot";
+  spotsHead.append(spotsTitle, addSpotBtn);
+  const spotList = document.createElement("div");
+  spotList.className = "trip-spot-list";
+  const spotsEmpty = document.createElement("p");
+  spotsEmpty.className = "trip-spots-empty";
+  spotsBox.append(spotsHead, spotList, spotsEmpty);
+
+  /* 질문 칸 — 학습지 갈래에서만 뜬다(빈 낱말 = 감춤 규칙). */
+  const promptsBox = document.createElement("section");
+  promptsBox.className = "trip-prompts";
+  const promptsHead = document.createElement("div");
+  promptsHead.className = "trip-prompts-head";
+  const promptsTitle = document.createElement("span");
+  const addPromptBtn = document.createElement("button");
+  addPromptBtn.type = "button";
+  addPromptBtn.className = "diary-btn trip-add-prompt";
+  addPromptBtn.textContent = "＋";
+  promptsHead.append(promptsTitle, addPromptBtn);
+  const promptList = document.createElement("div");
+  promptList.className = "trip-prompt-list";
+  promptsBox.append(promptsHead, promptList);
+
+  main.append(pageHead, els.paper, promptsBox, spotsBox);
   body.append(rail, main);
   root.append(bar, body);
 
@@ -912,6 +945,209 @@ function mountTripEditor(doc){
     renderPage();
   }
 
+  /* ----- 장소 목록 ----- */
+
+  /* 고르개에는 이 갈래의 것만 담되, 지금 값이 목록에 없으면 맨 아래에 그 값을 덧붙인다.
+     갈래를 바꿨다고 값이 사라지면 무손실 규칙이 깨진다(설계 부록 B). */
+  function fillKindSelect(select, purpose, value){
+    select.innerHTML = "";
+    const blank = document.createElement("option");
+    blank.value = ""; blank.textContent = "—";
+    select.append(blank);
+    const shown = tripSpotKinds(purpose);
+    for (const kind of shown){
+      const option = document.createElement("option");
+      option.value = kind[0];
+      option.textContent = tripSpotKindName(purpose, kind[0]);
+      select.append(option);
+    }
+    if (value && !shown.some(k => k[0] === value)){
+      const option = document.createElement("option");
+      option.value = value;
+      // 다른 갈래에서 고른 값이면 그 이름을, 아예 모르는 글자면 글자 그대로 보여 준다.
+      option.textContent = tripSpotKindName(purpose, value) || value;
+      option.className = "trip-kind-foreign";
+      select.append(option);
+    }
+    select.value = value || "";
+  }
+
+  function renderSpots(){
+    const day = dayOf(current);
+    const purpose = tripPurpose(model.purpose);
+    spotsTitle.textContent = tripWord(purpose, "spotList");
+    addSpotBtn.textContent = tripWord(purpose, "spotAdd");
+    addSpotBtn.disabled = !day;
+    spotList.innerHTML = "";
+    const spots = day ? day.spots : [];
+    spotsEmpty.textContent = tripWord(purpose, "spotEmpty");
+    spotsEmpty.hidden = !!spots.length;
+    const showCost = tripHasWord(purpose, "cost");
+    const showFields = tripHasWord(purpose, "fields");
+
+    for (const spot of spots){
+      const row = document.createElement("div");
+      row.className = "trip-spot";
+      row.dataset.id = spot.id;
+
+      const line1 = document.createElement("div");
+      line1.className = "trip-spot-line";
+      const at = document.createElement("input");
+      at.type = "text"; at.className = "trip-spot-at"; at.maxLength = 5;
+      at.value = spot.at || ""; at.placeholder = "09:30";
+      at.title = tripWord(purpose, "spotAt");
+      const icon = document.createElement("span");
+      icon.className = "trip-spot-icon";
+      icon.innerHTML = spot.kind ? diaryArtSvg(tripSpotKindIcon(spot.kind), "trip-spot-art") : "";
+      const kindSelect = document.createElement("select");
+      kindSelect.className = "trip-select trip-spot-kind";
+      kindSelect.title = tripWord(purpose, "spotKindLabel");
+      fillKindSelect(kindSelect, purpose, spot.kind);
+      const name = document.createElement("input");
+      name.type = "text"; name.className = "trip-spot-name"; name.maxLength = 120;
+      name.value = spot.name || ""; name.placeholder = tripWord(purpose, "spotNameHint");
+      const removeBtn = diaryButton("", "이 줄 빼기", "diary-btn trip-spot-remove", "close");
+      line1.append(at, icon, kindSelect, name, removeBtn);
+
+      const line2 = document.createElement("div");
+      line2.className = "trip-spot-line";
+      const address = document.createElement("input");
+      address.type = "text"; address.className = "trip-spot-addr"; address.maxLength = 300;
+      address.value = spot.address || ""; address.placeholder = "주소";
+      const note = document.createElement("input");
+      note.type = "text"; note.className = "trip-spot-note"; note.maxLength = 2000;
+      note.value = spot.note || ""; note.placeholder = tripWord(purpose, "spotNote");
+      line2.append(address, note);
+      row.append(line1, line2);
+
+      if (showCost){
+        const line3 = document.createElement("div");
+        line3.className = "trip-spot-line";
+        const cost = document.createElement("input");
+        cost.type = "text"; cost.className = "trip-spot-cost"; cost.maxLength = 12; cost.inputMode = "numeric";
+        cost.value = spot.cost ? String(spot.cost.amount) : "";
+        cost.placeholder = tripWord(purpose, "cost");
+        cost.title = tripWord(purpose, "cost");
+        const unit = document.createElement("span");
+        unit.className = "trip-spot-cost-unit";
+        unit.textContent = (spot.cost && spot.cost.currency) || model.budget.currency;
+        cost.addEventListener("input", () => {
+          // Number("") 는 0 이다 — 빈 칸을 0원으로 적으면 안 된다.
+          const text = cost.value.replace(/[^0-9.]/g, "");
+          spot.cost = text ? tripNormalizeCost({ amount:Number(text), currency:unit.textContent }) : null;
+          touch();
+        });
+        line3.append(cost, unit);
+        row.append(line3);
+      }
+      if (showFields){
+        const box = document.createElement("div");
+        box.className = "trip-spot-fields";
+        const head = document.createElement("span");
+        head.className = "trip-spot-fields-head";
+        head.textContent = tripWord(purpose, "fields");
+        const addField = document.createElement("button");
+        addField.type = "button"; addField.className = "diary-btn trip-add-field"; addField.textContent = "＋";
+        addField.addEventListener("click", () => {
+          if (history) history.flush();
+          spot.fields = [...(spot.fields || []), { k:"", v:"" }];
+          renderSpots(); touch(true);
+        });
+        box.append(head, addField);
+        for (const [at2, field] of (spot.fields || []).entries()){
+          const k = document.createElement("input");
+          k.type = "text"; k.className = "trip-field-k"; k.maxLength = 40;
+          k.value = field.k; k.placeholder = "항목";
+          const v = document.createElement("input");
+          v.type = "text"; v.className = "trip-field-v"; v.maxLength = 300;
+          v.value = field.v; v.placeholder = "내용";
+          k.addEventListener("input", () => { spot.fields[at2].k = k.value; touch(); });
+          v.addEventListener("input", () => { spot.fields[at2].v = v.value; touch(); });
+          box.append(k, v);
+        }
+        row.append(box);
+      }
+
+      at.addEventListener("change", () => {
+        spot.at = tripNormalizeTime(at.value);
+        at.value = spot.at;
+        touch(true);
+      });
+      kindSelect.addEventListener("change", () => {
+        spot.kind = kindSelect.value;
+        icon.innerHTML = spot.kind ? diaryArtSvg(tripSpotKindIcon(spot.kind), "trip-spot-art") : "";
+        touch(true);
+      });
+      name.addEventListener("input", () => { spot.name = name.value; renderRail(); touch(); });
+      address.addEventListener("input", () => { spot.address = address.value; touch(); });
+      note.addEventListener("input", () => { spot.note = note.value; touch(); });
+      removeBtn.addEventListener("click", () => {
+        if (history) history.flush();
+        day.spots = day.spots.filter(s => s.id !== spot.id);
+        renderSpots(); renderRail(); touch(true);
+        setStatus(tripT("지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
+      });
+      spotList.append(row);
+    }
+  }
+
+  addSpotBtn.addEventListener("click", () => {
+    const day = dayOf(current);
+    if (!day) return;
+    if (history) history.flush();
+    if (day.spots.length >= TRIP_MAX_SPOTS){
+      setStatus(tripT("한 날에 넣을 수 있는 수를 넘었어요.")); return;
+    }
+    day.spots.push({ id:tripSpotId(), at:"", name:"", address:"", note:"", kind:"",
+      lat:null, lng:null, color:"", cost:null, photos:[], fields:[] });
+    renderSpots(); renderRail(); touch(true);
+    const last = spotList.querySelector(".trip-spot:last-child .trip-spot-name");
+    if (last) last.focus();
+  });
+
+  /* ----- 질문 칸(학습지) ----- */
+  function renderPrompts(){
+    const purpose = tripPurpose(model.purpose);
+    const show = tripHasWord(purpose, "prompts");
+    promptsBox.hidden = !show;
+    if (!show) return;
+    const day = dayOf(current);
+    promptsTitle.textContent = tripWord(purpose, "prompts");
+    addPromptBtn.disabled = !day;
+    promptList.innerHTML = "";
+    for (const [at, prompt] of ((day && day.prompts) || []).entries()){
+      const row = document.createElement("div");
+      row.className = "trip-prompt";
+      const q = document.createElement("input");
+      q.type = "text"; q.className = "trip-prompt-q"; q.maxLength = 300;
+      q.value = prompt.q; q.placeholder = tripWord(purpose, "prompts");
+      const a = document.createElement("input");
+      a.type = "text"; a.className = "trip-prompt-a"; a.maxLength = 2000;
+      a.value = prompt.a; a.placeholder = tripWord(purpose, "promptAnswer");
+      const remove = diaryButton("", "이 줄 빼기", "diary-btn trip-prompt-remove", "close");
+      q.addEventListener("input", () => { day.prompts[at].q = q.value; touch(); });
+      a.addEventListener("input", () => { day.prompts[at].a = a.value; touch(); });
+      remove.addEventListener("click", () => {
+        if (history) history.flush();
+        day.prompts.splice(at, 1);
+        renderPrompts(); touch(true);
+      });
+      row.append(q, a, remove);
+      promptList.append(row);
+    }
+  }
+  addPromptBtn.addEventListener("click", () => {
+    const day = dayOf(current);
+    if (!day) return;
+    if (history) history.flush();
+    if (!Array.isArray(day.prompts)) day.prompts = [];
+    if (day.prompts.length >= TRIP_MAX_PROMPTS){ setStatus(tripT("질문을 더 넣을 수 없어요.")); return; }
+    day.prompts.push({ q:"", a:"" });
+    renderPrompts(); touch(true);
+    const last = promptList.querySelector(".trip-prompt:last-child .trip-prompt-q");
+    if (last) last.focus();
+  });
+
   function renderPage(){
     const day = dayOf(current);
     deleteBtn.disabled = !day;
@@ -926,6 +1162,8 @@ function mountTripEditor(doc){
     renderStickers();
     layout();
     syncDrawBar();
+    renderPrompts();
+    renderSpots();
   }
 
   addDayBtn.addEventListener("click", () => {

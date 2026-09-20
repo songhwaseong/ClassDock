@@ -101,6 +101,76 @@ test("저장하면 ZIP 으로 쓰이고 다시 열어도 그대로다", async ({
   expect(round.same).toBe(true);
 });
 
+test("장소를 넣고 고치면 그 날에 담기고, 여정 띠 요약도 따라간다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await expect(page.locator(".trip-spots-empty")).toHaveText("들른 곳이 아직 없어요");
+  await expect(page.locator(".trip-add-spot")).toHaveText("＋ 들른 곳");
+
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot-name").fill("성산일출봉");
+  await page.locator(".trip-spot-at").fill("9:30");
+  await page.locator(".trip-spot-at").blur();
+  await page.locator(".trip-spot-kind").selectOption("sight");
+  await page.locator(".trip-spot-addr").fill("제주 서귀포시");
+  await page.locator(".trip-spot-note").fill("바람이 셌다");
+  await expect(page.locator(".trip-spot-icon svg")).toBeVisible();
+
+  const model = await modelOf(page);
+  const spot = model.days[0].spots[0];
+  expect([spot.name, spot.at, spot.kind, spot.address, spot.note])
+    .toEqual(["성산일출봉", "09:30", "sight", "제주 서귀포시", "바람이 셌다"]);
+  await expect(page.locator(".trip-day-chip-sub")).toHaveText("들른 곳 1");
+});
+
+test("갈래마다 보이는 칸이 다르다 — 경비는 여행만, 조사 항목은 답사만, 질문은 학습지만", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-spot").click();
+  await expect(page.locator(".trip-spot-cost")).toBeVisible();
+  await expect(page.locator(".trip-spot-fields")).toHaveCount(0);
+  await expect(page.locator(".trip-prompts")).toBeHidden();
+
+  await page.locator(".trip-spot-cost").fill("5000");
+  await page.locator(".trip-purpose-select").selectOption("survey");
+  await expect(page.locator(".trip-spot-cost")).toHaveCount(0, { timeout:3000 });
+  await expect(page.locator(".trip-spot-fields")).toBeVisible();
+  await expect(page.locator(".trip-spots-title")).toHaveText("조사 지점 목록");
+
+  await page.locator(".trip-purpose-select").selectOption("field");
+  await expect(page.locator(".trip-prompts")).toBeVisible();
+  await expect(page.locator(".trip-spot-fields")).toHaveCount(0);
+
+  // 갈래를 오가도 여행에서 적은 경비는 그대로 남아 있다(무손실)
+  const model = await modelOf(page);
+  expect(model.days[0].spots[0].cost).toEqual({ amount:5000, currency:"KRW" });
+});
+
+test("다른 갈래에서 고른 종류는 고르개에서 사라지지 않고 맨 아래에 남는다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot-kind").selectOption("stay");        // '잠자리'는 여행 갈래에만 있다
+
+  await page.locator(".trip-purpose-select").selectOption("survey");
+  const select = page.locator(".trip-spot-kind");
+  await expect(select).toHaveValue("stay", { timeout:3000 });
+  await expect(select.locator("option.trip-kind-foreign")).toHaveText("잠자리");
+  const model = await modelOf(page);
+  expect(model.days[0].spots[0].kind).toBe("stay");
+});
+
+test("학습지 질문을 넣고 답을 적으면 그 날에 담긴다", async ({ page }) => {
+  await boot(page, "field");
+  await page.locator(".trip-add-day").click();
+  await expect(page.locator(".trip-prompts")).toBeVisible();
+  await page.locator(".trip-add-prompt").click();
+  await page.locator(".trip-prompt-q").fill("가장 기억에 남는 것은?");
+  await page.locator(".trip-prompt-a").fill("바다");
+  const model = await modelOf(page);
+  expect(model.days[0].prompts).toEqual([{ q:"가장 기억에 남는 것은?", a:"바다" }]);
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();
