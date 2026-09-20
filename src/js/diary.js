@@ -1877,6 +1877,1074 @@ function diaryColorInput(className, onPick){
   return input;
 }
 
+/* ===== 종이 한 장(일기장·여행일지 공용) =====
+   els = 이미 만들어 둔 층 14개 · ctx = 바깥이 내주는 것 23개 · 돌려주는 것 27개.
+   DOM 뼈대를 만드는 일은 부르는 쪽이 하고 여기는 '행동'만 붙인다 — 여행일지(.trip)가 같은 종이를 쓰되
+   달력이 아니라 여정 띠를 두르기 때문이다. 바뀌는 값(날짜·되돌리기·펜)은 ctx 의 창구로 그때그때 읽는다. */
+function mountDiaryPaper(els, paperEnv){
+  const { paper, area, bgLayer, veilLayer, genkoLayer, genkoCaret, genkoGrid, stickerLayer, artBgLayer, drawLayer, drawCanvas, pictureBox, pictureHint, main } = els;
+  const { model, assets, assetUrl, ensureEntry, entryOf, onDrawModeChange, onEntryChange, onStickerSelect, openStickerColorPicker, refreshCurrentLabel, refreshDirty, renderCalendar, repaintCardPapers, scheduleRecovery, setStatus, syncDrawBar, syncPanel, touch, translateUi } = paperEnv;
+  /* ----- 종이 ----- */
+  // 고른 스티커는 종이의 것이다. 바깥은 selectionIds()·clearSelection() 으로만 본다.
+  let selection = [];
+  let paperWidth = 0;
+  function applyStyle(){
+    const entry = entryOf(paperEnv.current());
+    const style = diaryEffectiveStyle(model, entry);
+    const m = diaryLineMetrics(style, paperWidth || paper.clientWidth);
+    const bgc = diaryLineBackground(style);
+    Object.assign(area.style, {
+      backgroundImage:bgc.image, backgroundSize:bgc.size, backgroundPosition:bgc.position, backgroundRepeat:bgc.repeat,
+      lineHeight:m.gap + "px", fontSize:m.fontSize + "px", fontFamily:DIARY_FONT_STACKS[style.font] || "",
+      paddingTop:m.padTop + "px", paddingBottom:m.gap + "px", paddingLeft:m.padLeft + "px", paddingRight:m.padRight + "px"
+    });
+    paper.dataset.lines = m.lines;
+    paper.dataset.font = style.font;
+    if (DIARY_HAND_FONTS[style.font]){
+      const want = style.font;
+      diaryEnsureFont(want).then(ok => {
+        // 글꼴이 바뀌면 줄바꿈 자리가 달라진다 — 다 읽은 뒤 종이 높이를 다시 잰다.
+        if (ok){ if (paper.dataset.font === want) layout(); }
+        else setStatus(diaryT("손글씨 글꼴을 불러오지 못했어요."));
+      });
+    }
+    const genko = diaryUsesGenko(style);
+    paper.classList.toggle("is-genko", genko);
+    area.classList.toggle("is-genko-input", genko);
+    genkoLayer.hidden = !genko;
+    genkoLayer.style.fontFamily = DIARY_FONT_STACKS[style.font] || "";
+    if (!genko){ genkoLay = null; area.style.left = ""; area.style.top = ""; }
+    placePictureBox(m);
+    // 배경 효과는 종이에도 표시를 남긴다 — 어두운 효과가 글자·줄 색을 갈아끼우려면 종이 쪽 선택자가 필요하다.
+    paper.dataset.paper = diaryPaintPaper(artBgLayer, style).kind;
+    const url = assetUrl(style.bg);
+    bgLayer.style.backgroundImage = url ? `url("${url}")` : "none";
+    bgLayer.dataset.fit = style.fit;
+    bgLayer.hidden = !url;
+    veilLayer.hidden = !url;
+    veilLayer.style.opacity = String(style.veil);
+    repaintCardPapers();
+    syncPanel();
+  }
+  // 종이 높이 = 글 높이·스티커 아래 끝·최소 한 쪽 중 큰 값(줄 간격의 배수로 맞춰 마지막 줄이 잘리지 않게).
+  function layout(){
+    const width = paper.clientWidth;
+    if (!width) return;
+    paperWidth = width;
+    measureTextStickers(width);            // 글상자 높이를 먼저 채워야 아래의 stickerBottom 이 맞는다
+    const effective = diaryEffectiveStyle(model, entryOf(paperEnv.current()));
+    if (diaryUsesGenko(effective)){ layoutGenko(width, effective); positionStickers(); return; }
+    const m = diaryLineMetrics(effective, width);
+    area.style.paddingTop = m.padTop + "px";
+    placePictureBox(m);
+    const top = main.scrollTop;
+    area.style.height = "0px";
+    const textH = area.scrollHeight;
+    let stickerBottom = 0;
+    const entry = entryOf(paperEnv.current());
+    for (const s of (entry ? entry.stickers : [])) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(s) * width);
+    const minH = m.gap * 24;
+    const height = Math.ceil(Math.max(textH, stickerBottom + m.gap * 2, minH) / m.gap) * m.gap;
+    area.style.height = height + "px";
+    main.scrollTop = top;
+    positionStickers();
+  }
+  /* 글상자 높이는 글에서 나온다 — 파일에 담지 않고 그릴 때마다 잰다.
+     글자 크기가 종이 폭에 대한 비율이라 어느 폭에서도 줄바꿈 자리가 같고, 잰 높이를 ar 에 채워 두면
+     종이 길이(layout)·인쇄가 사진과 똑같은 식으로 잰다. 재기는 종이 길이를 셈하기 전에 끝나야 한다. */
+  function measureTextStickers(w){
+    const entry = entryOf(paperEnv.current());
+    if (!w || !entry) return;
+    for (const node of stickerLayer.children){
+      if (node.dataset.kind !== "text") continue;
+      const s = entry.stickers.find(item => item.id === node.dataset.id);
+      const body = s && node.querySelector(".diary-sticker-body");
+      if (!body) continue;
+      node.style.width = (s.w * w) + "px";
+      node.style.height = "auto";
+      body.style.fontSize = (s.size * w) + "px";
+      body.style.fontFamily = DIARY_FONT_STACKS[s.font] || "";
+      body.style.color = s.color || DIARY_TEXT_DEFAULT_COLOR;
+      body.style.textAlign = s.align || "left";
+      const h = node.offsetHeight;
+      if (h > 0) s.ar = h / Math.max(1, s.w * w);
+    }
+  }
+  function positionStickers(){
+    const w = paperWidth || paper.clientWidth;
+    measureTextStickers(w);
+    for (const node of stickerLayer.children){
+      const entry = entryOf(paperEnv.current());
+      const s = entry && entry.stickers.find(item => item.id === node.dataset.id);
+      if (!s) continue;
+      node.style.left = (s.x * w) + "px";
+      node.style.top = (s.y * w) + "px";
+      node.style.width = (s.w * w) + "px";
+      // 글상자만 높이를 글에 맡긴다(measureTextStickers 가 이미 auto 로 두고 잰 뒤다).
+      if (node.dataset.kind !== "text") node.style.height = (s.w * s.ar * w) + "px";
+      node.style.transform = s.rot ? `rotate(${s.rot}deg)` : "";
+      const body = node.querySelector(".diary-sticker-body");
+      if (body && node.dataset.kind !== "text") body.style.transform = s.flip ? "scaleX(-1)" : "";
+    }
+    // 사진이나 그림이 있으면 안내 문장만 감추고 가운데 아이콘은 남긴다.
+    // 오른쪽 위에 별도 연필 단추를 두지 않으므로, 이 아이콘이 다시 그리기로 들어가는 길이기도 하다.
+    if (!pictureBox.hidden){
+      const entry = entryOf(paperEnv.current());
+      const box = pictureBoxRect();
+      const hasContent = !!(entry && entry.drawing && entry.drawing.length) || !!(box && entry && entry.stickers.some(st => {
+        const cx = (st.x + st.w / 2) * w, cy = (st.y + st.w * st.ar / 2) * w;
+        return cx >= box.left && cx <= box.left + box.width && cy >= box.top && cy <= box.top + box.height;
+      }));
+      pictureHint.hidden = drawMode;
+      pictureHint.classList.toggle("is-compact", hasContent);
+    }
+  }
+  let genkoLay = null, genkoGm = null;
+  function layoutGenko(width, style){
+    placePictureBox(diaryLineMetrics(style, width));
+    const gm = diaryGenkoMetrics(style, width);
+    const lay = diaryGenkoLayout(area.value, gm.cols);
+    const entry = entryOf(paperEnv.current());
+    let stickerBottom = 0;
+    for (const st of (entry ? entry.stickers : [])) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(st) * width);
+    // 한 쪽(줄 간격 26줄쯤)을 채우되, 그림일기는 그림 칸이 차지한 만큼 줄 수를 줄인다.
+    const minRows = Math.max(4, Math.ceil((gm.pageH - gm.padTop) / gm.pitch), Math.ceil((stickerBottom - gm.padTop) / gm.pitch) + 1);
+    const focused = document.activeElement === area;
+    const rows = diaryRenderGenko(genkoGrid, lay, gm, { minRows, selStart:focused ? area.selectionStart : 0, selEnd:focused ? area.selectionEnd : 0 });
+    genkoLayer.style.height = (gm.padTop + rows * gm.pitch + gm.cell) + "px";
+    genkoLay = lay; genkoGm = gm;
+    placeGenkoCaret();
+  }
+  function placeGenkoCaret(){
+    if (!genkoLay) return;
+    const head = area.selectionDirection === "backward" ? area.selectionStart : area.selectionEnd;
+    const p = genkoLay.pos[Math.max(0, Math.min(genkoLay.pos.length - 1, head))] || { row:0, col:0 };
+    const left = genkoGm.offsetX + p.col * genkoGm.cell, top = genkoGm.padTop + p.row * genkoGm.pitch;
+    genkoCaret.style.left = left + "px";
+    genkoCaret.style.top = (top + 3) + "px";
+    genkoCaret.style.height = (genkoGm.cell - 6) + "px";
+    // IME 후보 창이 커서 옆에 뜨도록 보이지 않는 입력칸도 그 자리로 옮긴다.
+    area.style.left = left + "px";
+    area.style.top = top + "px";
+    genkoCaret.classList.toggle("is-on", document.activeElement === area && area.selectionStart === area.selectionEnd);
+  }
+  let genkoSelKey = "";
+  function refreshGenkoSelection(force){
+    if (!genkoLay) return;
+    const key = document.activeElement === area ? area.selectionStart + ":" + area.selectionEnd + ":" + area.selectionDirection : "blur";
+    if (!force && key === genkoSelKey) return;
+    genkoSelKey = key;
+    layoutGenko(paperWidth || paper.clientWidth, diaryEffectiveStyle(model, entryOf(paperEnv.current())));
+  }
+  function setGenkoSelection(anchor, head){
+    if (head >= anchor) area.setSelectionRange(anchor, head, "forward");
+    else area.setSelectionRange(head, anchor, "backward");
+  }
+  function genkoIndexFromPoint(ev){
+    const r = genkoLayer.getBoundingClientRect();
+    const x = ev.clientX - r.left, y = ev.clientY - r.top;
+    const row = Math.max(0, Math.floor((y - genkoGm.padTop + genkoGm.rowGap / 2) / genkoGm.pitch));
+    return diaryGenkoIndexAt(genkoLay, row, Math.max(0, (x - genkoGm.offsetX) / genkoGm.cell));
+  }
+  function pictureBoxRect(){
+    const m = diaryLineMetrics(diaryEffectiveStyle(model, entryOf(paperEnv.current())), paperWidth || paper.clientWidth);
+    if (!m.box) return null;
+    const w = paperWidth || paper.clientWidth;
+    return { left:m.box.left, top:m.box.top, width:Math.max(40, w - m.box.left - m.box.right), height:m.box.height };
+  }
+  function placePictureBox(m){
+    pictureBox.hidden = !m.box;
+    drawLayer.hidden = !m.box;
+    if (!m.box){ if (drawMode) setDrawMode(false); return; }
+    const w = paperWidth || paper.clientWidth;
+    const geo = { left:m.box.left + "px", top:m.box.top + "px",
+      width:Math.max(40, w - m.box.left - m.box.right) + "px", height:m.box.height + "px" };
+    Object.assign(pictureBox.style, geo);
+    Object.assign(drawLayer.style, geo);
+    redrawDrawing();
+  }
+
+  /* ----- 본문 입력·떨어뜨리기 -----
+     종이의 textarea·종이 판을 듣는 자리라 종이 구역 안에 둔다. 바깥 창·바에는 되부름으로만 알린다. */
+  area.addEventListener("input", () => {
+    const entry = ensureEntry(paperEnv.current());
+    const wasEmpty = diaryEntryIsEmpty(entry);
+    entry.text = area.value;
+    layout();
+    onEntryChange();
+    refreshCurrentLabel(wasEmpty);
+    touch();
+  });
+  area.addEventListener("pointerdown", () => selectSticker(""));
+  area.addEventListener("paste", async (event) => {
+    const imgs = [...((event.clipboardData && event.clipboardData.items) || [])]
+      .filter(it => it.kind === "file" && /^image\//i.test(it.type || ""))
+      .map(it => it.getAsFile()).filter(Boolean);
+    if (!imgs.length) return;
+    event.preventDefault();
+    await addStickers(imgs);
+  });
+  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
+  paper.addEventListener("pointerdown", (e) => { if (!e.target.closest(".diary-sticker")) selectSticker(""); });
+  genkoLayer.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !genkoLay) return;
+    e.preventDefault();
+    const idx = genkoIndexFromPoint(e);
+    const wasFocused = document.activeElement === area;
+    const anchor = e.shiftKey && wasFocused ? (area.selectionDirection === "backward" ? area.selectionEnd : area.selectionStart) : idx;
+    area.focus({ preventScroll:true });
+    setGenkoSelection(anchor, idx);
+    refreshGenkoSelection(true);
+    const move = (ev) => { if (genkoLay){ setGenkoSelection(anchor, genkoIndexFromPoint(ev)); refreshGenkoSelection(); } };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+  // 원고지는 줄이 칸으로 정해져 textarea 의 위·아래·처음·끝 이동이 맞지 않는다 — 칸 기준으로 직접 옮긴다.
+  area.addEventListener("keydown", (e) => {
+    if (!genkoLay || e.isComposing || e.altKey) return;
+    const key = e.key;
+    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(key)) return;
+    if ((key === "Home" || key === "End") && (e.ctrlKey || e.metaKey)) return;   // 글 처음·끝은 textarea 그대로
+    e.preventDefault();
+    const back = area.selectionDirection === "backward";
+    const head = back ? area.selectionStart : area.selectionEnd;
+    const anchor = back ? area.selectionEnd : area.selectionStart;
+    const p = genkoLay.pos[head] || { row:0, col:0 };
+    const lastRow = genkoLay.pos[genkoLay.pos.length - 1].row;
+    let idx;
+    if (key === "ArrowUp") idx = p.row === 0 ? 0 : diaryGenkoIndexAt(genkoLay, p.row - 1, p.col);
+    else if (key === "ArrowDown") idx = p.row >= lastRow ? area.value.length : diaryGenkoIndexAt(genkoLay, p.row + 1, p.col);
+    else if (key === "Home") idx = diaryGenkoIndexAt(genkoLay, p.row, 0);
+    else idx = diaryGenkoIndexAt(genkoLay, p.row, genkoGm.cols + 1);
+    if (e.shiftKey) setGenkoSelection(anchor, idx); else area.setSelectionRange(idx, idx);
+    refreshGenkoSelection();
+  });
+  const onSelectionChange = () => { if (genkoLay && document.activeElement === area) refreshGenkoSelection(); };
+  document.addEventListener("selectionchange", onSelectionChange);
+  area.addEventListener("keyup", () => { if (genkoLay) refreshGenkoSelection(); });
+  area.addEventListener("focus", () => { if (genkoLay) refreshGenkoSelection(true); });
+  area.addEventListener("blur", () => { if (genkoLay) refreshGenkoSelection(true); });
+  // 사진을 종이 위에 떨어뜨리면 그 자리에 붙인다. 그림이 아닌 파일은 흘려보내 평소처럼 새 탭으로 열린다.
+  const hasImageFiles = (dt) => !!dt && [...(dt.items || [])].some(it => it.kind === "file" && /^image\//i.test(it.type || ""));
+  paper.addEventListener("dragover", (e) => {
+    if (!hasImageFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    paper.classList.add("is-drop");
+  });
+  paper.addEventListener("dragleave", (e) => { if (!paper.contains(e.relatedTarget)) paper.classList.remove("is-drop"); });
+  paper.addEventListener("drop", async (e) => {
+    paper.classList.remove("is-drop");
+    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+    const images = files.filter(f => /^image\//i.test(f.type || ""));
+    if (!images.length) return;
+    e.preventDefault();
+    if (images.length === files.length) e.stopPropagation();
+    const rect = paper.getBoundingClientRect();
+    const at = { x:e.clientX - rect.left, y:e.clientY - rect.top };
+    const box = pictureBox.hidden ? null : pictureBoxRect();
+    const inBox = !!(box && at.x >= box.left && at.x <= box.left + box.width && at.y >= box.top && at.y <= box.top + box.height);
+    await addStickers(images, at, inBox);
+  });
+
+  /* ----- 그림 칸 그리기 ----- */
+  let drawMode = false;
+  function setDrawMode(on){
+    drawMode = !!on && !pictureBox.hidden;
+    paper.classList.toggle("is-drawing", drawMode);
+    onDrawModeChange(drawMode);
+    if (drawMode){ selectSticker(""); syncDrawBar(); }
+    positionStickers();
+  }
+  function redrawDrawing(){
+    if (drawLayer.hidden) return;
+    const bw = drawLayer.clientWidth, bh = drawLayer.clientHeight;
+    if (!bw || !bh) return;
+    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const cw = Math.round(bw * dpr), ch = Math.round(bh * dpr);
+    if (drawCanvas.width !== cw || drawCanvas.height !== ch){ drawCanvas.width = cw; drawCanvas.height = ch; }
+    const ctx = drawCanvas.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const entry = entryOf(paperEnv.current());
+    diaryDrawStrokes(ctx, entry ? entry.drawing : [], bw);
+  }
+  drawCanvas.addEventListener("pointerdown", (e) => {
+    if (!drawMode || e.button !== 0) return;
+    e.preventDefault();
+    const rect = drawCanvas.getBoundingClientRect();
+    const bw = rect.width || 1;
+    const size = (DIARY_PEN_SIZES.find(x => x[0] === paperEnv.penSize()) || DIARY_PEN_SIZES[1])[1];
+    const stroke = { c:paperEnv.penColor(), w:paperEnv.eraser() ? size * 2.5 : size, p:[] };
+    if (paperEnv.eraser()) stroke.e = true;
+    const ctx = drawCanvas.getContext("2d");
+    const add = (ev) => {
+      if (stroke.p.length >= DIARY_MAX_STROKE_POINTS * 2) return;
+      const x = (ev.clientX - rect.left) / bw, y = (ev.clientY - rect.top) / bw;
+      const n = stroke.p.length;
+      if (n && Math.abs(stroke.p[n - 2] - x) < 0.0015 && Math.abs(stroke.p[n - 1] - y) < 0.0015) return;
+      stroke.p.push(Math.round(x * 10000) / 10000, Math.round(y * 10000) / 10000);
+      // 그리는 동안은 새 토막만 바로 그린다(모든 획을 매번 다시 그리면 획이 많을 때 느려진다).
+      const q = stroke.p, m = q.length;
+      ctx.save();
+      ctx.globalCompositeOperation = stroke.e ? "destination-out" : "source-over";
+      ctx.strokeStyle = ctx.fillStyle = stroke.c;
+      ctx.lineWidth = Math.max(0.5, stroke.w * bw);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      if (m >= 4){ ctx.moveTo(q[m - 4] * bw, q[m - 3] * bw); ctx.lineTo(q[m - 2] * bw, q[m - 1] * bw); ctx.stroke(); }
+      else { ctx.arc(q[0] * bw, q[1] * bw, ctx.lineWidth / 2, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    };
+    add(e);
+    try { drawCanvas.setPointerCapture(e.pointerId); } catch(_){}
+    const move = (ev) => {
+      const list = typeof ev.getCoalescedEvents === "function" ? ev.getCoalescedEvents() : [];
+      if (list.length) list.forEach(add); else add(ev);
+    };
+    const up = () => {
+      drawCanvas.removeEventListener("pointermove", move);
+      drawCanvas.removeEventListener("pointerup", up);
+      drawCanvas.removeEventListener("pointercancel", up);
+      if (!stroke.p.length) return;
+      if (paperEnv.history()) paperEnv.history().flush();
+      const entry = ensureEntry(paperEnv.current());
+      if (!Array.isArray(entry.drawing)) entry.drawing = [];
+      if (entry.drawing.length >= DIARY_MAX_STROKES){ setStatus(diaryT("그림이 너무 많아 더 그릴 수 없어요.")); redrawDrawing(); return; }
+      entry.drawing.push(stroke);
+      redrawDrawing();
+      onEntryChange();
+      renderCalendar();
+      syncDrawBar();
+      touch(true);
+    };
+    drawCanvas.addEventListener("pointermove", move);
+    drawCanvas.addEventListener("pointerup", up);
+    drawCanvas.addEventListener("pointercancel", up);
+  });
+  function renderStickers(){
+    const entry = entryOf(paperEnv.current());
+    const list = entry ? entry.stickers : [];
+    selection = selection.filter(id => list.some(s => s.id === id));
+    // 다시 그리면 스티커 요소가 새로 생겨 포커스가 빠진다 — 같은 스티커에 되돌려야 방향키·단축키가 이어진다.
+    const focusedId = document.activeElement && stickerLayer.contains(document.activeElement)
+      ? document.activeElement.dataset.id : "";
+    // 글상자에 손글씨 글꼴을 골랐으면 미리 읽어 둔다 — 다 읽으면 줄바꿈 자리가 달라지므로 다시 재야 한다.
+    const handFonts = [...new Set(list.filter(s => diaryStickerKind(s) === "text").map(s => s.font))].filter(f => DIARY_HAND_FONTS[f]);
+    if (handFonts.length) Promise.all(handFonts.map(diaryEnsureFont)).then(() => { if (stickerLayer.isConnected) layout(); });
+    stickerLayer.replaceChildren(...list.map(s => {
+      const kind = diaryStickerKind(s);
+      const node = document.createElement("div");
+      node.className = "diary-sticker diary-sticker-is-" + kind + (selection.includes(s.id) ? " is-selected" : "");
+      node.dataset.id = s.id;
+      node.dataset.kind = kind;
+      node.tabIndex = 0;
+      node.setAttribute("role", kind === "text" ? "group" : "img");
+      node.setAttribute("aria-label", kind === "text"
+        ? "글상자 — 두 번 누르면 고쳐 쓰기, 끌어서 옮기기, 모서리로 너비, 우클릭으로 글자 크기·맞춤"
+        : kind === "art"
+          ? "붙인 스티커 — 끌어서 옮기기, 모서리로 크기, 위 손잡이로 돌리기, 우클릭으로 순서·색"
+          : "붙인 사진 — 끌어서 옮기기, 두 번 누르면 크게 보기, Alt+누르기로 겹친 것 고르기, 우클릭으로 정렬·순서");
+      let body;
+      if (kind === "art"){
+        body = document.createElement("span");
+        body.className = "diary-sticker-body diary-sticker-art";
+        body.innerHTML = diaryArtSvg(s.art);                       // 앱이 만든 고정 SVG 표에서만 나온다(사용자 입력 아님)
+        body.style.color = s.color || DIARY_ART_DEFAULT_COLOR;
+      } else if (kind === "text"){
+        body = document.createElement("div");
+        body.className = "diary-sticker-body diary-sticker-text";
+        body.textContent = s.text;                                  // 글은 반드시 textContent 로(HTML 로 새지 않게)
+      } else {
+        body = document.createElement("img");
+        body.className = "diary-sticker-body";
+        body.src = assetUrl(s.asset);
+        body.alt = "";
+        body.draggable = false;
+      }
+      if (kind !== "photo") body.style.opacity = String(s.opacity == null ? 1 : s.opacity);
+      const handle = document.createElement("span");
+      handle.className = "diary-sticker-handle";
+      handle.title = kind === "text" ? "너비 바꾸기" : "크기 바꾸기";
+      const rotor = document.createElement("span");
+      rotor.className = "diary-sticker-rotate";
+      rotor.title = "돌리기 (Shift: 15°씩)";
+      const remove = diaryButton("", kind === "photo" ? "사진 떼기" : "스티커 떼기", "diary-sticker-remove", "close");
+      remove.addEventListener("pointerdown", e => e.stopPropagation());
+      remove.addEventListener("click", (e) => { e.stopPropagation(); removeSticker(s.id); });
+      const more = diaryButton("", "순서·돌리기·뒤집기", "diary-sticker-more", "more");
+      more.addEventListener("pointerdown", e => e.stopPropagation());
+      more.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const r = more.getBoundingClientRect();
+        openStickerMenu(s.id, r.left, r.bottom + 4);
+      });
+      node.append(body, handle, rotor, remove, more);
+      if (kind === "text"){
+        node.addEventListener("dblclick", (e) => { e.preventDefault(); e.stopPropagation(); editTextSticker(s.id); });
+        node.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" || e.target !== node) return;
+          e.preventDefault(); e.stopPropagation(); editTextSticker(s.id);
+        });
+      }
+      if (kind === "photo"){
+        // 두 번 누르면 크게 보기 — 종이 위에서는 작게 붙여 두고도 그 날 사진을 큰 창에서 넘겨 볼 수 있다.
+        node.addEventListener("dblclick", (e) => { e.preventDefault(); e.stopPropagation(); openPhotoViewer(s.id); });
+        node.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" || e.target !== node) return;
+          e.preventDefault(); e.stopPropagation(); openPhotoViewer(s.id);
+        });
+      }
+      node.addEventListener("pointerdown", (e) => {
+        if (node.classList.contains("is-editing")) return;       // 고쳐 쓰는 중엔 끌기가 글칸 누르기를 가로채면 안 된다
+        // Alt+누르기는 끌지 않고 '아래 것'으로 넘어간다 — 겹쳐 놓은 사진 속에서 가린 것을 골라내는 길.
+        if (e.button === 0 && e.altKey && e.target !== handle && e.target !== rotor){
+          e.preventDefault(); e.stopPropagation();
+          cycleStickerAt(e);
+          return;
+        }
+        startStickerDrag(e, s, node, e.target === handle ? "resize" : e.target === rotor ? "rotate" : "move");
+      });
+      node.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!selection.includes(s.id)) selectSticker(s.id);          // 고른 무리 안이면 무리 전체에 대한 메뉴
+        openStickerMenu(s.id, e.clientX, e.clientY);
+      });
+      translateUi(node);
+      node.addEventListener("focus", () => { if (!selection.includes(s.id)) selectSticker(s.id); });
+      return node;
+    }));
+    syncSelection();
+    positionStickers();
+    const refocus = focusedId && stickerLayer.querySelector(`[data-id="${focusedId}"]`);
+    if (refocus) refocus.focus({ preventScroll:true });
+  }
+  function syncSelection(){
+    for (const node of stickerLayer.children) node.classList.toggle("is-selected", selection.includes(node.dataset.id));
+    stickerLayer.classList.toggle("is-multi", selection.length > 1);
+    onStickerSelect();                                // 고른 것의 색·투명도를 스티커 창에 비춘다
+  }
+  function setSelection(ids){
+    const before = selection.join("|");
+    selection = [...new Set(ids.filter(Boolean))];
+    if (selection.join("|") === before) return;
+    syncSelection();
+    if (selection.length > 1) setStatus(diaryTf("스티커 {n}개를 골랐어요 — 함께 옮기고 돌리고 뗄 수 있어요", { n:selection.length }));
+  }
+  function selectSticker(id){ setSelection(id ? [id] : []); }
+  function toggleSticker(id){
+    setSelection(selection.includes(id) ? selection.filter(x => x !== id) : [...selection, id]);
+  }
+  const selectedStickers = () => {
+    const entry = entryOf(paperEnv.current());
+    return entry ? entry.stickers.filter(s => selection.includes(s.id)) : [];
+  };
+  const clampStickerPos = (s) => {
+    s.x = Math.max(-s.w * 0.6, Math.min(1 - s.w * 0.4, s.x));
+    s.y = Math.max(-0.02, s.y);
+  };
+  /* 누른 자리에 걸친 스티커들 — 위에 있는 것부터. 돌린 것은 돌리기 전 상자로 잰다(네모 고르기와 같은 규칙).
+     배열 순서가 쌓는 순서이므로 뒤에서부터 보면 위에 있는 것이 먼저다. */
+  function stickersAtPoint(px, py){
+    const entry = entryOf(paperEnv.current());
+    if (!entry) return [];
+    return entry.stickers.filter(s => px >= s.x && px <= s.x + s.w && py >= s.y && py <= s.y + s.w * s.ar).reverse();
+  }
+  /* Alt+누르기 = 겹친 자리에서 아래 것으로 한 칸씩 내려가며 고르기(맨 아래 다음은 다시 맨 위).
+     사진을 여러 장 깔면 겹치는 일이 흔한데, 위 스티커가 누르기를 다 먹어서 가려진 것은 고를 길이 없었다.
+     '한 칸 뒤로' 메뉴는 이미 있지만 그건 가린 것을 먼저 골라야 쓸 수 있다. */
+  function cycleStickerAt(ev){
+    const w = paperWidth || paper.clientWidth || 1;
+    const rect = paper.getBoundingClientRect();
+    const hits = stickersAtPoint((ev.clientX - rect.left) / w, (ev.clientY - rect.top) / w);
+    if (!hits.length) return;
+    const at = hits.findIndex(s => selection.includes(s.id));
+    const next = hits[(at + 1) % hits.length];                 // 고른 것이 없으면(-1) 맨 위부터
+    selectSticker(next.id);
+    const node = stickerLayer.querySelector(`[data-id="${next.id}"]`);
+    if (node) node.focus({ preventScroll:true });
+    setStatus(hits.length > 1
+      ? diaryTf("겹친 것 가운데 {i}/{n} 을 골랐어요 — Alt+누르기로 아래 것을 골라요.", { i:hits.indexOf(next) + 1, n:hits.length })
+      : diaryT("스티커 하나를 골랐어요."));
+  }
+  /* 사진을 두 번 누르면 크게 본다 — 앱 공용 그림 창(image-lightbox.js)을 그대로 빌린다.
+     그 날 사진을 모두 넘겨 주므로 ←→ 로 넘겨 볼 수 있고, 저장·메모 보내기도 딸려 온다. */
+  function openPhotoViewer(id){
+    const entry = entryOf(paperEnv.current());
+    if (!entry || typeof window.openImageLightbox !== "function") return false;
+    const photos = entry.stickers.filter(s => diaryStickerKind(s) === "photo" && assetUrl(s.asset));
+    if (!photos.length) return false;
+    const at = Math.max(0, photos.findIndex(s => s.id === id));
+    const label = diaryUiDateLabel(paperEnv.current());
+    window.openImageLightbox(photos.map((s, i) => ({
+      src:assetUrl(s.asset),
+      alt:photos.length > 1 ? label + " (" + (i + 1) + "/" + photos.length + ")" : label
+    })), at);
+    return true;
+  }
+  function startStickerDrag(e, sticker, node, mode){
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (mode === "move" && (e.shiftKey || e.ctrlKey || e.metaKey)){
+      toggleSticker(sticker.id);
+      if (selection.includes(sticker.id)) node.focus({ preventScroll:true });
+      return;
+    }
+    const group = mode === "move" && selection.length > 1 && selection.includes(sticker.id);
+    if (!group) selectSticker(sticker.id);
+    node.focus({ preventScroll:true });
+    const w = paperWidth || paper.clientWidth || 1;
+    const start = { x:e.clientX, y:e.clientY, sx:sticker.x, sy:sticker.y, sw:sticker.w, rot:sticker.rot || 0 };
+    const groupStart = group ? selectedStickers().map(s => ({ s, x:s.x, y:s.y })) : null;
+    const rect = node.getBoundingClientRect();
+    const center = { x:rect.left + rect.width / 2, y:rect.top + rect.height / 2 };
+    const startAngle = Math.atan2(e.clientY - center.y, e.clientX - center.x);
+    let moved = false;
+    try { node.setPointerCapture(e.pointerId); } catch(_){}
+    node.classList.add("is-dragging");
+    const onMove = (ev) => {
+      const dx = (ev.clientX - start.x) / w, dy = (ev.clientY - start.y) / w;
+      if (!moved && Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) < 3) return;
+      if (!moved && paperEnv.history()) paperEnv.history().flush();
+      moved = true;
+      if (mode === "rotate"){
+        const now = Math.atan2(ev.clientY - center.y, ev.clientX - center.x);
+        let deg = start.rot + (now - startAngle) * 180 / Math.PI;
+        if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+        sticker.rot = diaryNormalizeAngle(deg);
+      } else if (mode === "resize"){
+        // 돌린 스티커는 끈 거리를 스티커 자기 가로 방향으로 옮겨 잰다(손잡이가 따라오게).
+        const rad = (start.rot || 0) * Math.PI / 180;
+        const along = dx * Math.cos(rad) + dy * Math.sin(rad);
+        sticker.w = Math.max(0.04, Math.min(1.5, start.sw + along));
+      } else if (groupStart){
+        for (const g of groupStart){ g.s.x = g.x + dx; g.s.y = g.y + dy; clampStickerPos(g.s); }
+      } else {
+        sticker.x = Math.max(-sticker.w * 0.6, Math.min(1 - sticker.w * 0.4, start.sx + dx));
+        sticker.y = Math.max(-0.02, start.sy + dy);
+      }
+      positionStickers();
+    };
+    const onUp = () => {
+      node.removeEventListener("pointermove", onMove);
+      node.removeEventListener("pointerup", onUp);
+      node.removeEventListener("pointercancel", onUp);
+      node.classList.remove("is-dragging");
+      if (moved){ layout(); touch(true); }
+      else if (groupStart) selectSticker(sticker.id);       // 무리 안 하나를 끌지 않고 누르기만 하면 그 한 장만 고른다
+    };
+    node.addEventListener("pointermove", onMove);
+    node.addEventListener("pointerup", onUp);
+    node.addEventListener("pointercancel", onUp);
+  }
+  function nudgeStickers(dx, dy){
+    const list = selectedStickers();
+    if (!list.length) return;
+    for (const s of list){ s.x += dx; s.y += dy; clampStickerPos(s); }
+    positionStickers();
+    layout();
+    touch();
+  }
+  function stickerOf(id){
+    const entry = entryOf(paperEnv.current());
+    return entry ? entry.stickers.find(item => item.id === id) || null : null;
+  }
+  // where: front(맨 앞)·forward(한 칸 앞)·backward(한 칸 뒤)·back(맨 뒤). 배열 순서가 곧 쌓는 순서다.
+  // 여러 장이면 고른 것끼리의 앞뒤 순서는 지키며 함께 옮긴다(diaryReorder).
+  function reorderStickers(where){
+    const entry = entryOf(paperEnv.current());
+    if (!entry || !selection.length) return;
+    const next = diaryReorder(entry.stickers, new Set(selection), where);
+    if (next.every((s, i) => s === entry.stickers[i])) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    entry.stickers = next;
+    renderStickers();
+    touch(true);
+  }
+  function rotateStickers(delta, absolute){
+    const list = selectedStickers();
+    if (!list.length) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    for (const s of list) s.rot = diaryNormalizeAngle(absolute ? delta : (s.rot || 0) + delta);
+    positionStickers(); layout(); touch(true);
+  }
+  // 하나라도 안 뒤집혔으면 모두 뒤집고, 모두 뒤집혀 있으면 모두 되돌린다.
+  function flipStickers(){
+    const list = selectedStickers();
+    if (!list.length) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    const to = !list.every(s => s.flip);
+    for (const s of list) s.flip = to;
+    positionStickers(); touch(true);
+  }
+  // 그림 칸에 꼭 맞추기 — 칸 안에 다 들어오는 가장 큰 크기로, 칸 한가운데에. 돌리기는 되돌린다.
+  function fitStickerToBox(s, box = pictureBoxRect(), w = paperWidth || paper.clientWidth){
+    if (!box || !w) return false;
+    const pad = 6;
+    let sw = (box.width - pad * 2) / w;
+    if (sw * s.ar * w > box.height - pad * 2) sw = (box.height - pad * 2) / (s.ar * w);
+    s.w = Math.max(0.04, sw);
+    s.x = (box.left + box.width / 2) / w - s.w / 2;
+    s.y = (box.top + box.height / 2) / w - (s.w * s.ar) / 2;
+    s.rot = 0;
+    return true;
+  }
+  /* ----- 여러 장 정렬해서 깔기 -----
+     자리 셈은 순수 함수(diaryArrange*)가 하고, 여기서는 대상을 고르고 모델에 넣는 일만 한다. */
+  function applyStickerPlaces(list, places){
+    const byId = new Map(list.map(s => [s.id, s]));
+    let hit = 0;
+    for (const p of places){
+      const s = byId.get(p.id);
+      if (!s) continue;
+      s.x = p.x; s.y = p.y; s.w = p.w;
+      if (p.rot != null) s.rot = diaryNormalizeAngle(p.rot);
+      clampStickerPos(s);
+      hit++;
+    }
+    return hit;
+  }
+  /* 정렬할 것 — 고르지 않고 부르면 그 날 '사진'만 손댄다. 하트·별 같은 그림 스티커는 그 자리에 두려고
+     일부러 놓은 것이라, 사진을 정리한다고 격자로 끌려오면 꾸며 둔 것이 망가진다.
+     반대로 그림 스티커를 둘 이상 골라 놓고 불렀다면 그건 "이것들을 줄 세워라"는 뜻이니 함께 정렬한다.
+     글상자는 어느 쪽이든 제외한다 — 높이를 글에서 재므로 줄 맞춰 늘릴 수가 없다. */
+  function arrangeTargets(){
+    const picked = selectedStickers().filter(s => diaryStickerKind(s) !== "text");
+    if (picked.length >= 2) return picked;
+    const entry = entryOf(paperEnv.current());
+    return entry ? entry.stickers.filter(s => diaryStickerKind(s) === "photo") : [];
+  }
+  // [사진만일 때, 그림 스티커가 섞였을 때] — 하트를 함께 옮겨 놓고 "사진 3장"이라고 하면 말이 어긋난다.
+  const DIARY_ARRANGE_DONE = {
+    row:["사진 {n}장을 줄 맞춰 깔았어요. Ctrl+Z 로 되돌릴 수 있어요.", "스티커 {n}개를 줄 맞춰 깔았어요. Ctrl+Z 로 되돌릴 수 있어요."],
+    grid:["사진 {n}장을 격자로 깔았어요. Ctrl+Z 로 되돌릴 수 있어요.", "스티커 {n}개를 격자로 깔았어요. Ctrl+Z 로 되돌릴 수 있어요."],
+    scatter:["사진 {n}장을 사진첩처럼 깔았어요. Ctrl+Z 로 되돌릴 수 있어요.", "스티커 {n}개를 사진첩처럼 깔았어요. Ctrl+Z 로 되돌릴 수 있어요."]
+  };
+  const arrangeAllPhotos = (list) => list.every(s => diaryStickerKind(s) === "photo");
+  function arrangePhotos(mode, opts){
+    const list = arrangeTargets();
+    if (list.length < 2){ setStatus(diaryT("정렬하려면 사진이 두 장 이상 있어야 해요.")); return; }
+    const done = DIARY_ARRANGE_DONE[mode] || DIARY_ARRANGE_DONE.row;
+    // 있던 자리에서 정돈한다 — 맨 위에 있던 것의 높이가 정렬한 블록의 시작이 된다.
+    const top = Math.max(0.03, Math.min(...list.map(s => Number(s.y) || 0)));
+    const places = diaryArrangeStickers(list, mode, Object.assign({ top }, opts || {}));
+    if (!places.length) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    applyStickerPlaces(list, places);
+    selection = list.map(s => s.id);
+    renderStickers(); layout(); touch(true);
+    setStatus(diaryTf(arrangeAllPhotos(list) ? done[0] : done[1], { n:list.length }));
+  }
+  // 그림 칸 안에 든 스티커 — 가운데가 칸 안에 들면 '칸에 든 것'으로 본다(안내 문장을 감추는 판정과 같은 규칙).
+  function stickersInBox(entry, box, w){
+    if (!entry || !box || !w) return [];
+    return entry.stickers.filter(s => {
+      const cx = (s.x + s.w / 2) * w, cy = (s.y + s.w * s.ar / 2) * w;
+      return cx >= box.left && cx <= box.left + box.width && cy >= box.top && cy <= box.top + box.height;
+    });
+  }
+  // 그림 칸에 나눠 맞추기 — 한 장이면 예전처럼 칸에 꼭 맞춘다.
+  function fitStickersToBox(list, box = pictureBoxRect(), w = paperWidth || paper.clientWidth){
+    if (!box || !w || !list || !list.length) return false;
+    if (list.length === 1) return fitStickerToBox(list[0], box, w);
+    const places = diaryArrangeInBox(list, { left:box.left / w, top:box.top / w, width:box.width / w, height:box.height / w });
+    return applyStickerPlaces(list, places) > 0;
+  }
+  function fitSelectionToBox(){
+    const list = arrangeTargets();
+    if (!list.length) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    if (!fitStickersToBox(list)) return;
+    selection = list.map(s => s.id);
+    renderStickers(); layout(); touch(true);
+    setStatus(list.length < 2 ? diaryT("사진을 그림 칸에 꼭 맞췄어요.")
+      : arrangeAllPhotos(list) ? diaryTf("사진 {n}장을 그림 칸에 나눠 맞췄어요.", { n:list.length })
+      : diaryTf("스티커 {n}개를 그림 칸에 나눠 맞췄어요.", { n:list.length }));
+  }
+  function openStickerMenu(id, x, y){
+    const s = stickerOf(id);
+    if (!s || typeof MNContextMenu === "undefined") return;
+    const entry = entryOf(paperEnv.current());
+    const list = selectedStickers();
+    const many = list.length > 1;
+    const kind = diaryStickerKind(s);
+    // 이미 맨 앞/맨 뒤인지 — 여러 장이면 고른 것이 모두 그 끝에 붙어 있을 때
+    const n = entry.stickers.length, k = list.length;
+    const atFront = entry.stickers.slice(n - k).every(x => selection.includes(x.id));
+    const atBack = entry.stickers.slice(0, k).every(x => selection.includes(x.id));
+    const arrangeCount = arrangeTargets().length;
+    // 그림·글상자만 색을 바꾼다(사진은 바꿀 색이 없다). 고른 것에 사진이 섞여 있으면 사진만 그대로 둔다.
+    const colorTargets = list.filter(item => diaryStickerKind(item) !== "photo");
+    const colorful = colorTargets.length > 0;
+    // 고른 것이 모두 한 색일 때만 그 색을 켠다(섞여 있으면 아무것도 켜지 않는다).
+    const oneColor = colorful && colorTargets.every(item => item.color === colorTargets[0].color) ? colorTargets[0].color : "";
+    const colorChildren = DIARY_PENS.map(([color, ko, en]) => ({
+      label:diaryIsEn() ? en : ko, active:list.every(item => item.color === color), action:() => applyStickerColor(color)
+    }));
+    // 팔레트 밖 색은 메뉴 안에 칸을 넣을 수 없어(MNContextMenu 는 글자 항목만 받는다) 스티커 창의 색 칸을 대신 연다.
+    // 창이 닫혀 있으면 먼저 연다 — display:none 인 칸은 click() 해도 고르개가 뜨지 않는다.
+    colorChildren.push({
+      label:diaryT("직접 고르기…"),
+      active:!!oneColor && !DIARY_PENS.some(pen => pen[0] === oneColor),
+      action:() => {
+        openStickerColorPicker();
+      }
+    });
+    const textItems = kind !== "text" || many ? [] : [
+      { label:diaryT("글 고쳐 쓰기"), icon:"pen", title:"Enter", action:() => editTextSticker(id) },
+      { label:diaryT("글자 크기"), children:DIARY_TEXT_SIZES.map(([, value, ko, en]) => ({
+        label:diaryIsEn() ? en : ko, active:Math.abs((s.size || 0) - value) < 0.0005,
+        action:() => setTextStickerField({ size:value })
+      })) },
+      { label:diaryT("글 맞춤"), children:[["left", "왼쪽", "Left"], ["center", "가운데", "Center"], ["right", "오른쪽", "Right"]]
+        .map(([align, ko, en]) => ({ label:diaryIsEn() ? en : ko, active:(s.align || "left") === align, action:() => setTextStickerField({ align }) })) },
+      { label:diaryT("글꼴"), children:DIARY_FONTS.map(font => ({
+        label:diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, font), active:(s.font || "gothic") === font,
+        action:() => setTextStickerField({ font })
+      })) },
+      { separator:true }
+    ];
+    MNContextMenu.open(x, y, [
+      ...textItems,
+      (kind !== "photo" || many) ? null : { label:diaryEn("크게 보기", "View large"), icon:"zoomIn", title:"Enter", action:() => openPhotoViewer(id) },
+      (kind !== "photo" || many) ? null : { separator:true },
+      colorful ? { label:diaryT("색 바꾸기"), children:colorChildren } : null,
+      colorful ? { separator:true } : null,
+      { label:diaryT("맨 앞으로"), title:"Ctrl+Shift+]", disabled:atFront, action:() => reorderStickers("front") },
+      { label:diaryT("한 칸 앞으로"), title:"Ctrl+]", disabled:atFront, action:() => reorderStickers("forward") },
+      { label:diaryT("한 칸 뒤로"), title:"Ctrl+[", disabled:atBack, action:() => reorderStickers("backward") },
+      { label:diaryT("맨 뒤로"), title:"Ctrl+Shift+[", disabled:atBack, action:() => reorderStickers("back") },
+      { separator:true },
+      { label:diaryT("왼쪽으로 15° 돌리기"), icon:"rotateLeft", title:"[ (Shift: 15°)", action:() => rotateStickers(-15) },
+      { label:diaryT("오른쪽으로 15° 돌리기"), icon:"rotateRight", title:"] (Shift: 15°)", action:() => rotateStickers(15) },
+      { label:diaryT("돌리기 되돌리기"), disabled:!list.some(x => x.rot), action:() => rotateStickers(0, true) },
+      // 글상자는 뒤집지 않는다 — 거울 글씨가 될 뿐이다.
+      list.every(x => diaryStickerKind(x) === "text") ? null
+        : { label:diaryT("좌우 뒤집기"), icon:"flipH", active:list.every(x => x.flip), action:() => flipStickers() },
+      // 사진 여러 장은 자리를 하나하나 끌지 않고 한 번에 정돈한다 — 고른 것이 둘 이상이면 그것만, 아니면 그 날 전부.
+      arrangeCount < 2 ? null : { label:diaryEn("정렬해서 깔기", "Arrange photos"), icon:"table", children:[
+        { label:diaryEn("줄 맞춰", "In rows"), action:() => arrangePhotos("row") },
+        { label:diaryEn("격자로", "In a grid"), children:[
+          { label:diaryEn("자동", "Auto"), action:() => arrangePhotos("grid") },
+          ...[2, 3, 4].map(cols => ({ label:diaryIsEn() ? cols + " columns" : cols + "열", action:() => arrangePhotos("grid", { cols }) }))
+        ] },
+        { label:diaryEn("사진첩처럼", "Photo-album look"), action:() => arrangePhotos("scatter") }
+      ] },
+      (pictureBox.hidden || kind === "text") ? null
+        : many ? { label:diaryTf("그림 칸에 {n}장 나눠 맞추기", { n:k }), icon:"fit", action:() => fitSelectionToBox() }
+        : { label:diaryT("그림 칸에 꼭 맞추기"), icon:"fit", action:() => {
+            if (paperEnv.history()) paperEnv.history().flush();
+            if (fitStickerToBox(s)){ positionStickers(); layout(); touch(true); }
+          } },
+      { separator:true },
+      many ? { label:diaryT("모두 고르기"), title:"Ctrl+A", disabled:k === n, action:() => setSelection(entry.stickers.map(x => x.id)) } : null,
+      { label:many ? diaryTf("스티커 {n}개 떼기", { n:k }) : diaryT(kind === "photo" ? "사진 떼기" : "스티커 떼기"), icon:"delete", action:() => removeStickers(selection) }
+    ], { onClose:() => { const node = stickerLayer.querySelector(`[data-id="${id}"]`); if (node) node.focus({ preventScroll:true }); } });
+  }
+  function removeSticker(id){ removeStickers([id]); }
+  function removeStickers(ids){
+    const entry = entryOf(paperEnv.current());
+    if (!entry) return;
+    const drop = new Set(ids);
+    const keep = entry.stickers.filter(s => !drop.has(s.id));
+    const count = entry.stickers.length - keep.length;
+    if (!count) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    entry.stickers = keep;
+    selection = [];
+    renderStickers();
+    layout();
+    renderCalendar();
+    touch(true);
+    setStatus(count > 1 ? diaryTf("스티커 {n}개를 뗐어요. Ctrl+Z 로 되돌릴 수 있어요.", { n:count }) : diaryT("스티커를 뗐어요. Ctrl+Z 로 되돌릴 수 있어요."));
+  }
+  /* Ctrl(⌘)+끌기 = 네모를 그려 한꺼번에 고르기. 종이 대부분이 글칸이라 그냥 끌기·Shift+끌기는 글 고르기로 남겨 둔다.
+     네모에 조금이라도 걸친 스티커를 고른다(돌린 스티커는 돌리기 전 상자로 잰다). Shift 를 함께 누르면 지금 고른 것에 더한다. */
+  const marquee = document.createElement("div");
+  marquee.className = "diary-marquee";
+  marquee.hidden = true;
+  paper.append(marquee);
+  paper.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || !(e.ctrlKey || e.metaKey) || drawMode) return;
+    if (e.target.closest(".diary-sticker, .diary-draw-bar, .diary-picture-hint button")) return;
+    const entry = entryOf(paperEnv.current());
+    if (!entry || !entry.stickers.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const base = e.shiftKey ? [...selection] : [];
+    const rect = paper.getBoundingClientRect();
+    const x0 = e.clientX - rect.left, y0 = e.clientY - rect.top;
+    const w = paperWidth || paper.clientWidth || 1;
+    try { paper.setPointerCapture(e.pointerId); } catch(_){}
+    const move = (ev) => {
+      const x1 = ev.clientX - rect.left, y1 = ev.clientY - rect.top;
+      const box = { left:Math.min(x0, x1), top:Math.min(y0, y1), right:Math.max(x0, x1), bottom:Math.max(y0, y1) };
+      Object.assign(marquee.style, { left:box.left + "px", top:box.top + "px", width:(box.right - box.left) + "px", height:(box.bottom - box.top) + "px" });
+      marquee.hidden = false;
+      const hit = entry.stickers.filter(s => {
+        const l = s.x * w, t = s.y * w, r = l + s.w * w, b = t + s.w * s.ar * w;
+        return l < box.right && r > box.left && t < box.bottom && b > box.top;
+      }).map(s => s.id);
+      setSelection([...base, ...hit]);
+    };
+    const up = () => {
+      paper.removeEventListener("pointermove", move);
+      paper.removeEventListener("pointerup", up);
+      paper.removeEventListener("pointercancel", up);
+      marquee.hidden = true;
+      const first = selection[0] && stickerLayer.querySelector(`[data-id="${selection[0]}"]`);
+      if (first) first.focus({ preventScroll:true });            // 곧바로 방향키·Delete 가 먹게
+    };
+    paper.addEventListener("pointermove", move);
+    paper.addEventListener("pointerup", up);
+    paper.addEventListener("pointercancel", up);
+  }, true);
+  async function addAsset(blob, maxDim){
+    const prepared = await diaryPrepareImage(blob, maxDim);
+    if (!prepared) return null;
+    const ext = prepared.mime === "image/jpeg" ? "jpg" : prepared.mime.split("/")[1];
+    const name = "assets/" + await diaryHashBytes(prepared.bytes) + "." + ext;
+    if (!assets.has(name)) assets.set(name, { bytes:prepared.bytes });
+    return { name, w:prepared.w, h:prepared.h };
+  }
+  /* at: 종이 안 픽셀 좌표(없으면 지금 보이는 종이 한가운데) · fit: 그림 칸에 맞추기
+     여러 장을 한꺼번에 넣으면 계단식으로 겹쳐 쌓지 않고 곧바로 줄 맞춰 깐다 — 다섯 장을 떨어뜨렸는데
+     카드 뭉치처럼 겹쳐 있으면 한 장씩 끌어내는 일부터 해야 한다. 그림 칸에 넣을 때도 칸을 나눠 맞춘다. */
+  async function addStickers(files, at, fit){
+    const blobs = [...(files || [])].filter(f => f && /^image\//i.test(f.type || ""));
+    if (!blobs.length) return;
+    const targetDate = paperEnv.current();
+    const targetBox = fit ? pictureBoxRect() : null;
+    setStatus(diaryT("사진을 붙이는 중…"));
+    const w = paperWidth || paper.clientWidth || 600;
+    const origin = at || stickerOrigin();
+    // 사진을 모두 준비한 뒤 현재 모델에 한 번에 넣는다. 날짜 이동·되돌리기로 교체된 entry 를 붙잡지 않는다.
+    const prepared = [];
+    let added = 0, skipped = 0;
+    for (const blob of blobs){
+      if (prepared.length >= DIARY_MAX_STICKERS){ skipped++; continue; }
+      const asset = await addAsset(blob, DIARY_STICKER_MAX_DIM);
+      if (!asset){ skipped++; continue; }
+      prepared.push(asset);
+    }
+    if (prepared.length && paperEnv.history()) paperEnv.history().flush();
+    const fresh = [];
+    for (const asset of prepared){
+      const entry = ensureEntry(targetDate);
+      if (entry.stickers.length >= DIARY_MAX_STICKERS){ skipped++; continue; }
+      const width = Math.min(0.45, Math.max(0.12, (asset.w / w) * 0.6));
+      const ar = asset.h / asset.w;
+      const sticker = {
+        id:diaryStickerId(), asset:asset.name, w:width, ar,
+        x:Math.max(0, Math.min(1 - width, origin.x / w - width / 2 + added * 0.03)),
+        y:Math.max(0, origin.y / w - (width * ar) / 2 + added * 0.03)
+      };
+      entry.stickers.push(sticker);
+      fresh.push(sticker);
+      if (paperEnv.current() === targetDate) selection = [sticker.id];
+      added++;
+    }
+    // 넣은 자리는 한 번에 정한다 — 한 장씩 맞추면 칸을 나눌 때 앞 장이 어디 있는지 알 수 없다.
+    let fitted = 0;
+    if (fresh.length && fit){
+      // 칸에 이미 들어 있던 사진까지 함께 나눈다 — 새것만 나누면 먼저 있던 한 장이 칸을 덮은 채로 남는다.
+      // 칸 안에 놓인 그림 스티커·글상자는 건드리지 않는다(정렬 대상과 같은 규칙 — 꾸미기는 그 자리에 둔다).
+      const older = stickersInBox(entryOf(targetDate), targetBox, w)
+        .filter(s => diaryStickerKind(s) === "photo" && !fresh.includes(s));
+      const targets = [...older, ...fresh];
+      if (fitStickersToBox(targets, targetBox, w)) fitted = targets.length;
+    }
+    else if (fresh.length > 1){
+      const top = Math.max(0.02, origin.y / w - 0.04);
+      applyStickerPlaces(fresh, diaryArrangeStickers(fresh, "row", { top }));
+    }
+    if (fresh.length > 1 && paperEnv.current() === targetDate) selection = fresh.map(s => s.id);
+    if (added){
+      if (paperEnv.current() === targetDate){
+        renderStickers();
+        layout();
+        onEntryChange();
+      }
+      renderCalendar();
+      touch(true);
+    }
+    if (skipped) setStatus((added ? diaryTf("사진 {n}장을 붙였어요.", { n:added }) + " " : "") + diaryTf("{n}장은 붙이지 못했어요(그림 파일이 아니거나 너무 크거나 한 날 {max}장을 넘었어요).", { n:skipped, max:DIARY_MAX_STICKERS }));
+    // 여러 장은 이미 정렬해 두었다고 알려 준다 — 다른 모양으로 깔 길(우클릭)도 여기서 한 번 짚어 준다.
+    else if (fitted > 1) setStatus(diaryTf("사진 {n}장을 그림 칸에 나눠 맞췄어요.", { n:fitted }));
+    else if (fresh.length > 1) setStatus(diaryTf("사진 {n}장을 줄 맞춰 깔았어요 — 우클릭 '정렬해서 깔기' 로 격자·사진첩 모양으로 바꿀 수 있어요.", { n:fresh.length }));
+    else refreshDirty();
+  }
+
+  /* ----- 내장 스티커·글상자 붙이기 -----
+     사진과 달리 ZIP 에 담을 바이트가 없어서 기다릴 것도, 줄일 것도 없다 — 곧바로 모델에 한 줄을 더한다. */
+  let artColor = DIARY_ART_DEFAULT_COLOR;        // 다음에 붙일 그림 색(고른 스티커가 있으면 그쪽을 바꾼다)
+  let artOpacity = 1;                            // 다음에 붙일 내장 그림·글상자 투명도
+  // 색을 한 번이라도 직접 고르기 전까지는 그림은 빨강, 글상자는 검정이라는 기본을 지킨다.
+  // 고른 뒤에는 글상자도 그 색을 따른다 — 색을 골라 놓고 글상자만 검정으로 붙으면 고장으로 보인다.
+  let artColorPicked = false;
+  // 종이에서 지금 보이는 데의 한가운데 — 사진 붙이기와 같은 자리 규칙.
+  function stickerOrigin(){
+    const w = paperWidth || paper.clientWidth || 600;
+    const rect = paper.getBoundingClientRect(), view = main.getBoundingClientRect();
+    const visibleTop = Math.max(0, view.top - rect.top);
+    return { x:w * 0.5, y:visibleTop + Math.min(view.height, rect.height) * 0.35, w };
+  }
+  // 같은 자리에 똑같이 겹쳐 쌓이면 위의 것만 잡힌다 — 한 장씩 조금씩 어긋내 놓는다
+  // (사진을 여러 장 한꺼번에 붙일 때 쓰던 규칙과 같다).
+  function cascadeOffset(){
+    const entry = entryOf(paperEnv.current());
+    return ((entry ? entry.stickers.length : 0) % 8) * 0.025;
+  }
+  function pushSticker(sticker){
+    const entry = ensureEntry(paperEnv.current());
+    if (entry.stickers.length >= DIARY_MAX_STICKERS){
+      setStatus(diaryTf("한 날에 스티커는 {max}개까지예요.", { max:DIARY_MAX_STICKERS }));
+      return null;
+    }
+    if (paperEnv.history()) paperEnv.history().flush();
+    entry.stickers.push(sticker);
+    selection = [sticker.id];
+    renderStickers();
+    layout();
+    renderCalendar();
+    onEntryChange();
+    touch(true);
+    return sticker;
+  }
+  function addArtSticker(id){
+    const info = diaryArtInfo(id);
+    if (!info) return;
+    const o = stickerOrigin(), width = 0.18, off = cascadeOffset();
+    const s = pushSticker({ id:diaryStickerId(), kind:"art", art:info[0], color:artColor, opacity:artOpacity, w:width, ar:info[3],
+      x:Math.max(0, Math.min(1 - width, o.x / o.w - width / 2 + off)), y:Math.max(0, o.y / o.w - (width * info[3]) / 2 + off),
+      rot:0, flip:false });
+    if (s) setStatus(diaryTf("{name} 스티커를 붙였어요 — 끌어서 옮기고 모서리로 크기를 바꿔요.", { name:diaryArtName(info) }));
+  }
+  function addTextSticker(){
+    const o = stickerOrigin(), width = 0.42, off = cascadeOffset();
+    const s = pushSticker({ id:diaryStickerId(), kind:"text", text:diaryT("여기에 쓰세요"), color:artColorPicked ? artColor : DIARY_TEXT_DEFAULT_COLOR, opacity:artOpacity,
+      font:diaryEffectiveStyle(model, entryOf(paperEnv.current())).font, size:0.048, align:"left", w:width, ar:0.2,
+      x:Math.max(0, Math.min(1 - width, o.x / o.w - width / 2 + off)), y:Math.max(0, o.y / o.w + off), rot:0, flip:false });
+    if (s) editTextSticker(s.id, true);          // 붙이자마자 바로 쓰게 — 견본 글은 모두 골라 둔다
+  }
+  /* 글상자 고쳐 쓰기 — 종이 위 그 자리에 같은 글꼴·크기의 textarea 를 잠깐 얹는다.
+     contenteditable 은 쓰지 않는다(.mnote 설계 때 커서·IME 로 데인 길이라 일기장도 같은 결정이다).
+     Esc 는 되돌리고, 글을 모두 지우면 글상자가 사라진다(빈 상자는 저장되지도 않는다). */
+  let textEditing = "";
+  function editTextSticker(id, selectAll){
+    if (textEditing) return;
+    const s = stickerOf(id);
+    if (!s || diaryStickerKind(s) !== "text") return;
+    const node = stickerLayer.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    const body = node && node.querySelector(".diary-sticker-body");
+    if (!body) return;
+    textEditing = id;
+    node.classList.add("is-editing");
+    const before = s.text;
+    const w = paperWidth || paper.clientWidth || 600;
+    const ta = document.createElement("textarea");
+    ta.className = "diary-sticker-edit";
+    ta.value = s.text;
+    ta.maxLength = DIARY_TEXT_MAX;
+    ta.spellcheck = false;
+    ta.setAttribute("aria-label", "글상자 글");
+    Object.assign(ta.style, { fontSize:(s.size * w) + "px", fontFamily:DIARY_FONT_STACKS[s.font] || "",
+      color:s.color || DIARY_TEXT_DEFAULT_COLOR, textAlign:s.align || "left" });
+    body.hidden = true;
+    node.append(ta);
+    const grow = () => { ta.style.height = "0px"; ta.style.height = ta.scrollHeight + "px"; };
+    grow();
+    ta.addEventListener("input", () => { grow(); layout(); });
+    let cancelled = false;
+    ta.addEventListener("keydown", (e) => {
+      if (e.isComposing) return;
+      if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); cancelled = true; ta.blur(); }
+      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); e.stopPropagation(); ta.blur(); }
+    });
+    ta.addEventListener("blur", () => {
+      if (textEditing !== id) return;
+      textEditing = "";
+      const next = cancelled ? before : ta.value;
+      ta.remove();
+      body.hidden = false;
+      node.classList.remove("is-editing");
+      const live = stickerOf(id);
+      if (!live) return;
+      if (next === before){ renderStickers(); layout(); return; }
+      if (paperEnv.history()) paperEnv.history().flush();
+      if (!String(next).trim()){
+        removeStickers([id]);
+        setStatus(diaryT("글이 비어서 글상자를 뺐어요. Ctrl+Z 로 되돌릴 수 있어요."));
+        return;
+      }
+      live.text = String(next).slice(0, DIARY_TEXT_MAX);
+      renderStickers(); layout(); renderCalendar(); touch(true);
+    });
+    ta.focus({ preventScroll:true });
+    if (selectAll) ta.select(); else ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+  // 고른 글상자의 글자 크기·맞춤·글꼴 바꾸기(여럿을 골랐으면 글상자만 골라 함께).
+  function setTextStickerField(patch){
+    const list = selectedStickers().filter(s => diaryStickerKind(s) === "text");
+    if (!list.length) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    for (const s of list) Object.assign(s, patch);
+    if (patch.font && DIARY_HAND_FONTS[patch.font]) diaryEnsureFont(patch.font).then(() => layout());
+    renderStickers(); layout(); touch(true);
+  }
+  /* 고른 스티커의 색 바꾸기. 고른 게 없으면 다음에 붙일 색만 기억한다.
+     live=true 는 색 고르개를 아직 끄는 중이라는 뜻 — 화면만 바꾸고 되돌리기 단계는 만들지 않는다.
+     확정(change)에서 한 번만 commit 하므로, 색을 한참 고르다 놓아도 Ctrl+Z 한 번에 돌아간다. */
+  function applyStickerColor(color, live){
+    const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
+    artColor = color;
+    artColorPicked = true;
+    if (!list.length){
+      onStickerSelect();
+      if (!live) setStatus(diaryT("다음에 붙일 스티커 색을 바꿨어요."));
+      return;
+    }
+    if (!live && paperEnv.history()) paperEnv.history().flush();
+    for (const s of list) s.color = color;
+    renderStickers(); onStickerSelect();
+    if (live){ refreshDirty(); scheduleRecovery(); return; }
+    touch(true);
+  }
+  function applyStickerOpacity(opacity, live){
+    const value = Math.max(0.1, Math.min(1, Number(opacity) || 1));
+    const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
+    artOpacity = value;
+    if (!list.length){
+      onStickerSelect();
+      if (!live) setStatus(diaryT("다음에 붙일 스티커 투명도를 바꿨어요."));
+      return;
+    }
+    for (const s of list) s.opacity = value;
+    renderStickers(); onStickerSelect();
+    if (live){ refreshDirty(); scheduleRecovery(); return; }
+    touch(true);
+  }
+
+  /* ----- 바깥에 내주는 읽기 창구 -----
+     종이 엔진을 떼어 낼 때 이 여섯이 돌려주는 값이 된다. 바깥이 종이의 변수를 직접 읽지 않게 한다. */
+  const selectionIds = () => selection;
+  const clearSelection = () => { selection = []; };
+  const paperWidthNow = () => paperWidth;
+  const isDrawing = () => drawMode;
+  const stickerColorNow = () => artColor;
+  const stickerOpacityNow = () => artOpacity;
+
+
+  // 종이가 문서에 직접 건 처리기는 종이가 거둔다.
+  const destroyPaper = () => document.removeEventListener("selectionchange", onSelectionChange);
+
+  return { addArtSticker, addAsset, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow };
+}
+
 function mountDiaryEditor(doc){
   const model = doc.diary;
   const assets = doc.diaryAssets || (doc.diaryAssets = new Map());
@@ -3338,1058 +4406,12 @@ function mountDiaryEditor(doc){
   };
 
   /* ----- 종이 ----- */
-  // 고른 스티커는 종이의 것이다. 바깥은 selectionIds()·clearSelection() 으로만 본다.
-  let selection = [];
-  let paperWidth = 0;
-  function applyStyle(){
-    const entry = entryOf(current);
-    const style = diaryEffectiveStyle(model, entry);
-    const m = diaryLineMetrics(style, paperWidth || paper.clientWidth);
-    const bgc = diaryLineBackground(style);
-    Object.assign(area.style, {
-      backgroundImage:bgc.image, backgroundSize:bgc.size, backgroundPosition:bgc.position, backgroundRepeat:bgc.repeat,
-      lineHeight:m.gap + "px", fontSize:m.fontSize + "px", fontFamily:DIARY_FONT_STACKS[style.font] || "",
-      paddingTop:m.padTop + "px", paddingBottom:m.gap + "px", paddingLeft:m.padLeft + "px", paddingRight:m.padRight + "px"
-    });
-    paper.dataset.lines = m.lines;
-    paper.dataset.font = style.font;
-    if (DIARY_HAND_FONTS[style.font]){
-      const want = style.font;
-      diaryEnsureFont(want).then(ok => {
-        // 글꼴이 바뀌면 줄바꿈 자리가 달라진다 — 다 읽은 뒤 종이 높이를 다시 잰다.
-        if (ok){ if (paper.dataset.font === want) layout(); }
-        else setStatus(diaryT("손글씨 글꼴을 불러오지 못했어요."));
-      });
-    }
-    const genko = diaryUsesGenko(style);
-    paper.classList.toggle("is-genko", genko);
-    area.classList.toggle("is-genko-input", genko);
-    genkoLayer.hidden = !genko;
-    genkoLayer.style.fontFamily = DIARY_FONT_STACKS[style.font] || "";
-    if (!genko){ genkoLay = null; area.style.left = ""; area.style.top = ""; }
-    placePictureBox(m);
-    // 배경 효과는 종이에도 표시를 남긴다 — 어두운 효과가 글자·줄 색을 갈아끼우려면 종이 쪽 선택자가 필요하다.
-    paper.dataset.paper = diaryPaintPaper(artBgLayer, style).kind;
-    const url = assetUrl(style.bg);
-    bgLayer.style.backgroundImage = url ? `url("${url}")` : "none";
-    bgLayer.dataset.fit = style.fit;
-    bgLayer.hidden = !url;
-    veilLayer.hidden = !url;
-    veilLayer.style.opacity = String(style.veil);
-    repaintCardPapers();
-    syncPanel();
-  }
-  // 종이 높이 = 글 높이·스티커 아래 끝·최소 한 쪽 중 큰 값(줄 간격의 배수로 맞춰 마지막 줄이 잘리지 않게).
-  function layout(){
-    const width = paper.clientWidth;
-    if (!width) return;
-    paperWidth = width;
-    measureTextStickers(width);            // 글상자 높이를 먼저 채워야 아래의 stickerBottom 이 맞는다
-    const effective = diaryEffectiveStyle(model, entryOf(current));
-    if (diaryUsesGenko(effective)){ layoutGenko(width, effective); positionStickers(); return; }
-    const m = diaryLineMetrics(effective, width);
-    area.style.paddingTop = m.padTop + "px";
-    placePictureBox(m);
-    const top = main.scrollTop;
-    area.style.height = "0px";
-    const textH = area.scrollHeight;
-    let stickerBottom = 0;
-    const entry = entryOf(current);
-    for (const s of (entry ? entry.stickers : [])) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(s) * width);
-    const minH = m.gap * 24;
-    const height = Math.ceil(Math.max(textH, stickerBottom + m.gap * 2, minH) / m.gap) * m.gap;
-    area.style.height = height + "px";
-    main.scrollTop = top;
-    positionStickers();
-  }
-  /* 글상자 높이는 글에서 나온다 — 파일에 담지 않고 그릴 때마다 잰다.
-     글자 크기가 종이 폭에 대한 비율이라 어느 폭에서도 줄바꿈 자리가 같고, 잰 높이를 ar 에 채워 두면
-     종이 길이(layout)·인쇄가 사진과 똑같은 식으로 잰다. 재기는 종이 길이를 셈하기 전에 끝나야 한다. */
-  function measureTextStickers(w){
-    const entry = entryOf(current);
-    if (!w || !entry) return;
-    for (const node of stickerLayer.children){
-      if (node.dataset.kind !== "text") continue;
-      const s = entry.stickers.find(item => item.id === node.dataset.id);
-      const body = s && node.querySelector(".diary-sticker-body");
-      if (!body) continue;
-      node.style.width = (s.w * w) + "px";
-      node.style.height = "auto";
-      body.style.fontSize = (s.size * w) + "px";
-      body.style.fontFamily = DIARY_FONT_STACKS[s.font] || "";
-      body.style.color = s.color || DIARY_TEXT_DEFAULT_COLOR;
-      body.style.textAlign = s.align || "left";
-      const h = node.offsetHeight;
-      if (h > 0) s.ar = h / Math.max(1, s.w * w);
-    }
-  }
-  function positionStickers(){
-    const w = paperWidth || paper.clientWidth;
-    measureTextStickers(w);
-    for (const node of stickerLayer.children){
-      const entry = entryOf(current);
-      const s = entry && entry.stickers.find(item => item.id === node.dataset.id);
-      if (!s) continue;
-      node.style.left = (s.x * w) + "px";
-      node.style.top = (s.y * w) + "px";
-      node.style.width = (s.w * w) + "px";
-      // 글상자만 높이를 글에 맡긴다(measureTextStickers 가 이미 auto 로 두고 잰 뒤다).
-      if (node.dataset.kind !== "text") node.style.height = (s.w * s.ar * w) + "px";
-      node.style.transform = s.rot ? `rotate(${s.rot}deg)` : "";
-      const body = node.querySelector(".diary-sticker-body");
-      if (body && node.dataset.kind !== "text") body.style.transform = s.flip ? "scaleX(-1)" : "";
-    }
-    // 사진이나 그림이 있으면 안내 문장만 감추고 가운데 아이콘은 남긴다.
-    // 오른쪽 위에 별도 연필 단추를 두지 않으므로, 이 아이콘이 다시 그리기로 들어가는 길이기도 하다.
-    if (!pictureBox.hidden){
-      const entry = entryOf(current);
-      const box = pictureBoxRect();
-      const hasContent = !!(entry && entry.drawing && entry.drawing.length) || !!(box && entry && entry.stickers.some(st => {
-        const cx = (st.x + st.w / 2) * w, cy = (st.y + st.w * st.ar / 2) * w;
-        return cx >= box.left && cx <= box.left + box.width && cy >= box.top && cy <= box.top + box.height;
-      }));
-      pictureHint.hidden = drawMode;
-      pictureHint.classList.toggle("is-compact", hasContent);
-    }
-  }
-  let genkoLay = null, genkoGm = null;
-  function layoutGenko(width, style){
-    placePictureBox(diaryLineMetrics(style, width));
-    const gm = diaryGenkoMetrics(style, width);
-    const lay = diaryGenkoLayout(area.value, gm.cols);
-    const entry = entryOf(current);
-    let stickerBottom = 0;
-    for (const st of (entry ? entry.stickers : [])) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(st) * width);
-    // 한 쪽(줄 간격 26줄쯤)을 채우되, 그림일기는 그림 칸이 차지한 만큼 줄 수를 줄인다.
-    const minRows = Math.max(4, Math.ceil((gm.pageH - gm.padTop) / gm.pitch), Math.ceil((stickerBottom - gm.padTop) / gm.pitch) + 1);
-    const focused = document.activeElement === area;
-    const rows = diaryRenderGenko(genkoGrid, lay, gm, { minRows, selStart:focused ? area.selectionStart : 0, selEnd:focused ? area.selectionEnd : 0 });
-    genkoLayer.style.height = (gm.padTop + rows * gm.pitch + gm.cell) + "px";
-    genkoLay = lay; genkoGm = gm;
-    placeGenkoCaret();
-  }
-  function placeGenkoCaret(){
-    if (!genkoLay) return;
-    const head = area.selectionDirection === "backward" ? area.selectionStart : area.selectionEnd;
-    const p = genkoLay.pos[Math.max(0, Math.min(genkoLay.pos.length - 1, head))] || { row:0, col:0 };
-    const left = genkoGm.offsetX + p.col * genkoGm.cell, top = genkoGm.padTop + p.row * genkoGm.pitch;
-    genkoCaret.style.left = left + "px";
-    genkoCaret.style.top = (top + 3) + "px";
-    genkoCaret.style.height = (genkoGm.cell - 6) + "px";
-    // IME 후보 창이 커서 옆에 뜨도록 보이지 않는 입력칸도 그 자리로 옮긴다.
-    area.style.left = left + "px";
-    area.style.top = top + "px";
-    genkoCaret.classList.toggle("is-on", document.activeElement === area && area.selectionStart === area.selectionEnd);
-  }
-  let genkoSelKey = "";
-  function refreshGenkoSelection(force){
-    if (!genkoLay) return;
-    const key = document.activeElement === area ? area.selectionStart + ":" + area.selectionEnd + ":" + area.selectionDirection : "blur";
-    if (!force && key === genkoSelKey) return;
-    genkoSelKey = key;
-    layoutGenko(paperWidth || paper.clientWidth, diaryEffectiveStyle(model, entryOf(current)));
-  }
-  function setGenkoSelection(anchor, head){
-    if (head >= anchor) area.setSelectionRange(anchor, head, "forward");
-    else area.setSelectionRange(head, anchor, "backward");
-  }
-  function genkoIndexFromPoint(ev){
-    const r = genkoLayer.getBoundingClientRect();
-    const x = ev.clientX - r.left, y = ev.clientY - r.top;
-    const row = Math.max(0, Math.floor((y - genkoGm.padTop + genkoGm.rowGap / 2) / genkoGm.pitch));
-    return diaryGenkoIndexAt(genkoLay, row, Math.max(0, (x - genkoGm.offsetX) / genkoGm.cell));
-  }
-  function pictureBoxRect(){
-    const m = diaryLineMetrics(diaryEffectiveStyle(model, entryOf(current)), paperWidth || paper.clientWidth);
-    if (!m.box) return null;
-    const w = paperWidth || paper.clientWidth;
-    return { left:m.box.left, top:m.box.top, width:Math.max(40, w - m.box.left - m.box.right), height:m.box.height };
-  }
-  function placePictureBox(m){
-    pictureBox.hidden = !m.box;
-    drawLayer.hidden = !m.box;
-    if (!m.box){ if (drawMode) setDrawMode(false); return; }
-    const w = paperWidth || paper.clientWidth;
-    const geo = { left:m.box.left + "px", top:m.box.top + "px",
-      width:Math.max(40, w - m.box.left - m.box.right) + "px", height:m.box.height + "px" };
-    Object.assign(pictureBox.style, geo);
-    Object.assign(drawLayer.style, geo);
-    redrawDrawing();
-  }
-
-  /* ----- 본문 입력·떨어뜨리기 -----
-     종이의 textarea·종이 판을 듣는 자리라 종이 구역 안에 둔다. 바깥 창·바에는 되부름으로만 알린다. */
-  area.addEventListener("input", () => {
-    const entry = ensureEntry(current);
-    const wasEmpty = diaryEntryIsEmpty(entry);
-    entry.text = area.value;
-    layout();
-    onEntryChange();
-    refreshCurrentLabel(wasEmpty);
-    touch();
-  });
-  area.addEventListener("pointerdown", () => selectSticker(""));
-  area.addEventListener("paste", async (event) => {
-    const imgs = [...((event.clipboardData && event.clipboardData.items) || [])]
-      .filter(it => it.kind === "file" && /^image\//i.test(it.type || ""))
-      .map(it => it.getAsFile()).filter(Boolean);
-    if (!imgs.length) return;
-    event.preventDefault();
-    await addStickers(imgs);
-  });
-  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
-  paper.addEventListener("pointerdown", (e) => { if (!e.target.closest(".diary-sticker")) selectSticker(""); });
-  genkoLayer.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || !genkoLay) return;
-    e.preventDefault();
-    const idx = genkoIndexFromPoint(e);
-    const wasFocused = document.activeElement === area;
-    const anchor = e.shiftKey && wasFocused ? (area.selectionDirection === "backward" ? area.selectionEnd : area.selectionStart) : idx;
-    area.focus({ preventScroll:true });
-    setGenkoSelection(anchor, idx);
-    refreshGenkoSelection(true);
-    const move = (ev) => { if (genkoLay){ setGenkoSelection(anchor, genkoIndexFromPoint(ev)); refreshGenkoSelection(); } };
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  });
-  // 원고지는 줄이 칸으로 정해져 textarea 의 위·아래·처음·끝 이동이 맞지 않는다 — 칸 기준으로 직접 옮긴다.
-  area.addEventListener("keydown", (e) => {
-    if (!genkoLay || e.isComposing || e.altKey) return;
-    const key = e.key;
-    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(key)) return;
-    if ((key === "Home" || key === "End") && (e.ctrlKey || e.metaKey)) return;   // 글 처음·끝은 textarea 그대로
-    e.preventDefault();
-    const back = area.selectionDirection === "backward";
-    const head = back ? area.selectionStart : area.selectionEnd;
-    const anchor = back ? area.selectionEnd : area.selectionStart;
-    const p = genkoLay.pos[head] || { row:0, col:0 };
-    const lastRow = genkoLay.pos[genkoLay.pos.length - 1].row;
-    let idx;
-    if (key === "ArrowUp") idx = p.row === 0 ? 0 : diaryGenkoIndexAt(genkoLay, p.row - 1, p.col);
-    else if (key === "ArrowDown") idx = p.row >= lastRow ? area.value.length : diaryGenkoIndexAt(genkoLay, p.row + 1, p.col);
-    else if (key === "Home") idx = diaryGenkoIndexAt(genkoLay, p.row, 0);
-    else idx = diaryGenkoIndexAt(genkoLay, p.row, genkoGm.cols + 1);
-    if (e.shiftKey) setGenkoSelection(anchor, idx); else area.setSelectionRange(idx, idx);
-    refreshGenkoSelection();
-  });
-  const onSelectionChange = () => { if (genkoLay && document.activeElement === area) refreshGenkoSelection(); };
-  document.addEventListener("selectionchange", onSelectionChange);
-  area.addEventListener("keyup", () => { if (genkoLay) refreshGenkoSelection(); });
-  area.addEventListener("focus", () => { if (genkoLay) refreshGenkoSelection(true); });
-  area.addEventListener("blur", () => { if (genkoLay) refreshGenkoSelection(true); });
-  // 사진을 종이 위에 떨어뜨리면 그 자리에 붙인다. 그림이 아닌 파일은 흘려보내 평소처럼 새 탭으로 열린다.
-  const hasImageFiles = (dt) => !!dt && [...(dt.items || [])].some(it => it.kind === "file" && /^image\//i.test(it.type || ""));
-  paper.addEventListener("dragover", (e) => {
-    if (!hasImageFiles(e.dataTransfer)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-    paper.classList.add("is-drop");
-  });
-  paper.addEventListener("dragleave", (e) => { if (!paper.contains(e.relatedTarget)) paper.classList.remove("is-drop"); });
-  paper.addEventListener("drop", async (e) => {
-    paper.classList.remove("is-drop");
-    const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
-    const images = files.filter(f => /^image\//i.test(f.type || ""));
-    if (!images.length) return;
-    e.preventDefault();
-    if (images.length === files.length) e.stopPropagation();
-    const rect = paper.getBoundingClientRect();
-    const at = { x:e.clientX - rect.left, y:e.clientY - rect.top };
-    const box = pictureBox.hidden ? null : pictureBoxRect();
-    const inBox = !!(box && at.x >= box.left && at.x <= box.left + box.width && at.y >= box.top && at.y <= box.top + box.height);
-    await addStickers(images, at, inBox);
-  });
-
-  /* ----- 그림 칸 그리기 ----- */
-  let drawMode = false;
-  function setDrawMode(on){
-    drawMode = !!on && !pictureBox.hidden;
-    paper.classList.toggle("is-drawing", drawMode);
-    onDrawModeChange(drawMode);
-    if (drawMode){ selectSticker(""); syncDrawBar(); }
-    positionStickers();
-  }
-  function redrawDrawing(){
-    if (drawLayer.hidden) return;
-    const bw = drawLayer.clientWidth, bh = drawLayer.clientHeight;
-    if (!bw || !bh) return;
-    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    const cw = Math.round(bw * dpr), ch = Math.round(bh * dpr);
-    if (drawCanvas.width !== cw || drawCanvas.height !== ch){ drawCanvas.width = cw; drawCanvas.height = ch; }
-    const ctx = drawCanvas.getContext("2d");
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const entry = entryOf(current);
-    diaryDrawStrokes(ctx, entry ? entry.drawing : [], bw);
-  }
-  drawCanvas.addEventListener("pointerdown", (e) => {
-    if (!drawMode || e.button !== 0) return;
-    e.preventDefault();
-    const rect = drawCanvas.getBoundingClientRect();
-    const bw = rect.width || 1;
-    const size = (DIARY_PEN_SIZES.find(x => x[0] === penSize) || DIARY_PEN_SIZES[1])[1];
-    const stroke = { c:penColor, w:eraser ? size * 2.5 : size, p:[] };
-    if (eraser) stroke.e = true;
-    const ctx = drawCanvas.getContext("2d");
-    const add = (ev) => {
-      if (stroke.p.length >= DIARY_MAX_STROKE_POINTS * 2) return;
-      const x = (ev.clientX - rect.left) / bw, y = (ev.clientY - rect.top) / bw;
-      const n = stroke.p.length;
-      if (n && Math.abs(stroke.p[n - 2] - x) < 0.0015 && Math.abs(stroke.p[n - 1] - y) < 0.0015) return;
-      stroke.p.push(Math.round(x * 10000) / 10000, Math.round(y * 10000) / 10000);
-      // 그리는 동안은 새 토막만 바로 그린다(모든 획을 매번 다시 그리면 획이 많을 때 느려진다).
-      const q = stroke.p, m = q.length;
-      ctx.save();
-      ctx.globalCompositeOperation = stroke.e ? "destination-out" : "source-over";
-      ctx.strokeStyle = ctx.fillStyle = stroke.c;
-      ctx.lineWidth = Math.max(0.5, stroke.w * bw);
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      if (m >= 4){ ctx.moveTo(q[m - 4] * bw, q[m - 3] * bw); ctx.lineTo(q[m - 2] * bw, q[m - 1] * bw); ctx.stroke(); }
-      else { ctx.arc(q[0] * bw, q[1] * bw, ctx.lineWidth / 2, 0, Math.PI * 2); ctx.fill(); }
-      ctx.restore();
-    };
-    add(e);
-    try { drawCanvas.setPointerCapture(e.pointerId); } catch(_){}
-    const move = (ev) => {
-      const list = typeof ev.getCoalescedEvents === "function" ? ev.getCoalescedEvents() : [];
-      if (list.length) list.forEach(add); else add(ev);
-    };
-    const up = () => {
-      drawCanvas.removeEventListener("pointermove", move);
-      drawCanvas.removeEventListener("pointerup", up);
-      drawCanvas.removeEventListener("pointercancel", up);
-      if (!stroke.p.length) return;
-      if (history) history.flush();
-      const entry = ensureEntry(current);
-      if (!Array.isArray(entry.drawing)) entry.drawing = [];
-      if (entry.drawing.length >= DIARY_MAX_STROKES){ setStatus(diaryT("그림이 너무 많아 더 그릴 수 없어요.")); redrawDrawing(); return; }
-      entry.drawing.push(stroke);
-      redrawDrawing();
-      onEntryChange();
-      renderCalendar();
-      syncDrawBar();
-      touch(true);
-    };
-    drawCanvas.addEventListener("pointermove", move);
-    drawCanvas.addEventListener("pointerup", up);
-    drawCanvas.addEventListener("pointercancel", up);
-  });
-  function renderStickers(){
-    const entry = entryOf(current);
-    const list = entry ? entry.stickers : [];
-    selection = selection.filter(id => list.some(s => s.id === id));
-    // 다시 그리면 스티커 요소가 새로 생겨 포커스가 빠진다 — 같은 스티커에 되돌려야 방향키·단축키가 이어진다.
-    const focusedId = document.activeElement && stickerLayer.contains(document.activeElement)
-      ? document.activeElement.dataset.id : "";
-    // 글상자에 손글씨 글꼴을 골랐으면 미리 읽어 둔다 — 다 읽으면 줄바꿈 자리가 달라지므로 다시 재야 한다.
-    const handFonts = [...new Set(list.filter(s => diaryStickerKind(s) === "text").map(s => s.font))].filter(f => DIARY_HAND_FONTS[f]);
-    if (handFonts.length) Promise.all(handFonts.map(diaryEnsureFont)).then(() => { if (stickerLayer.isConnected) layout(); });
-    stickerLayer.replaceChildren(...list.map(s => {
-      const kind = diaryStickerKind(s);
-      const node = document.createElement("div");
-      node.className = "diary-sticker diary-sticker-is-" + kind + (selection.includes(s.id) ? " is-selected" : "");
-      node.dataset.id = s.id;
-      node.dataset.kind = kind;
-      node.tabIndex = 0;
-      node.setAttribute("role", kind === "text" ? "group" : "img");
-      node.setAttribute("aria-label", kind === "text"
-        ? "글상자 — 두 번 누르면 고쳐 쓰기, 끌어서 옮기기, 모서리로 너비, 우클릭으로 글자 크기·맞춤"
-        : kind === "art"
-          ? "붙인 스티커 — 끌어서 옮기기, 모서리로 크기, 위 손잡이로 돌리기, 우클릭으로 순서·색"
-          : "붙인 사진 — 끌어서 옮기기, 두 번 누르면 크게 보기, Alt+누르기로 겹친 것 고르기, 우클릭으로 정렬·순서");
-      let body;
-      if (kind === "art"){
-        body = document.createElement("span");
-        body.className = "diary-sticker-body diary-sticker-art";
-        body.innerHTML = diaryArtSvg(s.art);                       // 앱이 만든 고정 SVG 표에서만 나온다(사용자 입력 아님)
-        body.style.color = s.color || DIARY_ART_DEFAULT_COLOR;
-      } else if (kind === "text"){
-        body = document.createElement("div");
-        body.className = "diary-sticker-body diary-sticker-text";
-        body.textContent = s.text;                                  // 글은 반드시 textContent 로(HTML 로 새지 않게)
-      } else {
-        body = document.createElement("img");
-        body.className = "diary-sticker-body";
-        body.src = assetUrl(s.asset);
-        body.alt = "";
-        body.draggable = false;
-      }
-      if (kind !== "photo") body.style.opacity = String(s.opacity == null ? 1 : s.opacity);
-      const handle = document.createElement("span");
-      handle.className = "diary-sticker-handle";
-      handle.title = kind === "text" ? "너비 바꾸기" : "크기 바꾸기";
-      const rotor = document.createElement("span");
-      rotor.className = "diary-sticker-rotate";
-      rotor.title = "돌리기 (Shift: 15°씩)";
-      const remove = diaryButton("", kind === "photo" ? "사진 떼기" : "스티커 떼기", "diary-sticker-remove", "close");
-      remove.addEventListener("pointerdown", e => e.stopPropagation());
-      remove.addEventListener("click", (e) => { e.stopPropagation(); removeSticker(s.id); });
-      const more = diaryButton("", "순서·돌리기·뒤집기", "diary-sticker-more", "more");
-      more.addEventListener("pointerdown", e => e.stopPropagation());
-      more.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const r = more.getBoundingClientRect();
-        openStickerMenu(s.id, r.left, r.bottom + 4);
-      });
-      node.append(body, handle, rotor, remove, more);
-      if (kind === "text"){
-        node.addEventListener("dblclick", (e) => { e.preventDefault(); e.stopPropagation(); editTextSticker(s.id); });
-        node.addEventListener("keydown", (e) => {
-          if (e.key !== "Enter" || e.target !== node) return;
-          e.preventDefault(); e.stopPropagation(); editTextSticker(s.id);
-        });
-      }
-      if (kind === "photo"){
-        // 두 번 누르면 크게 보기 — 종이 위에서는 작게 붙여 두고도 그 날 사진을 큰 창에서 넘겨 볼 수 있다.
-        node.addEventListener("dblclick", (e) => { e.preventDefault(); e.stopPropagation(); openPhotoViewer(s.id); });
-        node.addEventListener("keydown", (e) => {
-          if (e.key !== "Enter" || e.target !== node) return;
-          e.preventDefault(); e.stopPropagation(); openPhotoViewer(s.id);
-        });
-      }
-      node.addEventListener("pointerdown", (e) => {
-        if (node.classList.contains("is-editing")) return;       // 고쳐 쓰는 중엔 끌기가 글칸 누르기를 가로채면 안 된다
-        // Alt+누르기는 끌지 않고 '아래 것'으로 넘어간다 — 겹쳐 놓은 사진 속에서 가린 것을 골라내는 길.
-        if (e.button === 0 && e.altKey && e.target !== handle && e.target !== rotor){
-          e.preventDefault(); e.stopPropagation();
-          cycleStickerAt(e);
-          return;
-        }
-        startStickerDrag(e, s, node, e.target === handle ? "resize" : e.target === rotor ? "rotate" : "move");
-      });
-      node.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!selection.includes(s.id)) selectSticker(s.id);          // 고른 무리 안이면 무리 전체에 대한 메뉴
-        openStickerMenu(s.id, e.clientX, e.clientY);
-      });
-      translateUi(node);
-      node.addEventListener("focus", () => { if (!selection.includes(s.id)) selectSticker(s.id); });
-      return node;
-    }));
-    syncSelection();
-    positionStickers();
-    const refocus = focusedId && stickerLayer.querySelector(`[data-id="${focusedId}"]`);
-    if (refocus) refocus.focus({ preventScroll:true });
-  }
-  function syncSelection(){
-    for (const node of stickerLayer.children) node.classList.toggle("is-selected", selection.includes(node.dataset.id));
-    stickerLayer.classList.toggle("is-multi", selection.length > 1);
-    onStickerSelect();                                // 고른 것의 색·투명도를 스티커 창에 비춘다
-  }
-  function setSelection(ids){
-    const before = selection.join("|");
-    selection = [...new Set(ids.filter(Boolean))];
-    if (selection.join("|") === before) return;
-    syncSelection();
-    if (selection.length > 1) setStatus(diaryTf("스티커 {n}개를 골랐어요 — 함께 옮기고 돌리고 뗄 수 있어요", { n:selection.length }));
-  }
-  function selectSticker(id){ setSelection(id ? [id] : []); }
-  function toggleSticker(id){
-    setSelection(selection.includes(id) ? selection.filter(x => x !== id) : [...selection, id]);
-  }
-  const selectedStickers = () => {
-    const entry = entryOf(current);
-    return entry ? entry.stickers.filter(s => selection.includes(s.id)) : [];
-  };
-  const clampStickerPos = (s) => {
-    s.x = Math.max(-s.w * 0.6, Math.min(1 - s.w * 0.4, s.x));
-    s.y = Math.max(-0.02, s.y);
-  };
-  /* 누른 자리에 걸친 스티커들 — 위에 있는 것부터. 돌린 것은 돌리기 전 상자로 잰다(네모 고르기와 같은 규칙).
-     배열 순서가 쌓는 순서이므로 뒤에서부터 보면 위에 있는 것이 먼저다. */
-  function stickersAtPoint(px, py){
-    const entry = entryOf(current);
-    if (!entry) return [];
-    return entry.stickers.filter(s => px >= s.x && px <= s.x + s.w && py >= s.y && py <= s.y + s.w * s.ar).reverse();
-  }
-  /* Alt+누르기 = 겹친 자리에서 아래 것으로 한 칸씩 내려가며 고르기(맨 아래 다음은 다시 맨 위).
-     사진을 여러 장 깔면 겹치는 일이 흔한데, 위 스티커가 누르기를 다 먹어서 가려진 것은 고를 길이 없었다.
-     '한 칸 뒤로' 메뉴는 이미 있지만 그건 가린 것을 먼저 골라야 쓸 수 있다. */
-  function cycleStickerAt(ev){
-    const w = paperWidth || paper.clientWidth || 1;
-    const rect = paper.getBoundingClientRect();
-    const hits = stickersAtPoint((ev.clientX - rect.left) / w, (ev.clientY - rect.top) / w);
-    if (!hits.length) return;
-    const at = hits.findIndex(s => selection.includes(s.id));
-    const next = hits[(at + 1) % hits.length];                 // 고른 것이 없으면(-1) 맨 위부터
-    selectSticker(next.id);
-    const node = stickerLayer.querySelector(`[data-id="${next.id}"]`);
-    if (node) node.focus({ preventScroll:true });
-    setStatus(hits.length > 1
-      ? diaryTf("겹친 것 가운데 {i}/{n} 을 골랐어요 — Alt+누르기로 아래 것을 골라요.", { i:hits.indexOf(next) + 1, n:hits.length })
-      : diaryT("스티커 하나를 골랐어요."));
-  }
-  /* 사진을 두 번 누르면 크게 본다 — 앱 공용 그림 창(image-lightbox.js)을 그대로 빌린다.
-     그 날 사진을 모두 넘겨 주므로 ←→ 로 넘겨 볼 수 있고, 저장·메모 보내기도 딸려 온다. */
-  function openPhotoViewer(id){
-    const entry = entryOf(current);
-    if (!entry || typeof window.openImageLightbox !== "function") return false;
-    const photos = entry.stickers.filter(s => diaryStickerKind(s) === "photo" && assetUrl(s.asset));
-    if (!photos.length) return false;
-    const at = Math.max(0, photos.findIndex(s => s.id === id));
-    const label = diaryUiDateLabel(current);
-    window.openImageLightbox(photos.map((s, i) => ({
-      src:assetUrl(s.asset),
-      alt:photos.length > 1 ? label + " (" + (i + 1) + "/" + photos.length + ")" : label
-    })), at);
-    return true;
-  }
-  function startStickerDrag(e, sticker, node, mode){
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (mode === "move" && (e.shiftKey || e.ctrlKey || e.metaKey)){
-      toggleSticker(sticker.id);
-      if (selection.includes(sticker.id)) node.focus({ preventScroll:true });
-      return;
-    }
-    const group = mode === "move" && selection.length > 1 && selection.includes(sticker.id);
-    if (!group) selectSticker(sticker.id);
-    node.focus({ preventScroll:true });
-    const w = paperWidth || paper.clientWidth || 1;
-    const start = { x:e.clientX, y:e.clientY, sx:sticker.x, sy:sticker.y, sw:sticker.w, rot:sticker.rot || 0 };
-    const groupStart = group ? selectedStickers().map(s => ({ s, x:s.x, y:s.y })) : null;
-    const rect = node.getBoundingClientRect();
-    const center = { x:rect.left + rect.width / 2, y:rect.top + rect.height / 2 };
-    const startAngle = Math.atan2(e.clientY - center.y, e.clientX - center.x);
-    let moved = false;
-    try { node.setPointerCapture(e.pointerId); } catch(_){}
-    node.classList.add("is-dragging");
-    const onMove = (ev) => {
-      const dx = (ev.clientX - start.x) / w, dy = (ev.clientY - start.y) / w;
-      if (!moved && Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) < 3) return;
-      if (!moved && history) history.flush();
-      moved = true;
-      if (mode === "rotate"){
-        const now = Math.atan2(ev.clientY - center.y, ev.clientX - center.x);
-        let deg = start.rot + (now - startAngle) * 180 / Math.PI;
-        if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
-        sticker.rot = diaryNormalizeAngle(deg);
-      } else if (mode === "resize"){
-        // 돌린 스티커는 끈 거리를 스티커 자기 가로 방향으로 옮겨 잰다(손잡이가 따라오게).
-        const rad = (start.rot || 0) * Math.PI / 180;
-        const along = dx * Math.cos(rad) + dy * Math.sin(rad);
-        sticker.w = Math.max(0.04, Math.min(1.5, start.sw + along));
-      } else if (groupStart){
-        for (const g of groupStart){ g.s.x = g.x + dx; g.s.y = g.y + dy; clampStickerPos(g.s); }
-      } else {
-        sticker.x = Math.max(-sticker.w * 0.6, Math.min(1 - sticker.w * 0.4, start.sx + dx));
-        sticker.y = Math.max(-0.02, start.sy + dy);
-      }
-      positionStickers();
-    };
-    const onUp = () => {
-      node.removeEventListener("pointermove", onMove);
-      node.removeEventListener("pointerup", onUp);
-      node.removeEventListener("pointercancel", onUp);
-      node.classList.remove("is-dragging");
-      if (moved){ layout(); touch(true); }
-      else if (groupStart) selectSticker(sticker.id);       // 무리 안 하나를 끌지 않고 누르기만 하면 그 한 장만 고른다
-    };
-    node.addEventListener("pointermove", onMove);
-    node.addEventListener("pointerup", onUp);
-    node.addEventListener("pointercancel", onUp);
-  }
-  function nudgeStickers(dx, dy){
-    const list = selectedStickers();
-    if (!list.length) return;
-    for (const s of list){ s.x += dx; s.y += dy; clampStickerPos(s); }
-    positionStickers();
-    layout();
-    touch();
-  }
-  function stickerOf(id){
-    const entry = entryOf(current);
-    return entry ? entry.stickers.find(item => item.id === id) || null : null;
-  }
-  // where: front(맨 앞)·forward(한 칸 앞)·backward(한 칸 뒤)·back(맨 뒤). 배열 순서가 곧 쌓는 순서다.
-  // 여러 장이면 고른 것끼리의 앞뒤 순서는 지키며 함께 옮긴다(diaryReorder).
-  function reorderStickers(where){
-    const entry = entryOf(current);
-    if (!entry || !selection.length) return;
-    const next = diaryReorder(entry.stickers, new Set(selection), where);
-    if (next.every((s, i) => s === entry.stickers[i])) return;
-    if (history) history.flush();
-    entry.stickers = next;
-    renderStickers();
-    touch(true);
-  }
-  function rotateStickers(delta, absolute){
-    const list = selectedStickers();
-    if (!list.length) return;
-    if (history) history.flush();
-    for (const s of list) s.rot = diaryNormalizeAngle(absolute ? delta : (s.rot || 0) + delta);
-    positionStickers(); layout(); touch(true);
-  }
-  // 하나라도 안 뒤집혔으면 모두 뒤집고, 모두 뒤집혀 있으면 모두 되돌린다.
-  function flipStickers(){
-    const list = selectedStickers();
-    if (!list.length) return;
-    if (history) history.flush();
-    const to = !list.every(s => s.flip);
-    for (const s of list) s.flip = to;
-    positionStickers(); touch(true);
-  }
-  // 그림 칸에 꼭 맞추기 — 칸 안에 다 들어오는 가장 큰 크기로, 칸 한가운데에. 돌리기는 되돌린다.
-  function fitStickerToBox(s, box = pictureBoxRect(), w = paperWidth || paper.clientWidth){
-    if (!box || !w) return false;
-    const pad = 6;
-    let sw = (box.width - pad * 2) / w;
-    if (sw * s.ar * w > box.height - pad * 2) sw = (box.height - pad * 2) / (s.ar * w);
-    s.w = Math.max(0.04, sw);
-    s.x = (box.left + box.width / 2) / w - s.w / 2;
-    s.y = (box.top + box.height / 2) / w - (s.w * s.ar) / 2;
-    s.rot = 0;
-    return true;
-  }
-  /* ----- 여러 장 정렬해서 깔기 -----
-     자리 셈은 순수 함수(diaryArrange*)가 하고, 여기서는 대상을 고르고 모델에 넣는 일만 한다. */
-  function applyStickerPlaces(list, places){
-    const byId = new Map(list.map(s => [s.id, s]));
-    let hit = 0;
-    for (const p of places){
-      const s = byId.get(p.id);
-      if (!s) continue;
-      s.x = p.x; s.y = p.y; s.w = p.w;
-      if (p.rot != null) s.rot = diaryNormalizeAngle(p.rot);
-      clampStickerPos(s);
-      hit++;
-    }
-    return hit;
-  }
-  /* 정렬할 것 — 고르지 않고 부르면 그 날 '사진'만 손댄다. 하트·별 같은 그림 스티커는 그 자리에 두려고
-     일부러 놓은 것이라, 사진을 정리한다고 격자로 끌려오면 꾸며 둔 것이 망가진다.
-     반대로 그림 스티커를 둘 이상 골라 놓고 불렀다면 그건 "이것들을 줄 세워라"는 뜻이니 함께 정렬한다.
-     글상자는 어느 쪽이든 제외한다 — 높이를 글에서 재므로 줄 맞춰 늘릴 수가 없다. */
-  function arrangeTargets(){
-    const picked = selectedStickers().filter(s => diaryStickerKind(s) !== "text");
-    if (picked.length >= 2) return picked;
-    const entry = entryOf(current);
-    return entry ? entry.stickers.filter(s => diaryStickerKind(s) === "photo") : [];
-  }
-  // [사진만일 때, 그림 스티커가 섞였을 때] — 하트를 함께 옮겨 놓고 "사진 3장"이라고 하면 말이 어긋난다.
-  const DIARY_ARRANGE_DONE = {
-    row:["사진 {n}장을 줄 맞춰 깔았어요. Ctrl+Z 로 되돌릴 수 있어요.", "스티커 {n}개를 줄 맞춰 깔았어요. Ctrl+Z 로 되돌릴 수 있어요."],
-    grid:["사진 {n}장을 격자로 깔았어요. Ctrl+Z 로 되돌릴 수 있어요.", "스티커 {n}개를 격자로 깔았어요. Ctrl+Z 로 되돌릴 수 있어요."],
-    scatter:["사진 {n}장을 사진첩처럼 깔았어요. Ctrl+Z 로 되돌릴 수 있어요.", "스티커 {n}개를 사진첩처럼 깔았어요. Ctrl+Z 로 되돌릴 수 있어요."]
-  };
-  const arrangeAllPhotos = (list) => list.every(s => diaryStickerKind(s) === "photo");
-  function arrangePhotos(mode, opts){
-    const list = arrangeTargets();
-    if (list.length < 2){ setStatus(diaryT("정렬하려면 사진이 두 장 이상 있어야 해요.")); return; }
-    const done = DIARY_ARRANGE_DONE[mode] || DIARY_ARRANGE_DONE.row;
-    // 있던 자리에서 정돈한다 — 맨 위에 있던 것의 높이가 정렬한 블록의 시작이 된다.
-    const top = Math.max(0.03, Math.min(...list.map(s => Number(s.y) || 0)));
-    const places = diaryArrangeStickers(list, mode, Object.assign({ top }, opts || {}));
-    if (!places.length) return;
-    if (history) history.flush();
-    applyStickerPlaces(list, places);
-    selection = list.map(s => s.id);
-    renderStickers(); layout(); touch(true);
-    setStatus(diaryTf(arrangeAllPhotos(list) ? done[0] : done[1], { n:list.length }));
-  }
-  // 그림 칸 안에 든 스티커 — 가운데가 칸 안에 들면 '칸에 든 것'으로 본다(안내 문장을 감추는 판정과 같은 규칙).
-  function stickersInBox(entry, box, w){
-    if (!entry || !box || !w) return [];
-    return entry.stickers.filter(s => {
-      const cx = (s.x + s.w / 2) * w, cy = (s.y + s.w * s.ar / 2) * w;
-      return cx >= box.left && cx <= box.left + box.width && cy >= box.top && cy <= box.top + box.height;
-    });
-  }
-  // 그림 칸에 나눠 맞추기 — 한 장이면 예전처럼 칸에 꼭 맞춘다.
-  function fitStickersToBox(list, box = pictureBoxRect(), w = paperWidth || paper.clientWidth){
-    if (!box || !w || !list || !list.length) return false;
-    if (list.length === 1) return fitStickerToBox(list[0], box, w);
-    const places = diaryArrangeInBox(list, { left:box.left / w, top:box.top / w, width:box.width / w, height:box.height / w });
-    return applyStickerPlaces(list, places) > 0;
-  }
-  function fitSelectionToBox(){
-    const list = arrangeTargets();
-    if (!list.length) return;
-    if (history) history.flush();
-    if (!fitStickersToBox(list)) return;
-    selection = list.map(s => s.id);
-    renderStickers(); layout(); touch(true);
-    setStatus(list.length < 2 ? diaryT("사진을 그림 칸에 꼭 맞췄어요.")
-      : arrangeAllPhotos(list) ? diaryTf("사진 {n}장을 그림 칸에 나눠 맞췄어요.", { n:list.length })
-      : diaryTf("스티커 {n}개를 그림 칸에 나눠 맞췄어요.", { n:list.length }));
-  }
-  function openStickerMenu(id, x, y){
-    const s = stickerOf(id);
-    if (!s || typeof MNContextMenu === "undefined") return;
-    const entry = entryOf(current);
-    const list = selectedStickers();
-    const many = list.length > 1;
-    const kind = diaryStickerKind(s);
-    // 이미 맨 앞/맨 뒤인지 — 여러 장이면 고른 것이 모두 그 끝에 붙어 있을 때
-    const n = entry.stickers.length, k = list.length;
-    const atFront = entry.stickers.slice(n - k).every(x => selection.includes(x.id));
-    const atBack = entry.stickers.slice(0, k).every(x => selection.includes(x.id));
-    const arrangeCount = arrangeTargets().length;
-    // 그림·글상자만 색을 바꾼다(사진은 바꿀 색이 없다). 고른 것에 사진이 섞여 있으면 사진만 그대로 둔다.
-    const colorTargets = list.filter(item => diaryStickerKind(item) !== "photo");
-    const colorful = colorTargets.length > 0;
-    // 고른 것이 모두 한 색일 때만 그 색을 켠다(섞여 있으면 아무것도 켜지 않는다).
-    const oneColor = colorful && colorTargets.every(item => item.color === colorTargets[0].color) ? colorTargets[0].color : "";
-    const colorChildren = DIARY_PENS.map(([color, ko, en]) => ({
-      label:diaryIsEn() ? en : ko, active:list.every(item => item.color === color), action:() => applyStickerColor(color)
-    }));
-    // 팔레트 밖 색은 메뉴 안에 칸을 넣을 수 없어(MNContextMenu 는 글자 항목만 받는다) 스티커 창의 색 칸을 대신 연다.
-    // 창이 닫혀 있으면 먼저 연다 — display:none 인 칸은 click() 해도 고르개가 뜨지 않는다.
-    colorChildren.push({
-      label:diaryT("직접 고르기…"),
-      active:!!oneColor && !DIARY_PENS.some(pen => pen[0] === oneColor),
-      action:() => {
-        openStickerColorPicker();
-      }
-    });
-    const textItems = kind !== "text" || many ? [] : [
-      { label:diaryT("글 고쳐 쓰기"), icon:"pen", title:"Enter", action:() => editTextSticker(id) },
-      { label:diaryT("글자 크기"), children:DIARY_TEXT_SIZES.map(([, value, ko, en]) => ({
-        label:diaryIsEn() ? en : ko, active:Math.abs((s.size || 0) - value) < 0.0005,
-        action:() => setTextStickerField({ size:value })
-      })) },
-      { label:diaryT("글 맞춤"), children:[["left", "왼쪽", "Left"], ["center", "가운데", "Center"], ["right", "오른쪽", "Right"]]
-        .map(([align, ko, en]) => ({ label:diaryIsEn() ? en : ko, active:(s.align || "left") === align, action:() => setTextStickerField({ align }) })) },
-      { label:diaryT("글꼴"), children:DIARY_FONTS.map(font => ({
-        label:diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, font), active:(s.font || "gothic") === font,
-        action:() => setTextStickerField({ font })
-      })) },
-      { separator:true }
-    ];
-    MNContextMenu.open(x, y, [
-      ...textItems,
-      (kind !== "photo" || many) ? null : { label:diaryEn("크게 보기", "View large"), icon:"zoomIn", title:"Enter", action:() => openPhotoViewer(id) },
-      (kind !== "photo" || many) ? null : { separator:true },
-      colorful ? { label:diaryT("색 바꾸기"), children:colorChildren } : null,
-      colorful ? { separator:true } : null,
-      { label:diaryT("맨 앞으로"), title:"Ctrl+Shift+]", disabled:atFront, action:() => reorderStickers("front") },
-      { label:diaryT("한 칸 앞으로"), title:"Ctrl+]", disabled:atFront, action:() => reorderStickers("forward") },
-      { label:diaryT("한 칸 뒤로"), title:"Ctrl+[", disabled:atBack, action:() => reorderStickers("backward") },
-      { label:diaryT("맨 뒤로"), title:"Ctrl+Shift+[", disabled:atBack, action:() => reorderStickers("back") },
-      { separator:true },
-      { label:diaryT("왼쪽으로 15° 돌리기"), icon:"rotateLeft", title:"[ (Shift: 15°)", action:() => rotateStickers(-15) },
-      { label:diaryT("오른쪽으로 15° 돌리기"), icon:"rotateRight", title:"] (Shift: 15°)", action:() => rotateStickers(15) },
-      { label:diaryT("돌리기 되돌리기"), disabled:!list.some(x => x.rot), action:() => rotateStickers(0, true) },
-      // 글상자는 뒤집지 않는다 — 거울 글씨가 될 뿐이다.
-      list.every(x => diaryStickerKind(x) === "text") ? null
-        : { label:diaryT("좌우 뒤집기"), icon:"flipH", active:list.every(x => x.flip), action:() => flipStickers() },
-      // 사진 여러 장은 자리를 하나하나 끌지 않고 한 번에 정돈한다 — 고른 것이 둘 이상이면 그것만, 아니면 그 날 전부.
-      arrangeCount < 2 ? null : { label:diaryEn("정렬해서 깔기", "Arrange photos"), icon:"table", children:[
-        { label:diaryEn("줄 맞춰", "In rows"), action:() => arrangePhotos("row") },
-        { label:diaryEn("격자로", "In a grid"), children:[
-          { label:diaryEn("자동", "Auto"), action:() => arrangePhotos("grid") },
-          ...[2, 3, 4].map(cols => ({ label:diaryIsEn() ? cols + " columns" : cols + "열", action:() => arrangePhotos("grid", { cols }) }))
-        ] },
-        { label:diaryEn("사진첩처럼", "Photo-album look"), action:() => arrangePhotos("scatter") }
-      ] },
-      (pictureBox.hidden || kind === "text") ? null
-        : many ? { label:diaryTf("그림 칸에 {n}장 나눠 맞추기", { n:k }), icon:"fit", action:() => fitSelectionToBox() }
-        : { label:diaryT("그림 칸에 꼭 맞추기"), icon:"fit", action:() => {
-            if (history) history.flush();
-            if (fitStickerToBox(s)){ positionStickers(); layout(); touch(true); }
-          } },
-      { separator:true },
-      many ? { label:diaryT("모두 고르기"), title:"Ctrl+A", disabled:k === n, action:() => setSelection(entry.stickers.map(x => x.id)) } : null,
-      { label:many ? diaryTf("스티커 {n}개 떼기", { n:k }) : diaryT(kind === "photo" ? "사진 떼기" : "스티커 떼기"), icon:"delete", action:() => removeStickers(selection) }
-    ], { onClose:() => { const node = stickerLayer.querySelector(`[data-id="${id}"]`); if (node) node.focus({ preventScroll:true }); } });
-  }
-  function removeSticker(id){ removeStickers([id]); }
-  function removeStickers(ids){
-    const entry = entryOf(current);
-    if (!entry) return;
-    const drop = new Set(ids);
-    const keep = entry.stickers.filter(s => !drop.has(s.id));
-    const count = entry.stickers.length - keep.length;
-    if (!count) return;
-    if (history) history.flush();
-    entry.stickers = keep;
-    selection = [];
-    renderStickers();
-    layout();
-    renderCalendar();
-    touch(true);
-    setStatus(count > 1 ? diaryTf("스티커 {n}개를 뗐어요. Ctrl+Z 로 되돌릴 수 있어요.", { n:count }) : diaryT("스티커를 뗐어요. Ctrl+Z 로 되돌릴 수 있어요."));
-  }
-  /* Ctrl(⌘)+끌기 = 네모를 그려 한꺼번에 고르기. 종이 대부분이 글칸이라 그냥 끌기·Shift+끌기는 글 고르기로 남겨 둔다.
-     네모에 조금이라도 걸친 스티커를 고른다(돌린 스티커는 돌리기 전 상자로 잰다). Shift 를 함께 누르면 지금 고른 것에 더한다. */
-  const marquee = document.createElement("div");
-  marquee.className = "diary-marquee";
-  marquee.hidden = true;
-  paper.append(marquee);
-  paper.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || !(e.ctrlKey || e.metaKey) || drawMode) return;
-    if (e.target.closest(".diary-sticker, .diary-draw-bar, .diary-picture-hint button")) return;
-    const entry = entryOf(current);
-    if (!entry || !entry.stickers.length) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const base = e.shiftKey ? [...selection] : [];
-    const rect = paper.getBoundingClientRect();
-    const x0 = e.clientX - rect.left, y0 = e.clientY - rect.top;
-    const w = paperWidth || paper.clientWidth || 1;
-    try { paper.setPointerCapture(e.pointerId); } catch(_){}
-    const move = (ev) => {
-      const x1 = ev.clientX - rect.left, y1 = ev.clientY - rect.top;
-      const box = { left:Math.min(x0, x1), top:Math.min(y0, y1), right:Math.max(x0, x1), bottom:Math.max(y0, y1) };
-      Object.assign(marquee.style, { left:box.left + "px", top:box.top + "px", width:(box.right - box.left) + "px", height:(box.bottom - box.top) + "px" });
-      marquee.hidden = false;
-      const hit = entry.stickers.filter(s => {
-        const l = s.x * w, t = s.y * w, r = l + s.w * w, b = t + s.w * s.ar * w;
-        return l < box.right && r > box.left && t < box.bottom && b > box.top;
-      }).map(s => s.id);
-      setSelection([...base, ...hit]);
-    };
-    const up = () => {
-      paper.removeEventListener("pointermove", move);
-      paper.removeEventListener("pointerup", up);
-      paper.removeEventListener("pointercancel", up);
-      marquee.hidden = true;
-      const first = selection[0] && stickerLayer.querySelector(`[data-id="${selection[0]}"]`);
-      if (first) first.focus({ preventScroll:true });            // 곧바로 방향키·Delete 가 먹게
-    };
-    paper.addEventListener("pointermove", move);
-    paper.addEventListener("pointerup", up);
-    paper.addEventListener("pointercancel", up);
-  }, true);
-  async function addAsset(blob, maxDim){
-    const prepared = await diaryPrepareImage(blob, maxDim);
-    if (!prepared) return null;
-    const ext = prepared.mime === "image/jpeg" ? "jpg" : prepared.mime.split("/")[1];
-    const name = "assets/" + await diaryHashBytes(prepared.bytes) + "." + ext;
-    if (!assets.has(name)) assets.set(name, { bytes:prepared.bytes });
-    return { name, w:prepared.w, h:prepared.h };
-  }
-  /* at: 종이 안 픽셀 좌표(없으면 지금 보이는 종이 한가운데) · fit: 그림 칸에 맞추기
-     여러 장을 한꺼번에 넣으면 계단식으로 겹쳐 쌓지 않고 곧바로 줄 맞춰 깐다 — 다섯 장을 떨어뜨렸는데
-     카드 뭉치처럼 겹쳐 있으면 한 장씩 끌어내는 일부터 해야 한다. 그림 칸에 넣을 때도 칸을 나눠 맞춘다. */
-  async function addStickers(files, at, fit){
-    const blobs = [...(files || [])].filter(f => f && /^image\//i.test(f.type || ""));
-    if (!blobs.length) return;
-    const targetDate = current;
-    const targetBox = fit ? pictureBoxRect() : null;
-    setStatus(diaryT("사진을 붙이는 중…"));
-    const w = paperWidth || paper.clientWidth || 600;
-    const origin = at || stickerOrigin();
-    // 사진을 모두 준비한 뒤 현재 모델에 한 번에 넣는다. 날짜 이동·되돌리기로 교체된 entry 를 붙잡지 않는다.
-    const prepared = [];
-    let added = 0, skipped = 0;
-    for (const blob of blobs){
-      if (prepared.length >= DIARY_MAX_STICKERS){ skipped++; continue; }
-      const asset = await addAsset(blob, DIARY_STICKER_MAX_DIM);
-      if (!asset){ skipped++; continue; }
-      prepared.push(asset);
-    }
-    if (prepared.length && history) history.flush();
-    const fresh = [];
-    for (const asset of prepared){
-      const entry = ensureEntry(targetDate);
-      if (entry.stickers.length >= DIARY_MAX_STICKERS){ skipped++; continue; }
-      const width = Math.min(0.45, Math.max(0.12, (asset.w / w) * 0.6));
-      const ar = asset.h / asset.w;
-      const sticker = {
-        id:diaryStickerId(), asset:asset.name, w:width, ar,
-        x:Math.max(0, Math.min(1 - width, origin.x / w - width / 2 + added * 0.03)),
-        y:Math.max(0, origin.y / w - (width * ar) / 2 + added * 0.03)
-      };
-      entry.stickers.push(sticker);
-      fresh.push(sticker);
-      if (current === targetDate) selection = [sticker.id];
-      added++;
-    }
-    // 넣은 자리는 한 번에 정한다 — 한 장씩 맞추면 칸을 나눌 때 앞 장이 어디 있는지 알 수 없다.
-    let fitted = 0;
-    if (fresh.length && fit){
-      // 칸에 이미 들어 있던 사진까지 함께 나눈다 — 새것만 나누면 먼저 있던 한 장이 칸을 덮은 채로 남는다.
-      // 칸 안에 놓인 그림 스티커·글상자는 건드리지 않는다(정렬 대상과 같은 규칙 — 꾸미기는 그 자리에 둔다).
-      const older = stickersInBox(entryOf(targetDate), targetBox, w)
-        .filter(s => diaryStickerKind(s) === "photo" && !fresh.includes(s));
-      const targets = [...older, ...fresh];
-      if (fitStickersToBox(targets, targetBox, w)) fitted = targets.length;
-    }
-    else if (fresh.length > 1){
-      const top = Math.max(0.02, origin.y / w - 0.04);
-      applyStickerPlaces(fresh, diaryArrangeStickers(fresh, "row", { top }));
-    }
-    if (fresh.length > 1 && current === targetDate) selection = fresh.map(s => s.id);
-    if (added){
-      if (current === targetDate){
-        renderStickers();
-        layout();
-        onEntryChange();
-      }
-      renderCalendar();
-      touch(true);
-    }
-    if (skipped) setStatus((added ? diaryTf("사진 {n}장을 붙였어요.", { n:added }) + " " : "") + diaryTf("{n}장은 붙이지 못했어요(그림 파일이 아니거나 너무 크거나 한 날 {max}장을 넘었어요).", { n:skipped, max:DIARY_MAX_STICKERS }));
-    // 여러 장은 이미 정렬해 두었다고 알려 준다 — 다른 모양으로 깔 길(우클릭)도 여기서 한 번 짚어 준다.
-    else if (fitted > 1) setStatus(diaryTf("사진 {n}장을 그림 칸에 나눠 맞췄어요.", { n:fitted }));
-    else if (fresh.length > 1) setStatus(diaryTf("사진 {n}장을 줄 맞춰 깔았어요 — 우클릭 '정렬해서 깔기' 로 격자·사진첩 모양으로 바꿀 수 있어요.", { n:fresh.length }));
-    else refreshDirty();
-  }
-
-  /* ----- 내장 스티커·글상자 붙이기 -----
-     사진과 달리 ZIP 에 담을 바이트가 없어서 기다릴 것도, 줄일 것도 없다 — 곧바로 모델에 한 줄을 더한다. */
-  let artColor = DIARY_ART_DEFAULT_COLOR;        // 다음에 붙일 그림 색(고른 스티커가 있으면 그쪽을 바꾼다)
-  let artOpacity = 1;                            // 다음에 붙일 내장 그림·글상자 투명도
-  // 색을 한 번이라도 직접 고르기 전까지는 그림은 빨강, 글상자는 검정이라는 기본을 지킨다.
-  // 고른 뒤에는 글상자도 그 색을 따른다 — 색을 골라 놓고 글상자만 검정으로 붙으면 고장으로 보인다.
-  let artColorPicked = false;
-  // 종이에서 지금 보이는 데의 한가운데 — 사진 붙이기와 같은 자리 규칙.
-  function stickerOrigin(){
-    const w = paperWidth || paper.clientWidth || 600;
-    const rect = paper.getBoundingClientRect(), view = main.getBoundingClientRect();
-    const visibleTop = Math.max(0, view.top - rect.top);
-    return { x:w * 0.5, y:visibleTop + Math.min(view.height, rect.height) * 0.35, w };
-  }
-  // 같은 자리에 똑같이 겹쳐 쌓이면 위의 것만 잡힌다 — 한 장씩 조금씩 어긋내 놓는다
-  // (사진을 여러 장 한꺼번에 붙일 때 쓰던 규칙과 같다).
-  function cascadeOffset(){
-    const entry = entryOf(current);
-    return ((entry ? entry.stickers.length : 0) % 8) * 0.025;
-  }
-  function pushSticker(sticker){
-    const entry = ensureEntry(current);
-    if (entry.stickers.length >= DIARY_MAX_STICKERS){
-      setStatus(diaryTf("한 날에 스티커는 {max}개까지예요.", { max:DIARY_MAX_STICKERS }));
-      return null;
-    }
-    if (history) history.flush();
-    entry.stickers.push(sticker);
-    selection = [sticker.id];
-    renderStickers();
-    layout();
-    renderCalendar();
-    onEntryChange();
-    touch(true);
-    return sticker;
-  }
-  function addArtSticker(id){
-    const info = diaryArtInfo(id);
-    if (!info) return;
-    const o = stickerOrigin(), width = 0.18, off = cascadeOffset();
-    const s = pushSticker({ id:diaryStickerId(), kind:"art", art:info[0], color:artColor, opacity:artOpacity, w:width, ar:info[3],
-      x:Math.max(0, Math.min(1 - width, o.x / o.w - width / 2 + off)), y:Math.max(0, o.y / o.w - (width * info[3]) / 2 + off),
-      rot:0, flip:false });
-    if (s) setStatus(diaryTf("{name} 스티커를 붙였어요 — 끌어서 옮기고 모서리로 크기를 바꿔요.", { name:diaryArtName(info) }));
-  }
-  function addTextSticker(){
-    const o = stickerOrigin(), width = 0.42, off = cascadeOffset();
-    const s = pushSticker({ id:diaryStickerId(), kind:"text", text:diaryT("여기에 쓰세요"), color:artColorPicked ? artColor : DIARY_TEXT_DEFAULT_COLOR, opacity:artOpacity,
-      font:diaryEffectiveStyle(model, entryOf(current)).font, size:0.048, align:"left", w:width, ar:0.2,
-      x:Math.max(0, Math.min(1 - width, o.x / o.w - width / 2 + off)), y:Math.max(0, o.y / o.w + off), rot:0, flip:false });
-    if (s) editTextSticker(s.id, true);          // 붙이자마자 바로 쓰게 — 견본 글은 모두 골라 둔다
-  }
-  /* 글상자 고쳐 쓰기 — 종이 위 그 자리에 같은 글꼴·크기의 textarea 를 잠깐 얹는다.
-     contenteditable 은 쓰지 않는다(.mnote 설계 때 커서·IME 로 데인 길이라 일기장도 같은 결정이다).
-     Esc 는 되돌리고, 글을 모두 지우면 글상자가 사라진다(빈 상자는 저장되지도 않는다). */
-  let textEditing = "";
-  function editTextSticker(id, selectAll){
-    if (textEditing) return;
-    const s = stickerOf(id);
-    if (!s || diaryStickerKind(s) !== "text") return;
-    const node = stickerLayer.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    const body = node && node.querySelector(".diary-sticker-body");
-    if (!body) return;
-    textEditing = id;
-    node.classList.add("is-editing");
-    const before = s.text;
-    const w = paperWidth || paper.clientWidth || 600;
-    const ta = document.createElement("textarea");
-    ta.className = "diary-sticker-edit";
-    ta.value = s.text;
-    ta.maxLength = DIARY_TEXT_MAX;
-    ta.spellcheck = false;
-    ta.setAttribute("aria-label", "글상자 글");
-    Object.assign(ta.style, { fontSize:(s.size * w) + "px", fontFamily:DIARY_FONT_STACKS[s.font] || "",
-      color:s.color || DIARY_TEXT_DEFAULT_COLOR, textAlign:s.align || "left" });
-    body.hidden = true;
-    node.append(ta);
-    const grow = () => { ta.style.height = "0px"; ta.style.height = ta.scrollHeight + "px"; };
-    grow();
-    ta.addEventListener("input", () => { grow(); layout(); });
-    let cancelled = false;
-    ta.addEventListener("keydown", (e) => {
-      if (e.isComposing) return;
-      if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); cancelled = true; ta.blur(); }
-      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)){ e.preventDefault(); e.stopPropagation(); ta.blur(); }
-    });
-    ta.addEventListener("blur", () => {
-      if (textEditing !== id) return;
-      textEditing = "";
-      const next = cancelled ? before : ta.value;
-      ta.remove();
-      body.hidden = false;
-      node.classList.remove("is-editing");
-      const live = stickerOf(id);
-      if (!live) return;
-      if (next === before){ renderStickers(); layout(); return; }
-      if (history) history.flush();
-      if (!String(next).trim()){
-        removeStickers([id]);
-        setStatus(diaryT("글이 비어서 글상자를 뺐어요. Ctrl+Z 로 되돌릴 수 있어요."));
-        return;
-      }
-      live.text = String(next).slice(0, DIARY_TEXT_MAX);
-      renderStickers(); layout(); renderCalendar(); touch(true);
-    });
-    ta.focus({ preventScroll:true });
-    if (selectAll) ta.select(); else ta.setSelectionRange(ta.value.length, ta.value.length);
-  }
-  // 고른 글상자의 글자 크기·맞춤·글꼴 바꾸기(여럿을 골랐으면 글상자만 골라 함께).
-  function setTextStickerField(patch){
-    const list = selectedStickers().filter(s => diaryStickerKind(s) === "text");
-    if (!list.length) return;
-    if (history) history.flush();
-    for (const s of list) Object.assign(s, patch);
-    if (patch.font && DIARY_HAND_FONTS[patch.font]) diaryEnsureFont(patch.font).then(() => layout());
-    renderStickers(); layout(); touch(true);
-  }
-  /* 고른 스티커의 색 바꾸기. 고른 게 없으면 다음에 붙일 색만 기억한다.
-     live=true 는 색 고르개를 아직 끄는 중이라는 뜻 — 화면만 바꾸고 되돌리기 단계는 만들지 않는다.
-     확정(change)에서 한 번만 commit 하므로, 색을 한참 고르다 놓아도 Ctrl+Z 한 번에 돌아간다. */
-  function applyStickerColor(color, live){
-    const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
-    artColor = color;
-    artColorPicked = true;
-    if (!list.length){
-      onStickerSelect();
-      if (!live) setStatus(diaryT("다음에 붙일 스티커 색을 바꿨어요."));
-      return;
-    }
-    if (!live && history) history.flush();
-    for (const s of list) s.color = color;
-    renderStickers(); onStickerSelect();
-    if (live){ refreshDirty(); scheduleRecovery(); return; }
-    touch(true);
-  }
-  function applyStickerOpacity(opacity, live){
-    const value = Math.max(0.1, Math.min(1, Number(opacity) || 1));
-    const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
-    artOpacity = value;
-    if (!list.length){
-      onStickerSelect();
-      if (!live) setStatus(diaryT("다음에 붙일 스티커 투명도를 바꿨어요."));
-      return;
-    }
-    for (const s of list) s.opacity = value;
-    renderStickers(); onStickerSelect();
-    if (live){ refreshDirty(); scheduleRecovery(); return; }
-    touch(true);
-  }
-
-  /* ----- 바깥에 내주는 읽기 창구 -----
-     종이 엔진을 떼어 낼 때 이 여섯이 돌려주는 값이 된다. 바깥이 종이의 변수를 직접 읽지 않게 한다. */
-  const selectionIds = () => selection;
-  const clearSelection = () => { selection = []; };
-  const paperWidthNow = () => paperWidth;
-  const isDrawing = () => drawMode;
-  const stickerColorNow = () => artColor;
-  const stickerOpacityNow = () => artOpacity;
+  // 종이 한 장은 mountDiaryPaper 가 맡는다. 바깥은 창구로만 주고받는다(위 주석 참고).
+  const paperApi = mountDiaryPaper(
+    { paper, area, bgLayer, veilLayer, genkoLayer, genkoCaret, genkoGrid, stickerLayer, artBgLayer, drawLayer, drawCanvas, pictureBox, pictureHint, main },
+    { model, assets, assetUrl:(...a) => assetUrl(...a), ensureEntry:(...a) => ensureEntry(...a), entryOf:(...a) => entryOf(...a), onDrawModeChange:(...a) => onDrawModeChange(...a), onEntryChange:(...a) => onEntryChange(...a), onStickerSelect:(...a) => onStickerSelect(...a), openStickerColorPicker:(...a) => openStickerColorPicker(...a), refreshCurrentLabel:(...a) => refreshCurrentLabel(...a), refreshDirty:(...a) => refreshDirty(...a), renderCalendar:(...a) => renderCalendar(...a), repaintCardPapers:(...a) => repaintCardPapers(...a), scheduleRecovery:(...a) => scheduleRecovery(...a), setStatus:(...a) => setStatus(...a), syncDrawBar:(...a) => syncDrawBar(...a), syncPanel:(...a) => syncPanel(...a), touch:(...a) => touch(...a), translateUi:(...a) => translateUi(...a), current:() => current, history:() => history, penColor:() => penColor, penSize:() => penSize, eraser:() => eraser }
+  );
+  const { addArtSticker, addAsset, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow } = paperApi;
 
   /* ----- 꾸미기 바꾸기 ----- */
   function changeStyle(patch, immediate){
@@ -5269,7 +5291,7 @@ function mountDiaryEditor(doc){
     clearTimeout(autoLockTimer);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
-    document.removeEventListener("selectionchange", onSelectionChange);
+    destroyPaper();
     window.removeEventListener("mni18nchange", onLangChange);
     if (doc.printDiary) delete doc.printDiary;
     if (resizeObserver) resizeObserver.disconnect();

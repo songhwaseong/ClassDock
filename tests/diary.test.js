@@ -851,11 +851,18 @@ function diaryStickerHarness(){
     if (!entry){ entry = diary.diaryNormalizeEntry({ date:key }); ctx.model.entries.push(entry); }
     return entry;
   };
+  // 종이 엔진은 바뀌는 값(날짜·되돌리기·펜)을 바깥에서 그대로 읽지 않고 ctx 창구로 그때그때 읽는다.
+  ctx.paperEnv = {
+    current:() => ctx.current, history:() => ctx.history,
+    penColor:() => "#1f2937", penSize:() => "mid", eraser:() => false
+  };
   const source = read("src/js/diary.js");
   const fitStart = source.indexOf("  function fitStickerToBox(");
   const addStart = source.indexOf("  async function addStickers(");
+  // 종이 엔진(mountDiaryPaper) 안의 조각만 떼어 돌린다. 끝 표시는 함수 안에 있어야 한다 —
+  // 바깥 표시까지 잘라 오면 return 문이 딸려 와 vm 이 "Illegal return" 으로 죽는다.
   vm.runInContext(source.slice(fitStart, source.indexOf("  function openStickerMenu", fitStart))
-    + source.slice(addStart, source.indexOf("  /* ----- 꾸미기 바꾸기", addStart)), ctx);
+    + source.slice(addStart, source.indexOf("  /* ----- 바깥에 내주는 읽기 창구", addStart)), ctx);
   return { ctx, pending, commits:() => commits, add:vm.runInContext("addStickers", ctx) };
 }
 
