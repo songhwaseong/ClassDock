@@ -872,7 +872,7 @@ test("내장 스티커: 색을 골라 붙이면 그림으로 그려지고, 고�
   await page.locator(".diary-bar .diary-sticker-btn").click();
   const panel = page.locator(".diary-art-panel");
   await expect(panel).toBeVisible();
-  await expect(panel.locator(".diary-art-chip")).toHaveCount(48);
+  await expect(panel.locator(".diary-art-chip")).toHaveCount(144);
   await expect(panel.locator(".diary-art-grid")).toHaveCSS("display", "grid");
   const tiles = await panel.locator(".diary-art-chip").evaluateAll(nodes => nodes.slice(0, 13).map(node => {
     const box = node.getBoundingClientRect(); return { x:Math.round(box.x), y:Math.round(box.y), w:Math.round(box.width) };
