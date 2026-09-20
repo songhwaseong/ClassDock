@@ -3265,6 +3265,79 @@ function mountDiaryEditor(doc){
     if (activeSideTab === "review") renderReview();
   }
 
+  /* ----- 그리기 펜(바가 가진 상태) -----
+     펜 색·굵기·지우개는 도구 바의 것이다. 종이는 획을 시작할 때만 읽는다(localStorage mn.diaryPen).
+     그리기 켜짐(drawMode)만 종이 쪽에 남는다 — 그리기 층·스티커 고르기가 함께 움직여야 하기 때문이다. */
+  let eraser = false;
+  let penColor = DIARY_PENS[0][0], penSize = "mid";
+  try {
+    const saved = JSON.parse(localStorage.getItem("mn.diaryPen") || "null");
+    // 팔레트 밖 색도 기억한다(직접 고른 색이 다음에 열 때 조용히 검정으로 돌아가지 않게).
+    if (saved && DIARY_HEX_RE.test(String(saved.color || ""))) penColor = String(saved.color).toLowerCase();
+    if (saved && DIARY_PEN_SIZES.some(x => x[0] === saved.size)) penSize = saved.size;
+  } catch(_){}
+  const rememberPen = () => { try { localStorage.setItem("mn.diaryPen", JSON.stringify({ color:penColor, size:penSize })); } catch(_){} };
+  function syncDrawBar(){
+    penButtons.forEach(b => {
+      const on = !eraser && b.dataset.color === penColor;
+      const info = DIARY_PENS.find(x => x[0] === b.dataset.color);
+      const name = diaryIsEn() ? info[2] : info[1];
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+      b.title = name; b.setAttribute("aria-label", name);
+    });
+    // 팔레트에 없는 색이면 칩은 모두 꺼지고 '직접 고르기' 칸만 켠다.
+    penCustomColor.value = penColor;
+    penCustomColor.classList.toggle("is-on", !eraser && !DIARY_PENS.some(x => x[0] === penColor));
+    penCustomColor.title = diaryT("색 직접 고르기");
+    penCustomColor.setAttribute("aria-label", penCustomColor.title);
+    sizeButtons.forEach(b => {
+      const on = b.dataset.size === penSize;
+      const info = DIARY_PEN_SIZES.find(x => x[0] === b.dataset.size);
+      const name = diaryIsEn() ? info[3] : info[2];
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+      b.title = name; b.setAttribute("aria-label", name);
+    });
+    eraserBtn.classList.toggle("is-on", eraser);
+    eraserBtn.setAttribute("aria-pressed", String(eraser));
+    const entry = entryOf(current);
+    drawClearBtn.disabled = !(entry && entry.drawing && entry.drawing.length);
+  }
+
+  // 색을 고르면 지우개는 자동으로 풀린다(색을 골랐는데 계속 지워지면 놀란다).
+  // 끄는 중(live)에는 localStorage 에 쓰지 않는다 — 확정된 색만 기억한다.
+  function setPenColor(color, live){
+    penColor = color; eraser = false;
+    if (!live) rememberPen();
+    syncDrawBar();
+  }
+  penButtons.forEach(b => b.addEventListener("click", () => setPenColor(b.dataset.color)));
+  sizeButtons.forEach(b => b.addEventListener("click", () => { penSize = b.dataset.size; rememberPen(); syncDrawBar(); }));
+  eraserBtn.addEventListener("click", () => { eraser = !eraser; syncDrawBar(); });
+  drawClearBtn.addEventListener("click", () => {
+    const entry = entryOf(current);
+    if (!entry || !entry.drawing || !entry.drawing.length) return;
+    if (history) history.flush();
+    entry.drawing = [];
+    redrawDrawing(); syncDrawBar(); renderCalendar(); positionStickers();
+    deleteBtn.disabled = diaryEntryIsEmpty(entry);
+    touch(true);
+    setStatus(diaryT("그림을 모두 지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
+  });
+  drawDoneBtn.addEventListener("click", () => setDrawMode(false));
+  pictureDrawBtn.addEventListener("click", (e) => { e.stopPropagation(); setDrawMode(true); });
+
+  /* ----- 종이가 바깥 창·바에 알리는 네 가지 -----
+     종이 엔진을 따로 떼어 낼 때(mountDiaryPaper) 이 넷이 그대로 ctx 가 된다.
+     종이는 창·바의 요소를 직접 만지지 않고 여기로만 알린다. */
+  const onEntryChange = () => { deleteBtn.disabled = diaryEntryIsEmpty(entryOf(current)); };
+  const onDrawModeChange = (on) => { drawBar.hidden = !on; };
+  const onStickerSelect = () => syncArtPanel();
+  const openStickerColorPicker = () => {
+    setArtPanelOpen(true);
+    artCustomColor.focus({ preventScroll:true });
+    artCustomColor.click();
+  };
+
   /* ----- 종이 ----- */
   let paperWidth = 0;
   function applyStyle(){
@@ -3444,44 +3517,11 @@ function mountDiaryEditor(doc){
   }
 
   /* ----- 그림 칸 그리기 ----- */
-  let drawMode = false, eraser = false;
-  let penColor = DIARY_PENS[0][0], penSize = "mid";
-  try {
-    const saved = JSON.parse(localStorage.getItem("mn.diaryPen") || "null");
-    // 팔레트 밖 색도 기억한다(직접 고른 색이 다음에 열 때 조용히 검정으로 돌아가지 않게).
-    if (saved && DIARY_HEX_RE.test(String(saved.color || ""))) penColor = String(saved.color).toLowerCase();
-    if (saved && DIARY_PEN_SIZES.some(x => x[0] === saved.size)) penSize = saved.size;
-  } catch(_){}
-  const rememberPen = () => { try { localStorage.setItem("mn.diaryPen", JSON.stringify({ color:penColor, size:penSize })); } catch(_){} };
-  function syncDrawBar(){
-    penButtons.forEach(b => {
-      const on = !eraser && b.dataset.color === penColor;
-      const info = DIARY_PENS.find(x => x[0] === b.dataset.color);
-      const name = diaryIsEn() ? info[2] : info[1];
-      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
-      b.title = name; b.setAttribute("aria-label", name);
-    });
-    // 팔레트에 없는 색이면 칩은 모두 꺼지고 '직접 고르기' 칸만 켠다.
-    penCustomColor.value = penColor;
-    penCustomColor.classList.toggle("is-on", !eraser && !DIARY_PENS.some(x => x[0] === penColor));
-    penCustomColor.title = diaryT("색 직접 고르기");
-    penCustomColor.setAttribute("aria-label", penCustomColor.title);
-    sizeButtons.forEach(b => {
-      const on = b.dataset.size === penSize;
-      const info = DIARY_PEN_SIZES.find(x => x[0] === b.dataset.size);
-      const name = diaryIsEn() ? info[3] : info[2];
-      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
-      b.title = name; b.setAttribute("aria-label", name);
-    });
-    eraserBtn.classList.toggle("is-on", eraser);
-    eraserBtn.setAttribute("aria-pressed", String(eraser));
-    const entry = entryOf(current);
-    drawClearBtn.disabled = !(entry && entry.drawing && entry.drawing.length);
-  }
+  let drawMode = false;
   function setDrawMode(on){
     drawMode = !!on && !pictureBox.hidden;
     paper.classList.toggle("is-drawing", drawMode);
-    drawBar.hidden = !drawMode;
+    onDrawModeChange(drawMode);
     if (drawMode){ selectSticker(""); syncDrawBar(); }
     positionStickers();
   }
@@ -3543,7 +3583,7 @@ function mountDiaryEditor(doc){
       if (entry.drawing.length >= DIARY_MAX_STROKES){ setStatus(diaryT("그림이 너무 많아 더 그릴 수 없어요.")); redrawDrawing(); return; }
       entry.drawing.push(stroke);
       redrawDrawing();
-      deleteBtn.disabled = diaryEntryIsEmpty(entry);
+      onEntryChange();
       renderCalendar();
       syncDrawBar();
       touch(true);
@@ -3552,28 +3592,6 @@ function mountDiaryEditor(doc){
     drawCanvas.addEventListener("pointerup", up);
     drawCanvas.addEventListener("pointercancel", up);
   });
-  // 색을 고르면 지우개는 자동으로 풀린다(색을 골랐는데 계속 지워지면 놀란다).
-  // 끄는 중(live)에는 localStorage 에 쓰지 않는다 — 확정된 색만 기억한다.
-  function setPenColor(color, live){
-    penColor = color; eraser = false;
-    if (!live) rememberPen();
-    syncDrawBar();
-  }
-  penButtons.forEach(b => b.addEventListener("click", () => setPenColor(b.dataset.color)));
-  sizeButtons.forEach(b => b.addEventListener("click", () => { penSize = b.dataset.size; rememberPen(); syncDrawBar(); }));
-  eraserBtn.addEventListener("click", () => { eraser = !eraser; syncDrawBar(); });
-  drawClearBtn.addEventListener("click", () => {
-    const entry = entryOf(current);
-    if (!entry || !entry.drawing || !entry.drawing.length) return;
-    if (history) history.flush();
-    entry.drawing = [];
-    redrawDrawing(); syncDrawBar(); renderCalendar(); positionStickers();
-    deleteBtn.disabled = diaryEntryIsEmpty(entry);
-    touch(true);
-    setStatus(diaryT("그림을 모두 지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
-  });
-  drawDoneBtn.addEventListener("click", () => setDrawMode(false));
-  pictureDrawBtn.addEventListener("click", (e) => { e.stopPropagation(); setDrawMode(true); });
   function renderStickers(){
     const entry = entryOf(current);
     const list = entry ? entry.stickers : [];
@@ -3675,7 +3693,7 @@ function mountDiaryEditor(doc){
   function syncSelection(){
     for (const node of stickerLayer.children) node.classList.toggle("is-selected", selection.includes(node.dataset.id));
     stickerLayer.classList.toggle("is-multi", selection.length > 1);
-    if (!artPanel.hidden) syncArtPanel();              // 스티커 창이 열려 있으면 고른 것의 색을 비춘다
+    onStickerSelect();                                // 고른 것의 색·투명도를 스티커 창에 비춘다
   }
   function setSelection(ids){
     const before = selection.join("|");
@@ -3941,9 +3959,7 @@ function mountDiaryEditor(doc){
       label:diaryT("직접 고르기…"),
       active:!!oneColor && !DIARY_PENS.some(pen => pen[0] === oneColor),
       action:() => {
-        setArtPanelOpen(true);
-        artCustomColor.focus({ preventScroll:true });
-        artCustomColor.click();
+        openStickerColorPicker();
       }
     });
     const textItems = kind !== "text" || many ? [] : [
@@ -4119,7 +4135,7 @@ function mountDiaryEditor(doc){
       if (current === targetDate){
         renderStickers();
         layout();
-        deleteBtn.disabled = false;
+        onEntryChange();
       }
       renderCalendar();
       touch(true);
@@ -4163,7 +4179,7 @@ function mountDiaryEditor(doc){
     renderStickers();
     layout();
     renderCalendar();
-    deleteBtn.disabled = false;
+    onEntryChange();
     touch(true);
     return sticker;
   }
@@ -4256,13 +4272,13 @@ function mountDiaryEditor(doc){
     artColor = color;
     artColorPicked = true;
     if (!list.length){
-      syncArtPanel();
+      onStickerSelect();
       if (!live) setStatus(diaryT("다음에 붙일 스티커 색을 바꿨어요."));
       return;
     }
     if (!live && history) history.flush();
     for (const s of list) s.color = color;
-    renderStickers(); syncArtPanel();
+    renderStickers(); onStickerSelect();
     if (live){ refreshDirty(); scheduleRecovery(); return; }
     touch(true);
   }
@@ -4271,12 +4287,12 @@ function mountDiaryEditor(doc){
     const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
     artOpacity = value;
     if (!list.length){
-      syncArtPanel();
+      onStickerSelect();
       if (!live) setStatus(diaryT("다음에 붙일 스티커 투명도를 바꿨어요."));
       return;
     }
     for (const s of list) s.opacity = value;
-    renderStickers(); syncArtPanel();
+    renderStickers(); onStickerSelect();
     if (live){ refreshDirty(); scheduleRecovery(); return; }
     touch(true);
   }
