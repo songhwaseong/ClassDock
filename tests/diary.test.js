@@ -439,7 +439,7 @@ test("내장 그림 스티커는 이름·색·투명도를 저장하고, 모르�
 });
 
 test("모든 내장 그림은 이름·영어 이름·그릴 SVG 를 갖춘다", () => {
-  assert.ok(diary.DIARY_ART.length >= 48, "그림이 너무 적다: " + diary.DIARY_ART.length);
+  assert.equal(diary.DIARY_ART.length, 144, "내장 그림 스티커 수");
   assert.equal(new Set(diary.DIARY_ART_IDS).size, diary.DIARY_ART.length);      // id 가 겹치지 않는다
   for (const [id, ko, en, ar, body] of diary.DIARY_ART){
     assert.match(id, /^[a-z]+$/, id);
@@ -453,7 +453,7 @@ test("모든 내장 그림은 이름·영어 이름·그릴 SVG 를 갖춘다", 
   assert.equal(diary.diaryArtSvg("없는그림"), "");
 });
 
-test("48개 스티커는 작은 타일로 12칸씩 배치한다", () => {
+test("144개 스티커는 작은 타일로 12칸씩 배치한다", () => {
   const css = read("src/styles.css");
   assert.match(css, /\.diary-style-controls\.diary-art-grid\{[^}]*display:grid;grid-template-columns:repeat\(12,minmax\(0,1fr\)\);gap:3px/);
   assert.match(css, /\.diary-art-chip\{[^}]*padding:2px/);
@@ -540,9 +540,9 @@ test("내장 그림·글상자만 붙인 날도 빈 날로 버리지 않는다",
   }
 });
 
-test("스티커 투명도가 추가된 파일은 version 10 이고 옛 앱은 거절한다", () => {
-  assert.equal(diary.DIARY_VERSION, 10);
-  const json = JSON.stringify({ format:"classdock-diary", version:11, title:"미래", entries:[] });
+test("내장 그림 스티커가 확장된 파일은 version 11 이고 다음 버전은 거절한다", () => {
+  assert.equal(diary.DIARY_VERSION, 11);
+  const json = JSON.stringify({ format:"classdock-diary", version:12, title:"미래", entries:[] });
   assert.throws(() => diary.diaryNormalize(JSON.parse(json)), /diary-version/);
 });
 

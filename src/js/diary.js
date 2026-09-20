@@ -15,9 +15,9 @@ const DIARY_FORMAT = "classdock-diary";
 // 2: 날씨·기분·스티커 회전/뒤집기·그림일기·글꼴 · 3: 원고지 줄 무늬 · 4: 그림 칸에 그린 그림(drawing) · 5: 손글씨 글꼴
 // · 6: 원고지 한 줄 칸 수(genkoCols) · 7: 태그·즐겨찾기 · 8: 스티커 갈래(kind) — 내장 그림(art)·글상자(text).
 // · 9: 종이 배경 효과(paper·paperColor·paperTone)·인쇄할 땐 배경 빼기(printPlain).
-// · 10: 내장 그림 스티커·글상자 투명도(opacity).
+// · 10: 내장 그림 스티커·글상자 투명도(opacity) · 11: 내장 그림 스티커 80종으로 확장.
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 10;
+const DIARY_VERSION = 11;
 const DIARY_JSON_NAME = "diary.json";
 const DIARY_LINES = ["ruled", "grid", "dots", "blank", "picture", "genko"];
 const DIARY_LINE_LABELS = { ruled:"줄 공책", grid:"모눈", dots:"점", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
@@ -504,7 +504,364 @@ const DIARY_ART = [
   ["calendar", "달력", "Calendar", 0.9,
     '<rect x="7" y="14" width="86" height="75" rx="8"/><path d="M7 36h86" stroke="#fff" stroke-width="7"/>'
     + '<path d="M29 5v20M71 5v20" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>'
-    + '<g fill="#fff" fill-opacity=".82"><circle cx="29" cy="55" r="5"/><circle cx="50" cy="55" r="5"/><circle cx="71" cy="55" r="5"/><circle cx="29" cy="74" r="5"/><circle cx="50" cy="74" r="5"/><circle cx="71" cy="74" r="5"/></g>']
+    + '<g fill="#fff" fill-opacity=".82"><circle cx="29" cy="55" r="5"/><circle cx="50" cy="55" r="5"/><circle cx="71" cy="55" r="5"/><circle cx="29" cy="74" r="5"/><circle cx="50" cy="74" r="5"/><circle cx="71" cy="74" r="5"/></g>'],
+  ["dog", "강아지", "Dog", 1,
+    '<path d="M20 36C5 24 5 8 18 5c10-2 18 8 23 19 6-2 12-2 18 0C64 13 72 3 82 5c13 3 13 19-2 31 8 15 7 34-3 46-7 9-16 14-27 14S30 91 23 82c-10-12-11-31-3-46z"/>'
+    + '<g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"><path d="M35 51h.1M65 51h.1M43 66l7 5 7-5M34 76q16 12 32 0"/></g>'],
+  ["bear", "곰", "Bear", 1,
+    '<circle cx="22" cy="22" r="17"/><circle cx="78" cy="22" r="17"/><circle cx="50" cy="54" r="42"/>'
+    + '<ellipse cx="50" cy="65" rx="20" ry="16" fill="#fff" fill-opacity=".78"/><path d="M35 48h.1M65 48h.1" stroke="#fff" stroke-width="5" stroke-linecap="round"/><circle cx="50" cy="61" r="5"/>'],
+  ["penguin", "펭귄", "Penguin", 1.15,
+    '<ellipse cx="50" cy="58" rx="38" ry="55"/><ellipse cx="50" cy="65" rx="25" ry="39" fill="#fff" fill-opacity=".88"/>'
+    + '<circle cx="38" cy="38" r="4" fill="#fff"/><circle cx="62" cy="38" r="4" fill="#fff"/><path d="m50 45-9 8h18zM31 108l13-9M69 108l-13-9" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>'],
+  ["fish", "물고기", "Fish", 0.72,
+    '<path d="M8 36C25 8 66 5 82 29L98 13v46L82 43C66 67 25 64 8 36z"/><circle cx="35" cy="29" r="5" fill="#fff"/>'
+    + '<path d="M50 13c6 8 7 15 5 22M50 59c6-8 7-15 5-22" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="4"/>'],
+  ["bird", "새", "Bird", 0.82,
+    '<path d="M8 57c16-3 25-14 31-32 12 7 18 18 17 31 13-10 25-11 37-4-9 8-18 14-30 17-17 14-39 12-55-12z"/>'
+    + '<path d="M24 51c13-2 23 2 31 12" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="5" stroke-linecap="round"/><circle cx="44" cy="39" r="4" fill="#fff"/>'],
+  ["ladybug", "무당벌레", "Ladybug", 1,
+    '<circle cx="50" cy="55" r="40"/><circle cx="50" cy="18" r="18"/><path d="M50 26v69" stroke="#fff" stroke-width="5"/>'
+    + '<g fill="#fff" fill-opacity=".78"><circle cx="34" cy="48" r="6"/><circle cx="67" cy="48" r="6"/><circle cx="28" cy="70" r="6"/><circle cx="72" cy="70" r="6"/></g>'],
+  ["pizza", "피자", "Pizza", 1,
+    '<path d="M50 94 9 18c25-13 57-13 82 0z"/><path d="M9 18c25-13 57-13 82 0" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="12" stroke-linecap="round"/>'
+    + '<g fill="#fff" fill-opacity=".72"><circle cx="40" cy="38" r="7"/><circle cx="63" cy="51" r="7"/><circle cx="47" cy="68" r="6"/></g>'],
+  ["hamburger", "햄버거", "Hamburger", 0.88,
+    '<path d="M8 36C10 14 27 4 50 4s40 10 42 32zM7 61h86v14c0 5-4 8-9 8H16c-5 0-9-3-9-8z"/>'
+    + '<path d="M6 45h88M11 55l15 8 15-8 15 8 15-8 18 8" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>'],
+  ["donut", "도넛", "Donut", 1,
+    '<circle cx="50" cy="50" r="45"/><circle cx="50" cy="50" r="16" fill="#fff" fill-opacity=".9"/>'
+    + '<g fill="#fff" fill-opacity=".72"><rect x="25" y="24" width="14" height="4" rx="2" transform="rotate(30 32 26)"/><rect x="64" y="27" width="14" height="4" rx="2" transform="rotate(-25 71 29)"/><rect x="68" y="66" width="14" height="4" rx="2" transform="rotate(24 75 68)"/><rect x="22" y="65" width="14" height="4" rx="2" transform="rotate(-32 29 67)"/></g>'],
+  ["icecream", "아이스크림", "Ice cream", 1.18,
+    '<circle cx="50" cy="35" r="32"/><path d="M22 52h56L50 116z"/>'
+    + '<path d="m31 65 36 26M69 65 40 88" fill="none" stroke="#fff" stroke-opacity=".65" stroke-width="4"/>'],
+  ["watermelon", "수박", "Watermelon", 0.72,
+    '<path d="M5 7h90C91 43 72 67 50 67S9 43 5 7z"/><path d="M10 13h80" stroke="#fff" stroke-opacity=".8" stroke-width="9"/>'
+    + '<g fill="#fff" fill-opacity=".75"><ellipse cx="30" cy="31" rx="3" ry="6"/><ellipse cx="50" cy="40" rx="3" ry="6"/><ellipse cx="70" cy="31" rx="3" ry="6"/></g>'],
+  ["coffee", "커피", "Coffee", 0.9,
+    '<path d="M10 25h65v35c0 17-13 24-29 24h-7C23 84 10 77 10 60z"/><path d="M75 34h8c18 0 18 27 0 27h-9" fill="none" stroke="currentColor" stroke-width="9"/>'
+    + '<path d="M29 3c-8 8 8 13 0 22M49 3c-8 8 8 13 0 22" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>'],
+  ["bell", "종", "Bell", 1,
+    '<path d="M15 75h70L75 62V39C75 22 65 10 50 8 35 10 25 22 25 39v23z"/><path d="M39 80c1 11 21 11 22 0"/><circle cx="50" cy="7" r="7"/>'],
+  ["trophy", "트로피", "Trophy", 1,
+    '<path d="M24 8h52v24c0 20-10 33-26 36-16-3-26-16-26-36z"/><path d="M24 18H7v12c0 17 10 25 25 24M76 18h17v12c0 17-10 25-25 24" fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="round"/>'
+    + '<path d="M45 67h10v17h18v10H27V84h18z"/>'],
+  ["medal", "메달", "Medal", 1.08,
+    '<path d="M20 4h22l8 30L32 48zM80 4H58l-8 30 18 14z"/><circle cx="50" cy="70" r="35"/>'
+    + '<path d="m50 48 7 14 16 2-12 11 3 16-14-8-14 8 3-16-12-11 16-2z" fill="#fff" fill-opacity=".8"/>'],
+  ["graduation", "학사모", "Graduation cap", 0.72,
+    '<path d="M2 26 50 4l48 22-48 22z"/><path d="M22 38v19c17 12 39 12 56 0V38L50 51z"/>'
+    + '<path d="M91 29v26" fill="none" stroke="currentColor" stroke-width="5"/><circle cx="91" cy="61" r="7"/>'],
+  ["globe", "지구본", "Globe", 1.05,
+    '<circle cx="50" cy="43" r="39" fill="none" stroke="currentColor" stroke-width="7"/><path d="M50 5c20 20 20 56 0 76M50 5c-20 20-20 56 0 76M12 43h76M19 23h62M19 63h62" fill="none" stroke="currentColor" stroke-width="4"/>'
+    + '<path d="M50 83v10M29 101h42" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>'],
+  ["paintbrush", "붓", "Paint brush", 1,
+    '<path d="m15 75 18-4 54-54L74 4 20 58z"/><path d="M15 75c-13 5-10 17-8 22 7-6 20-3 26-18z"/>'
+    + '<path d="M24 56 36 68" stroke="#fff" stroke-opacity=".72" stroke-width="5"/>'],
+  ["rocket", "로켓", "Rocket", 1.18,
+    '<path d="M50 4c24 16 29 48 12 76H38C21 52 26 20 50 4z"/><circle cx="50" cy="40" r="11" fill="#fff" fill-opacity=".85"/>'
+    + '<path d="m38 63-19 12-5 26 25-16M62 63l19 12 5 26-25-16M42 82l8 31 8-31"/>'],
+  ["train", "기차", "Train", 1,
+    '<rect x="12" y="6" width="67" height="55" rx="10"/><path d="M25 18h41v23H25z" fill="#fff" fill-opacity=".8"/>'
+    + '<circle cx="29" cy="65" r="12"/><circle cx="66" cy="65" r="12"/><path d="m18 77-9 0M75 77h16M31 78l-12 15M63 78l13 15M34 89h31" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>'],
+  ["ship", "배", "Ship", 1,
+    '<path d="M7 48h86L79 76c-6 12-52 12-58 0z"/><path d="M46 5v43M48 9l34 31H48zM42 14 17 40h25z"/>'
+    + '<path d="M7 91c10-8 19 8 29 0s19 8 29 0 19 8 29 0" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>'],
+  ["suitcase", "여행 가방", "Suitcase", 0.94,
+    '<rect x="10" y="23" width="80" height="68" rx="9"/><path d="M35 23V10h30v13M30 25v64M70 25v64" fill="none" stroke="currentColor" stroke-width="7"/>'
+    + '<path d="M34 10h32" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>'],
+  ["tent", "텐트", "Tent", 0.82,
+    '<path d="M4 78 45 7h10l41 71z"/><path d="M50 20v58M50 78 30 78l20-37 20 37z" fill="#fff" fill-opacity=".78"/>'
+    + '<path d="M8 78h84" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>'],
+  ["compass", "나침반", "Compass", 1,
+    '<circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" stroke-width="7"/><path d="m64 20-8 36-36 8 24-20z"/>'
+    + '<circle cx="50" cy="50" r="6" fill="#fff"/><path d="M50 6v8M50 86v8M6 50h8M86 50h8" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>'],
+  ["partyhat", "파티 모자", "Party hat", 1.08,
+    '<path d="m12 92 30-78 50 50z"/><path d="M25 58c14 2 27 10 38 22" fill="none" stroke="#fff" stroke-opacity=".78" stroke-width="7"/>'
+    + '<circle cx="44" cy="11" r="9"/><circle cx="79" cy="19" r="5"/><circle cx="87" cy="39" r="4"/>'],
+  ["confetti", "색종이 폭죽", "Confetti", 1,
+    '<path d="m22 94 15-50 39 39z"/><g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"><path d="M45 31c-8-12 1-21 13-19M59 39c8-16 25-14 28-28M65 53c14-8 24-1 27 9"/></g>'
+    + '<circle cx="22" cy="23" r="6"/><rect x="73" y="65" width="11" height="11" rx="2" transform="rotate(25 78 70)"/><path d="m84 33 11 4-8 9z"/>'],
+  ["candle", "촛불", "Candle", 1.1,
+    '<rect x="27" y="36" width="46" height="70" rx="5"/><path d="M50 2c18 18 10 34 0 34S32 20 50 2z"/>'
+    + '<path d="M27 57c10-9 16 8 27-2 8-7 12 3 19-2" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="6"/>'],
+  ["key", "열쇠", "Key", 0.84,
+    '<circle cx="25" cy="31" r="20" fill="none" stroke="currentColor" stroke-width="10"/><path d="m41 43 50 13-4 15-14-4-4 13-14-4 4-13-22-6z"/><circle cx="25" cy="31" r="6"/>'],
+  ["envelope", "편지", "Envelope", 0.7,
+    '<rect x="5" y="7" width="90" height="62" rx="7"/><path d="m9 14 41 31 41-31M8 64l31-27M92 64 61 37" fill="none" stroke="#fff" stroke-opacity=".78" stroke-width="6" stroke-linejoin="round"/>'],
+  ["clock", "시계", "Clock", 1,
+    '<circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" stroke-width="8"/><path d="M50 24v28l20 13" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="50" cy="50" r="5"/>'],
+  ["soccer", "축구공", "Soccer ball", 1,
+    '<circle cx="50" cy="50" r="46"/><path d="m50 27 15 11-6 18H41l-6-18z" fill="#fff" fill-opacity=".88"/>'
+    + '<path d="m50 4v23M6 39l29-1M19 83l22-27M81 83 59 56M94 39l-29-1" fill="none" stroke="#fff" stroke-opacity=".82" stroke-width="6"/>'],
+  ["gamepad", "게임기", "Game controller", 0.82,
+    '<path d="M21 18h58c10 0 15 8 17 20l3 19c3 17-15 23-24 10L65 54H35L25 67C16 80-2 74 1 57l3-19c2-12 7-20 17-20z"/>'
+    + '<path d="M27 31v19M17 41h20" stroke="#fff" stroke-width="7" stroke-linecap="round"/><circle cx="72" cy="36" r="5" fill="#fff"/><circle cx="83" cy="47" r="5" fill="#fff"/>'],
+  ["thumbsup", "엄지척", "Thumbs up", 1,
+    '<rect x="5" y="46" width="22" height="48" rx="6"/>'
+    + '<path d="M34 94V50c10-2 16-9 19-20 2-8 2-14 6-20 8-12 22-4 18 10-2 7-4 12-6 17h21c8 0 13 7 11 15l-8 30c-2 8-8 12-16 12z"/>'],
+  ["sadface", "우는 얼굴", "Crying face", 1,
+    '<circle cx="50" cy="50" r="45"/><g fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round">'
+    + '<path d="M33 38h.1M67 38h.1M30 72c8-16 32-16 40 0"/></g>'
+    + '<path d="M33 50c-6 11-9 16-9 20a9 9 0 0 0 18 0c0-4-3-9-9-20z" fill="#fff" fill-opacity=".85"/>'],
+  ["question", "물음표", "Question mark", 1.05,
+    '<path d="M50 4C31 4 17 15 15 33h19c2-8 8-13 16-13 9 0 15 5 15 13 0 6-3 10-11 16-11 8-15 15-15 26v3h19v-2c0-7 3-11 12-18 10-8 15-15 15-26C85 16 71 4 50 4z"/>'
+    + '<circle cx="48" cy="93" r="11"/>'],
+  ["exclaim", "느낌표", "Exclamation mark", 1,
+    '<path d="M38 4h24l-4 62H42z"/><circle cx="50" cy="86" r="12"/>'],
+  ["cross", "가위표", "Cross mark", 1,
+    '<path d="M16 16 84 84M84 16 16 84" fill="none" stroke="currentColor" stroke-width="16" stroke-linecap="round"/>'],
+  ["bulb", "전구", "Light bulb", 1.15,
+    '<path d="M50 4C30 4 15 19 15 38c0 13 7 21 13 28 4 5 6 9 7 14h30c1-5 3-9 7-14 6-7 13-15 13-28C85 19 70 4 50 4z"/>'
+    + '<rect x="35" y="88" width="30" height="10" rx="5"/><rect x="38" y="102" width="24" height="10" rx="5"/>'
+    + '<path d="M50 24c-8 0-14 6-14 14" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="6" stroke-linecap="round"/>'],
+  ["magnifier", "돋보기", "Magnifying glass", 1,
+    '<circle cx="42" cy="42" r="32" fill="none" stroke="currentColor" stroke-width="10"/>'
+    + '<path d="m66 66 28 28" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round"/>'
+    + '<path d="M30 30c4-6 10-9 16-9" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="6" stroke-linecap="round"/>'],
+  ["backpack", "책가방", "Backpack", 1,
+    '<path d="M34 36v-7a16 16 0 0 1 32 0v7H55v-7a5 5 0 0 0-10 0v7z"/><rect x="10" y="34" width="80" height="62" rx="16"/>'
+    + '<rect x="28" y="56" width="44" height="26" rx="8" fill="#fff" fill-opacity=".82"/>'],
+  ["ruler", "자", "Ruler", 0.28,
+    '<rect x="2" y="4" width="96" height="20" rx="4"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="4" stroke-linecap="round"><path d="M14 4v9M26 4v6M38 4v9M50 4v6M62 4v9M74 4v6M86 4v9"/></g>'],
+  ["scissors", "가위", "Scissors", 1,
+    '<g fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"><path d="M22 8 62 62M78 8 38 62"/>'
+    + '<circle cx="26" cy="80" r="14"/><circle cx="74" cy="80" r="14"/></g>'],
+  ["clip", "클립", "Paper clip", 1,
+    '<path d="M72 26v42a24 24 0 0 1-48 0V24a15 15 0 0 1 30 0v40a7 7 0 0 1-14 0V30" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>'],
+  ["note", "메모지", "Sticky note", 1,
+    '<path d="M8 8h84v56L64 92H8z"/><path d="M92 64H72c-5 0-8 3-8 8v20z" fill="#fff" fill-opacity=".82"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="5" stroke-linecap="round"><path d="M22 28h56M22 44h56M22 60h34"/></g>'],
+  ["palette", "물감판", "Paint palette", 0.88,
+    '<path d="M50 4C22 4 4 22 4 45c0 22 18 38 38 38 8 0 12-4 12-9 0-6-6-8-6-14 0-6 5-10 12-10h16c14 0 20-8 20-19C96 16 78 4 50 4z"/>'
+    + '<g fill="#fff" fill-opacity=".8"><circle cx="28" cy="30" r="7"/><circle cx="52" cy="22" r="7"/><circle cx="74" cy="32" r="7"/><circle cx="24" cy="56" r="7"/></g>'],
+  ["glasses", "안경", "Glasses", 0.46,
+    '<g fill="none" stroke="currentColor" stroke-width="8"><circle cx="24" cy="26" r="18"/><circle cx="76" cy="26" r="18"/>'
+    + '<path d="M42 24c5-4 11-4 16 0M6 20 2 12M94 20l4-8" stroke-linecap="round"/></g>'],
+  ["cap", "모자", "Cap", 0.6,
+    '<path d="M50 8c-20 0-34 15-34 34v4h68v-4c0-19-14-34-34-34z"/><path d="M16 44h68c12 0 16 12 4 12H24c-8 0-10-6-8-12z"/>'
+    + '<circle cx="50" cy="8" r="6"/>'],
+  ["shoe", "운동화", "Sneaker", 0.56,
+    '<path d="M6 20h20l14 10 22 4c14 2 24 8 30 16v4H6z"/><rect x="2" y="42" width="96" height="12" rx="6"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="4" stroke-linecap="round"><path d="M28 24 40 34M36 20l12 12M44 18l12 14"/></g>'],
+  ["lock", "자물쇠", "Lock", 1.1,
+    '<path d="M30 46V32a20 20 0 0 1 40 0v14H57V32a7 7 0 0 0-14 0v14z"/><rect x="14" y="44" width="72" height="62" rx="12"/>'
+    + '<circle cx="50" cy="70" r="8" fill="#fff" fill-opacity=".85"/><rect x="46" y="74" width="8" height="18" rx="4" fill="#fff" fill-opacity=".85"/>'],
+  ["headphone", "헤드폰", "Headphones", 0.9,
+    '<path d="M14 62V50a36 36 0 0 1 72 0v12" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round"/>'
+    + '<rect x="4" y="54" width="24" height="34" rx="11"/><rect x="72" y="54" width="24" height="34" rx="11"/>'],
+  ["guitar", "기타", "Guitar", 1.2,
+    '<rect x="40" y="2" width="20" height="13" rx="4"/><rect x="44" y="13" width="12" height="36" rx="3"/>'
+    + '<path d="M50 44c-14 0-24 8-24 18 0 6 3 10 6 13-6 4-10 11-10 19 0 12 11 21 28 21s28-9 28-21c0-8-4-15-10-19 3-3 6-7 6-13 0-10-10-18-24-18z"/>'
+    + '<circle cx="50" cy="92" r="9" fill="#fff" fill-opacity=".9"/><rect x="46" y="106" width="8" height="8" rx="3" fill="#fff" fill-opacity=".8"/>'],
+  ["robot", "로봇", "Robot", 1,
+    '<circle cx="50" cy="8" r="7"/><path d="M50 12v14" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>'
+    + '<rect x="18" y="26" width="64" height="54" rx="12"/><rect x="4" y="38" width="12" height="28" rx="6"/><rect x="84" y="38" width="12" height="28" rx="6"/>'
+    + '<rect x="28" y="82" width="16" height="14" rx="5"/><rect x="56" y="82" width="16" height="14" rx="5"/>'
+    + '<g fill="#fff"><circle cx="36" cy="48" r="8"/><circle cx="64" cy="48" r="8"/></g>'
+    + '<path d="M38 64h24" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/>'],
+  ["basketball", "농구공", "Basketball", 1,
+    '<circle cx="50" cy="50" r="46"/><g fill="none" stroke="#fff" stroke-opacity=".85" stroke-width="5">'
+    + '<path d="M50 4v92M4 50h92M18 18c18 14 18 50 0 64M82 18c-18 14-18 50 0 64"/></g>'],
+  ["baseball", "야구공", "Baseball", 1,
+    '<circle cx="50" cy="50" r="46"/><g fill="none" stroke="#fff" stroke-opacity=".85" stroke-width="5" stroke-linecap="round">'
+    + '<path d="M22 14c12 20 12 52 0 72M78 14c-12 20-12 52 0 72M28 28l8 4M26 44h9M28 62l8-4M72 28l-8 4M74 44h-9M72 62l-8-4"/></g>'],
+  ["snowman", "눈사람", "Snowman", 1.08,
+    '<rect x="34" y="0" width="32" height="14" rx="3"/><rect x="22" y="12" width="56" height="7" rx="3"/>'
+    + '<circle cx="50" cy="34" r="20"/><circle cx="50" cy="74" r="32"/>'
+    + '<g fill="#fff"><circle cx="43" cy="32" r="4"/><circle cx="57" cy="32" r="4"/></g>'
+    + '<path d="m50 36 13 4-13 5z" fill="#fff" fill-opacity=".85"/>'
+    + '<g fill="#fff" fill-opacity=".8"><circle cx="50" cy="62" r="5"/><circle cx="50" cy="78" r="5"/><circle cx="50" cy="94" r="5"/></g>'
+    + '<path d="M20 70 4 56M80 70l16-14" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>'],
+  ["maple", "단풍잎", "Maple leaf", 1,
+    '<path d="M50 4 62 28l14-6-6 16 20-2-14 14 16 8-18 6 8 14-20-4 2 22h-8l2-22-20 4 8-14-18-6 16-8L20 36l20 2-6-16 14 6z"/>'],
+  ["blossom", "벚꽃", "Cherry blossom", 1,
+    '<g><ellipse cx="50" cy="22" rx="15" ry="20"/><ellipse cx="77" cy="42" rx="15" ry="20" transform="rotate(72 77 42)"/>'
+    + '<ellipse cx="67" cy="74" rx="15" ry="20" transform="rotate(144 67 74)"/><ellipse cx="33" cy="74" rx="15" ry="20" transform="rotate(216 33 74)"/>'
+    + '<ellipse cx="23" cy="42" rx="15" ry="20" transform="rotate(288 23 42)"/></g>'
+    + '<circle cx="50" cy="50" r="9" fill="#fff" fill-opacity=".85"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="3" stroke-linecap="round"><path d="M50 50 44 32M50 50l18-4M50 50l10 16M50 50l-16 10"/></g>'],
+  ["sunflower", "해바라기", "Sunflower", 1.15,
+    '<g><ellipse cx="50" cy="16" rx="9" ry="16"/><ellipse cx="74" cy="26" rx="9" ry="16" transform="rotate(45 74 26)"/>'
+    + '<ellipse cx="84" cy="50" rx="16" ry="9"/><ellipse cx="74" cy="74" rx="9" ry="16" transform="rotate(-45 74 74)"/>'
+    + '<ellipse cx="50" cy="84" rx="9" ry="16"/><ellipse cx="26" cy="74" rx="9" ry="16" transform="rotate(45 26 74)"/>'
+    + '<ellipse cx="16" cy="50" rx="16" ry="9"/><ellipse cx="26" cy="26" rx="9" ry="16" transform="rotate(-45 26 26)"/></g>'
+    + '<circle cx="50" cy="50" r="22" fill="#fff" fill-opacity=".85"/><circle cx="50" cy="50" r="14"/>'
+    + '<path d="M50 98v15" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>'],
+  ["mushroom", "버섯", "Mushroom", 1,
+    '<path d="M50 6C26 6 6 24 6 44c0 6 4 10 12 10h64c8 0 12-4 12-10C94 24 74 6 50 6z"/>'
+    + '<path d="M36 54h28v26c0 10-6 16-14 16s-14-6-14-16z"/>'
+    + '<g fill="#fff" fill-opacity=".8"><circle cx="30" cy="30" r="8"/><circle cx="62" cy="24" r="6"/><circle cx="74" cy="38" r="5"/></g>'],
+  ["wave", "물결", "Waves", 0.7,
+    '<g fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round">'
+    + '<path d="M5 18c12-12 20 12 32 0s20 12 31 0 20 12 27 0M5 40c12-12 20 12 32 0s20 12 31 0 20 12 27 0M5 62c12-12 20 12 32 0s20 12 31 0 20 12 27 0"/></g>'],
+  ["planet", "행성", "Planet", 0.86,
+    '<circle cx="50" cy="42" r="30"/>'
+    + '<path d="M22 54c-14 6-22 13-20 19 3 8 24 8 48 0s41-21 38-29c-2-5-10-6-20-4" fill="none" stroke="currentColor" stroke-width="7"/>'
+    + '<g fill="#fff" fill-opacity=".7"><circle cx="40" cy="32" r="6"/><circle cx="61" cy="50" r="5"/></g>'],
+  ["fox", "여우", "Fox", 0.9,
+    '<path d="M14 6 34 28h32L86 6c8 20 6 40-4 52-8 10-20 16-32 16s-24-6-32-16C8 46 6 26 14 6z"/>'
+    + '<path d="M34 62c0-7 7-12 16-12s16 5 16 12c0 8-7 14-16 14s-16-6-16-14z" fill="#fff" fill-opacity=".85"/>'
+    + '<g fill="#fff"><circle cx="32" cy="46" r="4"/><circle cx="68" cy="46" r="4"/></g><circle cx="50" cy="59" r="5"/>'
+    + '<path d="M42 69c5 4 11 4 16 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>'],
+  ["chick", "병아리", "Chick", 1.05,
+    '<circle cx="50" cy="60" r="33"/><circle cx="50" cy="28" r="21"/>'
+    + '<g fill="#fff"><circle cx="43" cy="26" r="4"/><circle cx="57" cy="26" r="4"/></g>'
+    + '<path d="m50 31 11 5-11 6-11-6z" fill="#fff" fill-opacity=".9"/>'
+    + '<path d="M22 58c8 6 10 16 6 26-10-4-14-16-6-26z" fill="#fff" fill-opacity=".7"/>'
+    + '<path d="M40 92v8M60 92v8M32 100h16M52 100h16" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>'],
+  ["bee", "벌", "Bee", 0.88,
+    '<ellipse cx="34" cy="26" rx="19" ry="12" transform="rotate(-22 34 26)" opacity=".5"/>'
+    + '<ellipse cx="68" cy="26" rx="19" ry="12" transform="rotate(22 68 26)" opacity=".5"/>'
+    + '<ellipse cx="50" cy="56" rx="36" ry="26"/>'
+    + '<g fill="#fff" fill-opacity=".75"><ellipse cx="44" cy="56" rx="4" ry="25"/><ellipse cx="62" cy="56" rx="4" ry="21"/></g>'
+    + '<g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="M24 34 16 22M38 28l-2-14"/></g>'
+    + '<circle cx="22" cy="50" r="4" fill="#fff"/>'],
+  ["frog", "개구리", "Frog", 0.9,
+    '<path d="M50 24c-27 0-45 16-45 34 0 16 18 26 45 26s45-10 45-26c0-18-18-34-45-34z"/>'
+    + '<circle cx="26" cy="24" r="17"/><circle cx="74" cy="24" r="17"/>'
+    + '<g fill="#fff"><circle cx="26" cy="24" r="8"/><circle cx="74" cy="24" r="8"/></g>'
+    + '<circle cx="27" cy="25" r="4"/><circle cx="75" cy="25" r="4"/>'
+    + '<path d="M32 62c8 10 28 10 36 0" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="5" stroke-linecap="round"/>'],
+  ["whale", "고래", "Whale", 0.76,
+    '<path d="M4 44c0-18 18-32 40-32s38 12 38 28c0 18-16 34-38 34C22 74 4 62 4 44z"/><path d="M80 40 98 22v44L78 52z"/>'
+    + '<path d="M12 56c16 10 40 10 56-2" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="5" stroke-linecap="round"/>'
+    + '<circle cx="24" cy="38" r="4" fill="#fff"/>'
+    + '<path d="M44 12c-2-8 4-12 10-9M54 10c0-6 6-8 10-5" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>'],
+  ["candy", "사탕", "Candy", 0.6,
+    '<ellipse cx="50" cy="30" rx="26" ry="25"/><path d="M25 30 3 10v40zM75 30l22-20v40z"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="5" stroke-linecap="round"><path d="M41 12c7 12 7 24 0 36M57 12c7 12 7 24 0 36"/></g>'],
+  ["cookie", "쿠키", "Cookie", 1,
+    '<circle cx="50" cy="50" r="45"/>'
+    + '<g fill="#fff" fill-opacity=".6"><circle cx="34" cy="34" r="8"/><circle cx="66" cy="40" r="7"/><circle cx="44" cy="64" r="7"/>'
+    + '<circle cx="70" cy="70" r="6"/><circle cx="24" cy="58" r="5"/></g>'],
+  ["milk", "우유", "Milk carton", 1.1,
+    '<path d="M22 36h56v60c0 6-4 10-10 10H32c-6 0-10-4-10-10z"/><path d="M22 36 50 16l28 20z"/><rect x="32" y="10" width="36" height="9" rx="3"/>'
+    + '<path d="M22 36 50 26l28 10" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="4"/>'
+    + '<rect x="33" y="54" width="34" height="26" rx="4" fill="#fff" fill-opacity=".85"/>'],
+  ["banana", "바나나", "Banana", 0.78,
+    '<path d="M12 18c-4 28 12 54 40 56 22 2 40-10 44-26-14 10-28 10-40 4C40 44 28 32 26 14z"/><rect x="18" y="6" width="13" height="14" rx="4"/>'],
+  ["grape", "포도", "Grapes", 1,
+    '<path d="M50 30V10" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>'
+    + '<path d="M52 16c10-14 26-12 32-4-8 12-22 14-32 4z"/>'
+    + '<g><circle cx="26" cy="42" r="13"/><circle cx="50" cy="40" r="13"/><circle cx="74" cy="42" r="13"/>'
+    + '<circle cx="38" cy="62" r="13"/><circle cx="62" cy="62" r="13"/><circle cx="50" cy="82" r="13"/></g>'],
+  ["carrot", "당근", "Carrot", 1.15,
+    '<path d="M50 36C40 16 28 10 14 12c2 14 14 24 36 24zM50 36c10-20 22-26 36-24-2 14-14 24-36 24z"/>'
+    + '<path d="M32 38h36l-12 70c-2 8-10 8-12 0z"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="4" stroke-linecap="round"><path d="M38 56h22M40 74h18M44 90h12"/></g>'],
+  ["piano", "피아노", "Piano", 0.7,
+    '<rect x="4" y="8" width="92" height="54" rx="7"/>'
+    + '<g fill="#fff" fill-opacity=".92"><rect x="10" y="22" width="11" height="34" rx="2"/><rect x="23" y="22" width="11" height="34" rx="2"/>'
+    + '<rect x="36" y="22" width="11" height="34" rx="2"/><rect x="49" y="22" width="11" height="34" rx="2"/>'
+    + '<rect x="62" y="22" width="11" height="34" rx="2"/><rect x="75" y="22" width="11" height="34" rx="2"/></g>'
+    + '<g><rect x="18" y="22" width="7" height="20" rx="2"/><rect x="31" y="22" width="7" height="20" rx="2"/>'
+    + '<rect x="57" y="22" width="7" height="20" rx="2"/><rect x="70" y="22" width="7" height="20" rx="2"/></g>'],
+  ["drum", "북", "Drum", 0.76,
+    '<path d="M20 28 42 6M80 28 58 6" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>'
+    + '<circle cx="42" cy="6" r="5"/><circle cx="58" cy="6" r="5"/>'
+    + '<ellipse cx="50" cy="60" rx="40" ry="12"/><rect x="10" y="38" width="80" height="22"/>'
+    + '<ellipse cx="50" cy="38" rx="40" ry="12" fill="#fff" fill-opacity=".85"/>'],
+  ["xylophone", "실로폰", "Xylophone", 0.72,
+    '<rect x="6" y="12" width="88" height="11" rx="5"/><rect x="10" y="28" width="80" height="11" rx="5"/>'
+    + '<rect x="14" y="44" width="72" height="11" rx="5"/><rect x="18" y="60" width="64" height="11" rx="5"/>'
+    + '<g fill="#fff" fill-opacity=".55"><circle cx="16" cy="17" r="3"/><circle cx="84" cy="17" r="3"/><circle cx="20" cy="33" r="3"/>'
+    + '<circle cx="80" cy="33" r="3"/><circle cx="24" cy="49" r="3"/><circle cx="76" cy="49" r="3"/><circle cx="28" cy="65" r="3"/><circle cx="72" cy="65" r="3"/></g>'],
+  ["recorder", "리코더", "Recorder", 0.3,
+    '<rect x="4" y="6" width="92" height="18" rx="9"/><path d="M4 8h16v14H4z"/>'
+    + '<g fill="#fff" fill-opacity=".75"><circle cx="36" cy="15" r="4"/><circle cx="50" cy="15" r="4"/><circle cx="64" cy="15" r="4"/><circle cx="78" cy="15" r="4"/></g>'],
+  ["trumpet", "트럼펫", "Trumpet", 0.7,
+    '<path d="M96 6 64 24v22l32 18z"/><rect x="14" y="28" width="52" height="14" rx="7"/><circle cx="14" cy="35" r="10"/>'
+    + '<g><rect x="28" y="12" width="8" height="18" rx="4"/><rect x="42" y="12" width="8" height="18" rx="4"/><rect x="56" y="12" width="8" height="18" rx="4"/></g>'],
+  ["violin", "바이올린", "Violin", 1.1,
+    '<g opacity=".7"><path d="M6 84 94 28" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>'
+    + '<rect x="2" y="78" width="14" height="11" rx="3" transform="rotate(-32 9 84)"/></g>'
+    + '<rect x="42" y="2" width="16" height="12" rx="5"/><rect x="45" y="12" width="10" height="34" rx="3"/>'
+    + '<path d="M50 42c-13 0-22 7-22 16 0 5 2 9 6 12-5 4-9 10-9 17 0 11 10 19 25 19s25-8 25-19c0-7-4-13-9-17 4-3 6-7 6-12 0-9-9-16-22-16z"/>'
+    + '<g fill="#fff" fill-opacity=".8"><rect x="36" y="72" width="4" height="16" rx="2"/><rect x="60" y="72" width="4" height="16" rx="2"/></g>'],
+  ["harmonica", "하모니카", "Harmonica", 0.42,
+    '<rect x="4" y="8" width="92" height="28" rx="6"/>'
+    + '<g fill="#fff" fill-opacity=".8"><rect x="12" y="16" width="9" height="12" rx="2"/><rect x="25" y="16" width="9" height="12" rx="2"/>'
+    + '<rect x="38" y="16" width="9" height="12" rx="2"/><rect x="51" y="16" width="9" height="12" rx="2"/>'
+    + '<rect x="64" y="16" width="9" height="12" rx="2"/><rect x="77" y="16" width="9" height="12" rx="2"/></g>'],
+  ["tambourine", "탬버린", "Tambourine", 1,
+    '<circle cx="50" cy="52" r="42" fill="none" stroke="currentColor" stroke-width="13"/><circle cx="50" cy="52" r="30" opacity=".22"/>'
+    + '<g fill="#fff" fill-opacity=".85"><circle cx="50" cy="10" r="7"/><circle cx="86" cy="31" r="7"/><circle cx="86" cy="73" r="7"/>'
+    + '<circle cx="50" cy="94" r="7"/><circle cx="14" cy="73" r="7"/><circle cx="14" cy="31" r="7"/></g>'],
+  ["triangle", "트라이앵글", "Triangle", 0.95,
+    '<g fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="round"><path d="M14 86 50 8l36 78M18 86h52"/></g>'
+    + '<path d="M64 34 96 22" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" opacity=".7"/>'],
+  ["maracas", "마라카스", "Maracas", 1,
+    '<ellipse cx="28" cy="30" rx="20" ry="23"/><rect x="22" y="48" width="12" height="46" rx="6" transform="rotate(10 28 70)"/>'
+    + '<ellipse cx="72" cy="34" rx="18" ry="21"/><rect x="67" y="50" width="11" height="42" rx="5" transform="rotate(-10 72 72)"/>'
+    + '<g fill="#fff" fill-opacity=".6"><circle cx="24" cy="26" r="5"/><circle cx="68" cy="30" r="4"/></g>'],
+  ["janggu", "장구", "Janggu", 0.9,
+    '<path d="M16 14c10 6 24 16 34 16s24-10 34-16v60c-10-6-24-16-34-16s-24 10-34 16z"/>'
+    + '<ellipse cx="16" cy="44" rx="9" ry="31"/><ellipse cx="84" cy="44" rx="9" ry="31"/>'
+    + '<ellipse cx="16" cy="44" rx="4" ry="24" fill="#fff" fill-opacity=".7"/><ellipse cx="84" cy="44" rx="4" ry="24" fill="#fff" fill-opacity=".7"/>'
+    + '<path d="M34 28 40 60M50 32v25M60 28l6 32" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width="4" stroke-linecap="round"/>'],
+  ["microphone", "마이크", "Microphone", 1.1,
+    '<rect x="36" y="4" width="28" height="52" rx="14"/>'
+    + '<path d="M22 46c0 16 12 28 28 28s28-12 28-28" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>'
+    + '<path d="M50 74v20M32 100h36" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>'
+    + '<path d="M40 16h20M40 26h20M40 36h20" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>'],
+  ["hanbok", "한복", "Hanbok", 1,
+    '<path d="M50 6c-9 0-16 3-22 7L6 28l10 13 14-10v13h40V31l14 10 10-13-22-15c-6-4-13-7-22-7z"/>'
+    + '<path d="M38 10 50 26 62 10" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width="6" stroke-linejoin="round"/>'
+    + '<path d="M28 46h44l18 48c-17 8-63 8-80 0z"/>'
+    + '<path d="M50 30v14" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width="5" stroke-linecap="round"/>'],
+  ["pouch", "복주머니", "Lucky pouch", 1.05,
+    '<path d="M34 12c4-8 28-8 32 0" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>'
+    + '<path d="M30 30h40c14 12 22 28 22 42 0 16-19 26-42 26S8 88 8 72c0-14 8-30 22-42z"/>'
+    + '<path d="M26 30c10-7 38-7 48 0" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>'
+    + '<path d="M50 60c8 0 14 6 14 13s-6 13-14 13-14-6-14-13 6-13 14-13z" fill="#fff" fill-opacity=".8"/>'],
+  ["songpyeon", "송편", "Songpyeon", 0.72,
+    '<path d="M6 64c0-27 20-46 44-46s44 19 44 46z"/>'
+    + '<ellipse cx="34" cy="38" rx="7" ry="10" transform="rotate(-20 34 38)" fill="#fff" fill-opacity=".55"/>'
+    + '<path d="M62 28c10 5 16 13 18 23" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="5" stroke-linecap="round"/>'
+    + '<path d="M14 66c8-4 16-6 24-6M62 60c8 0 16 2 24 6" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" opacity=".55"/>'],
+  ["yut", "윷", "Yut sticks", 1,
+    '<g><rect x="6" y="8" width="16" height="84" rx="8" transform="rotate(-8 14 50)"/><rect x="29" y="6" width="16" height="88" rx="8" transform="rotate(-3 37 50)"/>'
+    + '<rect x="55" y="6" width="16" height="88" rx="8" transform="rotate(3 63 50)"/><rect x="78" y="8" width="16" height="84" rx="8" transform="rotate(8 86 50)"/></g>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="4" stroke-linecap="round"><path d="M14 32v36" transform="rotate(-8 14 50)"/>'
+    + '<path d="M37 30v40" transform="rotate(-3 37 50)"/><path d="M63 30v40" transform="rotate(3 63 50)"/><path d="M86 32v36" transform="rotate(8 86 50)"/></g>'],
+  ["kite", "연", "Kite", 1.15,
+    '<path d="M18 6h64v50c0 20-16 34-32 34S18 76 18 56z"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="5"><path d="M50 8v80M20 8l60 48M80 8 20 56"/></g>'
+    + '<circle cx="50" cy="44" r="13" fill="#fff" fill-opacity=".9"/>'
+    + '<path d="M50 90c-12 8 12 14 0 22" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>'],
+  ["jegi", "제기", "Jegi", 1,
+    '<path d="M38 78 24 10M46 76 42 6M54 76 58 6M62 78 76 10" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>'
+    + '<ellipse cx="50" cy="82" rx="26" ry="14"/><ellipse cx="50" cy="74" rx="15" ry="8" fill="#fff" fill-opacity=".7"/>'],
+  ["mask", "탈", "Korean mask", 1.05,
+    '<path d="M50 6C28 6 14 22 14 46c0 30 16 54 36 54s36-24 36-54C86 22 72 6 50 6z"/>'
+    + '<g fill="#fff"><ellipse cx="34" cy="46" rx="9" ry="6"/><ellipse cx="66" cy="46" rx="9" ry="6"/></g>'
+    + '<path d="M30 70c8 13 32 13 40 0" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/>'
+    + '<path d="M22 32c6-6 13-8 19-5M59 27c6-3 13-1 19 5" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="5" stroke-linecap="round"/>'],
+  ["carnation", "카네이션", "Carnation", 1.1,
+    '<path d="M50 6 58 15l12-5-2 13h13l-6 11 12 6-10 8 7 11-13 2 1 12-12-4-10 9-10-9-12 4 1-12-13-2 7-11-10-8 12-6-6-11h13l-2-13 12 5z"/>'
+    + '<circle cx="50" cy="42" r="11" fill="#fff" fill-opacity=".55"/>'
+    + '<path d="M39 64h22l-5 16H44z"/><path d="M50 78v28" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>'
+    + '<path d="M50 94c-14-8-24-4-26 3 9 7 20 5 26-3z"/>'],
+  ["xmastree", "크리스마스트리", "Christmas tree", 1.15,
+    '<path d="m50 2 3 7 8 1-6 5 2 8-7-4-7 4 2-8-6-5 8-1z"/>'
+    + '<path d="M50 16 72 46H28zM50 36 82 72H18zM50 58 92 100H8z"/><rect x="41" y="100" width="18" height="12" rx="3"/>'
+    + '<g fill="#fff" fill-opacity=".75"><circle cx="50" cy="40" r="4"/><circle cx="38" cy="64" r="4"/><circle cx="64" cy="66" r="4"/>'
+    + '<circle cx="30" cy="92" r="4"/><circle cx="52" cy="86" r="4"/><circle cx="72" cy="94" r="4"/></g>'],
+  ["santahat", "산타 모자", "Santa hat", 0.82,
+    '<path d="M10 58c0-28 20-48 42-48 13 0 24 6 30 15-5 12-13 21-25 28-11 6-24 9-47 9z"/>'
+    + '<rect x="2" y="56" width="76" height="20" rx="10"/><rect x="7" y="60" width="66" height="12" rx="6" fill="#fff" fill-opacity=".72"/>'
+    + '<circle cx="84" cy="26" r="13"/><circle cx="84" cy="26" r="8" fill="#fff" fill-opacity=".72"/>'],
+  ["stocking", "크리스마스 양말", "Christmas stocking", 1.15,
+    '<path d="M28 20h44v40c0 10 4 16 12 20l6 3c11 5 10 21-3 25-14 4-34 1-46-9-10-8-13-18-13-30z"/>'
+    + '<rect x="22" y="6" width="56" height="20" rx="9"/><rect x="26" y="10" width="48" height="13" rx="6" fill="#fff" fill-opacity=".85"/>'
+    + '<path d="M36 88c14 8 34 8 48 0" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="5" stroke-linecap="round"/>'],
+  ["pumpkin", "호박등", "Jack-o'-lantern", 1,
+    '<path d="M42 24h16l2-16H40z"/><ellipse cx="50" cy="60" rx="46" ry="36"/>'
+    + '<g fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="4"><path d="M26 34c-6 15-6 37 0 52M74 34c6 15 6 37 0 52"/></g>'
+    + '<g fill="#fff" fill-opacity=".9"><path d="M28 42h18l-9 16zM72 42H54l9 16z"/>'
+    + '<path d="M30 68h8l3 6 4-6h10l3 6 4-6h8c-2 12-11 20-20 20s-18-8-20-20z"/></g>']
 ];
 const DIARY_ART_IDS = DIARY_ART.map(a => a[0]);
 function diaryArtInfo(id){ return DIARY_ART.find(a => a[0] === id) || null; }
