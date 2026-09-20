@@ -2290,6 +2290,51 @@ function mountDiaryEditor(doc){
   printPlainNote.textContent = "배경 효과와 배경 그림을 빼고 인쇄해요(잉크를 아껴요). 일기장 전체에 적용돼요.";
   panel.append(printPlainRow, printPlainNote);
 
+  // 꾸미기 창의 칩·칸을 지금 꾸미기로 맞춘다. 종이를 그리는 일과는 상관이 없어 창 곁에 둔다.
+  function syncPanel(){
+    const entry = entryOf(current);
+    const own = !!(entry && entry.style);
+    const style = diaryEffectiveStyle(model, entry);
+    scopeBox.checked = own;
+    scopeNote.textContent = diaryT(own
+      ? "이 날짜만 따로 꾸몄어요. 체크를 풀면 일기장 전체 꾸미기로 돌아가요."
+      : "바꾸면 따로 꾸민 날을 뺀 일기장 전체에 적용돼요.");
+    lineButtons.forEach(b => { const on = b.dataset.lines === style.lines; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
+    gapButtons.forEach(b => { const on = b.dataset.gap === style.gap; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
+    fontButtons.forEach(b => { const on = b.dataset.font === style.font; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
+    lineButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_LINE_LABELS, DIARY_LINE_LABELS_EN, b.dataset.lines); });
+    gapButtons.forEach(b => { b.textContent = diaryLabel(DIARY_GAP_LABELS, DIARY_GAP_LABELS_EN, b.dataset.gap); });
+    fontButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, b.dataset.font); });
+    for (const option of fitSelect.options) option.textContent = diaryLabel(DIARY_FIT_LABELS, DIARY_FIT_LABELS_EN, option.value);
+    colsRow.hidden = !diaryUsesGenko(style);
+    colsButtons.forEach(b => {
+      const n = Number(b.dataset.cols), on = n === (style.genkoCols || 0);
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+      b.textContent = n ? (diaryIsEn() ? n + " / row" : n + "칸") : (diaryIsEn() ? "Auto" : "자동");
+      b.title = n ? (diaryIsEn() ? n + " cells per row" : "한 줄에 " + n + "칸") : (diaryIsEn() ? "Cell size follows the line spacing" : "칸 크기를 줄 간격에 맞춰요");
+    });
+    paperButtons.forEach(b => {
+      const on = b.dataset.paper === style.paper;
+      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
+      b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_PAPER_LABELS, DIARY_PAPER_LABELS_EN, b.dataset.paper);
+      // 견본도 지금 고른 색·진하기로 그린다 — 칩만 봐도 그 색이 어떻게 깔릴지 보인다.
+      diaryPaintPaper(b.querySelector(".diary-paper-sample"), { paper:b.dataset.paper, paperColor:style.paperColor, paperTone:style.paperTone });
+    });
+    printPlainBox.checked = !!model.printPlain;
+    paperColorPick.value = style.paperColor;
+    paperColorPick.disabled = paperToneRange.disabled = style.paper === "none";
+    paperToneRange.value = String(Math.round(style.paperTone * 100));
+    paperToneValue.textContent = Math.round(style.paperTone * 100) + "%";
+    const url = assetUrl(style.bg);
+    bgThumb.style.backgroundImage = url ? `url("${url}")` : "none";
+    bgThumb.classList.toggle("is-empty", !url);
+    bgClear.disabled = !style.bg;
+    fitSelect.value = style.fit;
+    fitSelect.disabled = veilRange.disabled = !style.bg;
+    veilRange.value = String(Math.round(style.veil * 100));
+    veilValue.textContent = Math.round(style.veil * 100) + "%";
+  }
+
   /* ----- 스티커 창 ----- */
   const artPanel = document.createElement("div");
   artPanel.className = "diary-art-panel";      // 꾸미기 창과 모양은 같지만 클래스는 따로 — 선택자가 둘을 가려야 한다
@@ -3259,49 +3304,6 @@ function mountDiaryEditor(doc){
     veilLayer.style.opacity = String(style.veil);
     repaintCardPapers();
     syncPanel();
-  }
-  function syncPanel(){
-    const entry = entryOf(current);
-    const own = !!(entry && entry.style);
-    const style = diaryEffectiveStyle(model, entry);
-    scopeBox.checked = own;
-    scopeNote.textContent = diaryT(own
-      ? "이 날짜만 따로 꾸몄어요. 체크를 풀면 일기장 전체 꾸미기로 돌아가요."
-      : "바꾸면 따로 꾸민 날을 뺀 일기장 전체에 적용돼요.");
-    lineButtons.forEach(b => { const on = b.dataset.lines === style.lines; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
-    gapButtons.forEach(b => { const on = b.dataset.gap === style.gap; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
-    fontButtons.forEach(b => { const on = b.dataset.font === style.font; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
-    lineButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_LINE_LABELS, DIARY_LINE_LABELS_EN, b.dataset.lines); });
-    gapButtons.forEach(b => { b.textContent = diaryLabel(DIARY_GAP_LABELS, DIARY_GAP_LABELS_EN, b.dataset.gap); });
-    fontButtons.forEach(b => { b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, b.dataset.font); });
-    for (const option of fitSelect.options) option.textContent = diaryLabel(DIARY_FIT_LABELS, DIARY_FIT_LABELS_EN, option.value);
-    colsRow.hidden = !diaryUsesGenko(style);
-    colsButtons.forEach(b => {
-      const n = Number(b.dataset.cols), on = n === (style.genkoCols || 0);
-      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
-      b.textContent = n ? (diaryIsEn() ? n + " / row" : n + "칸") : (diaryIsEn() ? "Auto" : "자동");
-      b.title = n ? (diaryIsEn() ? n + " cells per row" : "한 줄에 " + n + "칸") : (diaryIsEn() ? "Cell size follows the line spacing" : "칸 크기를 줄 간격에 맞춰요");
-    });
-    paperButtons.forEach(b => {
-      const on = b.dataset.paper === style.paper;
-      b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on));
-      b.querySelector(".diary-chip-label").textContent = diaryLabel(DIARY_PAPER_LABELS, DIARY_PAPER_LABELS_EN, b.dataset.paper);
-      // 견본도 지금 고른 색·진하기로 그린다 — 칩만 봐도 그 색이 어떻게 깔릴지 보인다.
-      diaryPaintPaper(b.querySelector(".diary-paper-sample"), { paper:b.dataset.paper, paperColor:style.paperColor, paperTone:style.paperTone });
-    });
-    printPlainBox.checked = !!model.printPlain;
-    paperColorPick.value = style.paperColor;
-    paperColorPick.disabled = paperToneRange.disabled = style.paper === "none";
-    paperToneRange.value = String(Math.round(style.paperTone * 100));
-    paperToneValue.textContent = Math.round(style.paperTone * 100) + "%";
-    const url = assetUrl(style.bg);
-    bgThumb.style.backgroundImage = url ? `url("${url}")` : "none";
-    bgThumb.classList.toggle("is-empty", !url);
-    bgClear.disabled = !style.bg;
-    fitSelect.value = style.fit;
-    fitSelect.disabled = veilRange.disabled = !style.bg;
-    veilRange.value = String(Math.round(style.veil * 100));
-    veilValue.textContent = Math.round(style.veil * 100) + "%";
   }
   // 종이 높이 = 글 높이·스티커 아래 끝·최소 한 쪽 중 큰 값(줄 간격의 배수로 맞춰 마지막 줄이 잘리지 않게).
   function layout(){
