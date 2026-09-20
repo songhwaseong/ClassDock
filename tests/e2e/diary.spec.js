@@ -148,7 +148,93 @@ test("꾸미기: 일기장 전체 줄 무늬와 그 날만 따로 꾸미기", as
   const bg = bandPng(64, 64, [250, 200, 0], [0, 160, 90]);
   await page.locator(".diary-bar input[type=file]").nth(1).setInputFiles({ name:"배경.png", mimeType:"image/png", buffer:bg });
   await expect(page.locator(".diary-paper-bg")).toBeVisible();
-  await expect(panel.locator('input[type="range"]')).toBeEnabled();
+  await expect(panel.locator(".diary-veil-range")).toBeEnabled();
+});
+
+test("꾸미기: 배경 효과는 사진 없이 종이를 칠하고, 색·진하기를 따라 다시 그린다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-text").fill("오늘은 배경 효과를 골라 보았다.");
+  const paper = page.locator(".diary-paper");
+  const art = page.locator(".diary-paper-art");
+  await page.locator(".diary-bar .diary-style-btn").click();
+  const panel = page.locator(".diary-style-panel");
+  await expect(paper).toHaveAttribute("data-paper", "none");
+  await expect(panel.locator(".diary-paper-tone")).toBeDisabled();          // 효과가 없으면 색·진하기는 잠긴다
+
+  await panel.locator('.diary-paper-chip[data-paper="mesh"]').click();
+  await expect(paper).toHaveAttribute("data-paper", "mesh");
+  await expect(panel.locator(".diary-paper-tone")).toBeEnabled();
+  const meshed = await art.evaluate(el => getComputedStyle(el).backgroundImage);
+  expect(meshed).toContain("radial-gradient");
+
+  // 색을 바꾸면 종이도 칩 견본도 다시 그린다(칩은 지금 고른 색으로 보여야 한다)
+  const chipBefore = await panel.locator('.diary-paper-chip[data-paper="linear"] .diary-paper-sample')
+    .evaluate(el => getComputedStyle(el).backgroundImage);
+  await panel.locator(".diary-paper-color").evaluate(el => { el.value = "#ff0000"; el.dispatchEvent(new Event("change", { bubbles:true })); });
+  await expect.poll(() => art.evaluate(el => getComputedStyle(el).backgroundImage)).not.toBe(meshed);
+  await expect.poll(() => panel.locator('.diary-paper-chip[data-paper="linear"] .diary-paper-sample')
+    .evaluate(el => getComputedStyle(el).backgroundImage)).not.toBe(chipBefore);
+
+  // 진하기를 낮추면 더 옅게(섞는 비율이 달라진다)
+  const strong = await art.evaluate(el => getComputedStyle(el).backgroundImage);
+  await panel.locator(".diary-paper-tone").fill("10");
+  await panel.locator(".diary-paper-tone").dispatchEvent("input");
+  await expect.poll(() => art.evaluate(el => getComputedStyle(el).backgroundImage)).not.toBe(strong);
+
+  // 어두운 효과(오로라)는 종이색을 밤하늘로 바꾸면서 글자색까지 밝은 쪽으로 갈아끼운다
+  await panel.locator('.diary-paper-chip[data-paper="aurora"]').click();
+  await expect(paper).toHaveAttribute("data-paper", "aurora");
+  const ink = await page.locator(".diary-text").evaluate(el => getComputedStyle(el).color);
+  const bright = ink.match(/\d+/g).slice(0, 3).map(Number).every(v => v > 180);
+  expect(bright, "오로라에서 글자는 밝아야 한다: " + ink).toBe(true);
+  const sheet = await paper.evaluate(el => getComputedStyle(el).backgroundColor);
+  expect(sheet.match(/\d+/g).slice(0, 3).map(Number).every(v => v < 80)).toBe(true);
+
+  // 인쇄 층에도 같은 함수로 깔린다 — 어두운 효과면 인쇄 글자도 밝은 쪽으로 나간다
+  await page.evaluate(() => {
+    window.__printedPaper = null;
+    window.print = () => {
+      const el = document.querySelector("#diaryPrintLayer .diary-print-paper");
+      const art = el && el.querySelector(".diary-paper-art");
+      const text = el && el.querySelector(".diary-print-text");
+      window.__printedPaper = el
+        ? { paper:el.dataset.paper, art:art ? art.style.backgroundImage : "", ink:text ? getComputedStyle(text).color : "" }
+        : null;
+    };
+  });
+  await page.keyboard.press("Escape");
+  await page.locator("#btnPrint").click();
+  await page.locator(".text-context-menu button", { hasText:"이 날 인쇄" }).click();
+  const printed = await page.evaluate(() => window.__printedPaper);
+  expect(printed.paper).toBe("aurora");
+  expect(printed.art).toContain("radial-gradient");
+  expect(printed.ink.match(/\d+/g).slice(0, 3).map(Number).every(v => v > 180)).toBe(true);
+  await page.locator(".diary-bar .diary-style-btn").click();
+
+  // 목록 카드 썸네일에도 그 날 종이 배경이 깔린다
+  const thumb = page.locator(".diary-entry-card-thumb").first();
+  await expect(thumb).toHaveAttribute("data-paper", "aurora");
+  expect(await thumb.evaluate(el => getComputedStyle(el).backgroundImage)).toContain("radial-gradient");
+
+  // '인쇄할 땐 배경 빼기' — 효과도 사진도 깔지 않는다(잉크 아끼기)
+  await panel.locator(".diary-print-plain input").check();
+  await page.keyboard.press("Escape");
+  await page.locator("#btnPrint").click();
+  await page.locator(".text-context-menu button", { hasText:"이 날 인쇄" }).click();
+  const plain = await page.evaluate(() => window.__printedPaper);
+  expect(plain.paper || "").toBe("");
+  expect(plain.art || "").toBe("");
+  await page.locator(".diary-bar .diary-style-btn").click();
+  await panel.locator(".diary-print-plain input").uncheck();
+
+  // 거친 질감은 그림 파일 대신 그려 넣은 알갱이(SVG)를 타일로 깐다
+  await panel.locator('.diary-paper-chip[data-paper="noise"]').click();
+  expect(await art.evaluate(el => getComputedStyle(el).backgroundImage)).toContain("feTurbulence");
+
+  // 효과를 끄면 종이만 남는다
+  await panel.locator('.diary-paper-chip[data-paper="none"]').click();
+  await expect(paper).toHaveAttribute("data-paper", "none");
+  expect(await art.evaluate(el => getComputedStyle(el).backgroundImage)).toBe("none");
 });
 
 test("저장한 일기장(ZIP)을 다시 열면 글·스티커·꾸미기가 그대로다", async ({ page }) => {
@@ -399,7 +485,31 @@ test("그림일기: 위에 그림 칸, 아래는 원고지 — 사진 넣기는 
   expect(Math.abs(sb.width - (bx.width - 12))).toBeLessThan(3);
   expect(sb.y).toBeGreaterThanOrEqual(bx.y - 1);
   expect(sb.y + sb.height).toBeLessThanOrEqual(bx.y + bx.height + 1);
-  await expect(page.locator(".diary-picture-hint")).toBeHidden();
+  // 사진이 들어오면 안내 문장만 감추고 가운데 단추는 남긴다 — 다시 그리기·사진 바꾸기로 들어가는 유일한 길이다
+  const hint = page.locator(".diary-picture-hint");
+  await expect(hint).toHaveClass(/is-compact/);
+  await expect(hint.locator("> span")).toBeHidden();
+  await expect(hint.locator(".diary-picture-hint-btns .diary-btn")).toHaveCount(2);
+
+  // 두 장을 더 넣으면 먼저 있던 한 장까지 셋이 칸을 나눠 쓴다(먼저 것이 칸을 덮은 채 남지 않는다)
+  await box.locator("input[type=file]").setInputFiles([
+    { name:"둘.png", mimeType:"image/png", buffer:solidPng(200, 200, [200, 90, 90]) },
+    { name:"셋.png", mimeType:"image/png", buffer:solidPng(200, 200, [90, 200, 140]) }
+  ]);
+  await expect(page.locator(".diary-sticker")).toHaveCount(3);
+  await expect(page.locator(".diary-status")).toContainText("3장");
+  await box.scrollIntoViewIfNeeded();
+  const bx2 = await stableBox(box);
+  const shots = await page.evaluate(() => [...document.querySelectorAll(".diary-sticker")]
+    .map(n => ({ x:n.offsetLeft, y:n.offsetTop, w:n.offsetWidth, h:n.offsetHeight })));
+  for (let i = 0; i < shots.length; i++){
+    const s = shots[i];
+    expect(s.w).toBeLessThan(bx2.width);                                  // 한 장이 칸을 다 먹지 않는다
+    for (let j = i + 1; j < shots.length; j++){
+      const t = shots[j];
+      expect(s.x < t.x + t.w - 1 && t.x < s.x + s.w - 1 && s.y < t.y + t.h - 1 && t.y < s.y + s.h - 1).toBe(false);
+    }
+  }
 });
 
 test("글꼴을 바꾸면 본문 글꼴이 바뀐다", async ({ page }) => {
@@ -608,11 +718,13 @@ test("그림 칸에 펜으로 그리고, 지우개·전체 지우기·되돌리�
   await expect.poll(async () => (await strokes()).length).toBe(2);
   await expect.poll(() => alphaAt(0.3)).toBeGreaterThan(200);
 
-  // Esc 로 그리기를 끝낸다 — 도구막대가 들어가고, 그림이 있으니 안내 글도 감춘다
+  // Esc 로 그리기를 끝낸다 — 도구막대가 들어가고, 그림이 있으니 안내 문장만 감춘다(단추는 남아 다시 그리러 들어간다)
   await page.keyboard.press("Escape");
   await expect(bar).toBeHidden();
   await expect(page.locator(".diary-picture-draw")).toBeVisible();
-  await expect(page.locator(".diary-picture-hint")).toBeHidden();
+  const hint = page.locator(".diary-picture-hint");
+  await expect(hint).toHaveClass(/is-compact/);
+  await expect(hint.locator("> span")).toBeHidden();
 
   // 인쇄에도 그림이 한 장으로 들어간다
   await page.evaluate(() => {
@@ -755,12 +867,19 @@ test("내장 스티커: 색을 골라 붙이면 그림으로 그려지고, 고�
   await boot(page);
   const entry = () => page.evaluate(() => {
     const e = docs.find(d => d.kind === "diary").diary.entries[0];
-    return e ? e.stickers.map(s => ({ kind:s.kind, art:s.art, color:s.color })) : [];
+    return e ? e.stickers.map(s => ({ kind:s.kind, art:s.art, color:s.color, opacity:s.opacity })) : [];
   });
   await page.locator(".diary-bar .diary-sticker-btn").click();
   const panel = page.locator(".diary-art-panel");
   await expect(panel).toBeVisible();
-  await expect(panel.locator(".diary-art-chip")).toHaveCount(16);
+  await expect(panel.locator(".diary-art-chip")).toHaveCount(48);
+  await expect(panel.locator(".diary-art-grid")).toHaveCSS("display", "grid");
+  const tiles = await panel.locator(".diary-art-chip").evaluateAll(nodes => nodes.slice(0, 13).map(node => {
+    const box = node.getBoundingClientRect(); return { x:Math.round(box.x), y:Math.round(box.y), w:Math.round(box.width) };
+  }));
+  expect(new Set(tiles.slice(0, 12).map(tile => tile.y)).size).toBe(1);
+  expect(tiles[12].y).toBeGreaterThan(tiles[0].y);
+  expect(Math.max(...tiles.map(tile => tile.w))).toBeLessThan(40);
 
   // 파랑을 고르고 하트를 붙인다 → 사진이 아니라 SVG 로 그려진다(파일에 바이트가 없다)
   await panel.locator('.diary-art-color[data-color="#3b82f6"]').click();
@@ -779,6 +898,13 @@ test("내장 스티커: 색을 골라 붙이면 그림으로 그려지고, 고�
   await panel.locator('.diary-art-color[data-color="#ef4444"]').click();
   assertArt(await entry(), [{ kind:"art", art:"heart", color:"#ef4444" }, { kind:"art", art:"star", color:"#3b82f6" }]);
 
+  // 고른 하트만 35%로 흐려지고, 별은 기본 100%를 유지한다
+  const opacity = panel.locator(".diary-art-opacity");
+  await opacity.fill("35");
+  await expect(page.locator(".diary-sticker-art").nth(0)).toHaveCSS("opacity", "0.35");
+  const faded = await entry();
+  expect(faded.map(row => row.opacity)).toEqual([0.35, 1]);
+
   // 저장한 .diary 안에는 사진이 하나도 들어가지 않는다
   const names = await page.evaluate(async () => {
     const doc = docs.find(d => d.kind === "diary");
@@ -796,6 +922,78 @@ function assertArt(rows, want){
     expect(row.color).toBe(want[i].color);
   });
 }
+
+test("색을 직접 골라 붙이면 그림도 글상자도 그 색이고, 고르개를 끄는 동안은 되돌리기 한 걸음이다", async ({ page }) => {
+  await boot(page);
+  const rows = () => page.evaluate(() => {
+    const e = docs.find(d => d.kind === "diary").diary.entries[0];
+    return e ? e.stickers.map(s => ({ kind:s.kind, color:s.color })) : [];
+  });
+  await page.locator(".diary-bar .diary-sticker-btn").click();
+  const panel = page.locator(".diary-art-panel");
+  const custom = panel.locator(".diary-art-color-custom");
+  await custom.fill("#7d5fff");
+  await expect(custom).toHaveClass(/is-on/);
+  await expect(panel.locator(".diary-art-color.is-on")).toHaveCount(0);      // 팔레트 밖 색이라 칩은 모두 꺼진다
+
+  // 그림도 글상자도 직접 고른 색을 따른다(글상자만 검정으로 붙지 않는다)
+  await panel.locator('.diary-art-chip[data-art="heart"]').click();
+  await panel.locator(".diary-btn").click();                                  // 글상자 넣기
+  await page.keyboard.type("보라색 글");
+  await page.keyboard.press("Control+Enter");
+  expect(await rows()).toEqual([{ kind:"art", color:"#7d5fff" }, { kind:"text", color:"#7d5fff" }]);
+
+  // 하트만 골라 색 고르개를 끄는 동안(input 이 여러 번) 바뀌어도 되돌리기는 한 걸음이다
+  const heart = page.locator(".diary-sticker").nth(0);
+  await heart.click({ position:{ x:4, y:4 } });
+  await expect(heart).toHaveClass(/is-selected/);
+  await page.locator(".diary-bar .diary-sticker-btn").click();
+  await page.evaluate(() => {
+    const input = document.querySelector(".diary-art-color-custom");
+    for (const value of ["#112233", "#445566", "#0a7d33"]){
+      input.value = value;
+      input.dispatchEvent(new Event("input", { bubbles:true }));
+    }
+    input.dispatchEvent(new Event("change", { bubbles:true }));
+  });
+  expect((await rows())[0].color).toBe("#0a7d33");
+  await heart.click({ position:{ x:4, y:4 } });                               // 입력칸에서 나와야 Ctrl+Z 가 일기장 것이 된다
+  await page.keyboard.press("Control+z");
+  expect(await rows()).toEqual([{ kind:"art", color:"#7d5fff" }, { kind:"text", color:"#7d5fff" }]);
+
+  // 우클릭 '색 바꾸기 ▸ 직접 고르기…' 는 (메뉴에 칸을 못 넣으므로) 스티커 창의 색 칸을 열어 준다
+  await page.locator(".diary-bar .diary-sticker-btn").click();               // 창을 닫아 두고 확인
+  await expect(panel).toBeHidden();
+  await heart.click({ button:"right", position:{ x:4, y:4 } });
+  const menu = page.locator(".text-context-menu");
+  await menu.locator("button", { hasText:"색 바꾸기" }).click();
+  await page.locator(".text-context-sub button", { hasText:"직접 고르기" }).click();
+  await expect(panel).toBeVisible();
+  await expect(custom).toBeFocused();
+});
+
+test("그림 칸 펜도 팔레트 밖 색으로 그리고, 고른 색을 다음에도 기억한다", async ({ page }) => {
+  await boot(page);
+  await chooseLines(page, "picture");
+  await page.locator(".diary-picture-draw").click();
+  const bar = page.locator(".diary-draw-bar");
+  await expect(bar).toBeVisible();
+  await bar.locator(".diary-pen-custom").fill("#0ea5e9");
+  await expect(bar.locator(".diary-pen.is-on")).toHaveCount(0);
+  await expect(bar.locator(".diary-pen-custom")).toHaveClass(/is-on/);
+  const layer = page.locator(".diary-draw-layer");
+  const lb = await stableBox(layer);
+  const y = lb.y + lb.height / 2;
+  await page.mouse.move(lb.x + lb.width * 0.2, y);
+  await page.mouse.down();
+  await page.mouse.move(lb.x + lb.width * 0.8, y, { steps:8 });
+  await page.mouse.up();
+  await expect.poll(async () => {
+    const drawing = await page.evaluate(() => (docs.find(d => d.kind === "diary").diary.entries[0] || {}).drawing || []);
+    return drawing.length ? drawing[0].c : "";
+  }).toBe("#0ea5e9");
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mn.diaryPen") || "null").color)).toBe("#0ea5e9");
+});
 
 test("글상자: 종이에 글을 얹고 두 번 눌러 고쳐 쓰며, 비우면 사라지고 검색에도 잡힌다", async ({ page }) => {
   await boot(page);
@@ -999,4 +1197,165 @@ test("원고지 칸 수: 원고지·그림일기일 때만 고를 수 있고, 10
     return [model.version === DIARY_VERSION, model.style.genkoCols];
   });
   expect(saved).toEqual([true, 10]);
+});
+
+/* ----- 사진 여러 장(정렬·겹친 것 고르기·크게 보기·모아 보기) ----- */
+
+const photoFiles = (n) => Array.from({ length:n }, (_, i) => ({
+  name:"사진" + (i + 1) + ".png", mimeType:"image/png",
+  buffer:solidPng(200, 100, [40 + i * 50, 200 - i * 40, 120 + i * 30])
+}));
+// 종이 층 안의 자리로 잰다 — 글을 쓰는 동안 화면이 굴러가도 값이 흔들리지 않는다.
+const stickerBoxes = (page) => page.evaluate(() => [...document.querySelectorAll(".diary-sticker")]
+  .map(n => ({ x:n.offsetLeft, y:n.offsetTop, w:n.offsetWidth, h:n.offsetHeight, rot:n.style.transform })));
+const rootMenu = (page) => page.locator(".text-context-menu:not(.text-context-sub)");
+
+test("사진 여러 장을 한꺼번에 붙이면 겹쳐 쌓지 않고 줄 맞춰 깐다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles(photoFiles(3));
+  const stickers = page.locator(".diary-sticker");
+  await expect(stickers).toHaveCount(3);
+  await expect(page.locator(".diary-status")).toContainText("줄 맞춰");
+  const boxes = await stickerBoxes(page);
+  // 어느 두 장도 겹치지 않는다(예전에는 3% 씩 어긋내 겹쳐 쌓았다)
+  for (let i = 0; i < boxes.length; i++){
+    for (let j = i + 1; j < boxes.length; j++){
+      const a = boxes[i], b = boxes[j];
+      const over = a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1;
+      expect(over, "겹치지 않는다 " + i + "-" + j).toBe(false);
+    }
+  }
+  expect(Math.round(boxes[0].y)).toBe(Math.round(boxes[1].y));              // 한 줄에 나란히
+  expect(boxes[0].x + boxes[0].w).toBeLessThanOrEqual(boxes[1].x + 1);
+  expect(Math.round(boxes[0].h)).toBe(Math.round(boxes[1].h));              // 같은 줄은 높이를 맞춘다
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(3);  // 방금 깐 것이 다 골라져 있다
+
+  // 우클릭 → 정렬해서 깔기 ▸ 격자로 ▸ 2열
+  await stickers.first().click({ button:"right" });
+  await rootMenu(page).locator("button", { hasText:"정렬해서 깔기" }).click();
+  await page.locator(".text-context-sub button", { hasText:"격자로" }).click();
+  await page.locator(".text-context-sub button", { hasText:"2열" }).click();
+  await expect(page.locator(".diary-status")).toContainText("격자로");
+  const grid = await stickerBoxes(page);
+  expect(new Set(grid.map(b => Math.round(b.x))).size).toBe(2);
+  expect(new Set(grid.map(b => Math.round(b.y))).size).toBe(2);
+
+  // 사진첩처럼 = 살짝 기울여 깔기. 되돌리기는 정렬 한 번이 한 걸음이다.
+  await stickers.first().click({ button:"right" });
+  await rootMenu(page).locator("button", { hasText:"정렬해서 깔기" }).click();
+  await page.locator(".text-context-sub button", { hasText:"사진첩처럼" }).click();
+  const album = await stickerBoxes(page);
+  expect(album.some(b => /rotate/.test(b.rot))).toBe(true);
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await stickerBoxes(page)).map(b => Math.round(b.x)).join(",")).toBe(grid.map(b => Math.round(b.x)).join(","));
+});
+
+test("겹친 사진은 Alt+누르기로 아래 것을 고르고, 두 번 누르면 크게 본다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles(photoFiles(2));
+  const stickers = page.locator(".diary-sticker");
+  await expect(stickers).toHaveCount(2);
+  const ids = await page.evaluate(() => [...document.querySelectorAll(".diary-sticker")].map(n => n.dataset.id));
+
+  // 뒤 사진만 골라 앞 사진 위로 끌어 겹쳐 놓는다(둘 다 골라져 있으면 함께 움직인다)
+  await stickers.last().click();
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(1);
+  const first = await stableBox(stickers.first()), second = await stableBox(stickers.last());
+  await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2, { steps:8 });
+  await page.mouse.up();
+  const at = await stableBox(stickers.first());
+  const cx = at.x + at.width / 2, cy = at.y + at.height / 2;
+
+  // 그냥 누르면 늘 위의 것(나중에 붙인 것)만 잡힌다
+  await page.mouse.click(cx, cy);
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveAttribute("data-id", ids[1]);
+  // Alt+누르기 = 한 칸 아래 것으로
+  await page.keyboard.down("Alt");
+  await page.mouse.click(cx, cy);
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveAttribute("data-id", ids[0]);
+  await expect(page.locator(".diary-status")).toContainText("2/2");
+  await page.mouse.click(cx, cy);                                    // 맨 아래 다음은 다시 맨 위
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveAttribute("data-id", ids[1]);
+  await page.keyboard.up("Alt");
+
+  // 두 번 누르면 공용 그림 창에서 크게 — ←→ 로 그 날 사진을 넘겨 본다
+  await stickers.last().dblclick();                                  // 겹친 자리에서는 위의 것이 잡힌다
+  const zoom = page.locator(".plot-zoom");
+  await expect(zoom).toBeVisible();
+  await expect(page.locator("#plotZoomCount")).toHaveText("2 / 2");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator("#plotZoomCount")).toHaveText("1 / 2");
+  await page.keyboard.press("Escape");
+  await expect(zoom).toBeHidden();
+  await expect(page.locator(".diary-sticker")).toHaveCount(2);       // Esc 가 스티커를 떼지 않는다
+});
+
+test("사진이 많은 날은 목록 카드에 여러 장이 보이고, '사진' 탭에서 모아 본다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-text").click();
+  await page.keyboard.type("소풍 간 날");
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles(photoFiles(4));
+  await expect(page.locator(".diary-sticker")).toHaveCount(4);
+  const thumb = page.locator(".diary-entry-card-thumb").first();
+  await expect(thumb).toHaveAttribute("data-photos", "3");
+  await expect(thumb.locator("img")).toHaveCount(3);
+  await expect(thumb.locator(".diary-entry-card-more")).toHaveText("+1");
+
+  // 어제로 가서 한 장 더 붙인 뒤 '사진' 탭에서 모아 본다
+  await page.locator(".diary-day-nav").first().click();
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles(photoFiles(1));
+  await expect(page.locator(".diary-sticker")).toHaveCount(1);
+  await page.locator('.diary-side-tab[data-side-tab="photos"]').click();
+  const cells = page.locator(".diary-photo-cell");
+  await expect(cells).toHaveCount(5);
+  await expect(page.locator(".diary-photo-day")).toHaveCount(2);
+  await expect(page.locator(".diary-photo-pane .diary-search-count")).toContainText("5장");
+
+  // 어제 칸에 있는 사진을 누르면 그 날로 가서 그 사진을 골라 준다
+  const target = page.locator(".diary-photo-day").first().locator(".diary-photo-cell").first();
+  await target.click();
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(1);
+  await expect(page.locator(".diary-sticker")).toHaveCount(4);
+});
+
+test("정렬은 사진만 건드리고, 꾸미려고 놓은 그림 스티커는 제 자리에 남는다", async ({ page }) => {
+  await boot(page);
+  // 하트를 먼저 붙여 종이 한쪽에 옮겨 둔다(꾸미기)
+  await page.locator(".diary-bar .diary-sticker-btn").click();
+  const panel = page.locator(".diary-art-panel");
+  await panel.locator('.diary-art-chip[data-art="heart"]').click();
+  await page.keyboard.press("Escape");
+  const heart = page.locator('.diary-sticker[data-kind="art"]');
+  await expect(heart).toHaveCount(1);
+  const hb = await stableBox(heart);
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(hb.x + hb.width / 2 + 120, hb.y + hb.height / 2 + 90, { steps:6 });
+  await page.mouse.up();
+  const parked = await heart.evaluate(n => ({ x:n.offsetLeft, y:n.offsetTop }));
+
+  // 사진 세 장을 붙이고 정렬한다 → 하트는 움직이지 않는다
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles(photoFiles(3));
+  await expect(page.locator('.diary-sticker[data-kind="photo"]')).toHaveCount(3);
+  const photo = page.locator('.diary-sticker[data-kind="photo"]').first();
+  await photo.click();
+  await photo.click({ button:"right" });
+  await rootMenu(page).locator("button", { hasText:"정렬해서 깔기" }).click();
+  await page.locator(".text-context-sub button", { hasText:"줄 맞춰" }).click();
+  await expect(page.locator(".diary-status")).toContainText("사진 3장");          // 하트는 세지 않는다
+  expect(await heart.evaluate(n => ({ x:n.offsetLeft, y:n.offsetTop }))).toEqual(parked);
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(3);        // 고른 것도 사진 셋뿐
+
+  // 그림 스티커까지 줄 세우려면 함께 골라 놓고 정렬한다(Ctrl+A = 그날 스티커 모두)
+  // — 그때는 하트도 함께 움직이고 '스티커 4개'라고 말한다.
+  await photo.click();
+  await page.keyboard.press("Control+a");
+  await expect(page.locator(".diary-sticker.is-selected")).toHaveCount(4);
+  await photo.click({ button:"right" });
+  await rootMenu(page).locator("button", { hasText:"정렬해서 깔기" }).click();
+  await page.locator(".text-context-sub button", { hasText:"줄 맞춰" }).click();
+  await expect(page.locator(".diary-status")).toContainText("스티커 4개");
+  expect(await heart.evaluate(n => ({ x:n.offsetLeft, y:n.offsetTop }))).not.toEqual(parked);
 });
