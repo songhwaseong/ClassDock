@@ -560,7 +560,7 @@ test("그림 칸에 펜으로 그리고, 지우개·전체 지우기·되돌리�
   await chooseLines(page, "picture");
   const layer = page.locator(".diary-draw-layer");
   await expect(layer).toBeVisible();
-  await page.locator(".diary-draw-toggle").click();
+  await page.locator(".diary-picture-draw").click();
   const bar = page.locator(".diary-draw-bar");
   await expect(bar).toBeVisible();
   await expect(page.locator(".diary-paper")).toHaveClass(/is-drawing/);
@@ -611,7 +611,7 @@ test("그림 칸에 펜으로 그리고, 지우개·전체 지우기·되돌리�
   // Esc 로 그리기를 끝낸다 — 도구막대가 들어가고, 그림이 있으니 안내 글도 감춘다
   await page.keyboard.press("Escape");
   await expect(bar).toBeHidden();
-  await expect(page.locator(".diary-draw-toggle")).toBeVisible();
+  await expect(page.locator(".diary-picture-draw")).toBeVisible();
   await expect(page.locator(".diary-picture-hint")).toBeHidden();
 
   // 인쇄에도 그림이 한 장으로 들어간다

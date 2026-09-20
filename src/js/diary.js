@@ -15,7 +15,7 @@ const DIARY_FORMAT = "classdock-diary";
 // 2: 날씨·기분·스티커 회전/뒤집기·그림일기·글꼴 · 3: 원고지 줄 무늬 · 4: 그림 칸에 그린 그림(drawing) · 5: 손글씨 글꼴
 // · 6: 원고지 한 줄 칸 수(genkoCols).
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 6;
+const DIARY_VERSION = 7;
 const DIARY_JSON_NAME = "diary.json";
 const DIARY_LINES = ["ruled", "grid", "dots", "blank", "picture", "genko"];
 const DIARY_LINE_LABELS = { ruled:"줄 공책", grid:"모눈", dots:"점", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
@@ -165,6 +165,7 @@ const DIARY_ASSET_RE = /^assets\/[a-z0-9_-]{4,64}\.(png|jpe?g|webp|gif)$/;
 const DIARY_ASSET_MIME = { png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", webp:"image/webp", gif:"image/gif" };
 const DIARY_WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const DIARY_WEEKDAYS_EN = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const DIARY_MAX_TAGS = 12;
 let _diaryScratchCount = 0;
 
 /* ---------- 파일 암호화 ---------- */
@@ -416,6 +417,17 @@ function diaryDrawStrokes(ctx, strokes, bw){
 }
 function diaryWeatherInfo(id){ return DIARY_WEATHERS.find(w => w[0] === id) || null; }
 function diaryMoodInfo(id){ return DIARY_MOODS.find(m => m[0] === id) || null; }
+function diaryNormalizeTags(raw){
+  const out = [], seen = new Set();
+  for (const value of (Array.isArray(raw) ? raw : [])){
+    const tag = String(value == null ? "" : value).replace(/^#+/, "").replace(/\s+/g, " ").trim().slice(0, 24);
+    const key = tag.toLocaleLowerCase();
+    if (!tag || seen.has(key)) continue;
+    seen.add(key); out.push(tag);
+    if (out.length >= DIARY_MAX_TAGS) break;
+  }
+  return out;
+}
 function diaryNormalizeEntry(raw, hasAsset){
   if (!raw || typeof raw !== "object" || !diaryIsDateKey(raw.date)) return null;
   const stickers = (Array.isArray(raw.stickers) ? raw.stickers : []).map(s => diaryNormalizeSticker(s, hasAsset)).filter(Boolean).slice(0, DIARY_MAX_STICKERS);
@@ -429,13 +441,16 @@ function diaryNormalizeEntry(raw, hasAsset){
     style:raw.style && typeof raw.style === "object" ? diaryNormalizeStyle(raw.style, hasAsset) : null,
     weather:diaryWeatherInfo(raw.weather) ? raw.weather : "",
     mood:diaryMoodInfo(raw.mood) ? raw.mood : "",
+    favorite:!!raw.favorite,
+    tags:diaryNormalizeTags(raw.tags),
     drawing:(Array.isArray(raw.drawing) ? raw.drawing : []).slice(0, DIARY_MAX_STROKES).map(diaryNormalizeStroke).filter(Boolean),
     stickers
   };
 }
 function diaryEntryIsEmpty(entry){
   return !entry || (!String(entry.title || "").trim() && !String(entry.text || "").trim()
-    && !(entry.stickers && entry.stickers.length) && !entry.style && !entry.weather && !entry.mood
+    && !(entry.stickers && entry.stickers.length) && !entry.style && !entry.weather && !entry.mood && !entry.favorite
+    && !(entry.tags && entry.tags.length)
     && !(entry.drawing && entry.drawing.length));
 }
 function diaryEmpty(title){
@@ -465,7 +480,7 @@ function diaryCleanEntries(model){
   return (model.entries || []).filter(e => !diaryEntryIsEmpty(e))
     .slice().sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
     .map(e => ({ date:e.date, title:e.title || "", text:e.text || "", style:e.style || null,
-      weather:e.weather || "", mood:e.mood || "",
+      weather:e.weather || "", mood:e.mood || "", favorite:!!e.favorite, tags:diaryNormalizeTags(e.tags),
       drawing:(e.drawing || []).map(st => st.e ? { c:st.c, w:st.w, p:st.p, e:true } : { c:st.c, w:st.w, p:st.p }),
       stickers:(e.stickers || []).map(s => ({ id:s.id, asset:s.asset, x:s.x, y:s.y, w:s.w, ar:s.ar,
         rot:diaryNormalizeAngle(s.rot), flip:!!s.flip })) }));
@@ -500,22 +515,51 @@ function diaryEntryLabel(entry){
   const line = String(entry.text || "").split("\n").map(s => s.trim()).find(Boolean);
   if (line) return line.length > 40 ? line.slice(0, 40) + "…" : line;
   if (entry.stickers && entry.stickers.length) return diaryTf("사진 {n}장", { n:entry.stickers.length });
+  if (entry.tags && entry.tags.length) return entry.tags.map(t => "#" + t).join(" ");
+  if (entry.favorite) return diaryT("즐겨찾기한 날");
   const mood = diaryMoodInfo(entry.mood), weather = diaryWeatherInfo(entry.weather);
   if (mood || weather) return [diaryName(weather), diaryName(mood)].filter(Boolean).join(" · ");
   return diaryT("꾸미기만 한 날");
 }
 function diaryPlainText(model){
-  return diaryCleanEntries(model).map(e => [diaryDateLabel(e.date), diaryWeatherMoodLabel(e), e.title, e.text].filter(Boolean).join("\n")).join("\n\n");
+  return diaryCleanEntries(model).map(e => [diaryDateLabel(e.date), diaryWeatherMoodLabel(e), ...(e.tags || []).map(t => "#" + t), e.title, e.text].filter(Boolean).join("\n")).join("\n\n");
 }
 function diaryEntryMatches(entry, query){
   const q = String(query || "").trim().toLowerCase();
   if (!q || !entry) return false;
-  return [entry.date, diaryDateLabel(entry.date), diaryWeatherMoodLabel(entry), entry.title, entry.text].join("\n").toLowerCase().includes(q);
+  return [entry.date, diaryDateLabel(entry.date), diaryWeatherMoodLabel(entry), ...(entry.tags || []), entry.title, entry.text].join("\n").toLowerCase().includes(q);
 }
 // 검색·목록용 "날씨 맑음 · 기분 기쁨" — 그림 글자 없이 이름만.
 function diaryWeatherMoodLabel(entry){
   const weather = diaryWeatherInfo(entry && entry.weather), mood = diaryMoodInfo(entry && entry.mood);
   return [weather && "날씨 " + weather[2], mood && "기분 " + mood[2]].filter(Boolean).join(" · ");
+}
+
+function diaryReviewStats(entries, year, month){
+  const prefix = String(year) + "-" + String(month).padStart(2, "0") + "-";
+  const rows = (entries || []).filter(e => e && e.date && e.date.startsWith(prefix) && !diaryEntryIsEmpty(e));
+  const mood = new Map(), weather = new Map(), words = new Map();
+  let photos = 0;
+  const skip = new Set(["그리고", "하지만", "오늘", "정말", "너무", "있는", "했다", "하는", "the", "and", "was", "that"]);
+  for (const e of rows){
+    if (e.mood) mood.set(e.mood, (mood.get(e.mood) || 0) + 1);
+    if (e.weather) weather.set(e.weather, (weather.get(e.weather) || 0) + 1);
+    photos += (e.stickers || []).length;
+    const tokens = (String(e.title || "") + " " + String(e.text || "")).toLocaleLowerCase();
+    for (const token of tokens.match(/[가-힣]{2,}|[a-z]{3,}/g) || []){
+      if (!skip.has(token)) words.set(token, (words.get(token) || 0) + 1);
+    }
+  }
+  const days = rows.map(e => Number(e.date.slice(8, 10))).sort((a, b) => a - b);
+  let longest = 0, run = 0, previous = -2;
+  for (const day of days){ run = day === previous + 1 ? run + 1 : 1; longest = Math.max(longest, run); previous = day; }
+  const top = map => [...map.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] || null;
+  return {
+    count:rows.length, photos, longest,
+    favorite:rows.filter(e => e.favorite).length,
+    mood:top(mood), weather:top(weather),
+    words:[...words.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5)
+  };
 }
 
 // 쌓는 순서 바꾸기(배열 뒤가 앞). picked = 고른 id 의 Set. 고른 것끼리의 순서는 그대로 둔다.
@@ -1068,7 +1112,7 @@ function mountDiaryEditor(doc){
   const ensureEntry = (key) => {
     let entry = entryOf(key);
     if (!entry){
-      entry = { date:key, title:"", text:"", style:null, weather:"", mood:"", drawing:[], stickers:[] };
+      entry = { date:key, title:"", text:"", style:null, weather:"", mood:"", favorite:false, tags:[], drawing:[], stickers:[] };
       model.entries.push(entry);
     }
     return entry;
@@ -1104,13 +1148,35 @@ function mountDiaryEditor(doc){
   photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
-  bar.append(titleInput, undoBtn, redoBtn, photoBtn, styleBtn, protectBtn, saveBtn, status, photoInput, bgInput);
+  const barIdentity = document.createElement("div");
+  barIdentity.className = "diary-bar-identity";
+  barIdentity.append(titleInput, status);
+  const barActions = document.createElement("div");
+  barActions.className = "diary-bar-actions";
+  barActions.append(undoBtn, redoBtn, photoBtn, styleBtn, protectBtn, saveBtn);
+  bar.append(barIdentity, barActions, photoInput, bgInput);
 
   const body = document.createElement("div");
   body.className = "diary-body";
   const side = document.createElement("aside");
   side.className = "diary-side";
   side.setAttribute("aria-label", "달력");
+  const sideMobileToggle = diaryButton("달력·검색", "달력과 일기 찾기 열기", "diary-side-mobile-toggle", "calendar");
+  const sideTabs = document.createElement("div");
+  sideTabs.className = "diary-side-tabs";
+  sideTabs.setAttribute("role", "tablist");
+  const makeSideTab = (id, ko, en, icon) => {
+    const b = diaryButton(diaryIsEn() ? en : ko, ko, "diary-side-tab", icon);
+    b.dataset.sideTab = id; b.setAttribute("role", "tab");
+    return b;
+  };
+  const calendarTab = makeSideTab("calendar", "달력", "Calendar", "calendar");
+  const searchTab = makeSideTab("search", "찾기", "Find", "search");
+  const reviewTab = makeSideTab("review", "돌아보기", "Review", "chart");
+  sideTabs.append(calendarTab, searchTab, reviewTab);
+  const calendarPane = document.createElement("div");
+  calendarPane.className = "diary-side-pane diary-calendar-pane";
+  calendarPane.dataset.sidePane = "calendar";
   const calHead = document.createElement("div");
   calHead.className = "diary-cal-head";
   const prevMonth = diaryButton("", "이전 달", "diary-btn diary-cal-nav", "arrowLeft");
@@ -1124,7 +1190,28 @@ function mountDiaryEditor(doc){
   calGrid.setAttribute("role", "grid");
   const monthList = document.createElement("div");
   monthList.className = "diary-month-list ui-keep-symbols";
-  side.append(calHead, calGrid, monthList);
+  calendarPane.append(calHead, calGrid, monthList);
+
+  const searchPane = document.createElement("div");
+  searchPane.className = "diary-side-pane diary-search-pane";
+  searchPane.dataset.sidePane = "search"; searchPane.hidden = true;
+  const searchInput = document.createElement("input");
+  searchInput.type = "search"; searchInput.className = "diary-search-input";
+  searchInput.placeholder = diaryIsEn() ? "Search this diary" : "이 일기장에서 찾기";
+  const searchFilters = document.createElement("div");
+  searchFilters.className = "diary-search-filters";
+  const searchFilter = document.createElement("select");
+  searchFilter.className = "diary-select";
+  searchFilter.setAttribute("aria-label", "검색 조건");
+  searchFilters.append(searchFilter);
+  const searchResults = document.createElement("div");
+  searchResults.className = "diary-search-results ui-keep-symbols";
+  searchPane.append(searchInput, searchFilters, searchResults);
+
+  const reviewPane = document.createElement("div");
+  reviewPane.className = "diary-side-pane diary-review-pane ui-keep-symbols";
+  reviewPane.dataset.sidePane = "review"; reviewPane.hidden = true;
+  side.append(sideMobileToggle, sideTabs, calendarPane, searchPane, reviewPane);
 
   const main = document.createElement("div");
   main.className = "diary-main";
@@ -1154,12 +1241,30 @@ function mountDiaryEditor(doc){
   entryTitle.placeholder = "제목(선택)";
   entryTitle.setAttribute("aria-label", "이 날 일기 제목");
   const deleteBtn = diaryButton("", "이 날 일기 지우기", "diary-btn diary-danger", "delete");
+  const favoriteBtn = diaryButton("★", "기억하고 싶은 날로 표시", "diary-btn diary-favorite ui-keep-symbols");
+  favoriteBtn.setAttribute("aria-pressed", "false");
+  const templateBtn = diaryButton("글감", "작성 질문과 양식 고르기", "diary-btn diary-template-btn");
   // 날씨·기분 — 그림 글자를 쓰므로 ui-keep-symbols 로 icons.js 의 이모지 지우기를 피한다.
   const weatherBtn = diaryButton("", "날씨 고르기", "diary-btn diary-pick ui-keep-symbols");
   weatherBtn.dataset.pick = "weather";
   const moodBtn = diaryButton("", "기분 고르기", "diary-btn diary-pick ui-keep-symbols");
   moodBtn.dataset.pick = "mood";
-  pageHead.append(prevDay, dateLabel, todayBadge, specialBadge, nextDay, weatherBtn, moodBtn, entryTitle, deleteBtn);
+  const dateRow = document.createElement("div");
+  dateRow.className = "diary-date-row";
+  dateRow.append(prevDay, dateLabel, todayBadge, specialBadge, nextDay);
+  const titleRow = document.createElement("div");
+  titleRow.className = "diary-title-row";
+  titleRow.append(entryTitle, weatherBtn, moodBtn, favoriteBtn, templateBtn, deleteBtn);
+  const tagRow = document.createElement("div");
+  tagRow.className = "diary-tag-row";
+  const tagList = document.createElement("div");
+  tagList.className = "diary-tag-list";
+  const tagInput = document.createElement("input");
+  tagInput.className = "diary-tag-input"; tagInput.type = "text"; tagInput.maxLength = 24;
+  tagInput.placeholder = diaryIsEn() ? "Add tag" : "태그 추가";
+  tagInput.setAttribute("aria-label", "태그 추가");
+  tagRow.append(tagList, tagInput);
+  pageHead.append(dateRow, titleRow, tagRow);
 
   const paper = document.createElement("div");
   paper.className = "diary-paper";
@@ -1181,10 +1286,10 @@ function mountDiaryEditor(doc){
   pictureHint.className = "diary-picture-hint";
   const pictureHintText = document.createElement("span");
   pictureHintText.textContent = "그림 칸 — 사진을 넣거나(끌어다 놓아도 돼요) 직접 그려 보세요";
-  const pictureBtn = diaryButton("사진 넣기", "그림 칸에 꼭 맞게 사진 넣기", "diary-btn", "image");
+  const pictureBtn = diaryButton("", "그림 칸에 꼭 맞게 사진 넣기", "diary-btn diary-picture-photo", "image");
   const pictureInput = document.createElement("input");
   pictureInput.type = "file"; pictureInput.accept = "image/*"; pictureInput.hidden = true;
-  const pictureDrawBtn = diaryButton("그리기", "그림 칸에 그리기", "diary-btn", "pen");
+  const pictureDrawBtn = diaryButton("", "그림 칸에 그리기", "diary-btn diary-picture-draw", "pen");
   const pictureHintBtns = document.createElement("div");
   pictureHintBtns.className = "diary-picture-hint-btns";
   pictureHintBtns.append(pictureBtn, pictureDrawBtn);
@@ -1195,7 +1300,6 @@ function mountDiaryEditor(doc){
   drawLayer.hidden = true;
   const drawCanvas = document.createElement("canvas");
   drawCanvas.className = "diary-draw-canvas";
-  const drawToggle = diaryButton("", "그림 칸에 그리기", "diary-draw-toggle", "pen");
   const drawBar = document.createElement("div");
   drawBar.className = "diary-draw-bar";
   drawBar.hidden = true;
@@ -1224,7 +1328,7 @@ function mountDiaryEditor(doc){
   const drawClearBtn = diaryButton("", "그림 전체 지우기", "diary-draw-tool", "delete");
   const drawDoneBtn = diaryButton("다 그렸어요", "그리기 끝내기 (Esc)", "diary-btn diary-primary diary-draw-done", "check");
   drawBar.append(eraserBtn, drawClearBtn, drawDoneBtn);
-  drawLayer.append(drawCanvas, drawToggle, drawBar);
+  drawLayer.append(drawCanvas, drawBar);
   pictureBox.append(pictureHint);
   // 원고지 — 칸과 글자를 그리는 층. 이때 textarea 는 커서 자리에 숨어 입력만 받는다(IME 후보 창도 거기 뜬다).
   const genkoLayer = document.createElement("div");
@@ -1331,7 +1435,21 @@ function mountDiaryEditor(doc){
   pickPop.className = "diary-pick-pop ui-keep-symbols";
   pickPop.hidden = true;
   pickPop.setAttribute("role", "dialog");
-  root.append(bar, body, panel, pickPop);
+  const templatePanel = document.createElement("div");
+  templatePanel.className = "diary-template-panel";
+  templatePanel.hidden = true;
+  templatePanel.setAttribute("role", "dialog");
+  templatePanel.setAttribute("aria-label", "작성 질문과 양식");
+  const lockScreen = document.createElement("div");
+  lockScreen.className = "diary-screen-lock"; lockScreen.hidden = true;
+  const lockIcon = document.createElement("span");
+  lockIcon.className = "diary-screen-lock-icon";
+  if (typeof window.uiIcon === "function") lockIcon.innerHTML = window.uiIcon("lock");
+  const lockTitle = document.createElement("strong"); lockTitle.textContent = "일기장이 잠겼어요";
+  const lockNote = document.createElement("p"); lockNote.textContent = "내용을 다시 보려면 파일 암호를 입력하세요.";
+  const unlockBtn = diaryButton("잠금 풀기", "일기장 화면 잠금 풀기", "diary-btn diary-primary", "lock");
+  lockScreen.append(lockIcon, lockTitle, lockNote, unlockBtn);
+  root.append(bar, body, panel, pickPop, templatePanel, lockScreen);
   doc.el.appendChild(root);
 
   /* ----- 상태 표시·되돌리기·복구본 ----- */
@@ -1559,7 +1677,7 @@ function mountDiaryEditor(doc){
   schoolBtn.hidden = true;
   schoolBtn.setAttribute("aria-haspopup", "dialog");
   schoolBtn.setAttribute("aria-expanded", "false");
-  bar.insertBefore(schoolBtn, saveBtn);
+  barActions.insertBefore(schoolBtn, saveBtn);
   const schoolStrip = document.createElement("div");
   schoolStrip.className = "diary-school";
   schoolStrip.hidden = true;
@@ -1827,6 +1945,135 @@ function mountDiaryEditor(doc){
     paintSchoolDays(); renderSchoolStrip();
   });
 
+  /* ----- 왼쪽 탐색: 달력 · 일기 찾기 · 돌아보기 ----- */
+  let activeSideTab = "calendar";
+  function syncSearchFilterOptions(){
+    const value = searchFilter.value || "all";
+    const labels = diaryIsEn()
+      ? [["all", "All entries"], ["favorite", "Favorites"], ["photo", "With photos"], ["tag", "With tags"], ["mood", "Mood or weather"]]
+      : [["all", "모든 일기"], ["favorite", "즐겨찾기"], ["photo", "사진이 있는 날"], ["tag", "태그가 있는 날"], ["mood", "기분·날씨가 있는 날"]];
+    searchFilter.replaceChildren(...labels.map(([id, label]) => {
+      const option = document.createElement("option"); option.value = id; option.textContent = label; return option;
+    }));
+    searchFilter.value = labels.some(([id]) => id === value) ? value : "all";
+  }
+  function setSideTab(id, focus){
+    activeSideTab = ["calendar", "search", "review"].includes(id) ? id : "calendar";
+    for (const tab of sideTabs.querySelectorAll(".diary-side-tab")){
+      const on = tab.dataset.sideTab === activeSideTab;
+      tab.classList.toggle("is-on", on); tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1;
+    }
+    for (const pane of side.querySelectorAll(".diary-side-pane")) pane.hidden = pane.dataset.sidePane !== activeSideTab;
+    side.classList.remove("is-mobile-collapsed");
+    if (activeSideTab === "search"){ renderSearchResults(); if (focus) searchInput.focus(); }
+    if (activeSideTab === "review") renderReview();
+  }
+  function renderSearchResults(){
+    const query = searchInput.value.trim(), filter = searchFilter.value || "all";
+    let rows = diaryCleanEntries(model).slice().sort((a, b) => a.date < b.date ? 1 : -1);
+    if (query) rows = rows.filter(e => diaryEntryMatches(e, query));
+    if (filter === "favorite") rows = rows.filter(e => e.favorite);
+    if (filter === "photo") rows = rows.filter(e => e.stickers && e.stickers.length);
+    if (filter === "tag") rows = rows.filter(e => e.tags && e.tags.length);
+    if (filter === "mood") rows = rows.filter(e => e.mood || e.weather);
+    if (!query && filter === "all") rows = rows.slice(0, 30);
+    const head = document.createElement("div");
+    head.className = "diary-search-count";
+    head.textContent = query || filter !== "all"
+      ? (diaryIsEn() ? rows.length + " results" : rows.length + "개의 일기")
+      : (diaryIsEn() ? "Recent entries" : "최근 일기");
+    const items = rows.slice(0, 100).map(e => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "diary-search-result";
+      const top = document.createElement("span"); top.className = "diary-search-result-top";
+      const date = document.createElement("span"); date.textContent = diaryUiShortDate(e.date);
+      const mark = document.createElement("span"); mark.textContent = e.favorite ? "★" : "";
+      top.append(date, mark);
+      const label = document.createElement("strong"); label.textContent = diaryEntryLabel(e);
+      b.append(top, label);
+      if (e.tags && e.tags.length){
+        const tags = document.createElement("span"); tags.className = "diary-search-result-tags";
+        tags.textContent = e.tags.map(t => "#" + t).join(" "); b.append(tags);
+      }
+      b.addEventListener("click", () => goTo(e.date));
+      return b;
+    });
+    if (!items.length){
+      const empty = document.createElement("div"); empty.className = "diary-side-empty";
+      empty.textContent = diaryIsEn() ? "No matching entries." : "조건에 맞는 일기가 없어요."; items.push(empty);
+    }
+    searchResults.replaceChildren(head, ...items);
+  }
+  function renderReview(){
+    const stats = diaryReviewStats(model.entries, viewYear, viewMonth + 1);
+    const heading = document.createElement("div"); heading.className = "diary-review-heading";
+    heading.textContent = diaryUiMonthLabel(viewYear, viewMonth);
+    const cards = document.createElement("div"); cards.className = "diary-review-cards";
+    const addCard = (value, label) => {
+      const card = document.createElement("div"); card.className = "diary-review-card";
+      const strong = document.createElement("strong"); strong.textContent = String(value);
+      const small = document.createElement("span"); small.textContent = label;
+      card.append(strong, small); cards.append(card);
+    };
+    addCard(stats.count, diaryIsEn() ? "entries" : "작성한 날");
+    addCard(stats.longest, diaryIsEn() ? "day streak" : "최장 연속");
+    addCard(stats.photos, diaryIsEn() ? "photos" : "사진");
+    addCard(stats.favorite, diaryIsEn() ? "favorites" : "즐겨찾기");
+    const insights = document.createElement("div"); insights.className = "diary-review-insights";
+    const addInsight = (label, value) => {
+      const row = document.createElement("div"); const key = document.createElement("span"); const val = document.createElement("strong");
+      key.textContent = label; val.textContent = value || "—"; row.append(key, val); insights.append(row);
+    };
+    addInsight(diaryIsEn() ? "Most common mood" : "가장 많았던 기분", stats.mood ? diaryName(diaryMoodInfo(stats.mood[0])) + " · " + stats.mood[1] : "");
+    addInsight(diaryIsEn() ? "Most common weather" : "가장 많았던 날씨", stats.weather ? diaryName(diaryWeatherInfo(stats.weather[0])) + " · " + stats.weather[1] : "");
+    if (stats.words.length){
+      const wordBox = document.createElement("div"); wordBox.className = "diary-review-words";
+      const label = document.createElement("span"); label.textContent = diaryIsEn() ? "Frequent words" : "자주 쓴 말"; wordBox.append(label);
+      for (const [word, count] of stats.words){ const chip = document.createElement("button"); chip.type = "button"; chip.textContent = word + " " + count; chip.addEventListener("click", () => { searchInput.value = word; setSideTab("search", true); }); wordBox.append(chip); }
+      insights.append(wordBox);
+    }
+    const heatTitle = document.createElement("div"); heatTitle.className = "diary-review-subhead";
+    heatTitle.textContent = diaryIsEn() ? viewYear + " writing map" : viewYear + "년 기록 지도";
+    const heat = document.createElement("div"); heat.className = "diary-review-heatmap";
+    const dates = new Set(diaryCleanEntries(model).filter(e => e.date.startsWith(String(viewYear) + "-")).map(e => e.date));
+    for (let month = 1; month <= 12; month++){
+      const row = document.createElement("div"); row.className = "diary-review-heat-row";
+      const monthName = document.createElement("span"); monthName.textContent = diaryIsEn() ? String(month) : month + "월"; row.append(monthName);
+      const last = new Date(viewYear, month, 0).getDate();
+      for (let day = 1; day <= 31; day++){
+        const dot = document.createElement(day <= last ? "button" : "span"); dot.className = "diary-review-day";
+        if (day <= last){
+          dot.type = "button";
+          const key = viewYear + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+          dot.classList.toggle("has-entry", dates.has(key)); dot.title = diaryUiDateLabel(key);
+          dot.addEventListener("click", () => goTo(key));
+        } else dot.classList.add("is-empty");
+        row.append(dot);
+      }
+      heat.append(row);
+    }
+    const memoryTitle = document.createElement("div"); memoryTitle.className = "diary-review-subhead";
+    memoryTitle.textContent = diaryIsEn() ? "On this day" : "그해 오늘";
+    const mmdd = current.slice(5), memories = diaryCleanEntries(model).filter(e => e.date.slice(5) === mmdd && e.date !== current).sort((a, b) => a.date < b.date ? 1 : -1);
+    const memoryBox = document.createElement("div"); memoryBox.className = "diary-review-memories";
+    if (!memories.length) memoryBox.textContent = diaryIsEn() ? "No earlier entry for this date." : "같은 날짜의 지난 기록이 아직 없어요.";
+    for (const e of memories){ const b = document.createElement("button"); b.type = "button"; b.textContent = e.date.slice(0, 4) + " · " + diaryEntryLabel(e); b.addEventListener("click", () => goTo(e.date)); memoryBox.append(b); }
+    reviewPane.replaceChildren(heading, cards, insights, heatTitle, heat, memoryTitle, memoryBox);
+  }
+  function refreshSideLanguage(){
+    calendarTab.querySelector("span:last-child").textContent = diaryIsEn() ? "Calendar" : "달력";
+    searchTab.querySelector("span:last-child").textContent = diaryIsEn() ? "Find" : "찾기";
+    reviewTab.querySelector("span:last-child").textContent = diaryIsEn() ? "Review" : "돌아보기";
+    searchInput.placeholder = diaryIsEn() ? "Search this diary" : "이 일기장에서 찾기";
+    sideMobileToggle.querySelector("span:last-child").textContent = diaryIsEn() ? "Calendar · Find" : "달력·검색";
+    syncSearchFilterOptions();
+  }
+  sideTabs.addEventListener("click", (event) => { const tab = event.target.closest(".diary-side-tab"); if (tab) setSideTab(tab.dataset.sideTab, true); });
+  sideMobileToggle.addEventListener("click", () => side.classList.toggle("is-mobile-collapsed"));
+  searchInput.addEventListener("input", renderSearchResults);
+  searchFilter.addEventListener("change", renderSearchResults);
+  refreshSideLanguage(); setSideTab("calendar");
+  if (typeof matchMedia === "function" && matchMedia("(max-width:760px)").matches) side.classList.add("is-mobile-collapsed");
+
   /* ----- 달력 ----- */
   function renderCalendar(){
     monthLabel.textContent = diaryUiMonthLabel(viewYear, viewMonth);
@@ -1855,6 +2102,9 @@ function mountDiaryEditor(doc){
       b.append(num);
       // 기분을 먼저, 없으면 날씨를 점 대신 작게 보여 준다.
       const entry = byDate.get(cell.key);
+      if (entry && entry.favorite){
+        const star = document.createElement("span"); star.className = "diary-cal-favorite"; star.textContent = "★"; b.append(star);
+      }
       const mark = entry && (diaryMoodInfo(entry.mood) || diaryWeatherInfo(entry.weather));
       if (mark){
         const em = document.createElement("span");
@@ -1889,6 +2139,7 @@ function mountDiaryEditor(doc){
       const label = document.createElement("span"); label.className = "diary-month-item-label";
       label.textContent = diaryEntryLabel(e);
       b.append(day);
+      if (e.favorite){ const star = document.createElement("span"); star.className = "diary-month-item-favorite"; star.textContent = "★"; b.append(star); }
       const mark = diaryMoodInfo(e.mood) || diaryWeatherInfo(e.weather);
       if (mark){ const em = document.createElement("span"); em.className = "diary-month-item-emoji"; diaryMarkFill(em, mark); b.append(em); }
       b.append(label);
@@ -1896,6 +2147,8 @@ function mountDiaryEditor(doc){
       return b;
     });
     monthList.replaceChildren(heading, ...items);
+    renderSearchResults();
+    if (activeSideTab === "review") renderReview();
   }
 
   /* ----- 종이 ----- */
@@ -2002,14 +2255,17 @@ function mountDiaryEditor(doc){
       const img = node.querySelector("img");
       if (img) img.style.transform = s.flip ? "scaleX(-1)" : "";
     }
-    // 그림 칸 한가운데를 스티커가 덮고 있으면 안내 글을 감춘다(사진 위로 글자가 비치지 않게).
+    // 사진이나 그림이 있으면 안내 문장만 감추고 가운데 아이콘은 남긴다.
+    // 오른쪽 위에 별도 연필 단추를 두지 않으므로, 이 아이콘이 다시 그리기로 들어가는 길이기도 하다.
     if (!pictureBox.hidden){
       const entry = entryOf(current);
       const box = pictureBoxRect();
-      pictureHint.hidden = drawMode || !!(entry && entry.drawing && entry.drawing.length) || !!(box && entry && entry.stickers.some(st => {
+      const hasContent = !!(entry && entry.drawing && entry.drawing.length) || !!(box && entry && entry.stickers.some(st => {
         const cx = (st.x + st.w / 2) * w, cy = (st.y + st.w * st.ar / 2) * w;
         return cx >= box.left && cx <= box.left + box.width && cy >= box.top && cy <= box.top + box.height;
       }));
+      pictureHint.hidden = drawMode;
+      pictureHint.classList.toggle("is-compact", hasContent);
     }
   }
   let genkoLay = null, genkoGm = null;
@@ -2110,7 +2366,6 @@ function mountDiaryEditor(doc){
     drawMode = !!on && !pictureBox.hidden;
     paper.classList.toggle("is-drawing", drawMode);
     drawBar.hidden = !drawMode;
-    drawToggle.hidden = drawMode;
     if (drawMode){ selectSticker(""); syncDrawBar(); }
     positionStickers();
   }
@@ -2196,7 +2451,6 @@ function mountDiaryEditor(doc){
     setStatus(diaryT("그림을 모두 지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
   });
   drawDoneBtn.addEventListener("click", () => setDrawMode(false));
-  drawToggle.addEventListener("click", (e) => { e.stopPropagation(); setDrawMode(true); });
   pictureDrawBtn.addEventListener("click", (e) => { e.stopPropagation(); setDrawMode(true); });
   function renderStickers(){
     const entry = entryOf(current);
@@ -2434,7 +2688,7 @@ function mountDiaryEditor(doc){
   paper.append(marquee);
   paper.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !(e.ctrlKey || e.metaKey) || drawMode) return;
-    if (e.target.closest(".diary-sticker, .diary-draw-bar, .diary-draw-toggle, .diary-picture-hint button")) return;
+    if (e.target.closest(".diary-sticker, .diary-draw-bar, .diary-picture-hint button")) return;
     const entry = entryOf(current);
     if (!entry || !entry.stickers.length) return;
     e.preventDefault();
@@ -2575,12 +2829,89 @@ function mountDiaryEditor(doc){
   styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setPanelOpen(panel.hidden); });
   const onOutside = (e) => {
     if (!pickPop.hidden && !pickPop.contains(e.target) && !weatherBtn.contains(e.target) && !moodBtn.contains(e.target)) closePicker();
+    if (!templatePanel.hidden && !templatePanel.contains(e.target) && !templateBtn.contains(e.target)) setTemplateOpen(false);
     if (panel.hidden) return;
     if (panel.contains(e.target) || styleBtn.contains(e.target)) return;
     setPanelOpen(false);
   };
   document.addEventListener("pointerdown", onOutside, true);
   panel.addEventListener("keydown", (e) => { if (e.key === "Escape"){ e.preventDefault(); setPanelOpen(false); styleBtn.focus(); } });
+
+  /* ----- 즐겨찾기 · 태그 · 글감 ----- */
+  const templates = [
+    ["daily", "하루 돌아보기", "Daily reflection", "오늘 가장 기억에 남는 일은?\n\n그때 어떤 기분이 들었나요?\n\n내일의 나에게 한마디"],
+    ["gratitude", "감사 일기", "Gratitude", "오늘 고마웠던 일 3가지\n\n1. \n2. \n3. \n\n고마움을 전하고 싶은 사람"],
+    ["school", "학교생활", "School day", "오늘 배운 것\n\n친구들과 있었던 일\n\n내일 준비할 것"],
+    ["reading", "독서 기록", "Reading note", "책 제목: \n\n기억에 남는 장면이나 문장\n\n읽고 난 뒤 든 생각"],
+    ["travel", "여행 일기", "Travel journal", "다녀온 곳: \n\n가장 좋았던 순간\n\n새롭게 발견한 것\n\n다시 가고 싶은 이유"]
+  ];
+  function renderEntryMeta(){
+    const entry = entryOf(current), favorite = !!(entry && entry.favorite), tags = entry && entry.tags ? entry.tags : [];
+    favoriteBtn.classList.toggle("is-on", favorite); favoriteBtn.setAttribute("aria-pressed", String(favorite));
+    favoriteBtn.title = favorite ? (diaryIsEn() ? "Remove from favorites" : "즐겨찾기에서 빼기") : (diaryIsEn() ? "Add to favorites" : "기억하고 싶은 날로 표시");
+    favoriteBtn.setAttribute("aria-label", favoriteBtn.title);
+    tagList.replaceChildren(...tags.map(tag => {
+      const chip = document.createElement("button"); chip.type = "button"; chip.className = "diary-tag-chip";
+      const label = document.createElement("span"); label.textContent = "#" + tag;
+      const remove = document.createElement("span"); remove.setAttribute("aria-hidden", "true"); remove.textContent = "×";
+      chip.append(label, remove); chip.title = (diaryIsEn() ? "Remove tag " : "태그 지우기 ") + tag;
+      chip.addEventListener("click", () => {
+        if (history) history.flush();
+        const live = entryOf(current); if (!live) return;
+        live.tags = (live.tags || []).filter(value => value !== tag);
+        renderEntryMeta(); renderCalendar(); touch(true);
+      });
+      return chip;
+    }));
+    tagInput.hidden = tags.length >= DIARY_MAX_TAGS;
+    tagInput.placeholder = diaryIsEn() ? "Add tag" : "태그 추가";
+  }
+  function addCurrentTag(){
+    const raw = tagInput.value; tagInput.value = "";
+    const entry = ensureEntry(current), tags = diaryNormalizeTags([...(entry.tags || []), raw]);
+    if (!raw.trim() || tags.length === (entry.tags || []).length) return;
+    if (history) history.flush(); entry.tags = tags;
+    renderEntryMeta(); renderCalendar(); touch(true);
+  }
+  favoriteBtn.addEventListener("click", () => {
+    if (history) history.flush();
+    const entry = ensureEntry(current); entry.favorite = !entry.favorite;
+    renderEntryMeta(); renderCalendar(); touch(true);
+  });
+  tagInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === ","){ event.preventDefault(); addCurrentTag(); }
+  });
+  function setTemplateOpen(open){
+    templatePanel.hidden = !open; templateBtn.classList.toggle("is-on", open); templateBtn.setAttribute("aria-expanded", String(open));
+    if (!open) return;
+    const title = document.createElement("strong"); title.textContent = diaryIsEn() ? "Choose a writing prompt" : "오늘의 글감 고르기";
+    const note = document.createElement("span"); note.className = "diary-template-note";
+    note.textContent = diaryIsEn() ? "Questions are inserted into the current entry." : "고른 질문을 지금 일기에 넣어 드려요.";
+    const buttons = templates.map(([, ko, en, text]) => {
+      const b = document.createElement("button"); b.type = "button"; b.className = "diary-template-option"; b.textContent = diaryIsEn() ? en : ko;
+      b.addEventListener("click", () => {
+        if (history) history.flush();
+        const chosen = diaryIsEn() ? ({
+          "하루 돌아보기":"What was the most memorable moment today?\n\nHow did it make you feel?\n\nA note to tomorrow's me",
+          "감사 일기":"Three things I was grateful for today\n\n1. \n2. \n3. \n\nSomeone I want to thank",
+          "학교생활":"What I learned today\n\nSomething that happened with friends\n\nWhat to prepare for tomorrow",
+          "독서 기록":"Book title: \n\nA memorable scene or sentence\n\nMy thoughts after reading",
+          "여행 일기":"Place: \n\nThe best moment\n\nSomething new I discovered\n\nWhy I want to return"
+        }[ko] || text) : text;
+        area.value = area.value.trim() ? area.value.replace(/\s*$/, "") + "\n\n" + chosen : chosen;
+        area.dispatchEvent(new Event("input", { bubbles:true }));
+        setTemplateOpen(false); area.focus(); area.setSelectionRange(area.value.length, area.value.length);
+      });
+      return b;
+    });
+    templatePanel.replaceChildren(title, note, ...buttons);
+    const r = templateBtn.getBoundingClientRect(), base = root.getBoundingClientRect();
+    templatePanel.style.left = Math.max(8, Math.min(base.width - 260, r.left - base.left)) + "px";
+    templatePanel.style.top = (r.bottom - base.top + 6) + "px";
+  }
+  templateBtn.setAttribute("aria-haspopup", "dialog"); templateBtn.setAttribute("aria-expanded", "false");
+  templateBtn.addEventListener("click", (event) => { event.stopPropagation(); setTemplateOpen(templatePanel.hidden); });
+  templatePanel.addEventListener("keydown", (event) => { if (event.key === "Escape"){ event.preventDefault(); setTemplateOpen(false); templateBtn.focus(); } });
 
   /* ----- 날짜 이동 ----- */
   function renderPage(){
@@ -2598,6 +2929,7 @@ function mountDiaryEditor(doc){
     area.placeholder = diaryT(current === today ? "오늘은 어떤 하루였나요?" : "이 날의 일기를 적어 보세요.");
     deleteBtn.disabled = diaryEntryIsEmpty(entry);
     syncPickers();
+    renderEntryMeta();
     applyStyle();
     renderStickers();
     layout();
@@ -2832,6 +3164,72 @@ function mountDiaryEditor(doc){
   photoInput.addEventListener("change", async () => { const files = [...(photoInput.files || [])]; photoInput.value = ""; await addStickers(files); });
 
   /* ----- 파일 암호 ----- */
+  let screenLocked = false, screenLockVerifier = null, autoLockTimer = 0;
+  let autoLockMinutes = (() => {
+    try { const n = Number(localStorage.getItem("mn.diaryAutoLock") || 0); return [0, 5, 10, 30].includes(n) ? n : 0; }
+    catch(_){ return 0; }
+  })();
+  const scheduleAutoLock = () => {
+    clearTimeout(autoLockTimer); autoLockTimer = 0;
+    if (!autoLockMinutes || !doc.diaryProtection || screenLocked) return;
+    autoLockTimer = setTimeout(() => { autoLockTimer = 0; lockDiaryScreen(); }, autoLockMinutes * 60000);
+  };
+  const ensureScreenLockVerifier = async () => {
+    if (screenLockVerifier || !doc.diaryProtection) return screenLockVerifier;
+    const api = diaryCryptoApi(); if (!api) return null;
+    const iv = api.getRandomValues(new Uint8Array(12));
+    const plain = new TextEncoder().encode("ClassDock diary screen lock");
+    const bytes = new Uint8Array(await api.subtle.encrypt({ name:"AES-GCM", iv, tagLength:128 }, doc.diaryProtection.key, plain));
+    screenLockVerifier = { iv, bytes };
+    return screenLockVerifier;
+  };
+  async function lockDiaryScreen(){
+    if (!doc.diaryProtection){
+      if (typeof toast === "function") toast(diaryT("화면 잠금은 먼저 파일 암호를 설정해야 사용할 수 있어요."), 3200);
+      return false;
+    }
+    try { if (!await ensureScreenLockVerifier()) return false; }
+    catch(error){ console.warn("diary screen lock verifier failed:", error); return false; }
+    closePicker(); setPanelOpen(false); setTemplateOpen(false); setSchoolOpen(false); setDrawMode(false);
+    screenLocked = true; clearTimeout(autoLockTimer); autoLockTimer = 0;
+    root.classList.add("is-screen-locked"); lockScreen.hidden = false;
+    lockTitle.textContent = diaryIsEn() ? "Diary locked" : "일기장이 잠겼어요";
+    lockNote.textContent = diaryIsEn() ? "Enter the file password to view it again." : "내용을 다시 보려면 파일 암호를 입력하세요.";
+    unlockBtn.querySelector("span:last-child").textContent = diaryIsEn() ? "Unlock" : "잠금 풀기";
+    unlockBtn.focus({ preventScroll:true });
+    return true;
+  }
+  async function unlockDiaryScreen(){
+    if (!screenLocked || !doc.diaryProtection || typeof examAskPassword !== "function") return;
+    let password = await examAskPassword({
+      title:diaryIsEn() ? "Unlock diary" : "일기장 잠금 풀기",
+      message:diaryIsEn() ? "Enter this diary's file password." : "이 일기장의 파일 암호를 입력하세요.",
+      okText:diaryIsEn() ? "Unlock" : "잠금 풀기"
+    });
+    if (password === null) return;
+    let ok = false;
+    try {
+      const candidate = await diaryDeriveProtection(password, doc.diaryProtection.salt, doc.diaryProtection.iterations);
+      const api = diaryCryptoApi();
+      const plain = await api.subtle.decrypt({ name:"AES-GCM", iv:screenLockVerifier.iv, tagLength:128 }, candidate.key, screenLockVerifier.bytes);
+      ok = new TextDecoder().decode(plain) === "ClassDock diary screen lock";
+    } catch(_){ ok = false; }
+    password = "";
+    if (!ok){ if (typeof toast === "function") toast(diaryIsEn() ? "Incorrect password." : "암호가 맞지 않아요.", 2600, { type:"error" }); return; }
+    screenLocked = false; lockScreen.hidden = true; root.classList.remove("is-screen-locked"); scheduleAutoLock(); area.focus();
+  }
+  const setAutoLock = minutes => {
+    autoLockMinutes = minutes;
+    try { localStorage.setItem("mn.diaryAutoLock", String(minutes)); } catch(_){}
+    scheduleAutoLock();
+    if (typeof toast === "function") toast(minutes
+      ? (diaryIsEn() ? "Auto-lock set to " + minutes + " minutes." : minutes + "분 동안 사용하지 않으면 화면을 잠급니다.")
+      : (diaryIsEn() ? "Auto-lock turned off." : "자동 화면 잠금을 껐어요."), 2600);
+  };
+  const onLockActivity = () => { if (!screenLocked) scheduleAutoLock(); };
+  root.addEventListener("pointerdown", onLockActivity, true);
+  root.addEventListener("keydown", onLockActivity, true);
+  unlockBtn.addEventListener("click", unlockDiaryScreen);
   const syncProtectionButton = () => {
     const protectedFile = !!doc.diaryProtection;
     protectBtn.classList.toggle("is-on", protectedFile);
@@ -2859,6 +3257,9 @@ function mountDiaryEditor(doc){
       syncProtectionButton(); refreshDirty(); scheduleRecovery();
       return false;
     }
+    screenLockVerifier = null;
+    if (!nextProtection){ autoLockMinutes = 0; try { localStorage.setItem("mn.diaryAutoLock", "0"); } catch(_){} }
+    scheduleAutoLock();
     refreshDirty();
     if (typeof toast === "function") toast(diaryT(successMessage), 3200, { type:"success" });
     return true;
@@ -2896,16 +3297,25 @@ function mountDiaryEditor(doc){
   const openProtectionMenu = () => {
     if (typeof MNContextMenu === "undefined") return;
     const r = protectBtn.getBoundingClientRect();
-    const items = doc.diaryProtection
+    const fileItems = doc.diaryProtection
       ? [
           { label:diaryT("암호 변경"), action:() => setDiaryPassword(true) },
           { label:diaryT("암호 제거"), danger:true, action:removeDiaryPassword }
         ]
       : [{ label:diaryT("암호 설정"), action:() => setDiaryPassword(false) }];
+    const autoChildren = [0, 5, 10, 30].map(minutes => ({
+      label:minutes ? (diaryIsEn() ? minutes + " minutes" : minutes + "분") : (diaryIsEn() ? "Off" : "사용 안 함"),
+      active:autoLockMinutes === minutes, action:() => setAutoLock(minutes)
+    }));
+    const items = [...fileItems, { separator:true },
+      { label:diaryIsEn() ? "Lock screen now" : "지금 화면 잠그기", icon:"lock", disabled:!doc.diaryProtection, action:lockDiaryScreen },
+      { label:diaryIsEn() ? "Auto-lock" : "자동 화면 잠금", disabled:!doc.diaryProtection, children:autoChildren }
+    ];
     MNContextMenu.open(r.left, r.bottom + 4, items, { autoFocus:true });
   };
   protectBtn.addEventListener("click", (e) => { e.stopPropagation(); openProtectionMenu(); });
   syncProtectionButton();
+  scheduleAutoLock();
 
   deleteBtn.addEventListener("click", () => {
     const idx = model.entries.findIndex(e => e.date === current);
@@ -3024,6 +3434,8 @@ function mountDiaryEditor(doc){
       tag.append(" " + diaryName(m));
       date.append(tag);
     }
+    if (e.favorite){ const tag = document.createElement("span"); tag.className = "diary-print-mark"; tag.textContent = "★"; date.append(tag); }
+    if (e.tags && e.tags.length){ const tag = document.createElement("span"); tag.className = "diary-print-mark"; tag.textContent = e.tags.map(value => "#" + value).join(" "); date.append(tag); }
     head.append(date);
     if (e.title){ const h = document.createElement("h2"); h.textContent = e.title; head.append(h); }
     page.append(head);
@@ -3164,7 +3576,10 @@ function mountDiaryEditor(doc){
   function translateUi(node){
     if (typeof MNI18N !== "undefined" && MNI18N && typeof MNI18N.translateTree === "function") MNI18N.translateTree(node);
   }
-  const onLangChange = () => { closePicker(); renderCalendar(); renderPage(); syncPanel(); syncProtectionButton(); refreshDirty(); };
+  const onLangChange = () => {
+    closePicker(); setTemplateOpen(false); refreshSideLanguage(); renderCalendar(); renderPage(); syncPanel(); syncProtectionButton(); refreshDirty();
+    if (screenLocked){ lockTitle.textContent = diaryIsEn() ? "Diary locked" : "일기장이 잠겼어요"; lockNote.textContent = diaryIsEn() ? "Enter the file password to view it again." : "내용을 다시 보려면 파일 암호를 입력하세요."; }
+  };
   window.addEventListener("mni18nchange", onLangChange);
 
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
@@ -3183,6 +3598,7 @@ function mountDiaryEditor(doc){
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
     clearTimeout(recoveryTimer);
+    clearTimeout(autoLockTimer);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
     document.removeEventListener("selectionchange", onSelectionChange);
@@ -3210,13 +3626,13 @@ if (typeof module !== "undefined" && module.exports){
   module.exports = {
     DIARY_FORMAT, DIARY_VERSION, DIARY_LINES, DIARY_GAPS, DIARY_ENCRYPTED_MAGIC, DIARY_PBKDF2_ITER,
     diaryDateKey, diaryIsDateKey, diaryAddDays, diaryDateLabel, diaryMonthGrid,
-    diaryDefaultStyle, diaryNormalizeStyle, diaryNormalizeSticker, diaryNormalizeEntry, diaryEntryIsEmpty,
+    diaryDefaultStyle, diaryNormalizeStyle, diaryNormalizeSticker, diaryNormalizeTags, diaryNormalizeEntry, diaryEntryIsEmpty,
     diaryEmpty, diaryNormalize, diaryContentKey, diaryModelJson, diaryEffectiveStyle, diaryReferencedAssets,
     DIARY_FONTS, DIARY_HAND_FONTS, DIARY_FONT_STACKS, diaryFontScale, diaryEnsureFont, DIARY_WEATHERS, DIARY_MOODS, diaryNormalizeAngle, diaryWeatherInfo, diaryMoodInfo, diaryWeatherMoodLabel,
     DIARY_PENS, DIARY_PEN_SIZES, diaryNormalizeStroke, diaryDrawStrokes,
     diaryReorder, DIARY_GENKO_COLS, diaryGenkoGrid, diaryPictureBox, diaryUsesGenko, diaryStickerBottom, diaryGenkoMetrics, diaryGenkoLayout, diaryGenkoIndexAt,
     diaryUiDateLabel, diaryUiHeadDate, diaryUiMonthLabel, diaryUiWeekday, diaryT, diaryTf,
-    diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryLineMetrics, diaryLineBackground,
+    diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryReviewStats, diaryLineMetrics, diaryLineBackground,
     diaryCrc32, diaryZipBuild, diaryZipRead, diaryPack, diaryUnpack, diaryScratchFileName, diaryStarterBytes,
     diaryCryptoReady, diaryIsEncrypted, diaryEncryptedInfo, diaryDeriveProtection, diarySealBytes, diaryOpenSealed, diaryOutputBytes
   };

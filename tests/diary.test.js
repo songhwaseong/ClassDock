@@ -273,6 +273,37 @@ test("날씨·기분만 고른 날도 남고, 목록·검색에 이름으로 나
   for (const list of [diary.DIARY_WEATHERS, diary.DIARY_MOODS]) assert.equal(new Set(list.map(x => x[0])).size, list.length);
 });
 
+test("7단계 태그·즐겨찾기는 정리해 저장되고 일기장 검색에도 잡힌다", async () => {
+  const model = diary.diaryEmpty("기록");
+  const entry = diary.diaryNormalizeEntry({
+    date:"2026-09-18", favorite:true, tags:[" 학교 ", "#친구", "학교", "", "아주 긴 태그 이름도 안전하게 잘라서 저장합니다"]
+  });
+  model.entries.push(entry);
+  assert.equal(diary.diaryEntryIsEmpty(entry), false);
+  assert.deepEqual(entry.tags.slice(0, 3), ["학교", "친구", "아주 긴 태그 이름도 안전하게 잘라서 저장합"]);
+  assert.ok(diary.diaryEntryMatches(entry, "친구"));
+  assert.match(diary.diaryPlainText(model), /#학교/);
+  const back = (await diary.diaryUnpack(diary.diaryPack(model, new Map()))).model.entries[0];
+  assert.equal(back.favorite, true);
+  assert.deepEqual(back.tags, entry.tags);
+});
+
+test("월간 돌아보기는 작성일·연속 기록·사진·기분·자주 쓴 말을 계산한다", () => {
+  const entries = [
+    diary.diaryNormalizeEntry({ date:"2026-09-01", text:"산책 산책 좋았다", mood:"happy", weather:"sunny", favorite:true, stickers:[] }),
+    diary.diaryNormalizeEntry({ date:"2026-09-02", text:"산책 친구", mood:"happy", weather:"rainy", stickers:[{ id:"s", asset:"assets/photo.png", x:0, y:0, w:.2, ar:1 }] }, () => true),
+    diary.diaryNormalizeEntry({ date:"2026-09-04", text:"친구와 공부", mood:"tired", weather:"sunny" }),
+    diary.diaryNormalizeEntry({ date:"2026-10-01", text:"다른 달" })
+  ];
+  const stats = diary.diaryReviewStats(entries, 2026, 9);
+  assert.equal(stats.count, 3);
+  assert.equal(stats.longest, 2);
+  assert.equal(stats.photos, 1);
+  assert.equal(stats.favorite, 1);
+  assert.deepEqual(stats.mood, ["happy", 2]);
+  assert.deepEqual(stats.words[0], ["산책", 3]);
+});
+
 test("그림일기는 그림 칸 아래가 원고지이고, 그림 칸 좌우가 원고지 칸 줄 끝에 맞는다", () => {
   for (const gap of Object.keys(diary.DIARY_GAPS)){
     const style = { lines:"picture", gap };
