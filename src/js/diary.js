@@ -1885,7 +1885,6 @@ function mountDiaryEditor(doc){
   let current = today;
   let viewYear = diaryDateFromKey(today).getFullYear(), viewMonth = diaryDateFromKey(today).getMonth();
   // 고른 스티커들(순서 = 고른 순서). 한 장이면 손잡이(크기·돌리기·떼기·⋯)가 보이고, 여러 장이면 테두리만.
-  let selection = [];
   let history = null;
   let recoveryTimer = 0;
 
@@ -3339,6 +3338,8 @@ function mountDiaryEditor(doc){
   };
 
   /* ----- 종이 ----- */
+  // 고른 스티커는 종이의 것이다. 바깥은 selectionIds()·clearSelection() 으로만 본다.
+  let selection = [];
   let paperWidth = 0;
   function applyStyle(){
     const entry = entryOf(current);
@@ -4381,6 +4382,15 @@ function mountDiaryEditor(doc){
     touch(true);
   }
 
+  /* ----- 바깥에 내주는 읽기 창구 -----
+     종이 엔진을 떼어 낼 때 이 여섯이 돌려주는 값이 된다. 바깥이 종이의 변수를 직접 읽지 않게 한다. */
+  const selectionIds = () => selection;
+  const clearSelection = () => { selection = []; };
+  const paperWidthNow = () => paperWidth;
+  const isDrawing = () => drawMode;
+  const stickerColorNow = () => artColor;
+  const stickerOpacityNow = () => artOpacity;
+
   /* ----- 꾸미기 바꾸기 ----- */
   function changeStyle(patch, immediate){
     if (history && immediate) history.flush();
@@ -4437,7 +4447,7 @@ function mountDiaryEditor(doc){
   function syncArtPanel(){
     const picked = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
     const colors = new Set(picked.map(s => s.color));
-    const shown = picked.length ? (colors.size === 1 ? [...colors][0] : "") : artColor;
+    const shown = picked.length ? (colors.size === 1 ? [...colors][0] : "") : stickerColorNow();
     artColorButtons.forEach(b => {
       const on = b.dataset.color === shown;
       b.classList.toggle("is-on", on);
@@ -4449,7 +4459,7 @@ function mountDiaryEditor(doc){
     artCustomColor.title = diaryT("색 직접 고르기");
     artCustomColor.setAttribute("aria-label", artCustomColor.title);
     const opacities = new Set(picked.map(s => s.opacity == null ? 1 : s.opacity));
-    const shownOpacity = picked.length ? (opacities.size === 1 ? [...opacities][0] : null) : artOpacity;
+    const shownOpacity = picked.length ? (opacities.size === 1 ? [...opacities][0] : null) : stickerOpacityNow();
     artOpacityRange.value = String(Math.round((shownOpacity == null ? 1 : shownOpacity) * 100));
     artOpacityValue.textContent = shownOpacity == null ? "—" : Math.round(shownOpacity * 100) + "%";
     artOpacityRange.title = diaryT("스티커 투명도");
@@ -4627,7 +4637,7 @@ function mountDiaryEditor(doc){
     renderStickers();
     layout();
     redrawDrawing();
-    if (drawMode) syncDrawBar();
+    if (isDrawing()) syncDrawBar();
   }
   function syncPickers(){
     const entry = entryOf(current);
@@ -4740,7 +4750,7 @@ function mountDiaryEditor(doc){
     // 비어 버린 날은 모델에서도 치운다(저장엔 원래 안 들어가지만 되돌리기 단계가 헛돌지 않게).
     model.entries = model.entries.filter(e => e.date === key || !diaryEntryIsEmpty(e));
     current = key;
-    selection = [];
+    clearSelection();
     const d = diaryDateFromKey(key);
     viewYear = d.getFullYear(); viewMonth = d.getMonth();
     renderCalendar();
@@ -4984,11 +4994,11 @@ function mountDiaryEditor(doc){
     if (e.defaultPrevented || e.isComposing) return;
     const target = e.target;
     const inField = !!(target && target.closest && target.closest('input,textarea,select,[contenteditable="true"]'));
-    if (drawMode && e.key === "Escape" && !inField){ e.preventDefault(); setDrawMode(false); return; }
+    if (isDrawing() && e.key === "Escape" && !inField){ e.preventDefault(); setDrawMode(false); return; }
     /* 몰입 모드는 Esc 로 나간다. 글을 쓰다가도 나갈 수 있어야 하므로 일기 본문 칸은 예외로 받아 주되,
        글상자 고쳐 쓰기(Esc = 고치기 취소)·다른 입력칸·열린 창·고른 스티커가 먼저다.
        이 처리기는 capture 라 글상자 textarea 의 Esc 보다 먼저 온다 — 그래서 여기서 걸러야 한다. */
-    if (e.key === "Escape" && focusMode && !selection.length
+    if (e.key === "Escape" && focusMode && !selectionIds().length
       && (!inField || target === area)
       && panel.hidden && artPanel.hidden && pickPop.hidden && templatePanel.hidden){
       e.preventDefault();
@@ -4997,14 +5007,14 @@ function mountDiaryEditor(doc){
     }
     if ((e.ctrlKey || e.metaKey) && !e.altKey){
       // Ctrl+] / Ctrl+[ 한 칸 앞·뒤, Shift 를 더하면 맨 앞·맨 뒤(파워포인트와 같은 자리).
-      if (selection.length && !inField && root.contains(target) && (e.code === "BracketRight" || e.code === "BracketLeft")){
+      if (selectionIds().length && !inField && root.contains(target) && (e.code === "BracketRight" || e.code === "BracketLeft")){
         e.preventDefault(); e.stopPropagation();
         const up = e.code === "BracketRight";
         reorderStickers(e.shiftKey ? (up ? "front" : "back") : (up ? "forward" : "backward"));
         return;
       }
       // 스티커를 고른 채 Ctrl+A → 이 날 스티커 모두 고르기(글칸 안의 Ctrl+A 는 글 전체 고르기 그대로)
-      if (selection.length && !inField && root.contains(target) && String(e.key || "").toLowerCase() === "a" && !e.shiftKey){
+      if (selectionIds().length && !inField && root.contains(target) && String(e.key || "").toLowerCase() === "a" && !e.shiftKey){
         e.preventDefault(); e.stopPropagation();
         const entry = entryOf(current);
         if (entry) setSelection(entry.stickers.map(s => s.id));
@@ -5018,14 +5028,14 @@ function mountDiaryEditor(doc){
       if (redo){ history.flush(); history.redo(); } else history.undo();
       return;
     }
-    if (!selection.length || inField || !root.contains(target)) return;
-    if (e.key === "Delete" || e.key === "Backspace"){ e.preventDefault(); removeStickers(selection); return; }
+    if (!selectionIds().length || inField || !root.contains(target)) return;
+    if (e.key === "Delete" || e.key === "Backspace"){ e.preventDefault(); removeStickers(selectionIds()); return; }
     if (e.code === "BracketLeft" || e.code === "BracketRight"){
       e.preventDefault();
       rotateStickers((e.code === "BracketRight" ? 1 : -1) * (e.shiftKey ? 15 : 5));
       return;
     }
-    const step = (e.shiftKey ? 20 : 2) / (paperWidth || 600);
+    const step = (e.shiftKey ? 20 : 2) / (paperWidthNow() || 600);
     const moves = { ArrowLeft:[-step, 0], ArrowRight:[step, 0], ArrowUp:[0, -step], ArrowDown:[0, step] };
     if (moves[e.key]){ e.preventDefault(); nudgeStickers(moves[e.key][0], moves[e.key][1]); }
     else if (e.key === "Escape") selectSticker("");
@@ -5241,7 +5251,7 @@ function mountDiaryEditor(doc){
   window.addEventListener("mni18nchange", onLangChange);
 
   const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
-    if (paper.clientWidth && paper.clientWidth !== paperWidth) layout();
+    if (paper.clientWidth && paper.clientWidth !== paperWidthNow()) layout();
   }) : null;
   if (resizeObserver) resizeObserver.observe(paper);
 
