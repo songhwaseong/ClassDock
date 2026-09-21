@@ -7913,6 +7913,11 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-route-btn.is-on{color:var(--accent);border-color:var(--accent)}
 .trip-map-stage{flex:1;min-height:180px}
 .trip-map-stage.is-picking{cursor:crosshair}
+.trip-map-scope.is-on,.trip-freeze-btn:not(:disabled){color:var(--accent)}
+.trip-still{padding:8px 10px;border-top:1px solid var(--border)}
+.trip-still-img{display:block;width:100%;border:1px solid var(--border);border-radius:6px}
+.trip-still-note{margin:5px 0 0;color:var(--muted);font-size:12px}
+.trip-still-note.is-stale{color:var(--warn,#d97706);font-weight:600}
 .trip-map-note{margin:0;padding:8px 10px;color:var(--muted);font-size:12px}
 .trip-spot-pick.is-on{color:var(--accent)}
 @media (max-width:1100px){.trip-body{grid-template-columns:var(--trip-rail,240px) minmax(0,1fr)}

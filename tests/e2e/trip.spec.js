@@ -273,6 +273,81 @@ test("좌표가 둘 이상이면 목록 차례대로 선으로 잇고, 잇기를
   expect(model.map.route).toBe(false);
 });
 
+/* 굳히기는 인터넷에서 타일이 와야 되는 일이라, e2e 에서는 '막는 규칙'까지만 확인한다.
+   실제로 찍히는 것은 타일이 오는 환경에서만 되고, 그 판정 자체가 규칙 3이다. */
+test("굳히기는 좌표가 없거나 배경 지도가 안 오면 막힌다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  const freeze = page.locator(".trip-freeze-btn");
+  await expect(freeze).toBeDisabled();
+  await expect(freeze).toHaveAttribute("title", /좌표가 없어요|배경 지도가 아직|지도 칸이|아직 열지/);
+
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  // 좌표는 생겼지만 타일이 안 왔으면 여전히 막힌다(회색 사각형이 박히는 것을 막는 규칙)
+  const state = await page.evaluate(() => {
+    const b = document.querySelector(".trip-freeze-btn");
+    return { disabled:b.disabled, title:b.title };
+  });
+  if (state.disabled) expect(state.title).toMatch(/배경 지도가 아직|지도 칸이|아직 열지/);
+  else expect(state.title).toMatch(/굳히기/);
+});
+
+test("이 날 / 여행 전체를 오가면 표시가 달라지고, 그 사실이 기억된다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-day").click();
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+    doc.trip.days[1].spots.push({ id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move",
+      lat:33.506, lng:126.951, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  const stage = page.locator(".trip-map-stage");
+  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(1);
+
+  await page.locator(".trip-map-scope").click();
+  await expect(page.locator(".trip-map-title")).toContainText("여행 전체");
+  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(3);   // 표시 둘 + 이은 선
+  expect(await page.evaluate(() => localStorage.getItem("mn.tripMapScope"))).toBe("all");
+});
+
+test("굳힌 그림이 있으면 보이고, 장소가 바뀌면 낡았다고 알린다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  // 굳힌 그림을 손으로 넣어 둔다(타일 없이도 '낡음' 규칙을 확인할 수 있다)
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    const png = new Uint8Array([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a,0,0,0,13]);
+    doc.tripAssets.set("assets/frozenmap.png", { bytes:png });
+    const day = doc.trip.days[0];
+    day.spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+    day.still = "assets/frozenmap.png";
+    day.stillKey = "낡은-서명";
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  await expect(page.locator(".trip-still")).toBeVisible();
+  await expect(page.locator(".trip-still-note")).toHaveText("지도 그림이 낡았어요 — 다시 굳히세요.");
+  await expect(page.locator(".trip-still-note")).toHaveClass(/is-stale/);
+
+  // 굳힌 그림도 저장되는 사진 목록에 든다(빠뜨리면 다음 저장에서 사라진다)
+  const used = await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    return [...tripReferencedAssets(doc.trip)];
+  });
+  expect(used).toContain("assets/frozenmap.png");
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

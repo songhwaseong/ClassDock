@@ -735,13 +735,24 @@ function mountTripEditor(doc){
   mapHead.className = "trip-map-head";
   const mapTitle = document.createElement("span");
   mapTitle.className = "trip-map-title";
+  const scopeBtn = diaryButton("", "이 날 / 여행 전체", "diary-btn trip-map-scope", "list");
   const routeBtn = diaryButton("", "표시를 목록 차례대로 잇기", "diary-btn trip-route-btn", "route");
-  mapHead.append(mapTitle, routeBtn);
+  const freezeBtn = diaryButton("", "지도 그림으로 굳히기", "diary-btn trip-freeze-btn", "camera");
+  mapHead.append(mapTitle, scopeBtn, routeBtn, freezeBtn);
   const mapStage = document.createElement("div");
   mapStage.className = "trip-map-stage";
   const mapNote = document.createElement("p");
   mapNote.className = "trip-map-note";
-  mapPane.append(mapHead, mapStage, mapNote);
+  const stillBox = document.createElement("div");
+  stillBox.className = "trip-still";
+  stillBox.hidden = true;
+  const stillImg = document.createElement("img");
+  stillImg.className = "trip-still-img";
+  stillImg.alt = "굳힌 지도 그림";
+  const stillNote = document.createElement("p");
+  stillNote.className = "trip-still-note";
+  stillBox.append(stillImg, stillNote);
+  mapPane.append(mapHead, mapStage, mapNote, stillBox);
 
   const main = document.createElement("div");
   main.className = "trip-main diary-main";
@@ -979,13 +990,29 @@ function mountTripEditor(doc){
      지도 만들기·타일·저작권 줄은 .map 문서 것을 그대로 부른다(mapCreateTileLayer·mapAttachNetworkNotice).
      인터넷이 없으면 타일이 안 오지만 칸은 그대로 두고 알림만 띄운다 — 좌표는 여전히 볼 수 있다. */
   let leafletMap = null, markerLayer = null, routeLine = null, tileLayer = null;
-  let mapReady = false, mapFailed = false;
+  let mapReady = false, mapFailed = false, tilesDrawn = 0, freezing = false;
   let pickingFor = "";                  // '지도에서 찍기' 를 누른 장소 id
 
+  /* 이 날만 볼지 여행 전체를 볼지 — 보는 사람 편의라 파일이 아니라 이 브라우저에만 남긴다.
+     굳힌 그림은 이 둘을 따로 담는다(날마다 한 장 + 전체 한 장, 설계 2.3). */
+  let mapScope = "day";
+  try { if (localStorage.getItem("mn.tripMapScope") === "all") mapScope = "all"; } catch(_){}
+
   const spotsWithCoords = () => {
-    const day = dayOf(current);
-    return day ? day.spots.filter(s => s.lat != null && s.lng != null) : [];
+    const days = mapScope === "all" ? (model.days || []) : [dayOf(current)].filter(Boolean);
+    const out = [];
+    for (const day of days) for (const s of (day.spots || [])) if (s.lat != null && s.lng != null) out.push(s);
+    return out;
   };
+  /* 굳힐 때의 서명. 이게 없으면 낡은 지도가 낡은 줄 모르고 인쇄된다(설계 2.3 규칙 4). */
+  const stillSignature = () => JSON.stringify({
+    scope:mapScope,
+    basemap:(model.map && model.map.basemap) || "osm",
+    route:!!(model.map && model.map.route),
+    at:spotsWithCoords().map(s => [s.lat, s.lng, s.kind || "", s.color || ""])
+  });
+  // 굳힌 그림이 들어갈 자리 — 이 날 것과 여행 전체 것이 다르다.
+  const stillHolder = () => (mapScope === "all" ? model.map : dayOf(current));
 
   async function ensureMap(){
     if (mapReady || mapFailed) return mapReady;
@@ -997,6 +1024,8 @@ function mountTripEditor(doc){
       const center = (model.map && model.map.center) || [36.5, 127.9];
       leafletMap.setView(center, (model.map && model.map.zoom) || 7);
       tileLayer = mapCreateTileLayer((model.map && model.map.basemap) || "osm", proxyBase, () => {});
+      // 타일이 실제로 그려졌는지 세어 둔다. 안 온 채로 찍으면 회색 사각형이 파일에 박힌다(설계 2.3 규칙 3).
+      tileLayer.on("tileload", () => { tilesDrawn++; syncFreezeBtn(); });
       tileLayer.addTo(leafletMap);
       if (typeof mapAttachNetworkNotice === "function") mapAttachNetworkNotice(mapStage, leafletMap, () => tileLayer);
       markerLayer = L.layerGroup().addTo(leafletMap);
@@ -1032,12 +1061,15 @@ function mountTripEditor(doc){
 
   function renderMap(){
     const purpose = tripPurpose(model.purpose);
-    mapTitle.textContent = tripWord(purpose, "mapPane");
+    mapTitle.textContent = tripWord(purpose, "mapPane") + (mapScope === "all" ? " · " + tripT("여행 전체") : "");
+    scopeBtn.classList.toggle("is-on", mapScope === "all");
     routeBtn.classList.toggle("is-on", !!(model.map && model.map.route));
     routeBtn.title = tripWord(purpose, "route");
     const list = spotsWithCoords();
     mapNote.textContent = list.length ? "" : tripWord(purpose, "mapEmpty");
     mapNote.hidden = !!list.length;
+    syncFreezeBtn();
+    renderStill();
     if (!mapReady || !markerLayer) return;
     markerLayer.clearLayers();
     if (routeLine){ routeLine.remove(); routeLine = null; }
@@ -1056,6 +1088,8 @@ function mountTripEditor(doc){
         { color:"#2563eb", weight:3, opacity:.75, dashArray:"6 5", className:"trip-route-line" }).addTo(leafletMap);
     }
     leafletMap.invalidateSize();
+    syncFreezeBtn();
+    renderStill();
   }
 
   async function showMap(){
@@ -1069,6 +1103,81 @@ function mountTripEditor(doc){
     if (list.length > 1) leafletMap.fitBounds(list.map(s => [s.lat, s.lng]), { padding:[28, 28] });
     else if (list.length === 1) leafletMap.setView([list[0].lat, list[0].lng], Math.max(leafletMap.getZoom(), 13));
   }
+
+  /* ----- 지도 그림으로 굳히기 (설계 2.3) -----
+     1) 단추로만 한다 — 저장할 때 자동으로 찍으면 아래 2·3 을 피할 수 없다.
+     2) 칸이 접혀 있으면 찍을 DOM 이 없다.
+     3) 타일이 안 왔으면 회색 사각형이 박힌다 — 가장 고약한 결과라 아예 막는다.
+     4) 굳힐 때의 서명을 함께 담아 낡으면 알린다. 자동으로 다시 굳히지는 않는다(2·3 때문에 늘 되지는 않는다).
+     5) 굳힌 그림이 없으면 그 자리를 비운다 — 회색 지도를 넣느니 아무것도 안 넣는 쪽이 낫다. */
+  function canFreeze(){
+    if (!mapReady || freezing) return false;
+    if (!mapStage.clientWidth || !mapStage.clientHeight) return false;   // 접힌 칸
+    if (!tilesDrawn) return false;                                       // 타일이 아직 안 왔다
+    return !!spotsWithCoords().length;
+  }
+  function syncFreezeBtn(){
+    freezeBtn.disabled = !canFreeze();
+    freezeBtn.title = freezing ? tripT("지도를 굳히는 중…")
+      : !mapReady ? tripT("지도를 아직 열지 못했어요.")
+      : !mapStage.clientHeight ? tripT("지도 칸이 접혀 있어요.")
+      : !tilesDrawn ? tripT("배경 지도가 아직 오지 않았어요. 인터넷이 없으면 굳힐 수 없어요.")
+      : !spotsWithCoords().length ? tripWord(model.purpose, "mapEmpty")
+      : tripWord(model.purpose, "mapStill");
+    freezeBtn.setAttribute("aria-label", freezeBtn.title);
+  }
+  function renderStill(){
+    const holder = stillHolder();
+    const name = holder && holder.still;
+    const url = name ? assetUrl(name) : "";
+    stillBox.hidden = !url;
+    if (!url) return;
+    stillImg.src = url;
+    const stale = (holder.stillKey || "") !== stillSignature();
+    stillNote.textContent = stale
+      ? tripT("지도 그림이 낡았어요 — 다시 굳히세요.")
+      : tripT("이 그림이 인쇄에 쓰여요.");
+    stillNote.classList.toggle("is-stale", stale);
+  }
+  async function freezeMap(){
+    if (!canFreeze() || typeof mapCaptureDataUrl !== "function") return;
+    freezing = true; syncFreezeBtn();
+    setStatus(tripT("지도를 굳히는 중…"));
+    try {
+      const spec = (typeof MAP_BASEMAPS !== "undefined" && MAP_BASEMAPS[(model.map && model.map.basemap) || "osm"]) || null;
+      const title = String(model.title || "").trim();
+      // 출처는 그림 자체에 새긴다 — 캡처 전에 저작권 줄을 감추기 때문이다(.map 과 같은 규칙).
+      const attribution = (title ? title + " · " : "") + (spec ? spec.attribution : "");
+      const labels = spotsWithCoords().map((s, at) => {
+        const p = leafletMap.latLngToContainerPoint([s.lat, s.lng]);
+        return { text:(at + 1) + ". " + (s.name || ""), x:p.x, y:p.y };
+      }).filter(l => l.text.trim().length > 2);
+      const dataUrl = await mapCaptureDataUrl(mapStage, attribution, labels);
+      const blob = typeof mapDataUrlToBlob === "function" ? await mapDataUrlToBlob(dataUrl) : null;
+      if (!blob) throw new Error("capture");
+      // 사진과 똑같은 길로 다시 굽는다 — 2배 해상도 PNG 그대로 담으면 한 장에 2MB 가 넘는다.
+      const asset = await addAsset(blob, 1600);
+      if (!asset) throw new Error("asset");
+      if (history) history.flush();
+      const holder = stillHolder();
+      if (!holder) return;
+      holder.still = asset.name;
+      holder.stillKey = stillSignature();
+      if (mapScope === "all") model.map = { ...model.map };
+      renderStill(); touch(true);
+      setStatus(tripT("지도를 그림으로 굳혔어요."));
+    } catch(error){
+      console.warn("지도를 굳히지 못했어요:", error);
+      setStatus(tripT("지도를 굳히지 못했어요."));
+    } finally { freezing = false; syncFreezeBtn(); }
+  }
+  freezeBtn.addEventListener("click", freezeMap);
+
+  scopeBtn.addEventListener("click", () => {
+    mapScope = mapScope === "all" ? "day" : "all";
+    try { localStorage.setItem("mn.tripMapScope", mapScope); } catch(_){}
+    showMap();
+  });
 
   routeBtn.addEventListener("click", () => {
     model.map = { ...model.map, route:!(model.map && model.map.route) };
