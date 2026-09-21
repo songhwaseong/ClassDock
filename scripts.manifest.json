@@ -620,7 +620,9 @@
       "code-viewer.js",
       "history.js",
       "context-menu.js",
-      "korea-coords.js"
+      "korea-coords.js",
+      "timeline.js",
+      "map-viewer.js"
     ]
   },
   "moduleBoundaries": [

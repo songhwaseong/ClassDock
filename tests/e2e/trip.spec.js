@@ -480,6 +480,62 @@ test("날씨 단추는 국내·좌표·날짜가 다 있을 때만 쓸 수 있�
   await expect(weather).toBeHidden();
 });
 
+test("연대표로 내보내면 여행 일정 모드로 열리고 장소가 일정이 된다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-title").fill("제주 3박 4일");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-20");
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push(
+      { id:"sp-a", at:"09:30", name:"성산일출봉", address:"제주 서귀포시", note:"바람", kind:"sight",
+        lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
+      { id:"sp-b", at:"14:05", name:"우도", address:"", note:"", kind:"move",
+        lat:null, lng:null, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+
+  await page.locator(".trip-export-btn").click();
+  await page.getByRole("menuitem", { name:"일정으로 내보내기" }).click();
+  await expect(page.locator(".timeline-bar")).toBeVisible();
+  const out = await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "timeline");
+    return { purpose:doc.timelineDoc.purpose, title:doc.timelineDoc.title,
+      events:doc.timelineDoc.events.map(e => [e.start, e.title, e.category, e.placeAddress]) };
+  });
+  expect(out.purpose).toBe("trip");
+  expect(out.title).toBe("제주 3박 4일");
+  // 좌표가 없어도 일정에는 간다 — 시각과 장소만 있으면 된다
+  expect(out.events).toEqual([
+    ["2026-07-20 09:30", "성산일출봉", "볼거리", "제주 서귀포시"],
+    ["2026-07-20 14:05", "우도", "이동", ""]
+  ]);
+});
+
+test("지도로 내보내면 좌표가 있는 곳만 가고, 빠진 수를 알려 준다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push(
+      { id:"sp-a", at:"09:30", name:"성산일출봉", address:"제주", note:"바람", kind:"sight",
+        lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
+      { id:"sp-b", at:"", name:"주소만 아는 곳", address:"어딘가", note:"", kind:"",
+        lat:null, lng:null, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+
+  await page.locator(".trip-export-btn").click();
+  await page.getByRole("menuitem", { name:"지도로 내보내기" }).click();
+  await expect(page.locator(".map-bar, .map-toolbar").first()).toBeVisible();
+  const out = await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "map");
+    return doc.mapDoc.markers.map(m => [m.label, Math.round(m.lat * 1000) / 1000, m.color, m.note.includes("볼거리")]);
+  });
+  expect(out).toEqual([["성산일출봉", 33.458, "blue", true]]);
+  await expect(page.locator(".trip-status")).toHaveText(/1곳을 지도로 보냈어요.*1곳은 좌표가 없어/);
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

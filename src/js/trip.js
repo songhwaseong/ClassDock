@@ -765,6 +765,60 @@ function tripBuildPaperEls(main){
     drawBar, pictureBtn, pictureInput, pictureDrawBtn };
 }
 
+/* ---------- 다른 문서로 내보내기 ----------
+   연대표의 '여행 일정' 모드와 지도의 표시는 여행일지의 장소와 자리가 거의 그대로 맞는다.
+   한 방향으로만 보낸다 — 글자로 되살리면 언어·사용자 편집에 깨진다(설계 부록 B.5). */
+
+function tripSpotRows(model){
+  const rows = [];
+  for (const day of (model.days || [])){
+    for (const spot of (day.spots || [])) rows.push({ day, spot });
+  }
+  return rows;
+}
+
+/* 여행일지 → 연대표(.timeline) 의 '여행 일정'. 날짜와 시각을 붙여 시작 시각으로 삼는다. */
+function tripToTimelineDoc(model){
+  const purpose = tripPurpose(model.purpose);
+  const doc = timelineDocEmpty(model.title || tripWord(purpose, "docName"));
+  doc.purpose = "trip";
+  doc.events = tripSpotRows(model).map(({ day, spot }, index) => timelineNormalizeEvent({
+    title:spot.name || tripWord(purpose, "spot"),
+    start:[day.date, spot.at].filter(Boolean).join(" "),
+    // 장소의 종류는 연대표의 '유형' 열과 자리가 같다.
+    category:spot.kind ? tripSpotKindName(purpose, spot.kind) : "",
+    placeName:spot.name || "",
+    placeAddress:spot.address || "",
+    description:[spot.note, day.title].filter(Boolean).join("\n"),
+    color:"blue"
+  }, index));
+  return timelineDocSerialize(doc);
+}
+
+/* 여행일지 → 지도(.map). 좌표가 있는 장소만 간다(주소만 있는 줄은 셈해서 알려 준다). */
+function tripToMapDoc(model){
+  const purpose = tripPurpose(model.purpose);
+  const doc = mapDocEmpty(model.title || tripWord(purpose, "docName"));
+  const rows = tripSpotRows(model).filter(({ spot }) => spot.lat != null && spot.lng != null);
+  doc.markers = rows.map(({ day, spot }) => mapNormalizeMarker({
+    lat:spot.lat, lng:spot.lng,
+    label:spot.name || tripWord(purpose, "spot"),
+    note:[[day.date, spot.at].filter(Boolean).join(" "),
+      spot.kind ? tripSpotKindName(purpose, spot.kind) : "",
+      spot.address, spot.note].filter(Boolean).join("\n"),
+    // .map 에는 장소의 종류가 없다. 업종 칸에 이름을 실어 보내되 되돌려 읽지는 않는다.
+    category:spot.kind ? tripSpotKindName(purpose, spot.kind) : "",
+    address:spot.address || "",
+    color:tripSpotKindColor(spot.kind)
+  }));
+  doc.route = !!(model.map && model.map.route);
+  if (rows.length){
+    doc.center = [rows[0].spot.lat, rows[0].spot.lng];
+    doc.zoom = rows.length > 1 ? 9 : 13;
+  }
+  return { text:mapDocSerialize(doc), sent:rows.length, skipped:tripSpotRows(model).length - rows.length };
+}
+
 /* ---------- 편집기 ---------- */
 
 const TRIP_RECOVERY_DELAY = 1500;
@@ -840,9 +894,10 @@ function mountTripEditor(doc){
   const styleBtn = diaryButton("꾸미기", "종이 꾸미기", "diary-btn trip-style-btn", "palette");
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
+  const exportBtn = diaryButton("내보내기", "일정·지도로 내보내기", "diary-btn trip-export-btn", "export");
   const saveBtn = diaryButton("저장", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
   bar.append(titleInput, purposeSelect, status, undoBtn, redoBtn, photoBtn, photoInput,
-    exifBtn, exifInput, stickerBtn, styleBtn, bgInput, saveBtn);
+    exifBtn, exifInput, stickerBtn, styleBtn, bgInput, exportBtn, saveBtn);
 
   /* ----- 본문: 여정 띠 + 종이 ----- */
   const body = document.createElement("div");
@@ -1772,6 +1827,35 @@ function mountTripEditor(doc){
     },
     onChange:updateHistoryButtons
   });
+  /* ----- 내보내기 ----- */
+  async function openAsDoc(text, name, mime){
+    if (typeof handleFiles !== "function") return false;
+    await handleFiles([new File([text], name, { type:mime })], { isScratch:true });
+    return true;
+  }
+  const exportBase = () => (String(model.title || "").trim() || tripWord(model.purpose, "fileBase")).slice(0, 60);
+  async function exportTimeline(){
+    const rows = tripSpotRows(model);
+    if (!rows.length){ setStatus(tripWord(model.purpose, "spotEmpty")); return; }
+    await openAsDoc(tripToTimelineDoc(model), exportBase() + ".timeline", "application/json");
+    setStatus(tripTf("일정 {n}개를 연대표로 보냈어요", { n:rows.length }));
+  }
+  async function exportMap(){
+    const out = tripToMapDoc(model);
+    if (!out.sent){ setStatus(tripWord(model.purpose, "mapEmpty")); return; }
+    await openAsDoc(out.text, exportBase() + ".map", "application/json");
+    setStatus(out.skipped
+      ? tripTf("{n}곳을 지도로 보냈어요 · {s}곳은 좌표가 없어 빠졌어요", { n:out.sent, s:out.skipped })
+      : tripTf("{n}곳을 지도로 보냈어요", { n:out.sent }));
+  }
+  exportBtn.addEventListener("click", () => {
+    const r = exportBtn.getBoundingClientRect();
+    MNContextMenu.open(r.left, r.bottom + 4, [
+      { label:tripWord(model.purpose, "exportTimeline"), action:exportTimeline },
+      { label:tripWord(model.purpose, "exportMap"), action:exportMap }
+    ], { autoFocus:true });
+  });
+
   undoBtn.addEventListener("click", () => history.undo());
   redoBtn.addEventListener("click", () => history.redo());
   saveBtn.addEventListener("click", () => saveTrip(doc));
