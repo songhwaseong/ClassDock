@@ -727,6 +727,22 @@ function mountTripEditor(doc){
   addDayBtn.className = "diary-btn trip-add-day";
   rail.append(railHead, railList, addDayBtn);
 
+  /* 지도 칸 — 좌표가 있는 장소를 표시로 찍고 목록 차례대로 잇는다(설계 2.3).
+     칸은 접을 수 있다. 접기는 보는 사람 편의라 파일이 아니라 이 브라우저에만 남긴다. */
+  const mapPane = document.createElement("aside");
+  mapPane.className = "trip-map-pane";
+  const mapHead = document.createElement("div");
+  mapHead.className = "trip-map-head";
+  const mapTitle = document.createElement("span");
+  mapTitle.className = "trip-map-title";
+  const routeBtn = diaryButton("", "표시를 목록 차례대로 잇기", "diary-btn trip-route-btn", "route");
+  mapHead.append(mapTitle, routeBtn);
+  const mapStage = document.createElement("div");
+  mapStage.className = "trip-map-stage";
+  const mapNote = document.createElement("p");
+  mapNote.className = "trip-map-note";
+  mapPane.append(mapHead, mapStage, mapNote);
+
   const main = document.createElement("div");
   main.className = "trip-main diary-main";
   const pageHead = document.createElement("div");
@@ -776,7 +792,7 @@ function mountTripEditor(doc){
   promptsBox.append(promptsHead, promptList);
 
   main.append(pageHead, els.paper, promptsBox, spotsBox);
-  body.append(rail, main);
+  body.append(rail, main, mapPane);
   root.append(bar, body);
 
   /* ----- 저장 여부·복구본 ----- */
@@ -959,6 +975,114 @@ function mountTripEditor(doc){
     if (files.length) await addStickers(files);
   });
 
+  /* ----- 지도 칸 -----
+     지도 만들기·타일·저작권 줄은 .map 문서 것을 그대로 부른다(mapCreateTileLayer·mapAttachNetworkNotice).
+     인터넷이 없으면 타일이 안 오지만 칸은 그대로 두고 알림만 띄운다 — 좌표는 여전히 볼 수 있다. */
+  let leafletMap = null, markerLayer = null, routeLine = null, tileLayer = null;
+  let mapReady = false, mapFailed = false;
+  let pickingFor = "";                  // '지도에서 찍기' 를 누른 장소 id
+
+  const spotsWithCoords = () => {
+    const day = dayOf(current);
+    return day ? day.spots.filter(s => s.lat != null && s.lng != null) : [];
+  };
+
+  async function ensureMap(){
+    if (mapReady || mapFailed) return mapReady;
+    if (typeof MNLazy === "undefined" || typeof mapCreateTileLayer !== "function"){ mapFailed = true; return false; }
+    try {
+      if (!await MNLazy.tryNeed("leaflet")) throw new Error("leaflet");
+      const proxyBase = typeof mapTileProxyBase === "function" ? await mapTileProxyBase() : "";
+      leafletMap = L.map(mapStage, { zoomControl:true, attributionControl:true });
+      const center = (model.map && model.map.center) || [36.5, 127.9];
+      leafletMap.setView(center, (model.map && model.map.zoom) || 7);
+      tileLayer = mapCreateTileLayer((model.map && model.map.basemap) || "osm", proxyBase, () => {});
+      tileLayer.addTo(leafletMap);
+      if (typeof mapAttachNetworkNotice === "function") mapAttachNetworkNotice(mapStage, leafletMap, () => tileLayer);
+      markerLayer = L.layerGroup().addTo(leafletMap);
+      leafletMap.on("click", (e) => {
+        if (!pickingFor) return;
+        const day = dayOf(current);
+        const spot = day && day.spots.find(s => s.id === pickingFor);
+        pickingFor = "";
+        mapStage.classList.remove("is-picking");
+        if (!spot) return;
+        if (history) history.flush();
+        spot.lat = Math.round(e.latlng.lat * 1e6) / 1e6;
+        spot.lng = Math.round(e.latlng.lng * 1e6) / 1e6;
+        renderSpots(); renderMap(); touch(true);
+        setStatus(tripT("자리를 찍었어요."));
+      });
+      // 보고 있던 자리는 문서에 남긴다 — 다음에 열면 그 자리에서 시작한다.
+      leafletMap.on("moveend zoomend", () => {
+        if (!leafletMap) return;
+        const c = leafletMap.getCenter();
+        model.map = { ...model.map, center:[Math.round(c.lat * 1e6) / 1e6, Math.round(c.lng * 1e6) / 1e6],
+          zoom:leafletMap.getZoom() };
+        touch();
+      });
+      mapReady = true;
+      return true;
+    } catch(error){
+      console.warn("여행일지 지도를 열지 못했어요:", error);
+      mapFailed = true;
+      return false;
+    }
+  }
+
+  function renderMap(){
+    const purpose = tripPurpose(model.purpose);
+    mapTitle.textContent = tripWord(purpose, "mapPane");
+    routeBtn.classList.toggle("is-on", !!(model.map && model.map.route));
+    routeBtn.title = tripWord(purpose, "route");
+    const list = spotsWithCoords();
+    mapNote.textContent = list.length ? "" : tripWord(purpose, "mapEmpty");
+    mapNote.hidden = !!list.length;
+    if (!mapReady || !markerLayer) return;
+    markerLayer.clearLayers();
+    if (routeLine){ routeLine.remove(); routeLine = null; }
+    for (const [at, spot] of list.entries()){
+      const color = tripSpotKindColor(spot.kind);
+      const hex = (typeof MAP_MARKER_COLORS !== "undefined"
+        ? (MAP_MARKER_COLORS.find(c => c.id === (spot.color || color)) || MAP_MARKER_COLORS[0]).hex : "#2563eb");
+      const marker = L.circleMarker([spot.lat, spot.lng], {
+        radius:9, color:"#fff", weight:2, fillColor:hex, fillOpacity:.95
+      });
+      marker.bindTooltip((at + 1) + ". " + (spot.name || tripWord(purpose, "spot")), { direction:"top" });
+      marker.addTo(markerLayer);
+    }
+    if (model.map && model.map.route && list.length > 1){
+      routeLine = L.polyline(list.map(s => [s.lat, s.lng]),
+        { color:"#2563eb", weight:3, opacity:.75, dashArray:"6 5", className:"trip-route-line" }).addTo(leafletMap);
+    }
+    leafletMap.invalidateSize();
+  }
+
+  async function showMap(){
+    if (!await ensureMap()){
+      mapNote.hidden = false;
+      mapNote.textContent = tripT("지도를 열지 못했어요. 인터넷이 없으면 배경 지도가 비어 보일 수 있어요.");
+      return;
+    }
+    renderMap();
+    const list = spotsWithCoords();
+    if (list.length > 1) leafletMap.fitBounds(list.map(s => [s.lat, s.lng]), { padding:[28, 28] });
+    else if (list.length === 1) leafletMap.setView([list[0].lat, list[0].lng], Math.max(leafletMap.getZoom(), 13));
+  }
+
+  routeBtn.addEventListener("click", () => {
+    model.map = { ...model.map, route:!(model.map && model.map.route) };
+    renderMap();
+    touch(true);
+  });
+
+  function startPicking(spotId){
+    pickingFor = spotId;
+    mapStage.classList.add("is-picking");
+    setStatus(tripT("지도를 눌러 자리를 찍으세요."));
+    showMap();
+  }
+
   /* ----- 여정 띠 ----- */
   function renderRail(){
     railList.innerHTML = "";
@@ -1052,8 +1176,11 @@ function mountTripEditor(doc){
       const name = document.createElement("input");
       name.type = "text"; name.className = "trip-spot-name"; name.maxLength = 120;
       name.value = spot.name || ""; name.placeholder = tripWord(purpose, "spotNameHint");
+      const pickBtn = diaryButton("", spot.lat == null ? "지도에서 자리 찍기" : "지도에서 자리 다시 찍기",
+        "diary-btn trip-spot-pick" + (spot.lat == null ? "" : " is-on"), "map");
       const removeBtn = diaryButton("", "이 줄 빼기", "diary-btn trip-spot-remove", "close");
-      line1.append(at, icon, kindSelect, name, removeBtn);
+      line1.append(at, icon, kindSelect, name, pickBtn, removeBtn);
+      pickBtn.addEventListener("click", () => startPicking(spot.id));
 
       const line2 = document.createElement("div");
       line2.className = "trip-spot-line";
@@ -1210,6 +1337,7 @@ function mountTripEditor(doc){
     syncDrawBar();
     renderPrompts();
     renderSpots();
+    renderMap();
   }
 
   addDayBtn.addEventListener("click", () => {
@@ -1316,6 +1444,7 @@ function mountTripEditor(doc){
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
     if (typeof paperApi.destroyPaper === "function") paperApi.destroyPaper();
+    if (leafletMap){ leafletMap.remove(); leafletMap = null; }
     if (history) history.cancel();
     for (const url of urls.values()) URL.revokeObjectURL(url);
     urls.clear();
@@ -1323,6 +1452,7 @@ function mountTripEditor(doc){
   });
 
   applyPurposeLabels();
+  showMap();
   history.reset();
   updateHistoryButtons();
   refreshDirty();

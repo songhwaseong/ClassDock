@@ -226,6 +226,53 @@ test("이 날짜에만 꾸미기도 여행일지에서 그대로다", async ({ p
   expect(model.days[1].style).toBe(null);
 });
 
+test("지도 칸에서 자리를 찍으면 장소에 좌표가 담기고 표시가 뜬다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot-name").fill("성산일출봉");
+  await expect(page.locator(".trip-map-note")).toHaveText("장소에 좌표가 없어요");
+
+  await page.locator(".trip-spot-pick").click();
+  await expect(page.locator(".trip-map-stage")).toHaveClass(/is-picking/);
+  const stage = page.locator(".trip-map-stage");
+  // leaflet-container 는 자식이 아니라 칸 자체에 붙는다
+  await expect(stage).toHaveClass(/leaflet-container/);
+  const box = await stage.boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+  await expect(page.locator(".trip-map-stage")).not.toHaveClass(/is-picking/);
+  const model = await modelOf(page);
+  const spot = model.days[0].spots[0];
+  expect(typeof spot.lat).toBe("number");
+  expect(typeof spot.lng).toBe("number");
+  await expect(page.locator(".trip-map-note")).toBeHidden();
+  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(1);
+});
+
+test("좌표가 둘 이상이면 목록 차례대로 선으로 잇고, 잇기를 끄면 선이 사라진다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  // 좌표는 모델에 바로 넣는다(지도를 두 번 찍는 것보다 흔들림이 적다)
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push(
+      { id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight", lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
+      { id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  const stage = page.locator(".trip-map-stage");
+  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(3);   // 표시 둘 + 이은 선 하나
+  await expect(stage.locator("path.trip-route-line")).toHaveCount(1);
+
+  await page.locator(".trip-route-btn").click();
+  await expect(stage.locator("path.trip-route-line")).toHaveCount(0);
+  const model = await modelOf(page);
+  expect(model.map.route).toBe(false);
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();
