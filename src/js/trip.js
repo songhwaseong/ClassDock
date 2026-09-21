@@ -298,10 +298,6 @@ function tripNormalizePhotoOpacity(raw, photos){
   }
   return result;
 }
-function tripPhotoOpacity(spot, asset){
-  return (spot.photoOpacity && spot.photoOpacity[asset]) || 1;
-}
-
 function tripNormalizeSpot(raw, hasAsset){
   if (!raw || typeof raw !== "object") return null;
   const name = String(raw.name == null ? "" : raw.name).trim().slice(0, 120);
@@ -368,6 +364,7 @@ function tripNormalizeDay(raw, hasAsset){
     style:raw.style && typeof raw.style === "object" && typeof diaryNormalizeStyle === "function"
       ? diaryNormalizeStyle(raw.style, hasAsset) : null,
     weather:typeof diaryWeatherInfo === "function" && diaryWeatherInfo(raw.weather) ? raw.weather : "",
+    weatherSource:typeof raw.weatherSource === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}\|[0-9]{2,3}$/.test(raw.weatherSource) ? raw.weatherSource : "",
     mood:typeof diaryMoodInfo === "function" && diaryMoodInfo(raw.mood) ? raw.mood : "",
     favorite:!!raw.favorite,
     tags:typeof diaryNormalizeTags === "function" ? diaryNormalizeTags(raw.tags) : [],
@@ -544,6 +541,7 @@ function tripCleanDays(model){
         ? (d.stickers || []).map(diaryCleanSticker).filter(Boolean) : [],
       spots:(d.spots || []).map(tripCleanSpot)
     };
+    if (d.weather && d.weatherSource) out.weatherSource = d.weatherSource;
     if (d.prompts && d.prompts.length) out.prompts = d.prompts.map(p => ({ q:p.q, a:p.a }));
     if (d.still){ out.still = d.still; out.stillKey = d.stillKey || ""; }
     return out;
@@ -1457,10 +1455,7 @@ function mountTripEditor(doc){
   if (typeof window.uiIcon === "function") mapHeadIcon.innerHTML = window.uiIcon("map");
   const mapTitle = document.createElement("span");
   mapTitle.className = "trip-map-title";
-  const scopeBtn = diaryButton("", "이 날 / 여행 전체", "diary-btn trip-map-scope", "list");
-  const scopeLabel = document.createElement("span");
-  scopeLabel.className = "trip-map-scope-label";
-  scopeBtn.append(scopeLabel);
+  const scopeBtn = diaryButton("", "이 날 지도 · 누르면 여행 전체 지도", "diary-btn trip-map-scope", "calendarDay");
   const routeBtn = diaryButton("", "표시를 목록 차례대로 잇기", "diary-btn trip-route-btn", "route");
   const freezeBtn = diaryButton("", "지도 그림으로 굳히기", "diary-btn trip-freeze-btn", "camera");
   mapHead.append(mapHeadIcon, mapTitle, scopeBtn, routeBtn, freezeBtn);
@@ -1534,11 +1529,17 @@ function mountTripEditor(doc){
   dayDateIcon.setAttribute("aria-hidden", "true");
   if (typeof window.uiIcon === "function") dayDateIcon.innerHTML = window.uiIcon("calendar");
   dayDateField.append(dayDateDisplay, dayDateIcon, dayDate);
-  const weatherBtn = diaryButton("", "그날 그곳 날씨 받기", "diary-btn trip-weather-btn", "sun");
+  const weatherDisplay = document.createElement("span");
+  weatherDisplay.className = "trip-weather-display";
+  weatherDisplay.setAttribute("aria-live", "polite");
+  const weatherMark = document.createElement("span");
+  weatherMark.className = "trip-weather-mark";
+  weatherMark.setAttribute("aria-hidden", "true");
   const weatherText = document.createElement("span");
   weatherText.className = "trip-weather-text";
+  weatherDisplay.append(weatherMark, weatherText);
   const deleteBtn = diaryButton("", "이 날 지우기", "diary-btn trip-day-delete", "delete");
-  pageHead.append(dayDateField, dayTitle, weatherBtn, weatherText, deleteBtn);
+  pageHead.append(dayDateField, dayTitle, weatherDisplay, deleteBtn);
 
   const els = tripBuildPaperEls(main);
 
@@ -1780,10 +1781,12 @@ function mountTripEditor(doc){
     if (files.length) await addStickers(files, null, true);
   });
   /* ----- 그날 그곳 날씨 -----
-     일기장은 사용자가 고른 관측 지점 하나를 쓰지만, 여행일지는 **그날 들른 자리**를 안다.
-     그래서 지점을 묻지 않고 그날 첫 좌표에서 가장 가까운 지점을 고른다(nearestStation).
-     기상청 자료라 국내에서만 된다 — 한국 밖이면 단추를 감춘다(설계 2.1). */
+     날짜와 첫 장소 좌표가 모이면 자동으로 받는다. 지난 날은 저장된 관측값을 재사용하고,
+     오늘·예보는 다시 방문할 때 갱신한다. 응답이 늦게 오면 날짜·관측 지점을 다시 확인한다. */
   const weatherApi = typeof MNWeatherApi !== "undefined" ? MNWeatherApi : null;
+  const weatherRequests = new Map();
+  const weatherSummaries = new Map();
+  const legacyWeatherSources = new Map();
   let weatherReady = false;
   if (weatherApi) weatherApi.available().then(ok => {
     if (!ok || !root.isConnected) return;
@@ -1793,8 +1796,7 @@ function mountTripEditor(doc){
   }).catch(() => {});
 
   /* 공휴일·24절기 — 한국천문연구원 특일. 런처(EXE)가 키로 대신 묻는다.
-     그리기는 **받아 둔 것만** 보고(cachedSpecialDays), 받아 오는 일은 따로 한다 —
-     그래야 인터넷이 없어도 화면이 막히지 않고, 이미 받아 둔 달은 그대로 뜬다. */
+     그리기는 받아 둔 것만 보고(cachedSpecialDays), 받아 오는 일은 따로 한다. */
   const specialFailed = new Set();
   function specialItemsOf(dateKey){
     if (!weatherApi || !tripIsDateKey(dateKey)) return [];
@@ -1819,55 +1821,102 @@ function mountTripEditor(doc){
     const spot = (day && day.spots || []).find(s => s.lat != null && s.lng != null);
     return spot && weatherApi ? weatherApi.nearestStation(spot.lat, spot.lng) : null;
   }
+  function weatherSourceOf(day, station){
+    return day && day.date && station ? day.date + "|" + station.id : "";
+  }
+  function weatherPhase(date){
+    const today = diaryDateKey(new Date());
+    const ahead = Math.round((diaryDateFromKey(date) - diaryDateFromKey(today)) / 86400000);
+    return ahead < 0 ? "past" : ahead === 0 ? "now" : ahead <= 5 ? "forecast" : "";
+  }
+  function requestWeather(day, station, source, phase){
+    if (!weatherReady || !source || !phase) return;
+    // 관측값은 날짜·지점이 맞으면 다시 묻지 않는다. 구판 문서는 출처가 없어 첫 방문에 갱신한다.
+    if (phase === "past" && day.weather && day.weatherSource === source) return;
+    const key = phase + "|" + source;
+    const previous = weatherRequests.get(day.id);
+    const now = Date.now();
+    const refreshMs = phase === "now" ? 15 * 60000 : phase === "forecast" ? 60 * 60000 : Infinity;
+    if (previous && previous.key === key
+        && (previous.pending || now - previous.at < (previous.ok ? refreshMs : 5 * 60000))) return;
+    const entry = { key, at:now, pending:true, ok:false, error:false };
+    weatherRequests.set(day.id, entry);
+    const date = day.date;
+    const stillApplies = () => root.isConnected && model.days.includes(day)
+      && day.date === date && weatherPhase(day.date) === phase
+      && weatherSourceOf(day, dayStation(day)) === source
+      && tripIsDomestic(model) && weatherRequests.get(day.id) === entry;
+    void (async () => {
+      try {
+        let value = "", summary = "";
+        const round = v => v == null ? "" : String(Math.round(v * 10) / 10);
+        if (phase === "past"){
+          const d = await weatherApi.loadDay(station.id, date);
+          value = d.diary;
+          summary = [tripTf("{place} 관측", { place:d.station || station.name }),
+            d.max != null ? tripTf("최고 {max}°", { max:round(d.max) }) : "",
+            d.min != null ? tripTf("최저 {min}°", { min:round(d.min) }) : ""].filter(Boolean).join(" · ");
+        } else if (phase === "now"){
+          const n = await weatherApi.loadNow(station.lat, station.lng);
+          value = n.diary;
+          summary = [tripTf("{place} 지금", { place:station.name }),
+            n.temp != null ? tripTf("기온 {t}°", { t:round(n.temp) }) : ""].filter(Boolean).join(" · ");
+        } else {
+          const f = await weatherApi.loadForecast(station.lat, station.lng);
+          const found = f.days.find(d => d.date === date.replace(/-/g, "") && d.sky != null);
+          if (found){ value = found.diary; summary = tripTf("{place} 예보", { place:station.name }); }
+        }
+        if (!stillApplies()) return;
+        if (!value){ entry.error = true; return; }
+        entry.ok = true;
+        weatherSummaries.set(day.id, { source, text:summary });
+        if (day.weather !== value || day.weatherSource !== source){
+          if (history) history.flush();
+          day.weather = value;
+          day.weatherSource = source;
+          renderRail();
+          touch(true);
+        }
+      } catch(_){
+        if (stillApplies()) entry.error = true;
+      } finally {
+        entry.pending = false;
+        entry.at = Date.now();
+        if (weatherRequests.get(day.id) === entry && !model.days.includes(day)) weatherRequests.delete(day.id);
+        if (root.isConnected && current === day.id) syncWeather();
+      }
+    })();
+  }
   function syncWeather(){
     const day = dayOf(current);
     const station = dayStation(day);
-    const domestic = tripIsDomestic(model);
-    const show = !!(weatherReady && day && day.date && station && domestic);
-    weatherBtn.hidden = !show;
-    weatherBtn.disabled = !show;
-    if (show) weatherBtn.title = tripTf("{place} 관측으로 날씨 채우기", { place:station.name });
-    // 이미 들어 있는 값은 갈래·나라와 상관없이 그대로 보여 준다(감춤이지 지움이 아니다).
-    const info = day && day.weather && typeof diaryWeatherInfo === "function" ? diaryWeatherInfo(day.weather) : null;
-    weatherText.textContent = info ? (diaryIsEn && diaryIsEn() ? info[3] : info[2]) : "";
+    const source = weatherSourceOf(day, station);
+    const eligible = !!(weatherReady && day && source && tripIsDomestic(model));
+    const phase = eligible ? weatherPhase(day.date) : "";
+    // 이전 판의 저장값에는 지점 정보가 없다. 처음 본 지점을 기억해 위치 변경 후 낡은 값을 감춘다.
+    if (day && day.weather && !day.weatherSource && source){
+      const first = legacyWeatherSources.get(day.id);
+      if (!first) legacyWeatherSources.set(day.id, source);
+      else if (first !== source) day.weatherSource = first;
+    }
+    if (eligible && phase) requestWeather(day, station, source, phase);
+    const request = day && weatherRequests.get(day.id);
+    const matching = day && day.weather && source
+      && (!day.weatherSource || day.weatherSource === source);
+    const info = matching && typeof diaryWeatherInfo === "function" ? diaryWeatherInfo(day.weather) : null;
+    if (typeof diaryMarkFill === "function") diaryMarkFill(weatherMark, info);
+    weatherMark.hidden = !info;
+    weatherText.textContent = info ? (tripIsEn() ? info[3] : info[2])
+      : eligible && phase && request && request.key === phase + "|" + source
+        ? (request.pending ? (tripIsEn() ? "Checking weather…" : "날씨 확인 중…")
+          : request.error ? (tripIsEn() ? "Weather unavailable" : "날씨 조회 불가") : "")
+        : "";
+    weatherDisplay.hidden = !info && !weatherText.textContent;
+    const savedSummary = day && weatherSummaries.get(day.id);
+    weatherDisplay.title = info
+      ? (savedSummary && savedSummary.source === source ? savedSummary.text : station ? station.name + " · " + weatherText.textContent : weatherText.textContent)
+      : weatherText.textContent;
   }
-  async function fillWeather(){
-    const day = dayOf(current);
-    const station = dayStation(day);
-    if (!day || !day.date || !station || !weatherReady) return;
-    weatherBtn.disabled = true;
-    setStatus(tripT("기상청 날씨를 받는 중…"));
-    try {
-      const today = diaryDateKey(new Date());
-      const ahead = Math.round((diaryDateFromKey(day.date) - diaryDateFromKey(today)) / 86400000);
-      let value = "", summary = "";
-      const round = v => v == null ? "" : String(Math.round(v * 10) / 10);
-      if (ahead < 0){
-        const d = await weatherApi.loadDay(station.id, day.date);
-        value = d.diary;
-        summary = [tripTf("{place} 관측", { place:d.station || station.name }),
-          d.max != null ? tripTf("최고 {max}°", { max:round(d.max) }) : "",
-          d.min != null ? tripTf("최저 {min}°", { min:round(d.min) }) : ""].filter(Boolean).join(" · ");
-      } else if (ahead === 0){
-        const n = await weatherApi.loadNow(station.lat, station.lng);
-        value = n.diary;
-        summary = [tripTf("{place} 지금", { place:station.name }),
-          n.temp != null ? tripTf("기온 {t}°", { t:round(n.temp) }) : ""].filter(Boolean).join(" · ");
-      } else if (ahead <= 5){
-        const f = await weatherApi.loadForecast(station.lat, station.lng);
-        const found = f.days.find(d => d.date === day.date.replace(/-/g, "") && d.sky != null);
-        if (found){ value = found.diary; summary = tripTf("{place} 예보", { place:station.name }); }
-      }
-      if (!value){ setStatus(tripT("기상청 자료로 날씨를 정하지 못했어요.")); return; }
-      if (history) history.flush();
-      day.weather = value;
-      syncWeather(); renderRail(); touch(true);
-      setStatus(summary || tripT("날씨를 채웠어요."));
-    } catch(error){
-      setStatus(weatherApi ? tripT(weatherApi.failureText(error, "day")) : tripT("날씨를 받지 못했어요."));
-    } finally { syncWeather(); }
-  }
-  weatherBtn.addEventListener("click", fillWeather);
 
   /* ----- 사진에서 장소 만들기 -----
      EXIF 는 **줄여 굽기 전 원본 바이트**에서 읽어야 한다 — diaryPrepareImage 를 지나면 통째로 날아간다.
@@ -2188,8 +2237,7 @@ function mountTripEditor(doc){
   /* 표식 미리보기 카드. 사진 먼저, 그다음 영상(첫 장면 + ▶) — 모두 합쳐 4칸까지.
      사진을 누르면 사진끼리 크게 보고, 영상을 누르면 그 장소 영상들을 곧바로 튼다. */
   function tripMapPhotoCard(spot, markerNumber){
-    const photos = (spot.photos || []).map(asset => ({ src:assetUrl(asset), opacity:tripPhotoOpacity(spot, asset) }))
-      .filter(photo => photo.src);
+    const photos = (spot.photos || []).map(asset => assetUrl(asset)).filter(Boolean);
     const videos = (spot.videos || []).filter(v => assets.has(v.v));
     if (!photos.length && !videos.length) return null;
     const placeName = spot.name || tripWord(model.purpose, "spot");
@@ -2213,7 +2261,7 @@ function mountTripEditor(doc){
       meta.textContent = metaText;
       card.append(meta);
     }
-    const items = [...photos.map((photo, at) => ({ kind:"photo", src:photo.src, opacity:photo.opacity, at })),
+    const items = [...photos.map((src, at) => ({ kind:"photo", src, at })),
       ...videos.map((video, at) => ({ kind:"video", src:video.p ? assetUrl(video.p) : "", at, video }))];
     const shown = items.slice(0, 4);
     const gallery = document.createElement("div");
@@ -2227,7 +2275,6 @@ function mountTripEditor(doc){
       if (item.src){
         const img = document.createElement("img");
         img.src = item.src;
-        if (item.kind === "photo") img.style.opacity = String(item.opacity);
         img.alt = placeName + (items.length > 1 ? " (" + (slot + 1) + "/" + items.length + ")" : "");
         img.loading = "lazy";
         button.append(img);
@@ -2261,7 +2308,7 @@ function mountTripEditor(doc){
         }
         if (typeof window.openImageLightbox !== "function") return;
         window.openImageLightbox(photos.map((photo, index) => ({
-          src:photo.src,
+          src:photo,
           alt:placeName + (photos.length > 1 ? " (" + (index + 1) + "/" + photos.length + ")" : "")
         })), item.at);
       });
@@ -2306,9 +2353,13 @@ function mountTripEditor(doc){
   function renderMap(){
     const purpose = tripPurpose(model.purpose);
     mapTitle.textContent = tripWord(purpose, "mapPane") + (mapScope === "all" ? " · " + tripT("여행 전체") : "");
-    scopeLabel.textContent = mapScope === "all"
-      ? (tripIsEn() ? "All" : "전체")
-      : (tripIsEn() ? "Day" : "이 날");
+    const scopeIsAll = mapScope === "all";
+    const scopeHint = scopeIsAll
+      ? (tripIsEn() ? "Whole trip map · Click for this day" : "여행 전체 지도 · 누르면 이 날 지도")
+      : (tripIsEn() ? "This day map · Click for whole trip" : "이 날 지도 · 누르면 여행 전체 지도");
+    if (typeof window.setUiIcon === "function") window.setUiIcon(scopeBtn, scopeIsAll ? "calendarStack" : "calendarDay", scopeHint);
+    scopeBtn.title = scopeHint;
+    scopeBtn.setAttribute("aria-pressed", String(scopeIsAll));
     scopeBtn.classList.toggle("is-on", mapScope === "all");
     routeBtn.classList.toggle("is-on", !!(model.map && model.map.route));
     routeBtn.title = tripWord(purpose, "route");
@@ -2653,13 +2704,12 @@ function mountTripEditor(doc){
         strip.className = "trip-spot-photos";
         for (const photo of spotPhotos){
           const tile = document.createElement("div");
-          tile.className = "trip-spot-photo has-opacity";
+          tile.className = "trip-spot-photo";
           const view = document.createElement("button");
           view.type = "button"; view.className = "trip-spot-photo-view";
           view.title = tripT("사진 크게 보기");
           const img = document.createElement("img");
           img.src = photo.src; img.alt = spot.name || tripT("장소 사진");
-          img.style.opacity = String(tripPhotoOpacity(spot, photo.asset));
           view.append(img);
           view.addEventListener("click", () => {
             if (typeof window.openImageLightbox !== "function") return;
@@ -2667,27 +2717,7 @@ function mountTripEditor(doc){
               src:item.src, alt:(spot.name || tripT("장소 사진")) + (spotPhotos.length > 1 ? " (" + (i + 1) + "/" + spotPhotos.length + ")" : "")
             })), photo.at);
           });
-          const opacityBar = document.createElement("label");
-          opacityBar.className = "trip-spot-photo-opacity";
-          const opacityRange = document.createElement("input");
-          opacityRange.type = "range"; opacityRange.min = "10"; opacityRange.max = "100"; opacityRange.step = "5";
-          opacityRange.value = String(Math.round(tripPhotoOpacity(spot, photo.asset) * 100));
-          opacityRange.setAttribute("aria-label", tripIsEn() ? "Photo opacity" : "사진 투명도");
-          const opacityValue = document.createElement("span");
-          opacityValue.textContent = opacityRange.value + "%";
-          opacityBar.append(opacityRange, opacityValue);
-          opacityRange.addEventListener("pointerdown", () => { if (history) history.flush(); });
-          opacityRange.addEventListener("input", () => {
-            const value = Number(opacityRange.value) / 100;
-            if (!spot.photoOpacity) spot.photoOpacity = {};
-            if (value >= 1) delete spot.photoOpacity[photo.asset];
-            else spot.photoOpacity[photo.asset] = value;
-            img.style.opacity = String(value);
-            opacityValue.textContent = opacityRange.value + "%";
-            refreshDirty(); scheduleRecovery();
-          });
-          opacityRange.addEventListener("change", () => { renderMap(); touch(true); });
-          const removePhoto = diaryButton("", "이 사진 빼기", "diary-btn trip-spot-photo-remove", "close");
+          const removePhoto = diaryButton("", "이 사진 빼기", "diary-btn trip-spot-photo-remove", "delete");
           removePhoto.addEventListener("click", () => {
             if (history) history.flush();
             spot.photos = (spot.photos || []).filter(name2 => name2 !== photo.asset);
@@ -2695,7 +2725,7 @@ function mountTripEditor(doc){
             renderSpots(); touch(true);
             setStatus(tripT("사진을 뺐어요. Ctrl+Z 로 되돌릴 수 있어요."));
           });
-          tile.append(view, opacityBar, removePhoto);
+          tile.append(view, removePhoto);
           strip.append(tile);
         }
         spotVideos.forEach((video, videoAt) => {
@@ -2727,7 +2757,7 @@ function mountTripEditor(doc){
             })), videoAt);
           });
           const removeVideo = diaryButton("", tripIsEn() ? "Remove this video" : "이 영상 빼기",
-            "diary-btn trip-spot-photo-remove", "close");
+            "diary-btn trip-spot-photo-remove", "delete");
           removeVideo.addEventListener("click", () => {
             if (history) history.flush();
             spot.videos = (spot.videos || []).filter(item => item.v !== video.v);
@@ -3002,6 +3032,13 @@ function mountTripEditor(doc){
         { date:picked, day:tripDayLabel(model, taken).replace(picked + " ", "") }));
       return;
     }
+    if (day.date !== picked){
+      day.weather = "";
+      day.weatherSource = "";
+      weatherRequests.delete(day.id);
+      weatherSummaries.delete(day.id);
+      legacyWeatherSources.delete(day.id);
+    }
     day.date = picked;
     autoDated.delete(day.id);
     const moved = tripPlaceDayByDate(model.days, day);
@@ -3015,6 +3052,7 @@ function mountTripEditor(doc){
       renderPage();
       setStatus(tripT("날짜에 맞춰 차례를 옮겼어요. 되돌리기 단추로 원래 자리로 돌릴 수 있어요."));
     }
+    syncWeather();
     touch(true);
   });
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });

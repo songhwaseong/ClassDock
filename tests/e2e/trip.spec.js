@@ -546,13 +546,13 @@ test("EXIF 가 없는 사진은 장소를 만들지 않고 그렇다고 알려 �
   await expect(page.locator(".trip-status")).toContainText("찍은 때·자리가 없어요");
 });
 
-/* 날씨는 런처(EXE)가 기상청 키로 대신 물어야 되는 일이라, 브라우저 e2e 에서는 늘 감춰져 있다.
-   그래서 '언제 보일 수 있는가'의 판정만 확인한다 — 국내·좌표·날짜 셋이 다 있어야 한다. */
-test("날씨 단추는 국내·좌표·날짜가 다 있을 때만 쓸 수 있다", async ({ page }) => {
+/* 자동 날씨는 런처(EXE)가 기상청 키로 대신 묻는다. 브라우저 e2e 에서는
+   조회가 일어나지 않으므로 날짜·좌표·국내 판정과 빈 표시만 확인한다. */
+test("자동 날씨는 날짜와 장소 좌표가 없으면 표시하지 않는다", async ({ page }) => {
   await page.setViewportSize({ width:1400, height:900 });
   await boot(page);
   await page.locator(".trip-add-day").click();
-  const weather = page.locator(".trip-weather-btn");
+  const weather = page.locator(".trip-weather-display");
   await expect(weather).toBeHidden();                       // 날짜도 좌표도 없다
 
   const check = () => page.evaluate(() => {

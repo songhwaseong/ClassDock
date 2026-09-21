@@ -149,7 +149,7 @@ test("가리키는 사진이 ZIP 에 없으면 버린다", () => {
   assert.deepEqual(day.spots[0].photos, ["assets/aaaa.jpg"]);
 });
 
-test("장소 사진별 투명도는 ZIP 왕복 뒤에도 서로 다르고 옛 사진은 100%다", async () => {
+test("이전 문서의 장소 사진 투명도 값은 ZIP 왕복 뒤에도 보존된다", async () => {
   const a = "assets/aaaa.jpg", b = "assets/bbbb.jpg";
   const model = trip.tripEmpty("사진 여행", "trip");
   model.days = [trip.tripNormalizeDay({ title:"첫날", spots:[{
@@ -165,6 +165,20 @@ test("장소 사진별 투명도는 ZIP 왕복 뒤에도 서로 다르고 옛 �
   assert.deepEqual(spot.photos, [a, b]);
   const old = trip.tripNormalizeSpot({ name:"옛 장소", photos:[a] });
   assert.deepEqual(old.photoOpacity, {});
+});
+
+test("자동 날씨의 날짜·관측 지점은 저장 뒤에도 유지되고 잘못된 출처는 버린다", () => {
+  const model = trip.tripEmpty("제주 여행", "trip");
+  const day = trip.tripNormalizeDay({
+    date:"2026-09-09", weather:"sunny", weatherSource:"2026-09-09|189",
+    spots:[{ name:"서귀포", lat:33.25, lng:126.57 }]
+  });
+  model.days = [day];
+  const saved = trip.tripCleanDays(model)[0];
+  assert.equal(saved.weather, "sunny");
+  assert.equal(saved.weatherSource, "2026-09-09|189");
+  assert.equal(trip.tripNormalizeDay(saved).weatherSource, "2026-09-09|189");
+  assert.equal(trip.tripNormalizeDay({ weather:"rainy", weatherSource:"wrong" }).weatherSource, "");
 });
 
 test("빈 장소 줄은 버린다", () => {

@@ -75,7 +75,7 @@ test("단기예보 → 시간별·날짜별(TMN/TMX 는 날짜 쪽으로, 강수
   assert.equal(shower.days[0].diary, "partly");
 });
 
-test("지난 날 관측 → 일기장 날씨(일기현상 글이 먼저, 빈 강수량은 0 이 아님)", () => {
+test("지난 날 관측 → 일기장 날씨(강수량 0.0mm의 비 기록은 하루를 비로 바꾸지 않는다)", () => {
   const day = (extra) => envelope([{ stnId:"108", stnNm:"서울", tm:"2026-09-15", avgTa:"20.4", minTa:"14.6", maxTa:"26.7",
     sumRn:"", avgTca:"0.0", iscs:"", maxWs:"4.0", ddMes:"", sumDpthFhsc:"", ...extra }]);
   const clear = api.parseDay(day({}));
@@ -86,6 +86,14 @@ test("지난 날 관측 → 일기장 날씨(일기현상 글이 먼저, 빈 강
   const rain = api.parseDay(day({ sumRn:"4.1", avgTca:"9.3", iscs:"-{비}-0055. {비}0940-1105. {비}1245-1410." }));
   assert.equal(rain.diary, "rainy");
   assert.deepEqual(rain.signs, ["비"]);
+  // 2026-09-09 서귀포처럼 일기현상에 비 종료 기록이 있어도 강수량이 0.0mm라면 하늘 상태를 따른다.
+  const trace = api.parseDay(day({ stnId:"189", stnNm:"서귀포", tm:"2026-09-09",
+    sumRn:"0.0", avgTca:"4.0", iscs:"{비}1930-2000." }));
+  assert.equal(trace.diary, "sunny");
+  assert.equal(trace.rain, 0);
+  assert.deepEqual(trace.signs, ["비"]);
+  assert.equal(api.parseDay(day({ sumRn:"", avgTca:"4.0", iscs:"{비}1930-2000." })).diary, "sunny");
+  assert.equal(api.parseDay(day({ sumRn:"0.6", avgTca:"4.0", iscs:"" })).diary, "rainy");
   assert.equal(api.parseDay(day({ iscs:"{소나기}1500-1520. {뇌전}1500-1530." })).diary, "storm");
   assert.equal(api.parseDay(day({ iscs:"{눈}0100-0300." })).diary, "snowy");
   assert.equal(api.parseDay(day({ iscs:"{안개}0500-0800." })).diary, "foggy");

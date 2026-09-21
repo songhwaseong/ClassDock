@@ -201,7 +201,8 @@ const MNWeatherApi = (() => {
     let diary = "";
     if (has(["뇌전", "우박"])) diary = "storm";
     else if (has(["눈", "소낙눈", "눈보라", "진눈깨비", "싸락눈"]) || (snow != null && snow > 0)) diary = "snowy";
-    else if (has(["비", "소나기", "이슬비", "가랑비", "소낙비"]) || (rain != null && rain >= 0.5)) diary = "rainy";
+    // 일기현상에는 강수량 0.0mm인 순간적인 비도 남는다. 하루 대표 날씨는 관측 강수량으로 정한다.
+    else if (rain != null && rain >= 0.5) diary = "rainy";
     else if (has(["안개"])) diary = "foggy";
     else if (maxWind != null && maxWind >= 10) diary = "windy";
     // 하루 평균 전운량(0~10): 0~5 맑음 · 6~8 구름많음 · 9~10 흐림(기상청 하늘 상태 구간).
