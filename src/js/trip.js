@@ -765,6 +765,32 @@ function tripBuildPaperEls(main){
     drawBar, pictureBtn, pictureInput, pictureDrawBtn };
 }
 
+/* ---------- 다녀온 지역 ----------
+   좌표가 어느 시군구 안인지는 내장 경계(vendor/korea-regions.js)로 **인터넷 없이** 가린다
+   (mapProjectedRegionIndex·mapProjectedRegionAt — 색칠 지도가 평면 좌표를 맞출 때 쓰는 길).
+   한국 경계만 있으므로 국내에서만 뜻이 있다(설계 2.1). */
+
+function tripRegionTally(model, index){
+  const counts = new Map();
+  let unknown = 0;
+  for (const day of (model.days || [])){
+    for (const spot of (day.spots || [])){
+      if (spot.lat == null || spot.lng == null) continue;
+      const region = typeof mapProjectedRegionAt === "function"
+        ? mapProjectedRegionAt(index, [spot.lat, spot.lng]) : null;
+      if (!region){ unknown++; continue; }
+      const key = region.sido + "\n" + region.sgg;
+      const seen = counts.get(key) || { sido:region.sido, sgg:region.sgg, count:0 };
+      seen.count++;
+      counts.set(key, seen);
+    }
+  }
+  const list = [...counts.values()].sort((a, b) => b.count - a.count
+    || (a.sido + a.sgg).localeCompare(b.sido + b.sgg));
+  const sidos = new Set(list.map(r => r.sido));
+  return { list, sidos:[...sidos], unknown };
+}
+
 /* ---------- 다른 문서로 내보내기 ----------
    연대표의 '여행 일정' 모드와 지도의 표시는 여행일지의 장소와 자리가 거의 그대로 맞는다.
    한 방향으로만 보낸다 — 글자로 되살리면 언어·사용자 편집에 깨진다(설계 부록 B.5). */
@@ -938,7 +964,16 @@ function mountTripEditor(doc){
   const stillNote = document.createElement("p");
   stillNote.className = "trip-still-note";
   stillBox.append(stillImg, stillNote);
-  mapPane.append(mapHead, mapStage, mapNote, stillBox);
+  /* 다녀온 지역 — 좌표가 어느 시군구 안인지 내장 경계로 가려 센다. 국내에서만 뜻이 있다. */
+  const regionBox = document.createElement("div");
+  regionBox.className = "trip-regions";
+  regionBox.hidden = true;
+  const regionHead = document.createElement("div");
+  regionHead.className = "trip-regions-head";
+  const regionList = document.createElement("div");
+  regionList.className = "trip-region-list";
+  regionBox.append(regionHead, regionList);
+  mapPane.append(mapHead, mapStage, mapNote, regionBox, stillBox);
 
   const main = document.createElement("div");
   main.className = "trip-main diary-main";
@@ -1366,6 +1401,7 @@ function mountTripEditor(doc){
     mapNote.hidden = !!list.length;
     syncFreezeBtn();
     renderStill();
+    renderRegions();
     if (!mapReady || !markerLayer) return;
     markerLayer.clearLayers();
     if (routeLine){ routeLine.remove(); routeLine = null; }
@@ -1422,6 +1458,37 @@ function mountTripEditor(doc){
       : tripWord(model.purpose, "mapStill");
     freezeBtn.setAttribute("aria-label", freezeBtn.title);
   }
+  /* ----- 다녀온 지역 -----
+     경계 자료(약 0.4MB)는 좌표가 생긴 뒤에만 한 번 읽는다. 없으면 이 칸만 조용히 감춘다. */
+  let regionIndex = null, regionTried = false;
+  async function renderRegions(){
+    const purpose = tripPurpose(model.purpose);
+    const word = tripWord(purpose, "choro");                 // 학습지 갈래에는 빈 낱말 = 감춤
+    const anyCoord = (model.days || []).some(d => (d.spots || []).some(s => s.lat != null));
+    if (!word || !anyCoord || !tripIsDomestic(model)){ regionBox.hidden = true; return; }
+    if (!regionIndex && !regionTried){
+      regionTried = true;
+      try {
+        if (typeof MNLazy !== "undefined") await MNLazy.tryNeed("koreaRegions");
+        regionIndex = typeof mapProjectedRegionIndex === "function" ? mapProjectedRegionIndex() : null;
+      } catch(_){ regionIndex = null; }
+      if (!root.isConnected) return;
+    }
+    if (!regionIndex){ regionBox.hidden = true; return; }
+    const tally = tripRegionTally(model, regionIndex);
+    regionBox.hidden = !tally.list.length;
+    if (!tally.list.length) return;
+    regionHead.textContent = word + " · " + tripTf("{a}개 시도 · {b}곳", { a:tally.sidos.length, b:tally.list.length });
+    regionList.innerHTML = "";
+    for (const region of tally.list){
+      const chip = document.createElement("span");
+      chip.className = "trip-region-chip";
+      chip.textContent = region.sgg + (region.count > 1 ? " ×" + region.count : "");
+      chip.title = region.sido + " " + region.sgg;
+      regionList.append(chip);
+    }
+  }
+
   function renderStill(){
     const holder = stillHolder();
     const name = holder && holder.still;

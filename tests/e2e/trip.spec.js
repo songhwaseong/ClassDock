@@ -536,6 +536,49 @@ test("지도로 내보내면 좌표가 있는 곳만 가고, 빠진 수를 알�
   await expect(page.locator(".trip-status")).toHaveText(/1곳을 지도로 보냈어요.*1곳은 좌표가 없어/);
 });
 
+test("다녀온 지역을 좌표에서 가려 센다(인터넷 없이)", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await expect(page.locator(".trip-regions")).toBeHidden();       // 좌표가 없으면 감춘다
+
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push(
+      { id:"sp-a", at:"", name:"성산일출봉", address:"", note:"", kind:"sight",
+        lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
+      { id:"sp-b", at:"", name:"경복궁", address:"", note:"", kind:"sight",
+        lat:37.5796, lng:126.977, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  await expect(page.locator(".trip-regions")).toBeVisible({ timeout:10000 });
+  await expect(page.locator(".trip-regions-head")).toContainText("다녀온 지역");
+  await expect(page.locator(".trip-regions-head")).toContainText("2개 시도");
+  const chips = await page.locator(".trip-region-chip").allTextContents();
+  expect(chips.length).toBe(2);
+  expect(chips.join(" ")).toMatch(/서귀포시|제주/);
+  expect(chips.join(" ")).toMatch(/종로구/);
+});
+
+test("학습지 갈래에는 다녀온 지역 칸이 없다(빈 낱말 = 감춤)", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page, "field");
+  await page.locator(".trip-add-day").click();
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  await page.waitForTimeout(600);
+  await expect(page.locator(".trip-regions")).toBeHidden();
+
+  // 답사 갈래로 바꾸면 '조사 지역 분포'로 뜬다
+  await page.locator(".trip-purpose-select").selectOption("survey");
+  await expect(page.locator(".trip-regions")).toBeVisible({ timeout:10000 });
+  await expect(page.locator(".trip-regions-head")).toContainText("조사 지역 분포");
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

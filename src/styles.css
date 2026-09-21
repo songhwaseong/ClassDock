@@ -7915,6 +7915,10 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-map-stage{flex:1;min-height:180px}
 .trip-map-stage.is-picking{cursor:crosshair}
 .trip-map-scope.is-on,.trip-freeze-btn:not(:disabled){color:var(--accent)}
+.trip-regions{padding:8px 10px;border-top:1px solid var(--border)}
+.trip-regions-head{margin-bottom:5px;color:var(--muted);font-size:12px;font-weight:600}
+.trip-region-list{display:flex;flex-wrap:wrap;gap:4px}
+.trip-region-chip{padding:2px 7px;border:1px solid var(--border);border-radius:999px;background:var(--bg);font-size:12px}
 .trip-still{padding:8px 10px;border-top:1px solid var(--border)}
 .trip-still-img{display:block;width:100%;border:1px solid var(--border);border-radius:6px}
 .trip-still-note{margin:5px 0 0;color:var(--muted);font-size:12px}
