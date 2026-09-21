@@ -301,9 +301,10 @@ function wire(){
     // 화이트보드는 경고 없이 닫혀도 복원되도록, 디바운스를 건너뛰고 마지막 편집까지 즉시 저장한다.
     docs.forEach(d => {
       if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery();
-      else if (["timeline", "concept", "study", "diary"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
+      else if (["timeline", "concept", "study", "diary", "trip"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
     });
     if (typeof persistTabStateNow === "function") persistTabStateNow();
+    if (typeof persistUnsavedDocKeys === "function") persistUnsavedDocKeys();
     if (suppressUnloadWarn) return;
     if (hasUnsavedEdits()){ e.preventDefault(); e.returnValue = ""; }
   });

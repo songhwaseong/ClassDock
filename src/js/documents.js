@@ -1301,12 +1301,50 @@ function updateDocumentStatus(doc){
 function markDocumentDirty(doc, dirty=true){
   if (!doc) return;
   const next = !!dirty;
+  // 저장 안 한 복구본으로 되살린 문서는 디스크 원본과 다르다. 편집기가 '되살린 모습과 같다'며
+  // 깨끗하다고 해도 실제로 디스크에 쓸 때(markDocumentSavedSnapshot)까지 '저장 안 됨'을 지킨다.
+  if (!next && doc.restoredUnsaved) return;
   if (doc.hasUnsavedEdits === next) return;
   doc.hasUnsavedEdits = next;
   if (!next) doc.workspaceRecovery = false;   // 디스크에 저장됐으니 폴더 동기화가 다시 읽어도 된다
   if (doc.id === activeId) updateDocumentStatus(doc);
   if (typeof renderSidebar === "function") renderSidebar();
   if (typeof renderTabs === "function") renderTabs();   // 탭의 점(●) 표시도 함께 켜고 끈다
+  persistUnsavedDocKeys();
+}
+
+/* 자동 복원은 파일 바이트만 담는다 — 저장 안 한 편집의 복구본도 그 자리에 들어가므로, 다시 켜면
+   고친 내용이 '저장된 것처럼' 열렸다(● 가 없어 탭을 닫으면 고친 내용이 디스크에 못 간 채 사라진다).
+   어느 문서가 저장 안 된 채였는지를 따로 적어 두고, 복원 뒤 다시 '저장 안 됨'으로 표시한다.
+   복원을 믿을 수 있는 종류만 — 저장할 때 markDocumentSavedSnapshot 을 거쳐 표식이 풀리는 편집기들. */
+// v2: v1 시절엔 여행일지가 탭을 열기만 해도(지도가 저절로 움직여) 저장 안 됨으로 적혀, 그 거짓 표식을 버린다.
+const UNSAVED_DOCS_KEY = "classdock-unsaved-docs:v2";
+const RESTORE_UNSAVED_KINDS = new Set(["trip", "diary", "timeline", "concept", "study", "map", "mnote", "music"]);
+function persistUnsavedDocKeys(){
+  if (typeof tabRestoreInProgress !== "undefined" && tabRestoreInProgress) return;   // 반쯤 연 목록으로 덮어쓰지 않게
+  if (window.__tabActive === false) return;
+  try {
+    localStorage.removeItem("classdock-unsaved-docs:v1");
+    const keys = docs.filter(d => d && d.hasUnsavedEdits && RESTORE_UNSAVED_KINDS.has(d.kind))
+      .map(docStableKey).filter(Boolean);
+    if (keys.length) localStorage.setItem(UNSAVED_DOCS_KEY, JSON.stringify(keys));
+    else localStorage.removeItem(UNSAVED_DOCS_KEY);
+  } catch(_){}
+}
+function restoreUnsavedDocMarks(){
+  let keys = [];
+  try { keys = JSON.parse(localStorage.getItem(UNSAVED_DOCS_KEY) || "[]"); } catch(_){ keys = []; }
+  if (!Array.isArray(keys) || !keys.length) return 0;
+  const wanted = new Set(keys.map(String));
+  let marked = 0;
+  docs.forEach(doc => {
+    if (!doc || !RESTORE_UNSAVED_KINDS.has(doc.kind) || !wanted.has(docStableKey(doc))) return;
+    doc.restoredUnsaved = true;
+    doc.workspaceRecovery = true;              // 폴더 동기화가 디스크 원본으로 덮어쓰지 않게
+    markDocumentDirty(doc, true);
+    marked++;
+  });
+  return marked;
 }
 
 function unsavedDocumentLabel(doc){
@@ -1364,6 +1402,7 @@ async function markDocumentSavedSnapshot(doc, bytes, type){
       try { doc.savedInWorkspace = await rememberWorkspace([file], false, { silent:true }); } catch(error){ console.warn("saved document workspace refresh skipped:", error); }
     }
   }
+  doc.restoredUnsaved = false;                 // 이제 디스크 원본과 같다
   markDocumentDirty(doc, false);
   return !!file;
 }

@@ -441,6 +441,7 @@ test("찍힌 날짜와 같은 날이 여정에 있으면 그 날로 간다", asy
   await page.setInputFiles(".trip-exif-btn + input[type=file]",
     [{ name:"첫날사진.jpg", mimeType:"image/jpeg", buffer:Buffer.from(bytes) }]);
 
+  await expect.poll(async () => (await modelOf(page)).days.reduce((n, day) => n + day.spots.length, 0)).toBe(1);
   const model = await modelOf(page);
   expect(model.days[0].spots.length).toBe(1);
   expect(model.days[1].spots.length).toBe(0);
@@ -464,6 +465,8 @@ test("서로 다른 촬영 날짜는 날짜별 날을 자동으로 만들고 같
     name:"여행사진" + (i + 1) + ".jpg", mimeType:"image/jpeg", buffer:Buffer.from(bytes)
   })));
 
+  // 사진 읽기는 비동기다 — 장소가 다 들어올 때까지 기다린 뒤 모델을 본다
+  await expect.poll(async () => (await modelOf(page)).days.reduce((n, day) => n + day.spots.length, 0)).toBe(3);
   const model = await modelOf(page);
   expect(model.days.map(day => day.date)).toEqual(["2026-07-21", "2026-07-22", "2026-07-23"]);
   expect(model.days.map(day => day.spots.length)).toEqual([1, 2, 0]);
@@ -823,4 +826,104 @@ test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티�
 
   // 되돌리기 단추가 살아 있다
   await expect(page.locator(".trip-undo-btn")).toBeEnabled();
+});
+
+test("저장 안 한 채 껐다 켜면 고친 글은 돌아오되 '저장 안 됨'으로 남고, 저장해야 풀린다", async ({ page }) => {
+  await page.addInitScript(() => {
+    try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch (_) {}
+  });
+  await collapseSidebar(page);
+  await page.goto("/");
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
+  // 디스크에서 연 것처럼 저장본 바이트로 연다
+  await page.evaluate(async () => {
+    await newTripScratch("trip");
+    const tmp = docs.find(d => d.kind === "trip");
+    tmp.trip.days.push({ id:"d1", date:"2026-07-20", title:"첫날", text:"디스크 글", spots:[], prompts:[] });
+    const bytes = tripPack(tmp.trip, tmp.tripAssets, Date.now());
+    tmp.name = "임시.trip";
+    await handleFiles([new File([bytes], "원본.trip", { type:"application/zip" })], {});
+  });
+  const stateOf = () => page.evaluate(() => {
+    const d = docs.find(x => x.name === "원본.trip");
+    return d ? { dirty:!!d.hasUnsavedEdits, text:d.trip.days[0].text } : null;
+  });
+  await page.locator("#docTabs .tab", { hasText:"원본.trip" }).first().click();
+  expect(await stateOf()).toEqual({ dirty:false, text:"디스크 글" });
+
+  await page.evaluate(() => {
+    window.__rw = 0;
+    const original = rememberWorkspace;
+    window.rememberWorkspace = async (...args) => { const r = await original(...args); window.__rw++; return r; };
+  });
+  await page.locator(".office:not([hidden]) .diary-text").fill("고친 글");
+  await expect.poll(stateOf).toEqual({ dirty:true, text:"고친 글" });
+  await expect.poll(() => page.evaluate(() => window.__rw), { timeout:10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
+  await expect.poll(stateOf, { timeout:15_000 }).toEqual({ dirty:true, text:"고친 글" });
+  await page.locator("#docTabs .tab", { hasText:"원본.trip" }).first().click();
+  await expect(page.locator(".office:not([hidden]) .diary-text")).toHaveValue("고친 글");
+  // 되살린 모습 그대로라도 편집기가 '깨끗함'으로 되돌리지 않는다
+  await page.locator(".office:not([hidden]) .diary-text").fill("고친 글!");
+  await page.locator(".office:not([hidden]) .diary-text").fill("고친 글");
+  await page.waitForTimeout(300);
+  expect((await stateOf()).dirty).toBe(true);
+
+  // 실제로 저장하면 풀리고, 다시 켜도 깨끗하다
+  await page.evaluate(async () => {
+    window.saveTextDoc = async () => true;          // 디스크 대화창 없이 저장 성공으로 친다
+    await saveTrip(docs.find(x => x.name === "원본.trip"));
+  });
+  expect(await stateOf()).toEqual({ dirty:false, text:"고친 글" });
+  await page.reload();
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
+  await expect.poll(stateOf, { timeout:15_000 }).toEqual({ dirty:false, text:"고친 글" });
+});
+
+test("장소가 있는 여행일지는 탭을 열어 지도가 저절로 맞춰져도 '저장 안 됨'이 켜지지 않고, 저장 뒤 껐다 켜도 깨끗하다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await page.addInitScript(() => {
+    try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch (_) {}
+  });
+  await collapseSidebar(page);
+  await page.goto("/");
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
+  await page.evaluate(async () => {
+    await newTripScratch("trip");
+    const tmp = docs.find(d => d.kind === "trip");
+    tmp.trip.map = { ...(tmp.trip.map || {}), center:[37.5, 127], zoom:7 };   // 장소와 먼 자리 — 열면 지도가 옮겨 간다
+    tmp.trip.days.push({ id:"d1", date:"2026-07-20", title:"첫날", text:"글", prompts:[], spots:[
+      { id:"s1", name:"성산", lat:33.458, lng:126.942 }, { id:"s2", name:"우도", lat:33.506, lng:126.951 }
+    ] });
+    const bytes = tripPack(tmp.trip, tmp.tripAssets, Date.now());
+    tmp.name = "임시.trip";
+    await handleFiles([new File([bytes], "장소.trip", { type:"application/zip" })], {});
+  });
+  const dirtyOf = () => page.evaluate(() => { const d = docs.find(x => x.name === "장소.trip"); return d ? !!d.hasUnsavedEdits : null; });
+  const openAndSettle = async () => {
+    await page.locator("#docTabs .tab", { hasText:"장소.trip" }).first().click();
+    await expect(page.locator(".office:not([hidden]) .trip-map-stage path.leaflet-interactive").first()).toBeVisible();
+    // 지도가 장소에 맞춰 움직였는지(= moveend 가 났는지) 확인한 뒤에 본다
+    await expect.poll(() => page.evaluate(() => docs.find(x => x.name === "장소.trip").trip.map.zoom)).not.toBe(7);
+    await page.waitForTimeout(300);
+  };
+  await openAndSettle();
+  expect(await dirtyOf()).toBe(false);
+
+  // 저장하고 껐다 켠 뒤 다시 열어도 깨끗하다
+  await page.evaluate(async () => {
+    window.saveTextDoc = async () => true;
+    await saveTrip(docs.find(x => x.name === "장소.trip"));
+  });
+  expect(await dirtyOf()).toBe(false);
+  await page.waitForTimeout(600);
+  await page.reload();
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
+  await expect.poll(dirtyOf, { timeout:15_000 }).toBe(false);
+  await page.locator("#docTabs .tab", { hasText:"장소.trip" }).first().click();
+  await expect(page.locator(".office:not([hidden]) .trip-map-stage path.leaflet-interactive").first()).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await dirtyOf()).toBe(false);
 });

@@ -1359,3 +1359,46 @@ test("정렬은 사진만 건드리고, 꾸미려고 놓은 그림 스티커는 
   await expect(page.locator(".diary-status")).toContainText("스티커 4개");
   expect(await heart.evaluate(n => ({ x:n.offsetLeft, y:n.offsetTop }))).not.toEqual(parked);
 });
+
+test("저장한 일기장은 탭을 열고 둘러보기만 해서는 '저장 안 됨'이 안 켜지고, 껐다 켜도 깨끗하다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".diary-text").click();
+  await page.keyboard.type("바다에 갔다.");
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles({ name:"a.png", mimeType:"image/png", buffer:solidPng(300, 200, [200, 0, 0]) });
+  await expect(page.locator(".diary-sticker")).toHaveCount(1);
+  await page.locator('.diary-pick[data-pick="weather"]').click();
+  await page.locator('.diary-pick-option[data-value="sunny"]').click();
+  // 저장본 바이트로 디스크에서 연 것처럼 다시 연다
+  await page.evaluate(async () => {
+    const tmp = docs.find(d => d.kind === "diary");
+    const bytes = diaryPack(tmp.diary, tmp.diaryAssets, Date.now());
+    tmp.name = "임시.diary";
+    await handleFiles([new File([bytes], "원본.diary", { type:"application/zip" })], {});
+  });
+  const dirtyOf = () => page.evaluate(() => { const d = docs.find(x => x.name === "원본.diary"); return d ? !!d.hasUnsavedEdits : null; });
+  await page.locator("#docTabs .tab", { hasText:"원본.diary" }).first().click();
+  const root = page.locator(".office:not([hidden])");
+  await expect(root.locator(".diary-paper")).toBeVisible();
+  // 고치지 않고 둘러보기만 — 옆 칸 탭, 빈 날·오늘 오가기, 스티커 고르기, 창 크기
+  for (const name of ["찾기", "사진", "돌아보기", "달력"]) await root.locator(".diary-side-tab", { hasText:name }).click();
+  const month = todayKey().slice(0, 8);
+  await root.locator(`.diary-cal-day[data-date="${month}05"]`).click();
+  await root.locator(`.diary-cal-day[data-date="${todayKey()}"]`).click();
+  await root.locator(".diary-sticker").first().click();
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width:1000, height:800 });
+  await page.waitForTimeout(500);
+  expect(await dirtyOf()).toBe(false);
+
+  await page.evaluate(async () => { window.saveTextDoc = async () => true; await saveDiary(docs.find(x => x.name === "원본.diary")); });
+  expect(await dirtyOf()).toBe(false);
+  await page.waitForTimeout(600);
+  await page.reload();
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
+  await expect.poll(dirtyOf, { timeout:15_000 }).toBe(false);
+  await page.locator("#docTabs .tab", { hasText:"원본.diary" }).first().click();
+  await expect(page.locator(".office:not([hidden]) .diary-paper")).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(await dirtyOf()).toBe(false);
+});

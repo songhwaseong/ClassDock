@@ -5,7 +5,8 @@ const { collapseSidebar } = require("./helpers");
 // 실제 백엔드(로컬 PowerShell·Pyodide) 대신 "끝나지 않는 실행"을 심어 두고,
 // 취소가 호출되는지만 확인한다.
 async function openTerminal(page){
-  await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); } catch(_){} });
+  // 단추 이름·오류 문구("터미널"·"중지")를 한국어로 찾으므로 언어를 못박는다(기본은 브라우저 언어를 따른다).
+  await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch(_){} });
   await collapseSidebar(page);
   await page.goto("/");
   await page.locator("#fileInput").setInputFiles({

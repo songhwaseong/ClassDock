@@ -469,13 +469,15 @@ function tripModelJson(model){
   });
 }
 /* 저장본과 같은지 가르는 열쇠 — 시각(updatedAt)은 뺀다. 저장 → 편집 → 되돌리기 뒤 다시 '깨끗'이
-   되어야 하기 때문이다(일기장과 같은 규칙). */
+   되어야 하기 때문이다(일기장과 같은 규칙). 지도를 보던 자리(center·zoom)도 뺀다 — 파일엔 담지만
+   편집이 아니다(열기만 해도 지도가 장소에 맞춰 움직인다). */
 function tripContentKey(model){
+  const map = model.map && typeof model.map === "object" ? { ...model.map, center:undefined, zoom:undefined } : model.map;
   return JSON.stringify({
     title:model.title || "", purpose:tripPurpose(model.purpose),
     style:model.style, printPlain:!!model.printPlain,
     header:tripNormalizePairs(model.header, TRIP_MAX_HEADER),
-    map:model.map, budget:model.budget, source:model.source || "",
+    map, budget:model.budget, source:model.source || "",
     days:tripCleanDays(model)
   });
 }
@@ -1720,13 +1722,14 @@ function mountTripEditor(doc){
         renderSpots(); renderMap(); syncWeather(); touch(true);
         setStatus(tripT("자리를 찍었어요."));
       });
-      // 보고 있던 자리는 문서에 남긴다 — 다음에 열면 그 자리에서 시작한다.
+      // 보고 있던 자리는 문서에 남긴다 — 다음에 저장하면 그 자리에서 시작한다.
+      // 다만 편집은 아니다: 탭을 열면 장소에 맞춰 지도가 저절로 움직이므로(showMap 의 fitBounds),
+      // 여기서 touch() 하면 고치지도 않았는데 '저장 안 됨'(●)이 켜지고 되돌리기 단계까지 생겼다.
       leafletMap.on("moveend zoomend", () => {
         if (!leafletMap) return;
         const c = leafletMap.getCenter();
         model.map = { ...model.map, center:[Math.round(c.lat * 1e6) / 1e6, Math.round(c.lng * 1e6) / 1e6],
           zoom:leafletMap.getZoom() };
-        touch();
       });
       mapReady = true;
       return true;

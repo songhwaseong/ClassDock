@@ -1201,8 +1201,16 @@ async function renderCode(file, host, ext, profile, runCtx){
       if (ownerDoc){ ownerDoc.codeViewer = null; if (ownerDoc.codeEditor && ownerDoc.codeEditor === ed) ownerDoc.codeEditor = null; }
     };
 
+    // 상단 저장 배지는 화면에 .run-save 가 있는지로 '저장할 수 있는 문서'를 가린다(documentSaveTarget).
+    // 보기↔편집을 오가면 그 버튼이 생기고 사라지므로, 그때마다 배지를 다시 잰다 — 안 그러면 편집을 켜도
+    // 첫 글자를 칠 때까지 '사본으로 저장/원본 저장' 안내가 비어 있다.
+    const refreshSaveBadge = () => {
+      if (ownerDoc && typeof activeId !== "undefined" && ownerDoc.id === activeId
+          && typeof updateDocumentStatus === "function") updateDocumentStatus(ownerDoc);
+    };
     const showView = () => {
       teardownActive(); host.innerHTML = ""; if (ownerDoc) ownerDoc.codeEditor = null;
+      refreshSaveBadge();
       viewMode = "view"; openReadonlyFind = null; openReadonlyGoto = null;
       // 보던 자리 그대로 편집을 여는 함수 — 아래 본문을 그린 뒤 채운다(툴바가 먼저 만들어지므로 예약 선언).
       let enterEditAtView = null;
@@ -1954,6 +1962,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       });
       viewBtn.addEventListener("click", () => { currentText = editor.getValue(); if (!isMd) captureEditAnchor(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
       requestAnimationFrame(() => editor.ta.focus());
+      refreshSaveBadge();
     };
 
     // HTML/마크다운 미리보기: 소스 대신 렌더된 화면을 보여준다.
@@ -1961,6 +1970,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     //  - 마크다운: markdownToHtml 로 문서 모양 렌더(저장 전 편집 내용도 반영)
     const showPreview = () => {
       teardownActive(); host.innerHTML = "";
+      refreshSaveBadge();
       viewMode = "preview"; openReadonlyFind = null; openReadonlyGoto = null;
       if (ownerDoc){ ownerDoc.codeViewer = null; ownerDoc.codeEditor = null; }
       const bar = document.createElement("div"); bar.className = "text-view-bar";
