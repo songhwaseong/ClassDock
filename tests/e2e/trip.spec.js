@@ -439,6 +439,47 @@ test("EXIF 가 없는 사진은 장소를 만들지 않고 그렇다고 알려 �
   await expect(page.locator(".trip-status")).toContainText("찍은 때·자리가 없어요");
 });
 
+/* 날씨는 런처(EXE)가 기상청 키로 대신 물어야 되는 일이라, 브라우저 e2e 에서는 늘 감춰져 있다.
+   그래서 '언제 보일 수 있는가'의 판정만 확인한다 — 국내·좌표·날짜 셋이 다 있어야 한다. */
+test("날씨 단추는 국내·좌표·날짜가 다 있을 때만 쓸 수 있다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  const weather = page.locator(".trip-weather-btn");
+  await expect(weather).toBeHidden();                       // 날짜도 좌표도 없다
+
+  const check = () => page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    const day = doc.trip.days[0];
+    const spot = day.spots[0];
+    return {
+      domestic:tripIsDomestic(doc.trip),
+      station:spot && spot.lat != null ? (MNWeatherApi.nearestStation(spot.lat, spot.lng) || {}).name : null
+    };
+  });
+
+  await page.locator(".trip-day-date").fill("2026-07-20");
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  const home = await check();
+  expect(home.domestic).toBe(true);
+  expect(home.station).toBe("성산");                        // 그날 첫 좌표에서 가장 가까운 관측 지점
+
+  // 해외 좌표면 국내 판정이 뒤집힌다(감춤 규칙, 설계 2.1)
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    const spot = doc.trip.days[0].spots[0];
+    spot.lat = 35.6586; spot.lng = 139.7454;
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  expect((await check()).domestic).toBe(false);
+  await expect(weather).toBeHidden();
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

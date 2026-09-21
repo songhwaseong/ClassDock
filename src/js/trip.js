@@ -896,8 +896,11 @@ function mountTripEditor(doc){
   const dayDate = document.createElement("input");
   dayDate.type = "date";
   dayDate.className = "trip-day-date";
+  const weatherBtn = diaryButton("", "그날 그곳 날씨 받기", "diary-btn trip-weather-btn", "sun");
+  const weatherText = document.createElement("span");
+  weatherText.className = "trip-weather-text";
   const deleteBtn = diaryButton("", "이 날 지우기", "diary-btn trip-day-delete", "delete");
-  pageHead.append(dayDate, dayTitle, deleteBtn);
+  pageHead.append(dayDate, dayTitle, weatherBtn, weatherText, deleteBtn);
 
   const els = tripBuildPaperEls(main);
 
@@ -1111,6 +1114,72 @@ function mountTripEditor(doc){
     const files = [...(els.pictureInput.files || [])]; els.pictureInput.value = "";
     if (files.length) await addStickers(files, null, true);
   });
+  /* ----- 그날 그곳 날씨 -----
+     일기장은 사용자가 고른 관측 지점 하나를 쓰지만, 여행일지는 **그날 들른 자리**를 안다.
+     그래서 지점을 묻지 않고 그날 첫 좌표에서 가장 가까운 지점을 고른다(nearestStation).
+     기상청 자료라 국내에서만 된다 — 한국 밖이면 단추를 감춘다(설계 2.1). */
+  const weatherApi = typeof MNWeatherApi !== "undefined" ? MNWeatherApi : null;
+  let weatherReady = false;
+  if (weatherApi) weatherApi.available().then(ok => {
+    if (!ok || !root.isConnected) return;
+    weatherReady = true;
+    syncWeather();
+  }).catch(() => {});
+
+  function dayStation(day){
+    const spot = (day && day.spots || []).find(s => s.lat != null && s.lng != null);
+    return spot && weatherApi ? weatherApi.nearestStation(spot.lat, spot.lng) : null;
+  }
+  function syncWeather(){
+    const day = dayOf(current);
+    const station = dayStation(day);
+    const domestic = tripIsDomestic(model);
+    const show = !!(weatherReady && day && day.date && station && domestic);
+    weatherBtn.hidden = !show;
+    weatherBtn.disabled = !show;
+    if (show) weatherBtn.title = tripTf("{place} 관측으로 날씨 채우기", { place:station.name });
+    // 이미 들어 있는 값은 갈래·나라와 상관없이 그대로 보여 준다(감춤이지 지움이 아니다).
+    const info = day && day.weather && typeof diaryWeatherInfo === "function" ? diaryWeatherInfo(day.weather) : null;
+    weatherText.textContent = info ? (diaryIsEn && diaryIsEn() ? info[3] : info[2]) : "";
+  }
+  async function fillWeather(){
+    const day = dayOf(current);
+    const station = dayStation(day);
+    if (!day || !day.date || !station || !weatherReady) return;
+    weatherBtn.disabled = true;
+    setStatus(tripT("기상청 날씨를 받는 중…"));
+    try {
+      const today = diaryDateKey(new Date());
+      const ahead = Math.round((diaryDateFromKey(day.date) - diaryDateFromKey(today)) / 86400000);
+      let value = "", summary = "";
+      const round = v => v == null ? "" : String(Math.round(v * 10) / 10);
+      if (ahead < 0){
+        const d = await weatherApi.loadDay(station.id, day.date);
+        value = d.diary;
+        summary = [tripTf("{place} 관측", { place:d.station || station.name }),
+          d.max != null ? tripTf("최고 {max}°", { max:round(d.max) }) : "",
+          d.min != null ? tripTf("최저 {min}°", { min:round(d.min) }) : ""].filter(Boolean).join(" · ");
+      } else if (ahead === 0){
+        const n = await weatherApi.loadNow(station.lat, station.lng);
+        value = n.diary;
+        summary = [tripTf("{place} 지금", { place:station.name }),
+          n.temp != null ? tripTf("기온 {t}°", { t:round(n.temp) }) : ""].filter(Boolean).join(" · ");
+      } else if (ahead <= 5){
+        const f = await weatherApi.loadForecast(station.lat, station.lng);
+        const found = f.days.find(d => d.date === day.date.replace(/-/g, "") && d.sky != null);
+        if (found){ value = found.diary; summary = tripTf("{place} 예보", { place:station.name }); }
+      }
+      if (!value){ setStatus(tripT("기상청 자료로 날씨를 정하지 못했어요.")); return; }
+      if (history) history.flush();
+      day.weather = value;
+      syncWeather(); renderRail(); touch(true);
+      setStatus(summary || tripT("날씨를 채웠어요."));
+    } catch(error){
+      setStatus(weatherApi ? tripT(weatherApi.failureText(error, "day")) : tripT("날씨를 받지 못했어요."));
+    } finally { syncWeather(); }
+  }
+  weatherBtn.addEventListener("click", fillWeather);
+
   /* ----- 사진에서 장소 만들기 -----
      EXIF 는 **줄여 굽기 전 원본 바이트**에서 읽어야 한다 — diaryPrepareImage 를 지나면 통째로 날아간다.
      찍힌 날짜와 같은 날이 여정에 있으면 그 날에, 없으면 보고 있는 날에 넣는다. 새 날을 멋대로 만들지는 않는다.
@@ -1138,7 +1207,7 @@ function mountTripEditor(doc){
       });
       made++;
     }
-    renderSpots(); renderRail(); renderMap();
+    renderSpots(); renderRail(); renderMap(); syncWeather();
     if (made) touch(true);
     const parts = [];
     if (made) parts.push(tripTf("{n}곳을 만들었어요", { n:made }));
@@ -1211,7 +1280,7 @@ function mountTripEditor(doc){
         if (history) history.flush();
         spot.lat = Math.round(e.latlng.lat * 1e6) / 1e6;
         spot.lng = Math.round(e.latlng.lng * 1e6) / 1e6;
-        renderSpots(); renderMap(); touch(true);
+        renderSpots(); renderMap(); syncWeather(); touch(true);
         setStatus(tripT("자리를 찍었어요."));
       });
       // 보고 있던 자리는 문서에 남긴다 — 다음에 열면 그 자리에서 시작한다.
@@ -1619,6 +1688,7 @@ function mountTripEditor(doc){
     renderPrompts();
     renderSpots();
     renderMap();
+    syncWeather();
   }
 
   addDayBtn.addEventListener("click", () => {

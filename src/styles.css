@@ -7905,6 +7905,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-add-day{margin-top:2px}
 .trip-page-head{flex-direction:row;align-items:center;gap:8px}
 .trip-day-title{flex:1;min-width:0;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px;font-weight:600}
+.trip-weather-text{color:var(--muted);font-size:12px}
 .trip-day-date{padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
 
 .trip-map-pane{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--border);background:var(--panel)}
