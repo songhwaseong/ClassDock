@@ -634,6 +634,37 @@ test("여행 화폐가 원이 아니면 굳혀 둔 환율로 원화 환산을 �
   expect(model.budget).toEqual({ currency:"USD", rate:1350 });
 });
 
+/* 특일은 런처(EXE)가 키로 대신 묻는다. 그리기는 '받아 둔 것'만 보므로,
+   받아 둔 척 채워 두면 브라우저에서도 배지까지 확인할 수 있다. */
+test("여정 띠에 공휴일·24절기가 뜬다", async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    MNWeatherApi.cachedSpecialDays = (year, month) => (year === 2026 && month === 10)
+      ? [{ date:"2026-10-03", name:"개천절", holiday:true },
+         { date:"2026-10-08", name:"한로", holiday:false }]
+      : null;
+  });
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-10-03");
+  await expect(page.locator(".trip-day-special")).toHaveText("개천절");
+  await expect(page.locator(".trip-day-special")).toHaveClass(/is-holiday/);
+
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-10-08");
+  const badges = page.locator(".trip-day-special");
+  await expect(badges).toHaveCount(2);
+  await expect(badges.nth(1)).toHaveText("한로");
+  await expect(badges.nth(1)).not.toHaveClass(/is-holiday/);   // 절기는 쉬는 날이 아니다
+});
+
+test("받아 둔 특일이 없으면 배지 없이 그냥 뜬다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-10-03");
+  await expect(page.locator(".trip-day-chip")).toHaveCount(1);
+  await expect(page.locator(".trip-day-special")).toHaveCount(0);
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

@@ -1229,7 +1229,31 @@ function mountTripEditor(doc){
     if (!ok || !root.isConnected) return;
     weatherReady = true;
     syncWeather();
+    requestSpecialMonths();
   }).catch(() => {});
+
+  /* 공휴일·24절기 — 한국천문연구원 특일. 런처(EXE)가 키로 대신 묻는다.
+     그리기는 **받아 둔 것만** 보고(cachedSpecialDays), 받아 오는 일은 따로 한다 —
+     그래야 인터넷이 없어도 화면이 막히지 않고, 이미 받아 둔 달은 그대로 뜬다. */
+  const specialFailed = new Set();
+  function specialItemsOf(dateKey){
+    if (!weatherApi || !tripIsDateKey(dateKey)) return [];
+    const items = weatherApi.cachedSpecialDays(Number(dateKey.slice(0, 4)), Number(dateKey.slice(5, 7)));
+    return items ? items.filter(item => item.date === dateKey) : [];
+  }
+  function requestSpecialMonths(){
+    if (!weatherApi || !weatherReady) return;
+    const months = new Set();
+    for (const day of (model.days || [])) if (day.date) months.add(day.date.slice(0, 7));
+    for (const ym of months){
+      const year = Number(ym.slice(0, 4)), month = Number(ym.slice(5, 7));
+      const key = year * 100 + month;
+      if (specialFailed.has(key) || weatherApi.cachedSpecialDays(year, month)) continue;
+      weatherApi.loadSpecialDays(year, month)
+        .then(() => { if (root.isConnected) renderRail(); })
+        .catch(() => { specialFailed.add(key); });
+    }
+  }
 
   function dayStation(day){
     const spot = (day && day.spots || []).find(s => s.lat != null && s.lng != null);
@@ -1582,6 +1606,13 @@ function mountTripEditor(doc){
       const head = document.createElement("span");
       head.className = "trip-day-chip-head";
       head.textContent = tripDayLabel(model, day);
+      // 공휴일·24절기가 있으면 이름을 옆에 단다. 쉬는 날은 붉게.
+      for (const item of specialItemsOf(day.date)){
+        const badge = document.createElement("span");
+        badge.className = "trip-day-special" + (item.holiday ? " is-holiday" : "");
+        badge.textContent = item.name;
+        head.append(badge);
+      }
       const sub = document.createElement("span");
       sub.className = "trip-day-chip-sub";
       const spots = (day.spots || []).length;
@@ -1920,6 +1951,7 @@ function mountTripEditor(doc){
     const day = dayOf(current);
     if (!day) return;
     day.date = tripIsDateKey(dayDate.value) ? dayDate.value : "";
+    requestSpecialMonths();
     renderRail();
     touch(true);
   });

@@ -7901,6 +7901,8 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-day-chip:hover{border-color:var(--accent)}
 .trip-day-chip.is-on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
 .trip-day-chip-head{font-size:13px;font-weight:600}
+.trip-day-special{margin-left:5px;padding:1px 5px;border-radius:999px;background:var(--border);color:var(--muted);font-size:11px;font-weight:500}
+.trip-day-special.is-holiday{background:color-mix(in srgb, var(--danger,#e11d48) 18%, transparent);color:var(--danger,#e11d48)}
 .trip-day-chip-sub{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trip-add-day{margin-top:2px}
 .trip-page-head{flex-direction:row;align-items:center;gap:8px}
