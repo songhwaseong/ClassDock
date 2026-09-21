@@ -7934,6 +7934,10 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-spots-title{flex:1}
 .trip-prompts-head span{flex:1}
 .trip-spots-empty{margin:2px 0;color:var(--muted);font-size:12px}
+.trip-budget{display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+.trip-budget-sum{flex:1;min-width:0;color:var(--ink);font-size:13px;font-weight:600}
+.trip-currency{width:56px;text-align:center;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
+.trip-rate{width:96px;text-align:right;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
 .trip-spot-list,.trip-prompt-list{display:flex;flex-direction:column;gap:8px}
 .trip-spot{display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--bg)}
 .trip-spot-line{display:flex;align-items:center;gap:6px}

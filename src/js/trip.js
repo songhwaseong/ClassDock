@@ -1009,7 +1009,22 @@ function mountTripEditor(doc){
   spotList.className = "trip-spot-list";
   const spotsEmpty = document.createElement("p");
   spotsEmpty.className = "trip-spots-empty";
-  spotsBox.append(spotsHead, spotList, spotsEmpty);
+  /* 경비 — 여행 갈래에만 있다. 환율은 받은 날 값을 문서에 굳힌다(설계 4장 budget.rate):
+     나중에 열었을 때 값이 저절로 달라지면 그때 쓴 돈이 아니게 된다. */
+  const budgetBox = document.createElement("div");
+  budgetBox.className = "trip-budget";
+  budgetBox.hidden = true;
+  const budgetSum = document.createElement("span");
+  budgetSum.className = "trip-budget-sum";
+  const currencyInput = document.createElement("input");
+  currencyInput.type = "text"; currencyInput.className = "trip-currency"; currencyInput.maxLength = 3;
+  currencyInput.title = "쓴 돈의 화폐(USD·JPY 처럼 세 글자)";
+  const rateInput = document.createElement("input");
+  rateInput.type = "text"; rateInput.className = "trip-rate"; rateInput.maxLength = 12; rateInput.inputMode = "decimal";
+  rateInput.title = "1 단위가 몇 원인지 — 받은 날 값을 그대로 굳혀 둡니다";
+  const rateBtn = diaryButton("", "환율 찾아보기", "diary-btn trip-rate-btn", "exchange");
+  budgetBox.append(budgetSum, currencyInput, rateInput, rateBtn);
+  spotsBox.append(spotsHead, spotList, spotsEmpty, budgetBox);
 
   /* 질문 칸 — 학습지 갈래에서만 뜬다(빈 낱말 = 감춤 규칙). */
   const promptsBox = document.createElement("section");
@@ -1676,10 +1691,12 @@ function mountTripEditor(doc){
         const unit = document.createElement("span");
         unit.className = "trip-spot-cost-unit";
         unit.textContent = (spot.cost && spot.cost.currency) || model.budget.currency;
+        unit.title = tripT("이 여행의 화폐 — 아래에서 바꿔요");
         cost.addEventListener("input", () => {
           // Number("") 는 0 이다 — 빈 칸을 0원으로 적으면 안 된다.
           const text = cost.value.replace(/[^0-9.]/g, "");
           spot.cost = text ? tripNormalizeCost({ amount:Number(text), currency:unit.textContent }) : null;
+          renderBudget();
           touch();
         });
         line3.append(cost, unit);
@@ -1734,7 +1751,65 @@ function mountTripEditor(doc){
       });
       spotList.append(row);
     }
+    renderBudget();
   }
+
+  /* ----- 경비 합계 -----
+     화폐가 섞여 있으면 합치지 않는다 — 5,000원과 5,000엔을 더한 수는 아무 뜻이 없다.
+     여행 화폐가 원이 아니면 굳혀 둔 환율로 원화 환산을 함께 보여 준다. */
+  function sumCost(days){
+    const byCurrency = new Map();
+    for (const day of days){
+      for (const spot of (day.spots || [])){
+        if (!spot.cost) continue;
+        const cur = spot.cost.currency || "KRW";
+        byCurrency.set(cur, (byCurrency.get(cur) || 0) + spot.cost.amount);
+      }
+    }
+    return byCurrency;
+  }
+  const moneyText = (amount, currency) => {
+    const digits = currency === "KRW" || currency === "JPY" ? 0 : 2;
+    const text = typeof MNExchangeRate !== "undefined" && MNExchangeRate
+      ? MNExchangeRate.formatMoney(amount, digits) : String(Math.round(amount));
+    return currency === "KRW" ? text + "원" : text + " " + currency;
+  };
+  function renderBudget(){
+    const purpose = tripPurpose(model.purpose);
+    if (!tripHasWord(purpose, "cost")){ budgetBox.hidden = true; return; }
+    const day = dayOf(current);
+    const here = sumCost(day ? [day] : []);
+    const all = sumCost(model.days || []);
+    budgetBox.hidden = !all.size;
+    if (!all.size) return;
+    const parts = [];
+    for (const [cur, amount] of here) parts.push(tripWordf(purpose, "costTotal", { sum:moneyText(amount, cur) }));
+    const total = [...all].map(([cur, amount]) => moneyText(amount, cur)).join(" + ");
+    parts.push(tripTf("모두 {sum}", { sum:total }));
+    // 여행 화폐가 원이 아니고 환율을 적어 두었으면 원화로도 보여 준다.
+    const rate = model.budget && model.budget.rate;
+    const cur = (model.budget && model.budget.currency) || "KRW";
+    if (rate && cur !== "KRW" && all.has(cur)) parts.push("≈ " + moneyText(all.get(cur) * rate, "KRW"));
+    budgetSum.textContent = parts.join(" · ");
+    currencyInput.value = cur;
+    rateInput.value = rate ? String(rate) : "";
+    rateInput.hidden = cur === "KRW";
+    rateBtn.hidden = cur === "KRW" || typeof window.openExchangeRate !== "function";
+  }
+  currencyInput.addEventListener("change", () => {
+    const value = String(currencyInput.value || "").trim().toUpperCase().slice(0, 3);
+    model.budget = tripNormalizeBudget({ ...model.budget, currency:/^[A-Z]{3}$/.test(value) ? value : "KRW" });
+    renderBudget(); renderSpots(); touch(true);
+  });
+  rateInput.addEventListener("change", () => {
+    const text = String(rateInput.value || "").replace(/[^0-9.]/g, "");
+    model.budget = tripNormalizeBudget({ ...model.budget, rate:text ? Number(text) : null });
+    renderBudget(); touch(true);
+  });
+  rateBtn.addEventListener("click", () => {
+    if (typeof window.openExchangeRate === "function") window.openExchangeRate();
+    setStatus(tripT("환율을 찾아 1 단위가 몇 원인지 적어 두세요 — 그날 값으로 굳습니다."));
+  });
 
   addSpotBtn.addEventListener("click", () => {
     const day = dayOf(current);

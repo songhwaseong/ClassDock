@@ -579,6 +579,61 @@ test("학습지 갈래에는 다녀온 지역 칸이 없다(빈 낱말 = 감춤)
   await expect(page.locator(".trip-regions-head")).toContainText("조사 지역 분포");
 });
 
+test("경비는 날마다·여행 전체로 더하고, 화폐가 섞이면 따로 센다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await expect(page.locator(".trip-budget")).toBeHidden();       // 쓴 돈이 없으면 감춘다
+
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot-cost").fill("5000");
+  await expect(page.locator(".trip-budget")).toBeVisible();
+  await expect(page.locator(".trip-budget-sum")).toContainText("이 날 5,000원");
+  await expect(page.locator(".trip-budget-sum")).toContainText("모두 5,000원");
+
+  // 둘째 날에 더 쓰면 전체만 늘어난다
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot-cost").fill("3000");
+  await expect(page.locator(".trip-budget-sum")).toContainText("이 날 3,000원");
+  await expect(page.locator(".trip-budget-sum")).toContainText("모두 8,000원");
+
+  // 화폐가 섞이면 더하지 않고 따로 센다
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots[0].cost = { amount:1200, currency:"JPY" };
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  const text = await page.locator(".trip-budget-sum").textContent();
+  expect(text).toMatch(/1,200 JPY/);
+  expect(text).toMatch(/3,000원/);
+  expect(text).not.toMatch(/4,200/);
+});
+
+test("여행 화폐가 원이 아니면 굳혀 둔 환율로 원화 환산을 함께 보여 준다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot-cost").fill("100");
+  await expect(page.locator(".trip-rate")).toBeHidden();          // 원이면 환율 칸이 없다
+
+  await page.locator(".trip-currency").fill("USD");
+  await page.locator(".trip-currency").blur();
+  await expect(page.locator(".trip-rate")).toBeVisible();
+  await page.locator(".trip-rate").fill("1350");
+  await page.locator(".trip-rate").blur();
+
+  // 쓴 돈의 화폐도 여행 화폐를 따라간다
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots[0].cost = { amount:100, currency:"USD" };
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  await expect(page.locator(".trip-budget-sum")).toContainText("≈ 135,000원");
+
+  const model = await modelOf(page);
+  expect(model.budget).toEqual({ currency:"USD", rate:1350 });
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();
