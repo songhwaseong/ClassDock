@@ -425,6 +425,10 @@ test("사진에서 장소 만들기 — 찍은 때·자리를 읽어 그 날에 
   // 합성 JPEG 는 그림 자료가 없어 못 굽는다 — 그때도 장소는 만들어지고 사진만 빠진다.
   expect(spots[0].photos.length).toBeLessThanOrEqual(1);
   await expect(page.locator(".trip-status")).toContainText("2곳을 만들었어요");
+  // 들른 곳 목록으로 내려가고 새 줄이 잠깐 밝아진다(글 칸에 포커스는 주지 않는다)
+  await expect(page.locator(".trip-spots")).toBeInViewport();
+  await expect(page.locator(".trip-spot.is-fresh")).toHaveCount(2);
+  expect(await page.evaluate(() => !!document.activeElement.closest(".trip-spot"))).toBe(false);
   // 좌표가 생겼으니 지도에 표시가 뜬다
   await expect(page.locator(".trip-map-stage path.leaflet-interactive")).toHaveCount(3);
 });
@@ -474,6 +478,63 @@ test("서로 다른 촬영 날짜는 날짜별 날을 자동으로 만들고 같
   await expect(page.locator(".trip-day-date")).toHaveValue("2026-07-21");
   await expect(page.locator(".trip-spot")).toHaveCount(1);
   await expect(page.locator(".trip-map-note")).toBeHidden();
+});
+
+test("'＋ 날' 로 날짜만 미리 채워진 빈 날은 사진을 받을 때 다시 쓰고, 고른 날짜의 빈 날은 지킨다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-20");
+  await page.locator(".trip-add-day").click();                // 07-21 이 미리 채워진 빈 날
+  const photo = when => page.evaluate(([make, w]) => [...eval(make)(w, 33.4, 126.9)], [EXIF_JPEG_MAKER, when]);
+  await page.setInputFiles(".trip-exif-btn + input[type=file]",
+    [{ name:"a.jpg", mimeType:"image/jpeg", buffer:Buffer.from(await photo("2026:07:25 10:00:00")) }]);
+  await expect.poll(async () => (await modelOf(page)).days.map(day => day.date)).toEqual(["2026-07-20", "2026-07-25"]);
+
+  // 사용자가 직접 고른 날짜는 내용이 없어도 덮어쓰지 않는다
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-28");
+  await page.setInputFiles(".trip-exif-btn + input[type=file]",
+    [{ name:"b.jpg", mimeType:"image/jpeg", buffer:Buffer.from(await photo("2026:07:30 10:00:00")) }]);
+  await expect.poll(async () => (await modelOf(page)).days.map(day => day.date))
+    .toEqual(["2026-07-20", "2026-07-25", "2026-07-28", "2026-07-30"]);
+});
+
+test("사진으로 새 날을 만들 때 사이에 둔 날짜 없는 날은 제자리에 둔다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-20");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("");
+  await page.locator(".trip-day-title").fill("이동");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-24");
+  await page.locator(".trip-day-title").fill("마지막 날");
+  const photo = when => page.evaluate(([make, w]) => [...eval(make)(w, 33.4, 126.9)], [EXIF_JPEG_MAKER, when]);
+  await page.setInputFiles(".trip-exif-btn + input[type=file]", [
+    { name:"앞.jpg", mimeType:"image/jpeg", buffer:Buffer.from(await photo("2026:07:18 10:00:00")) },
+    { name:"중간.jpg", mimeType:"image/jpeg", buffer:Buffer.from(await photo("2026:07:22 10:00:00")) }
+  ]);
+  await expect.poll(async () => (await modelOf(page)).days.map(day => day.date || day.title))
+    .toEqual(["2026-07-18", "2026-07-20", "이동", "2026-07-22", "2026-07-24"]);
+  await expect(page.locator(".trip-day-date")).toHaveValue("2026-07-18");   // 가져온 첫 날짜로 간다
+});
+
+test("사진으로 장소를 만든 직후 종이가 다시 재어져도 들른 곳 목록으로 내려가 있다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  // 실제 앱에서는 장소 사진이 뜨면서 종이 엔진이 다시 재고(layout) 스크롤 위치를 그 자리에 되써 넣는다.
+  // 굴러가기 시작하자마자 같은 일을 일으킨다 — 부드럽게 구르던 중이면 거기서 멈춰 버린다.
+  await page.evaluate(() => {
+    const main = document.querySelector(".trip-main");
+    main.addEventListener("scroll", () => { main.scrollTop = main.scrollTop; }, { once:true });
+  });
+  const bytes = await page.evaluate(make => [...eval(make)("2026:09:08 09:00:00", 33.4, 126.9)], EXIF_JPEG_MAKER);
+  await page.setInputFiles(".trip-exif-btn + input[type=file]", [{ name:"a.jpg", mimeType:"image/jpeg", buffer:Buffer.from(bytes) }]);
+  await expect(page.locator(".trip-spot")).toHaveCount(1);
+  await page.waitForTimeout(600);
+  await expect(page.locator(".trip-spots")).toBeInViewport({ ratio:0.5 });
 });
 
 test("EXIF 가 없는 사진은 장소를 만들지 않고 그렇다고 알려 준다", async ({ page }) => {
@@ -926,4 +987,46 @@ test("장소가 있는 여행일지는 탭을 열어 지도가 저절로 맞춰�
   await expect(page.locator(".office:not([hidden]) .trip-map-stage path.leaflet-interactive").first()).toBeVisible();
   await page.waitForTimeout(500);
   expect(await dirtyOf()).toBe(false);
+});
+
+test("뒤에 더한 날에 앞선 날짜를 넣으면 곧바로 제 차례로 옮겨지고 되돌리기로 돌아온다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  for (const date of ["2026-09-08", "2026-09-09", "2026-09-07"]) {
+    await page.locator(".trip-add-day").click();
+    await page.locator(".trip-day-title").fill("날 " + date);
+    await page.locator(".trip-day-date").fill(date);
+  }
+  const dates = async () => (await modelOf(page)).days.map(day => day.date);
+  await expect.poll(dates).toEqual(["2026-09-07", "2026-09-08", "2026-09-09"]);
+  await expect(page.locator(".trip-day-title")).toHaveValue("날 2026-09-07");
+  await page.locator(".trip-undo-btn").click();
+  // 더할 때 다음 날짜(09-10)가 미리 채워졌으니, 되돌리면 그 날짜로 맨 뒤에 돌아온다
+  await expect.poll(async () => (await modelOf(page)).days.map(day => day.date))
+    .toEqual(["2026-09-08", "2026-09-09", "2026-09-10"]);
+});
+
+test("여행일지에서 이미 있는 날짜를 또 고르면 받지 않고 원래 날짜로 돌려놓는다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-09-09");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-09-10");
+  await page.locator(".trip-day-date").fill("2026-09-09");
+  await expect(page.locator(".trip-day-date")).toHaveValue("2026-09-10");
+  await expect.poll(async () => (await modelOf(page)).days.map(day => day.date)).toEqual(["2026-09-09", "2026-09-10"]);
+  await expect(page.locator(".trip-day-date-display")).toHaveText("2026-09-10");
+});
+
+test("'＋ 날' 을 누르면 마지막 날의 다음 날짜가 미리 들어 있다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await expect(page.locator(".trip-day-date")).toHaveValue("");
+  await page.locator(".trip-day-date").fill("2026-09-30");
+  await page.locator(".trip-add-day").click();
+  await expect(page.locator(".trip-day-date")).toHaveValue("2026-10-01");
+  await expect(page.locator(".trip-day-date-display")).toHaveText("2026-10-01");
+  await expect.poll(async () => (await modelOf(page)).days.map(day => day.date)).toEqual(["2026-09-30", "2026-10-01"]);
 });

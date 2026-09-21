@@ -8046,6 +8046,8 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-day-date-icon{display:flex;flex:0 0 auto;color:#40557e}.trip-day-date-icon .ui-icon{width:16px;height:16px}
 .trip-day-date-field .trip-day-date{position:absolute;z-index:2;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;opacity:0;cursor:pointer}
 .trip-day-date-field .trip-day-date:disabled{cursor:default}
+.trip-day-date-field .trip-day-date::-webkit-calendar-picker-indicator{position:absolute;inset:0;width:auto;height:auto;margin:0;padding:0;background:none;cursor:pointer}
+.trip-day-date-field .trip-day-date:disabled::-webkit-calendar-picker-indicator{cursor:default}
 .trip-day-title{height:38px;padding:0 12px;border-color:rgba(125,158,193,.25);border-radius:9px;background:rgba(255,255,255,.72);font-size:14px}
 .trip-weather-btn,.trip-day-delete{width:38px;min-height:38px;padding:0;border-radius:10px;background:rgba(255,255,255,.7)}
 .trip-weather-btn{color:#f2a900}.trip-day-delete{color:#ee5f68}
@@ -8053,6 +8055,8 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-main .diary-paper{max-width:900px;border:1px solid rgba(125,158,193,.2);border-radius:16px;box-shadow:0 14px 30px rgba(47,88,124,.17),inset 0 0 0 1px rgba(255,255,255,.7)}
 .trip-prompts,.trip-spots{max-width:900px;border-color:rgba(125,158,193,.25);border-radius:14px;background:var(--trip-card);box-shadow:0 7px 18px rgba(53,107,146,.1)}
 .trip-spot{border-color:rgba(125,158,193,.22);border-radius:11px;background:color-mix(in srgb,var(--bg) 76%,transparent)}
+.trip-spot.is-fresh{animation:trip-spot-fresh 1.8s ease-out}
+@keyframes trip-spot-fresh{0%,35%{border-color:var(--trip-blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--trip-blue) 30%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
 .trip-map-divider{margin:10px 0;border-radius:999px;background:transparent}
 .trip-map-divider::before{background:rgba(92,131,172,.2)}
 .trip-map-pane{margin:0 0 0 2px;border:1px solid rgba(255,255,255,.86);border-radius:16px;background:var(--trip-card);box-shadow:0 9px 24px rgba(53,107,146,.15);overflow:hidden;backdrop-filter:blur(10px)}

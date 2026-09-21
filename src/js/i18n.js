@@ -3368,6 +3368,8 @@
     "사진 {n}장을 붙였어요.": "Added {n} {n|photo|photos}.",
     "{n}장은 붙이지 못했어요(그림 파일이 아니거나 너무 크거나 한 날 {max}장을 넘었어요).": "Couldn't add {n} (not an image, too large, or over {max} per day).",
     "{date} 일기를 지웠어요. Ctrl+Z 로 되돌릴 수 있어요.": "Deleted the entry for {date}. Press Ctrl+Z to undo.",
+    "{date} 은(는) 이미 {day}이에요. 다른 날짜를 고르세요.": "{date} is already {day}. Choose another date.",
+    "날짜에 맞춰 차례를 옮겼어요. 되돌리기 단추로 원래 자리로 돌릴 수 있어요.": "Moved the day to match its date. Use Undo to put it back.",
     "이 날 인쇄 ({date})": "Print this day ({date})",
     "이번 달 인쇄 ({month} · {n}편)": "Print this month ({month} · {n} {n|entry|entries})",
     "일기장 전체 인쇄 ({n}편)": "Print the whole diary ({n} {n|entry|entries})",

@@ -341,17 +341,44 @@ function tripMissingPhotoDates(days, infos){
     .filter(date => tripIsDateKey(date) && !existing.has(date)))].sort();
 }
 
-/* 날짜가 있는 날은 오래된 날부터, 날짜가 없는 활동지는 그 뒤에 둔다. 같은 날짜와 날짜 없는 날끼리는
-   사용자가 만든 차례를 지켜서 사진 가져오기가 기존 기록 순서를 함부로 바꾸지 않게 한다. */
-function tripSortDaysByDate(days){
-  return (Array.isArray(days) ? days : []).map((day, index) => ({ day, index })).sort((a, b) => {
-    const aDate = tripIsDateKey(a.day && a.day.date) ? a.day.date : "";
-    const bDate = tripIsDateKey(b.day && b.day.date) ? b.day.date : "";
-    if (aDate && bDate) return aDate.localeCompare(bDate) || a.index - b.index;
-    if (aDate) return -1;
-    if (bDate) return 1;
-    return a.index - b.index;
-  }).map(item => item.day);
+/* 한 날의 날짜를 고쳤을 때 그 날만 날짜 차례에 맞는 자리로 옮긴다. 이미 앞뒤 날짜 사이에 있으면
+   그대로 두고, 날짜 없는 날은 건드리지 않는다(통째로 정렬하면 사이에 끼워 둔 날짜 없는 날이 끝으로 밀린다). */
+function tripPlaceDayByDate(days, day){
+  const list = Array.isArray(days) ? days.slice() : [];
+  const from = list.indexOf(day);
+  if (from < 0 || !tripIsDateKey(day.date)) return list;
+  list.splice(from, 1);
+  const dateOf = d => (d && tripIsDateKey(d.date) ? d.date : "");
+  let lastBefore = -1, firstAfter = -1;
+  list.forEach((d, i) => {
+    const date = dateOf(d);
+    if (!date) return;
+    if (date <= day.date) lastBefore = i;
+    else if (firstAfter < 0) firstAfter = i;
+  });
+  const fits = from > lastBefore && (firstAfter < 0 || from <= firstAfter);
+  const at = fits ? from : firstAfter >= 0 && firstAfter > lastBefore ? firstAfter : lastBefore + 1;
+  list.splice(at, 0, day);
+  return list;
+}
+
+/* 여행(날) 갈래에서는 한 날짜에 날이 하나다 — 날 수 세기('5일')·사진 가져오기·날씨가 모두 날짜 하나에
+   날 하나를 기대한다. 체험학습(활동)·답사(조사 차례)는 하루에 여럿일 수 있어 막지 않는다. */
+function tripDateTakenBy(model, day, date){
+  if (!tripIsDateKey(date) || tripPurpose(model && model.purpose) !== "trip") return null;
+  return ((model && model.days) || []).find(other => other !== day && other && other.date === date) || null;
+}
+
+/* '＋ 날' 로 더하는 날의 날짜 — 여행 갈래에서 가장 늦은 날짜의 다음 날. 날짜가 하나도 없거나
+   하루에 여럿일 수 있는 활동·조사 차례면 비워 둔다. */
+function tripNextDayDate(model){
+  if (tripPurpose(model && model.purpose) !== "trip") return "";
+  const dates = ((model && model.days) || []).map(day => day && day.date).filter(tripIsDateKey).sort();
+  if (!dates.length) return "";
+  const next = new Date(dates[dates.length - 1] + "T00:00:00Z");
+  next.setUTCDate(next.getUTCDate() + 1);
+  const key = next.toISOString().slice(0, 10);
+  return tripIsDateKey(key) ? key : "";
 }
 
 function tripNormalizeMap(raw, hasAsset){
@@ -982,6 +1009,8 @@ function mountTripEditor(doc){
 
   let current = model.days.length ? model.days[0].id : "";
   let history = null;
+  // '＋ 날' 이 날짜를 미리 채운 뒤 아직 사용자가 날짜를 고르지 않은 날(문서에는 남기지 않는다).
+  const autoDated = new Set();
   let recoveryTimer = 0;
 
   /* 사진 주소는 한 번 만들어 두고 다시 쓴다(문서에 썸네일을 따로 담지 않는다). */
@@ -1523,6 +1552,7 @@ function mountTripEditor(doc){
     let fallbackDay = dayOf(current);
     if (!fallbackDay && !files.length) return;
     let made = 0, noExif = 0, noGps = 0;
+    const freshSpots = new Set();
     if (history) history.flush();
     const prepared = [];
     for (const file of files){
@@ -1536,17 +1566,26 @@ function mountTripEditor(doc){
 
     const daysByDate = new Map();
     for (const day of (model.days || [])) if (day.date && !daysByDate.has(day.date)) daysByDate.set(day.date, day);
-    let reusableBlank = fallbackDay && tripDayIsEmpty(fallbackDay) ? fallbackDay : null;
+    // 보고 있는 날이 비어 있으면 새 날을 만드는 대신 다시 쓴다. '＋ 날' 이 미리 채운 날짜만 있고 손대지
+    // 않은 날도 빈 날로 친다(사용자가 고른 날짜는 지키고) — 그 날짜로 찍은 사진이 있으면 그 자리라 그대로 둔다.
+    const photoDates = new Set(prepared.map(item => item.info.date).filter(tripIsDateKey));
+    const blank = fallbackDay && (tripDayIsEmpty(fallbackDay) || (autoDated.has(fallbackDay.id)
+      && tripDayIsEmpty({ ...fallbackDay, date:"" }) && !photoDates.has(fallbackDay.date)));
+    let reusableBlank = blank ? fallbackDay : null;
     const missingDates = tripMissingPhotoDates(model.days, prepared.map(item => item.info));
+    const placed = [];
     for (const date of missingDates){
       let day = reusableBlank;
       if (day){
+        if (daysByDate.get(day.date) === day) daysByDate.delete(day.date);
+        autoDated.delete(day.id);
         day.date = date;
         reusableBlank = null;
       } else {
         day = tripNormalizeDay({ date, title:"" });
         model.days.push(day);
       }
+      placed.push(day);
       daysByDate.set(date, day);
       if (!fallbackDay) fallbackDay = day;
       if (!current) current = day.id;
@@ -1564,8 +1603,10 @@ function mountTripEditor(doc){
       try { asset = await addAsset(file, DIARY_STICKER_MAX_DIM); }
       catch(error){ console.warn("장소 사진을 붙이지 못했어요:", error); }
       const name = String(file.name || "").replace(/\.[a-z0-9]+$/i, "").slice(0, 120);
+      const spotId = tripSpotId();
+      freshSpots.add(spotId);
       target.spots.push({
-        id:tripSpotId(), at:info.at || "", name, address:"", note:"", kind:"",
+        id:spotId, at:info.at || "", name, address:"", note:"", kind:"",
         lat:info.lat, lng:info.lat == null ? null : info.lng,
         color:"", cost:null, photos:asset ? [asset.name] : [], fields:[]
       });
@@ -1573,7 +1614,8 @@ function mountTripEditor(doc){
     }
     for (const day of (model.days || [])) day.spots = tripSortSpotsByTime(day.spots);
     const importedDates = [...new Set(prepared.map(item => item.info.date).filter(tripIsDateKey))].sort();
-    model.days = tripSortDaysByDate(model.days);
+    // 새로 만들거나 날짜를 바꾼 날만 날짜 자리에 끼운다. 통째로 정렬하면 사이에 둔 날짜 없는 날이 끝으로 밀린다.
+    for (const day of placed) model.days = tripPlaceDayByDate(model.days, day);
     // 현재 날 지도는 선택한 날만 보여 준다. 가져온 첫 날짜로 이동해야 장소와 표식이 곧바로 보인다.
     if (made && importedDates.length){
       const firstImportedDay = daysByDate.get(importedDates[0]);
@@ -1582,6 +1624,7 @@ function mountTripEditor(doc){
     // renderPage 가 종이 스티커와 장소 사진을 모델에서 함께 다시 그린다. 어느 한쪽을 덮어쓰지 않는다.
     renderRail(); renderPage();
     if (made) touch(true);
+    showFreshSpots(freshSpots);
     const parts = [];
     if (made) parts.push(tripTf("{n}곳을 만들었어요", { n:made }));
     if (noGps) parts.push(tripTf("{n}장은 찍은 자리가 없어 때만 적었어요", { n:noGps }));
@@ -2075,6 +2118,29 @@ function mountTripEditor(doc){
     select.value = value || "";
   }
 
+  /* 사진으로 만든 장소를 곧바로 보이게 — 들른 곳 목록으로 내려가고 새로 생긴 줄을 잠깐 밝힌다.
+     글 칸에 포커스를 주지 않는다(가져온 뒤 누른 글쇠가 장소 이름을 고치면 안 된다). */
+  function showFreshSpots(ids){
+    const rows = [...spotList.querySelectorAll(".trip-spot")].filter(row => ids.has(row.dataset.id));
+    if (!rows.length) return;
+    // 부드럽게 굴리지 않는다: 장소 사진이 뜨며 종이 엔진이 다시 재면(layout) scrollTop 을 되써 넣는데,
+    // 그 순간 굴러가던 스크롤이 멈춰 목록까지 못 간다. 곧장 옮겨 두면 되써 넣는 값도 그 자리다.
+    // scrollIntoView 는 바깥 칸까지 모두 굴려 편집기 전체가 위로 밀린다 — 글 칸(스크롤 칸)만 굴린다.
+    let scroller = spotsBox.parentElement;
+    while (scroller && scroller !== root && scroller.scrollHeight <= scroller.clientHeight + 1) scroller = scroller.parentElement;
+    if (!scroller || scroller === root) { spotsBox.scrollIntoView({ block:"nearest" }); }
+    else {
+      const top = scroller.scrollTop + spotsBox.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
+      scroller.scrollTop = Math.max(0, top);
+    }
+    for (const row of rows){
+      row.classList.remove("is-fresh");
+      void row.offsetWidth;
+      row.classList.add("is-fresh");
+      row.addEventListener("animationend", () => row.classList.remove("is-fresh"), { once:true });
+    }
+  }
+
   function renderSpots(){
     const day = dayOf(current);
     const purpose = tripPurpose(model.purpose);
@@ -2381,8 +2447,11 @@ function mountTripEditor(doc){
     if (history) history.flush();
     const day = tripNormalizeDay({ title:"" });
     day.title = "";
+    day.date = tripNextDayDate(model);
+    if (day.date) autoDated.add(day.id);
     model.days.push(day);
     current = day.id;
+    if (day.date) requestSpecialMonths();
     renderRail(); renderPage();
     touch(true);
     dayTitle.focus();
@@ -2408,11 +2477,28 @@ function mountTripEditor(doc){
   dayDate.addEventListener("change", () => {
     const day = dayOf(current);
     if (!day) return;
-    day.date = tripIsDateKey(dayDate.value) ? dayDate.value : "";
+    const picked = tripIsDateKey(dayDate.value) ? dayDate.value : "";
+    const taken = tripDateTakenBy(model, day, picked);
+    if (taken) {
+      // 날짜 고르개는 날짜 하나하나를 막을 수 없어서, 고른 뒤에 받지 않고 원래 날짜로 돌려놓는다.
+      dayDate.value = day.date || "";
+      setStatus(tripTf("{date} 은(는) 이미 {day}이에요. 다른 날짜를 고르세요.",
+        { date:picked, day:tripDayLabel(model, taken).replace(picked + " ", "") }));
+      return;
+    }
+    day.date = picked;
+    autoDated.delete(day.id);
+    const moved = tripPlaceDayByDate(model.days, day);
+    const reordered = moved.some((d, i) => d !== model.days[i]);
+    if (reordered) model.days = moved;
     dayDateDisplay.textContent = day.date || (tripIsEn() ? "Choose date" : "날짜 선택");
     dayDateField.classList.toggle("is-empty", !day.date);
     requestSpecialMonths();
     renderRail();
+    if (reordered) {
+      renderPage();
+      setStatus(tripT("날짜에 맞춰 차례를 옮겼어요. 되돌리기 단추로 원래 자리로 돌릴 수 있어요."));
+    }
     touch(true);
   });
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });
@@ -2723,7 +2809,7 @@ if (typeof module !== "undefined" && module.exports){
     tripPurpose, tripPurposeAt, tripWord, tripWordf, tripHasWord,
     tripSpotKinds, tripSpotKindInfo, tripSpotKindName, tripSpotKindIcon, tripSpotKindColor,
     tripIsDateKey, tripNormalizeTime, tripSortSpotsByTime, tripNormalizeSpot, tripNormalizeDay, tripDayIsEmpty,
-    tripMissingPhotoDates, tripSortDaysByDate,
+    tripMissingPhotoDates, tripPlaceDayByDate, tripDateTakenBy, tripNextDayDate,
     tripNormalizePairs, tripNormalizePrompts, tripNormalizeCost, tripNormalizeMap, tripNormalizeBudget,
     tripEmpty, tripNormalize, tripCleanDays, tripCleanSpot, tripModelJson, tripContentKey,
     tripReferencedAssets, tripPack, tripUnpack, tripIsDomestic, tripPlainText,

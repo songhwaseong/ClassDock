@@ -349,17 +349,6 @@ test("사진 묶음의 새 촬영 날짜는 중복 없이 시간순으로 날을
   assert.deepEqual(trip.tripMissingPhotoDates(null, [{ date:"2026-02-30" }, null]), []);
 });
 
-test("사진 날짜로 날을 정렬하되 같은 날짜와 날짜 없는 기록의 기존 차례는 지킨다", () => {
-  const days = [
-    { id:"late", date:"2026-09-11" }, { id:"none-a", date:"" },
-    { id:"early-a", date:"2026-09-08" }, { id:"early-b", date:"2026-09-08" },
-    { id:"middle", date:"2026-09-09" }, { id:"none-b", date:"" }
-  ];
-  assert.deepEqual(trip.tripSortDaysByDate(days).map(day => day.id),
-    ["early-a", "early-b", "middle", "late", "none-a", "none-b"]);
-  assert.deepEqual(days.map(day => day.id), ["late", "none-a", "early-a", "early-b", "middle", "none-b"]);
-});
-
 test("사진에서 만든 장소 사진은 카드에 보이고 날짜 없는 사진도 빈 여행일지에서 받는다", () => {
   const source = read("src/js/trip.js");
   const css = read("src/styles.css");
@@ -508,4 +497,37 @@ test("설계 문서가 말하는 개수와 실제가 같다", () => {
   assert.match(doc, /합집합\*\* \| \*\*13\*\*/, "부록 B 의 합집합 수");
   assert.equal(trip.TRIP_SPOT_KINDS.length, 13);
   assert.equal(trip.TRIP_PURPOSES.length, 3);
+});
+
+test("날짜를 고친 날만 날짜 차례 자리로 옮기고, 날짜 없는 날은 제자리에 둔다", () => {
+  const mk = (id, date) => ({ id, date });
+  const ids = list => list.map(day => day.id);
+  const a = mk("a", "2026-09-08"), b = mk("b", "2026-09-09"), c = mk("c", "2026-09-10"), d = mk("d", "2026-09-07");
+  assert.deepEqual(ids(trip.tripPlaceDayByDate([a, b, c, d], d)), ["d", "a", "b", "c"], "앞날을 뒤에 넣으면 맨 앞으로");
+  const e = mk("e", "2026-09-11");
+  assert.deepEqual(ids(trip.tripPlaceDayByDate([a, b, c, e], e)), ["a", "b", "c", "e"], "이미 맞는 자리면 그대로");
+  const x = mk("x", ""), m = mk("m", "2026-09-09");
+  assert.deepEqual(ids(trip.tripPlaceDayByDate([a, x, c, m], m)), ["a", "x", "m", "c"], "날짜 없는 날은 제자리");
+  assert.deepEqual(ids(trip.tripPlaceDayByDate([a, x, c], x)), ["a", "x", "c"], "날짜를 지운 날은 옮기지 않는다");
+  const same = mk("s", "2026-09-08");
+  assert.deepEqual(ids(trip.tripPlaceDayByDate([a, b, same], same)), ["a", "s", "b"], "같은 날짜는 그 날 뒤로");
+});
+
+test("여행 갈래에서만 이미 다른 날이 가진 날짜를 알려 준다", () => {
+  const a = { id:"a", date:"2026-09-09" }, b = { id:"b", date:"" };
+  assert.equal(trip.tripDateTakenBy({ purpose:"trip", days:[a, b] }, b, "2026-09-09"), a);
+  assert.equal(trip.tripDateTakenBy({ purpose:"trip", days:[a, b] }, a, "2026-09-09"), null, "자기 날짜는 괜찮다");
+  assert.equal(trip.tripDateTakenBy({ purpose:"trip", days:[a, b] }, b, "2026-09-10"), null);
+  assert.equal(trip.tripDateTakenBy({ purpose:"field", days:[a, b] }, b, "2026-09-09"), null, "활동은 하루에 여럿");
+  assert.equal(trip.tripDateTakenBy({ purpose:"survey", days:[a, b] }, b, "2026-09-09"), null, "조사 차례도 하루에 여럿");
+});
+
+test("'＋ 날' 은 여행 갈래에서 가장 늦은 날짜의 다음 날을 채운다", () => {
+  const days = [{ date:"2026-09-10" }, { date:"" }, { date:"2026-09-07" }];
+  assert.equal(trip.tripNextDayDate({ purpose:"trip", days }), "2026-09-11");
+  assert.equal(trip.tripNextDayDate({ purpose:"trip", days:[{ date:"2026-12-31" }] }), "2027-01-01", "해 넘김");
+  assert.equal(trip.tripNextDayDate({ purpose:"trip", days:[{ date:"2028-02-28" }] }), "2028-02-29", "윤년");
+  assert.equal(trip.tripNextDayDate({ purpose:"trip", days:[{ date:"" }] }), "", "날짜가 없으면 비워 둔다");
+  assert.equal(trip.tripNextDayDate({ purpose:"field", days }), "", "활동은 비워 둔다");
+  assert.equal(trip.tripNextDayDate({ purpose:"survey", days }), "", "조사 차례도 비워 둔다");
 });
