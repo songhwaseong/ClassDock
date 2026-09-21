@@ -736,9 +736,9 @@ test("큰 칸을 골라도 한 쪽 길이는 줄 간격으로 재고, 그림일�
 
 /* ---------- 저장·사진 처리 중 편집 회귀 ---------- */
 function diaryDeferred(){
-  let resolve;
-  const promise = new Promise(done => { resolve = done; });
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 function diarySaveHarness(overrides){
   const ctx = vm.createContext({
@@ -825,7 +825,8 @@ test("저장을 취소하거나 실패해도 다음 저장을 할 수 있다", a
 
 function diaryStickerHarness(){
   const pending = [];
-  let id = 0, commits = 0;
+  const statuses = [];
+  let id = 0, commits = 0, renders = 0;
   const ctx = vm.createContext({
     current:"2026-09-18", model:{ entries:[] }, paperWidth:600,
     paper:{ clientWidth:600, getBoundingClientRect:() => ({ top:0, height:600 }) }, selection:[], deleteBtn:{ disabled:true },
@@ -839,16 +840,20 @@ function diaryStickerHarness(){
     main:{ getBoundingClientRect:() => ({ top:0, height:600 }) },
     stickerLayer:{ querySelector:() => null, children:[] }, selectedStickers:() => [],
     pictureBoxRect:() => ({ left:32, top:34, width:536, height:330 }),
-    diaryT:value => value, diaryTf:value => value, setStatus:() => {},
+    diaryT:value => value, diaryTf:(value, vars) => value.replace("{n}", vars && vars.n), setStatus:value => { statuses.push(value); },
     diaryStickerId:() => "st-test-" + (++id),
-    renderStickers:() => {}, layout:() => {}, renderCalendar:() => {}, refreshDirty:() => {},
+    renderStickers:() => { renders++; }, layout:() => {}, renderCalendar:() => {}, onEntryChange:() => {}, refreshDirty:() => {},
     touch:() => { commits++; }, history:{ flush:() => {} },
     addAsset:() => { const task = diaryDeferred(); pending.push(task); return task.promise; }
   });
-  ctx.entryOf = key => ctx.model.entries.find(e => e.date === key) || null;
+  ctx.entryOf = key => ctx.model.entries.find(e => e.date === key || e.id === key) || null;
   ctx.ensureEntry = key => {
-    let entry = ctx.model.entries.find(e => e.date === key);
-    if (!entry){ entry = diary.diaryNormalizeEntry({ date:key }); ctx.model.entries.push(entry); }
+    let entry = ctx.entryOf(key);
+    if (!entry){
+      if (key) entry = diary.diaryNormalizeEntry({ date:key });
+      else { entry = { id:"dy-test-" + (++id), stickers:[] }; ctx.current = entry.id; }
+      ctx.model.entries.push(entry);
+    }
     return entry;
   };
   // 종이 엔진은 바뀌는 값(날짜·되돌리기·펜)을 바깥에서 그대로 읽지 않고 ctx 창구로 그때그때 읽는다.
@@ -863,8 +868,40 @@ function diaryStickerHarness(){
   // 바깥 표시까지 잘라 오면 return 문이 딸려 와 vm 이 "Illegal return" 으로 죽는다.
   vm.runInContext(source.slice(fitStart, source.indexOf("  function openStickerMenu", fitStart))
     + source.slice(addStart, source.indexOf("  /* ----- 바깥에 내주는 읽기 창구", addStart)), ctx);
-  return { ctx, pending, commits:() => commits, add:vm.runInContext("addStickers", ctx) };
+  return { ctx, pending, statuses, commits:() => commits, renders:() => renders, add:vm.runInContext("addStickers", ctx) };
 }
+
+test("여행일지에서도 사진 한 장을 붙인 뒤 처리 중 문구를 끝낸다", async () => {
+  const h = diaryStickerHarness();
+  const adding = h.add([{ type:"image/png" }], { x:300, y:180 });
+  assert.equal(h.statuses.at(-1), "사진을 붙이는 중…");
+  h.pending[0].resolve({ name:"assets/test1.png", w:600, h:400 });
+  await adding;
+  assert.equal(h.statuses.at(-1), "사진 1장을 붙였어요.");
+});
+
+test("사진 준비 중 예외가 나도 처리 중 문구에 머물지 않는다", async () => {
+  const h = diaryStickerHarness();
+  const adding = h.add([{ type:"image/png" }], { x:300, y:180 });
+  h.pending[0].reject(new Error("decode failed"));
+  await adding;
+  assert.match(h.statuses.at(-1), /1장은 붙이지 못했어요/);
+  assert.equal(h.commits(), 0);
+});
+
+test("빈 여행일지의 첫 사진은 새로 만든 첫날에 보이고 여러 장도 한 날에 붙는다", async () => {
+  const h = diaryStickerHarness();
+  h.ctx.current = "";
+  const adding = h.add([{ type:"image/png" }, { type:"image/png" }], { x:300, y:180 });
+  h.pending[0].resolve({ name:"assets/test1.png", w:600, h:400 });
+  await new Promise(resolve => setImmediate(resolve));
+  h.pending[1].resolve({ name:"assets/test2.png", w:600, h:400 });
+  await adding;
+  assert.equal(h.ctx.model.entries.length, 1);
+  assert.equal(h.ctx.model.entries[0].stickers.length, 2);
+  assert.equal(h.ctx.current, h.ctx.model.entries[0].id);
+  assert.equal(h.renders(), 1);
+});
 
 test("여러 사진 처리 중 날짜·폭·모델이 바뀌어도 시작 날짜에 한 번에 붙인다", async () => {
   const h = diaryStickerHarness();

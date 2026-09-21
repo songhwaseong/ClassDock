@@ -30,6 +30,7 @@
     highlighter: '<path d="m5 15 8-8 4 4-8 8H5zM12 8l4 4M4 21h16"/>',
     eraser: '<path d="m7 18-3-3a2 2 0 0 1 0-3l6-6a2 2 0 0 1 3 0l7 7a2 2 0 0 1 0 3l-2 2H7zM7 18h13"/>',
     image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 18 5-5 3 3 3-4 5 6"/>',
+    map: '<path d="M9 4 3 6.5V20l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
     chart: '<path d="M4 20V5M4 20h17M8 16v-4M13 16V8M18 16v-7"/>',
     calendar: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/>',
     school: '<path d="M2.5 9.5 12 5l9.5 4.5L12 14z"/><path d="M6.5 11.5v4.2c3 2.4 8 2.4 11 0v-4.2M21.5 9.5v5"/>',
@@ -80,6 +81,7 @@
     ,more: '<circle cx="5" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.35" fill="currentColor" stroke="none"/>'
     ,plus: '<path d="M12 5v14M5 12h14"/>'
     ,print: '<path d="M7 9V3.5h10V9"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v6.5H7z"/>'
+    ,export: '<path d="M12 15V3M7.5 7.5 12 3l4.5 4.5"/><path d="M5 11v9h14v-9"/>'
     ,shuffle: '<path d="M3 7h3.5l4 10H15M3 17h3.5l4-10H15"/><path d="m17 4 4 3-4 3M17 14l4 3-4 3"/>'
     ,paste: '<path d="M9 4h6v3H9z"/><path d="M15 5.5h2a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2h2"/><path d="M9 13h6M9 17h4"/>'
     // 악보 도구 탭 — 16px 에서도 '음표'와 '연장통'으로 갈라 보여야 해서 채운 머리·손잡이를 크게 잡는다.

@@ -14,6 +14,7 @@ for (const name of ["diaryCrc32", "diaryZipBuild", "diaryZipRead", "diaryNormali
   if (diary[name] !== undefined) globalThis[name] = diary[name];
 }
 const trip = require("../src/js/trip.js");
+const documentTypes = require("../src/js/document-types.js");
 
 const read = rel => fs.readFileSync(path.join(__dirname, "..", rel), "utf8");
 const jpg = seed => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, seed, seed + 1, seed + 2, seed + 3]);
@@ -305,6 +306,64 @@ test("EXIF 가 없거나 JPEG 가 아니면 빈 값이고 던지지 않는다", 
   assert.deepEqual(trip.tripReadExif(new Uint8Array([0xFF, 0xD8, 0xFF, 0xDA, 0, 2])), { date:"", at:"", lat:null, lng:null });
   assert.deepEqual(trip.tripReadExif(null), { date:"", at:"", lat:null, lng:null });
   assert.deepEqual(trip.tripReadExif(new Uint8Array(0)), { date:"", at:"", lat:null, lng:null });
+});
+
+test("사진에서 만든 장소 사진은 카드에 보이고 빈 여행일지에는 첫날을 만든다", () => {
+  const source = read("src/js/trip.js");
+  const css = read("src/styles.css");
+  assert.match(source, /if \(!target\)\{[\s\S]{0,180}target = ensureDay\(""\)/);
+  assert.match(source, /className = "trip-spot-photos"/);
+  assert.match(source, /window\.openImageLightbox\(spotPhotos\.map/);
+  assert.match(source, /renderRail\(\); renderPage\(\);/);
+  assert.match(css, /\.trip-spot-photo-view img\{[^}]*object-fit:cover/);
+});
+
+test("스티커·꾸미기 창은 Leaflet 동선 지도 위에 뜬다", () => {
+  const css = read("src/styles.css");
+  assert.match(css, /\.trip-root\{[^}]*position:relative;[^}]*isolation:isolate/);
+  assert.match(css, /\.trip-map-pane\{[^}]*z-index:0;[^}]*isolation:isolate/);
+  assert.match(css, /\.diary-style-panel,\.diary-art-panel\{[^}]*z-index:40/);
+});
+
+test("여행일지 탭과 칩은 공용 문서 색상표를 쓴다", () => {
+  const css = read("src/styles.css");
+  assert.equal(documentTypes.extCategory("trip", "여행일지.trip"), "trip");
+  assert.match(css, /\[data-cat="trip"\]\{--ic:#[0-9a-f]{6}\}/i);
+});
+
+test("편집 화면과 지도 화면 사이 분할 바는 폭을 조절하고 기억한다", () => {
+  const source = read("src/js/trip.js");
+  const css = read("src/styles.css");
+  assert.match(source, /className = "trip-map-divider"/);
+  assert.match(source, /body\.append\(rail, main, mapDivider, mapPane\)/);
+  assert.match(source, /localStorage\.getItem\("mn\.tripMapWidth"\)/);
+  assert.match(source, /localStorage\.setItem\("mn\.tripMapWidth"/);
+  assert.match(source, /leafletMap\.invalidateSize\(\{ pan:false \}\)/);
+  assert.match(source, /mapDivider\.addEventListener\("keydown"/);
+  assert.match(css, /\.trip-map-divider\{[^}]*cursor:col-resize;[^}]*touch-action:none/);
+  assert.match(css, /\.trip-map-divider,\.trip-map-pane\{display:none\}/);
+});
+
+test("여행일지 상단 편집 도구는 일기장처럼 글자 없는 공용 아이콘 버튼이다", () => {
+  const source = read("src/js/trip.js");
+  const icons = read("src/js/icons.js");
+  for (const [className, icon] of [
+    ["trip-photo-btn", "image"], ["trip-exif-btn", "map"], ["trip-sticker-btn", "sticker"],
+    ["trip-style-btn", "sliders"], ["trip-print-btn", "print"], ["trip-export-btn", "export"],
+    ["trip-save-btn", "save"]
+  ]) {
+    assert.match(source, new RegExp('diaryButton\\("",[^\\n]*"[^"]*' + className + '[^"]*"[^\\n]*"' + icon + '"\\)'));
+  }
+  assert.match(icons, /\bmap:\s*['"]/);
+  assert.match(icons, /,export:\s*['"]/);
+});
+
+test("들른 곳을 지우면 지도 표식·동선과 날씨도 즉시 갱신한다", () => {
+  const source = read("src/js/trip.js");
+  assert.match(source,
+    /removeBtn\.addEventListener\("click",[\s\S]*?day\.spots = day\.spots\.filter[\s\S]*?renderSpots\(\); renderRail\(\); renderMap\(\); syncWeather\(\); touch\(true\)/);
+  assert.match(source,
+    /if \(pickingFor === spot\.id\)\{[\s\S]*?pickingFor = "";[\s\S]*?mapStage\.classList\.remove\("is-picking"\)/);
 });
 
 test("찍은 때 글은 실제 있는 날만 받는다", () => {

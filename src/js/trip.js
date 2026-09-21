@@ -946,19 +946,19 @@ function mountTripEditor(doc){
   status.className = "trip-status";
   const undoBtn = diaryButton("", "실행 취소 (Ctrl+Z)", "diary-btn trip-undo-btn", "undo");
   const redoBtn = diaryButton("", "다시 실행 (Ctrl+Shift+Z)", "diary-btn trip-redo-btn", "redo");
-  const photoBtn = diaryButton("사진", "사진 붙이기", "diary-btn trip-photo-btn", "image");
+  const photoBtn = diaryButton("", "사진 붙이기", "diary-btn trip-photo-btn", "image");
   const photoInput = document.createElement("input");
   photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
-  const exifBtn = diaryButton("사진에서", "사진에 찍힌 때·자리로 장소 만들기", "diary-btn trip-exif-btn", "map");
+  const exifBtn = diaryButton("", "사진에 찍힌 때·자리로 장소 만들기", "diary-btn trip-exif-btn", "map");
   const exifInput = document.createElement("input");
   exifInput.type = "file"; exifInput.accept = "image/jpeg,image/jpg"; exifInput.multiple = true; exifInput.hidden = true;
-  const stickerBtn = diaryButton("스티커", "그림·글상자 붙이기", "diary-btn trip-sticker-btn", "sticker");
-  const styleBtn = diaryButton("꾸미기", "종이 꾸미기", "diary-btn trip-style-btn", "palette");
+  const stickerBtn = diaryButton("", "그림·글상자 붙이기", "diary-btn trip-sticker-btn", "sticker");
+  const styleBtn = diaryButton("", "종이 꾸미기", "diary-btn trip-style-btn", "sliders");
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
-  const printBtn = diaryButton("인쇄", "인쇄 · PDF 로 저장", "diary-btn trip-print-btn", "print");
-  const exportBtn = diaryButton("내보내기", "일정·지도로 내보내기", "diary-btn trip-export-btn", "export");
-  const saveBtn = diaryButton("저장", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
+  const printBtn = diaryButton("", "인쇄 · PDF 로 저장", "diary-btn trip-print-btn", "print");
+  const exportBtn = diaryButton("", "일정·지도로 내보내기", "diary-btn trip-export-btn", "export");
+  const saveBtn = diaryButton("", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
   bar.append(titleInput, purposeSelect, status, undoBtn, redoBtn, photoBtn, photoInput,
     exifBtn, exifInput, stickerBtn, styleBtn, bgInput, printBtn, exportBtn, saveBtn);
 
@@ -1011,6 +1011,16 @@ function mountTripEditor(doc){
   regionList.className = "trip-region-list";
   regionBox.append(regionHead, regionList);
   mapPane.append(mapHead, mapStage, mapNote, regionBox, stillBox);
+
+  const mapDivider = document.createElement("div");
+  mapDivider.className = "trip-map-divider";
+  mapDivider.tabIndex = 0;
+  mapDivider.setAttribute("role", "separator");
+  mapDivider.setAttribute("aria-orientation", "vertical");
+  mapDivider.title = tripIsEn()
+    ? "Drag to resize the editor and map · Double-click to reset"
+    : "드래그해서 편집 화면과 지도 화면의 크기 조절 · 더블클릭하면 초기화";
+  mapDivider.setAttribute("aria-label", mapDivider.title);
 
   const main = document.createElement("div");
   main.className = "trip-main diary-main";
@@ -1079,7 +1089,7 @@ function mountTripEditor(doc){
   promptsBox.append(promptsHead, promptList);
 
   main.append(pageHead, els.paper, promptsBox, spotsBox);
-  body.append(rail, main, mapPane);
+  body.append(rail, main, mapDivider, mapPane);
   root.append(bar, body);
 
   /* ----- 저장 여부·복구본 ----- */
@@ -1351,8 +1361,8 @@ function mountTripEditor(doc){
      찍힌 날짜와 같은 날이 여정에 있으면 그 날에, 없으면 보고 있는 날에 넣는다. 새 날을 멋대로 만들지는 않는다.
      GPS 는 개인정보라 저절로 읽지 않는다 — 이 단추를 누른 사진만 읽는다. */
   async function makeSpotsFromPhotos(files){
-    const day = dayOf(current);
-    if (!day && !files.length) return;
+    let fallbackDay = dayOf(current);
+    if (!fallbackDay && !files.length) return;
     let made = 0, noExif = 0, noGps = 0;
     if (history) history.flush();
     for (const file of files){
@@ -1361,10 +1371,18 @@ function mountTripEditor(doc){
       catch(_){ info = { date:"", at:"", lat:null, lng:null }; }
       if (!info.date && info.lat == null){ noExif++; continue; }
       if (info.lat == null) noGps++;
-      const target = (info.date && (model.days || []).find(d => d.date === info.date)) || day;
-      if (!target) continue;
+      let target = (info.date && (model.days || []).find(d => d.date === info.date)) || fallbackDay;
+      // 모든 날을 지운 뒤에도 첫 유효 사진은 받을 수 있어야 한다. 사진마다 날을 만들지는 않고
+      // 첫 장으로 한 날만 만든 뒤 나머지는 그 날에 모은다.
+      if (!target){
+        target = ensureDay("");
+        if (info.date) target.date = info.date;
+        fallbackDay = target;
+      }
       if (target.spots.length >= TRIP_MAX_SPOTS) continue;
-      const asset = await addAsset(file, DIARY_STICKER_MAX_DIM);
+      let asset = null;
+      try { asset = await addAsset(file, DIARY_STICKER_MAX_DIM); }
+      catch(error){ console.warn("장소 사진을 붙이지 못했어요:", error); }
       const name = String(file.name || "").replace(/\.[a-z0-9]+$/i, "").slice(0, 120);
       target.spots.push({
         id:tripSpotId(), at:info.at || "", name, address:"", note:"", kind:"",
@@ -1373,7 +1391,8 @@ function mountTripEditor(doc){
       });
       made++;
     }
-    renderSpots(); renderRail(); renderMap(); syncWeather();
+    // renderPage 가 종이 스티커와 장소 사진을 모델에서 함께 다시 그린다. 어느 한쪽을 덮어쓰지 않는다.
+    renderRail(); renderPage();
     if (made) touch(true);
     const parts = [];
     if (made) parts.push(tripTf("{n}곳을 만들었어요", { n:made }));
@@ -1399,6 +1418,72 @@ function mountTripEditor(doc){
   let leafletMap = null, markerLayer = null, routeLine = null, tileLayer = null;
   let mapReady = false, mapFailed = false, tilesDrawn = 0, freezing = false;
   let pickingFor = "";                  // '지도에서 찍기' 를 누른 장소 id
+
+  /* 편집 화면 ↔ 지도 화면 분할 바. 폭은 문서 내용이 아니라 보는 환경이므로 이 브라우저에만 남긴다.
+     Leaflet 은 컨테이너 폭이 바뀐 사실을 스스로 모르므로 드래그하는 동안 invalidateSize 도 함께 부른다. */
+  const TRIP_MAP_WIDTH_DEFAULT = 320;
+  let tripMapWidth = TRIP_MAP_WIDTH_DEFAULT, mapResizeRaf = 0;
+  try {
+    const saved = Number(localStorage.getItem("mn.tripMapWidth"));
+    if (saved >= 240 && saved <= 720) tripMapWidth = saved;
+  } catch(_){}
+  const tripMapWidthLimit = () => {
+    // 좁은 화면에서는 지도와 분할 바가 감춰진다. 그때 저장 폭까지 줄이지 말고 다시 넓어질 때 복원한다.
+    if (matchMedia("(max-width: 1100px)").matches) return 720;
+    return Math.max(240, Math.min(720, body.clientWidth - rail.offsetWidth - 360 - mapDivider.offsetWidth));
+  };
+  const syncMapAfterResize = () => {
+    cancelAnimationFrame(mapResizeRaf);
+    mapResizeRaf = requestAnimationFrame(() => {
+      mapResizeRaf = 0;
+      if (leafletMap) leafletMap.invalidateSize({ pan:false });
+      syncFreezeBtn();
+    });
+  };
+  const applyTripMapWidth = (next) => {
+    tripMapWidth = Math.max(240, Math.min(tripMapWidthLimit(), Number(next) || TRIP_MAP_WIDTH_DEFAULT));
+    body.style.setProperty("--trip-map", Math.round(tripMapWidth) + "px");
+    mapDivider.setAttribute("aria-valuemin", "240");
+    mapDivider.setAttribute("aria-valuemax", String(Math.round(tripMapWidthLimit())));
+    mapDivider.setAttribute("aria-valuenow", String(Math.round(tripMapWidth)));
+    syncMapAfterResize();
+  };
+  const rememberTripMapWidth = () => {
+    try { localStorage.setItem("mn.tripMapWidth", String(Math.round(tripMapWidth))); } catch(_){}
+  };
+  applyTripMapWidth(tripMapWidth);
+  mapDivider.addEventListener("pointerdown", (e) => {
+    if (matchMedia("(max-width: 1100px)").matches) return;
+    e.preventDefault();
+    mapDivider.setPointerCapture(e.pointerId);
+    mapDivider.classList.add("dragging");
+    const move = (ev) => {
+      const rect = body.getBoundingClientRect();
+      applyTripMapWidth(rect.right - ev.clientX - mapDivider.offsetWidth / 2);
+    };
+    const up = () => {
+      mapDivider.classList.remove("dragging");
+      mapDivider.removeEventListener("pointermove", move);
+      mapDivider.removeEventListener("pointerup", up);
+      mapDivider.removeEventListener("pointercancel", up);
+      rememberTripMapWidth();
+    };
+    mapDivider.addEventListener("pointermove", move);
+    mapDivider.addEventListener("pointerup", up);
+    mapDivider.addEventListener("pointercancel", up);
+  });
+  mapDivider.addEventListener("dblclick", () => {
+    applyTripMapWidth(TRIP_MAP_WIDTH_DEFAULT);
+    rememberTripMapWidth();
+  });
+  mapDivider.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    applyTripMapWidth(tripMapWidth + (e.key === "ArrowLeft" ? 20 : -20));
+    rememberTripMapWidth();
+  });
+  const onTripWindowResize = () => applyTripMapWidth(tripMapWidth);
+  window.addEventListener("resize", onTripWindowResize);
 
   /* 이 날만 볼지 여행 전체를 볼지 — 보는 사람 편의라 파일이 아니라 이 브라우저에만 남긴다.
      굳힌 그림은 이 둘을 따로 담는다(날마다 한 장 + 전체 한 장, 설계 2.3). */
@@ -1748,6 +1833,38 @@ function mountTripEditor(doc){
       line2.append(address, note);
       row.append(line1, line2);
 
+      const spotPhotos = (spot.photos || []).map((asset, at2) => ({ asset, at:at2, src:assetUrl(asset) })).filter(item => item.src);
+      if (spotPhotos.length){
+        const strip = document.createElement("div");
+        strip.className = "trip-spot-photos";
+        for (const photo of spotPhotos){
+          const tile = document.createElement("div");
+          tile.className = "trip-spot-photo";
+          const view = document.createElement("button");
+          view.type = "button"; view.className = "trip-spot-photo-view";
+          view.title = tripT("사진 크게 보기");
+          const img = document.createElement("img");
+          img.src = photo.src; img.alt = spot.name || tripT("장소 사진");
+          view.append(img);
+          view.addEventListener("click", () => {
+            if (typeof window.openImageLightbox !== "function") return;
+            window.openImageLightbox(spotPhotos.map((item, i) => ({
+              src:item.src, alt:(spot.name || tripT("장소 사진")) + (spotPhotos.length > 1 ? " (" + (i + 1) + "/" + spotPhotos.length + ")" : "")
+            })), photo.at);
+          });
+          const removePhoto = diaryButton("", "이 사진 빼기", "diary-btn trip-spot-photo-remove", "close");
+          removePhoto.addEventListener("click", () => {
+            if (history) history.flush();
+            spot.photos = (spot.photos || []).filter(name2 => name2 !== photo.asset);
+            renderSpots(); touch(true);
+            setStatus(tripT("사진을 뺐어요. Ctrl+Z 로 되돌릴 수 있어요."));
+          });
+          tile.append(view, removePhoto);
+          strip.append(tile);
+        }
+        row.append(strip);
+      }
+
       if (showCost){
         const line3 = document.createElement("div");
         line3.className = "trip-spot-line";
@@ -1814,7 +1931,13 @@ function mountTripEditor(doc){
       removeBtn.addEventListener("click", () => {
         if (history) history.flush();
         day.spots = day.spots.filter(s => s.id !== spot.id);
-        renderSpots(); renderRail(); touch(true);
+        // 장소와 지도는 같은 자료를 읽는다. 목록에서 뺀 즉시 표식·동선·지역 집계와
+        // 그 장소를 기준으로 하던 날씨까지 함께 다시 그려야 지도에 낡은 표식이 남지 않는다.
+        if (pickingFor === spot.id){
+          pickingFor = "";
+          mapStage.classList.remove("is-picking");
+        }
+        renderSpots(); renderRail(); renderMap(); syncWeather(); touch(true);
         setStatus(tripT("지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
       });
       spotList.append(row);
@@ -2256,6 +2379,8 @@ function mountTripEditor(doc){
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
     clearTimeout(recoveryTimer);
+    cancelAnimationFrame(mapResizeRaf);
+    window.removeEventListener("resize", onTripWindowResize);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
     if (typeof paperApi.destroyPaper === "function") paperApi.destroyPaper();

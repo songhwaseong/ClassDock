@@ -7888,12 +7888,13 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
   --diary-sun:#f87171;--diary-sat:#60a5fa;--diary-mark:#f472b6
 }
 /* ===== 여행일지(.trip) ===== 종이는 일기장 것을 그대로 쓰고(diary-doc·diary-paper), 여기서는 둘레만 꾸민다. */
-.trip-root{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg)}
+[data-cat="trip"]{--ic:#0891b2}
+.trip-root{position:relative;isolation:isolate;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg)}
 .trip-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border);z-index:20}
 .trip-title{flex:1;min-width:120px;max-width:420px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:14px;font-weight:600}
 .trip-select{padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
 .trip-status{flex:1;min-width:0;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.trip-body{flex:1;min-height:0;display:grid;grid-template-columns:var(--trip-rail,240px) minmax(0,1fr) var(--trip-map,320px)}
+.trip-body{flex:1;min-height:0;display:grid;grid-template-columns:var(--trip-rail,240px) minmax(0,1fr) 10px var(--trip-map,320px)}
 .trip-rail{display:flex;flex-direction:column;gap:6px;min-height:0;padding:10px;border-right:1px solid var(--border);background:var(--panel);overflow:auto}
 .trip-rail-head{color:var(--muted);font-size:12px;font-weight:600;padding:0 2px 2px}
 .trip-rail-list{display:flex;flex-direction:column;gap:6px}
@@ -7910,7 +7911,12 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-weather-text{color:var(--muted);font-size:12px}
 .trip-day-date{padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
 
-.trip-map-pane{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--border);background:var(--panel)}
+/* Leaflet pane 은 내부 z-index가 최대 1000이다. 지도 자체를 낮은 stacking context에 가두지 않으면
+   z-index:40인 공용 스티커·꾸미기 창이 지도 영역에서 뒤로 숨어 버린다. */
+.trip-map-divider{position:relative;z-index:4;min-width:10px;cursor:col-resize;touch-action:none;outline:0;background:var(--panel)}
+.trip-map-divider::before{content:"";position:absolute;top:0;bottom:0;left:4px;width:2px;background:var(--border);transition:background .12s,width .12s,left .12s}
+.trip-map-divider:hover::before,.trip-map-divider.dragging::before,.trip-map-divider:focus-visible::before{left:3px;width:4px;background:var(--accent)}
+.trip-map-pane{position:relative;z-index:0;isolation:isolate;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel)}
 .trip-map-head{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border)}
 .trip-map-title{flex:1;color:var(--muted);font-size:12px;font-weight:600}
 .trip-route-btn.is-on{color:var(--accent);border-color:var(--accent)}
@@ -7928,7 +7934,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-map-note{margin:0;padding:8px 10px;color:var(--muted);font-size:12px}
 .trip-spot-pick.is-on{color:var(--accent)}
 @media (max-width:1100px){.trip-body{grid-template-columns:var(--trip-rail,240px) minmax(0,1fr)}
-  .trip-map-pane{display:none}}
+  .trip-map-divider,.trip-map-pane{display:none}}
 @media (max-width:760px){.trip-body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
   .trip-rail{border-right:0;border-bottom:1px solid var(--border);max-height:34vh}}
 .trip-prompts,.trip-spots{max-width:780px;margin:14px auto 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
@@ -7951,6 +7957,11 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-spot-name{flex:1}
 .trip-spot-addr{flex:1}
 .trip-spot-note{flex:1.4}
+.trip-spot-photos{display:flex;flex-wrap:wrap;gap:7px;padding-top:2px}
+.trip-spot-photo{position:relative;width:96px;height:72px;border:1px solid var(--border);border-radius:7px;overflow:hidden;background:var(--panel)}
+.trip-spot-photo-view{display:block;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:zoom-in}
+.trip-spot-photo-view img{display:block;width:100%;height:100%;object-fit:cover}
+.trip-spot-photo-remove{position:absolute;top:3px;right:3px;width:24px;min-height:24px;padding:0;border-radius:999px;background:color-mix(in srgb,var(--bg) 82%,transparent)}
 .trip-spot-cost{width:110px;text-align:right}
 .trip-spot-cost-unit{color:var(--muted);font-size:12px}
 .trip-kind-foreign{color:var(--muted)}

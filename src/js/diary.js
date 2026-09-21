@@ -2717,7 +2717,7 @@ function mountDiaryPaper(els, paperEnv){
   async function addStickers(files, at, fit){
     const blobs = [...(files || [])].filter(f => f && /^image\//i.test(f.type || ""));
     if (!blobs.length) return;
-    const targetDate = paperEnv.current();
+    let targetDate = paperEnv.current();
     const targetBox = fit ? pictureBoxRect() : null;
     setStatus(diaryT("사진을 붙이는 중…"));
     const w = paperWidth || paper.clientWidth || 600;
@@ -2727,9 +2727,19 @@ function mountDiaryPaper(els, paperEnv){
     let added = 0, skipped = 0;
     for (const blob of blobs){
       if (prepared.length >= DIARY_MAX_STICKERS){ skipped++; continue; }
-      const asset = await addAsset(blob, DIARY_STICKER_MAX_DIM);
+      let asset = null;
+      try { asset = await addAsset(blob, DIARY_STICKER_MAX_DIM); }
+      catch(error){ console.warn("사진을 붙이지 못했어요:", error); }
       if (!asset){ skipped++; continue; }
       prepared.push(asset);
+    }
+    // 빈 여행일지에는 아직 첫날 id가 없다. 첫 사진을 준비한 뒤 날을 만들면 ensureEntry("")가 새 id를
+    // 만들 수 있으므로, 그 실제 id를 이후 추가·화면 갱신에 계속 쓴다. 그렇지 않으면 사진 바이트와
+    // 스티커는 들어가도 현재 id와 비교가 어긋나 화면에 그리지 않고, 여러 장은 날도 여러 개 만든다.
+    if (prepared.length && !entryOf(targetDate)){
+      const created = ensureEntry(targetDate);
+      const createdKey = created && (created.date || created.id);
+      if (createdKey) targetDate = createdKey;
     }
     if (prepared.length && paperEnv.history()) paperEnv.history().flush();
     const fresh = [];
@@ -2776,6 +2786,9 @@ function mountDiaryPaper(els, paperEnv){
     // 여러 장은 이미 정렬해 두었다고 알려 준다 — 다른 모양으로 깔 길(우클릭)도 여기서 한 번 짚어 준다.
     else if (fitted > 1) setStatus(diaryTf("사진 {n}장을 그림 칸에 나눠 맞췄어요.", { n:fitted }));
     else if (fresh.length > 1) setStatus(diaryTf("사진 {n}장을 줄 맞춰 깔았어요 — 우클릭 '정렬해서 깔기' 로 격자·사진첩 모양으로 바꿀 수 있어요.", { n:fresh.length }));
+    // 일기장 refreshDirty 는 저장 상태를 문구로 쓰지만 여행일지는 그렇지 않다. 한 장 성공도 직접 끝났다고
+    // 알려 주지 않으면 여행일지 막대에는 시작 문구인 "사진을 붙이는 중…"이 영원히 남는다.
+    else if (added) setStatus(diaryTf("사진 {n}장을 붙였어요.", { n:added }));
     else refreshDirty();
   }
 
