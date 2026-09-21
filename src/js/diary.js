@@ -16,14 +16,15 @@ const DIARY_FORMAT = "classdock-diary";
 // · 6: 원고지 한 줄 칸 수(genkoCols) · 7: 태그·즐겨찾기 · 8: 스티커 갈래(kind) — 내장 그림(art)·글상자(text).
 // · 9: 종이 배경 효과(paper·paperColor·paperTone)·인쇄할 땐 배경 빼기(printPlain).
 // · 10: 내장 그림 스티커·글상자 투명도(opacity) · 11: 내장 그림 스티커 80종으로 확장.
+// · 12: 줄 무늬 8종 추가(두 줄·세 줄·점선·목록·세로줄·십자·오선·사선 격자).
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 11;
+const DIARY_VERSION = 12;
 const DIARY_JSON_NAME = "diary.json";
-const DIARY_LINES = ["ruled", "grid", "dots", "blank", "picture", "genko"];
-const DIARY_LINE_LABELS = { ruled:"줄 공책", grid:"모눈", dots:"점", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
+const DIARY_LINES = ["ruled", "double", "triple", "dashed", "list", "grid", "columns", "dots", "crosses", "staff", "diagonal", "blank", "picture", "genko"];
+const DIARY_LINE_LABELS = { ruled:"줄 공책", double:"두 줄", triple:"세 줄", dashed:"점선", list:"목록", grid:"모눈", columns:"세로줄", dots:"점", crosses:"십자", staff:"오선", diagonal:"사선 격자", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
 // 짧은 이름은 앱 공용 사전(i18n.js) 대신 여기 영어를 함께 둔다 — "점"·"비"·"눈" 같은 한두 글자를 사전에 넣으면
 // 다른 화면의 같은 글자까지 바뀐다. diaryLabel(한국어 표, 영어 표, 값)으로 고른다.
-const DIARY_LINE_LABELS_EN = { ruled:"Lined", grid:"Grid", dots:"Dots", blank:"Blank", picture:"Picture diary", genko:"Manuscript" };
+const DIARY_LINE_LABELS_EN = { ruled:"Lined", double:"Double line", triple:"Triple line", dashed:"Dashed", list:"List", grid:"Grid", columns:"Columns", dots:"Dots", crosses:"Crosses", staff:"Staff", diagonal:"Diagonal grid", blank:"Blank", picture:"Picture diary", genko:"Manuscript" };
 // 고딕·바탕·궁서·굴림은 Windows·Mac 에 기본으로 있는 글꼴을 쓰고, 손글씨(나눔손글씨 펜·붓, OFL)는 앱에 담아 두었다가
 // 고를 때만 읽는다(vendor/hand-font-*.js, 약 0.8MB 씩 — 오프라인 앱이라 웹 글꼴을 받을 수 없다).
 const DIARY_FONTS = ["gothic", "myeongjo", "gungseo", "gulim", "pen", "brush"];
@@ -1322,7 +1323,7 @@ function diaryUsesGenko(style){ return !!style && (style.lines === "genko" || st
 function diaryLineMetrics(style, width){
   const gap = DIARY_GAPS[style && style.gap] || DIARY_GAPS.normal;
   const lines = style && DIARY_LINES.includes(style.lines) ? style.lines : "ruled";
-  const padLeft = lines === "ruled" ? 64 : (lines === "blank" || lines === "picture") ? 40 : gap * 2;
+  const padLeft = lines === "ruled" || lines === "list" ? 64 : (lines === "blank" || lines === "picture") ? 40 : gap * 2;
   const fontSize = Math.round((DIARY_FONT_SIZES[style && style.gap] || 16) * diaryFontScale(style && style.font));
   const lift = Math.max(0, Math.round(gap / 2 - fontSize * 0.62));
   const box = lines === "picture" ? diaryPictureBox(style, width) : null;
@@ -1332,7 +1333,9 @@ function diaryLineMetrics(style, width){
 function diaryLineBackground(style){
   const { gap, lines, lift } = diaryLineMetrics(style);
   const line = "var(--diary-line)";
+  const light = "color-mix(in srgb, var(--diary-line) 60%, transparent)";
   const rule = `linear-gradient(to bottom, transparent ${gap - 1}px, ${line} ${gap - 1}px, ${line} ${gap}px)`;
+  const guide = (at) => `linear-gradient(to bottom, transparent ${at - 1}px, ${light} ${at - 1}px, ${light} ${at}px, transparent ${at}px)`;
   if (lines === "ruled"){
     return {
       image:`linear-gradient(to right, transparent 48px, var(--diary-margin) 48px, var(--diary-margin) 49.5px, transparent 49.5px), ${rule}`,
@@ -1344,6 +1347,38 @@ function diaryLineBackground(style){
       image:`${rule}, linear-gradient(to right, transparent ${gap - 1}px, ${line} ${gap - 1}px, ${line} ${gap}px)`,
       size:`100% ${gap}px, ${gap}px 100%`, position:`0 ${-lift}px, 0 0`, repeat:"repeat, repeat"
     };
+  }
+  if (lines === "double" || lines === "triple"){
+    const at = lines === "double" ? [Math.round(gap / 2)] : [Math.round(gap / 3), Math.round(gap * 2 / 3)];
+    const images = [rule, ...at.map(guide)];
+    return { image:images.join(", "), size:images.map(() => `100% ${gap}px`).join(", "),
+      position:images.map(() => `0 ${-lift}px`).join(", "), repeat:images.map(() => "repeat").join(", ") };
+  }
+  if (lines === "dashed"){
+    return { image:`radial-gradient(ellipse 3px 1px at 4px ${gap - 1}px, ${line} 98%, transparent 100%)`,
+      size:`10px ${gap}px`, position:`0 ${-lift}px`, repeat:"repeat" };
+  }
+  if (lines === "list"){
+    return { image:`radial-gradient(circle at 28px ${Math.round(gap / 2)}px, var(--diary-dot) 3px, transparent 3.5px), ${rule}`,
+      size:`100% ${gap}px, 100% ${gap}px`, position:`0 ${-lift}px, 0 ${-lift}px`, repeat:"repeat, repeat" };
+  }
+  if (lines === "columns"){
+    return { image:`linear-gradient(to right, transparent ${gap * 4 - 1}px, ${light} ${gap * 4 - 1}px, ${light} ${gap * 4}px)`,
+      size:`${gap * 4}px 100%`, position:"0 0", repeat:"repeat" };
+  }
+  if (lines === "crosses"){
+    return { image:`radial-gradient(ellipse 4px 0.8px at 50% 50%, var(--diary-dot) 98%, transparent 100%), radial-gradient(ellipse 0.8px 4px at 50% 50%, var(--diary-dot) 98%, transparent 100%)`,
+      size:`${gap}px ${gap}px, ${gap}px ${gap}px`, position:`0 ${-lift}px, 0 ${-lift}px`, repeat:"repeat, repeat" };
+  }
+  if (lines === "staff"){
+    const marks = [1, 2, 3, 4, 5].map(n => guide(Math.round(gap * n / 6)));
+    return { image:marks.join(", "), size:marks.map(() => `100% ${gap}px`).join(", "),
+      position:marks.map(() => `0 ${-lift}px`).join(", "), repeat:marks.map(() => "repeat").join(", ") };
+  }
+  if (lines === "diagonal"){
+    const step = gap * 2;
+    return { image:`repeating-linear-gradient(60deg, transparent 0, transparent ${step - 1}px, ${light} ${step - 1}px, ${light} ${step}px), repeating-linear-gradient(-60deg, transparent 0, transparent ${step - 1}px, ${light} ${step - 1}px, ${light} ${step}px)`,
+      size:"auto, auto", position:"0 0, 0 0", repeat:"repeat, repeat" };
   }
   if (lines === "dots"){
     const half = gap / 2;

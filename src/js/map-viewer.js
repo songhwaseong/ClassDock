@@ -4791,6 +4791,23 @@ async function searchMapForText(raw, options){
 /* 연대표처럼 저장된 주소를 넘기는 화면은 문단 선택보다 긴 검색어를 쓸 수 있다. 나머지 이동·후보
    선택 흐름은 우클릭의 지도 검색과 똑같이 유지한다. */
 function searchMapForPlace(raw){ return searchMapForText(raw, { allowAddress:true }); }
+/* 다른 문서가 이미 아는 좌표는 이름을 재검색하지 않고 지도에 임시 점으로 보여 준다. */
+async function showMapCoordinate(lat, lng, label){
+  const pointLat = Number(lat), pointLng = Number(lng);
+  if (!Number.isFinite(pointLat) || Math.abs(pointLat) > 85
+      || !Number.isFinite(pointLng) || Math.abs(pointLng) > 180) return null;
+  const doc = mapRecentMapDoc() || await newMapScratch();
+  if (!doc) return null;
+  if (typeof setActiveDoc === "function") setActiveDoc(doc.id);
+  const pending = { lat:pointLat, lng:pointLng, label:String(label || "").slice(0, 120) };
+  doc._mapPendingCoordinate = pending;
+  if (typeof ensureRendered === "function") await ensureRendered(doc);
+  if (doc._mapPendingCoordinate === pending && typeof doc.mapShowCoordinate === "function"){
+    doc._mapPendingCoordinate = null;
+    doc.mapShowCoordinate(pending);
+  }
+  return doc;
+}
 /* 우클릭 메뉴 한 줄 — 글자를 다루는 메뉴라면 어디서든 같은 꼴로 쓴다(편집기·표 셀·보기 화면).
    고른 것이 없거나 문단째 긁었으면 흐리게 둔다 — 감추면 이런 길이 있다는 것을 알 수 없다. */
 function mapSearchMenuItem(selectedText){
@@ -8428,6 +8445,15 @@ async function mountMapEditor(doc){
   /* 다른 문서에서 고른 낱말로 찾아 달라는 부탁(searchMapForText)을 받는 창구. 탭이 그려지기 전에
      들어온 부탁은 _mapPendingSearch 에 담겨 오므로, 검색칸이 준비된 지금 자리에서 함께 처리한다. */
   doc.mapSearchFor = (text) => placeSearch.searchFor(text);
+  doc.mapShowCoordinate = (point) => {
+    moveToSearchLocation(point.lat, point.lng, 15, point.label);
+    setStatus(mapT("고른 좌표를 빨간 점으로 표시했어요 (Esc 로 지우기)"));
+  };
+  if (doc._mapPendingCoordinate){
+    const pending = doc._mapPendingCoordinate;
+    doc._mapPendingCoordinate = null;
+    doc.mapShowCoordinate(pending);
+  }
   if (doc._mapPendingSearch){
     const pending = doc._mapPendingSearch;
     doc._mapPendingSearch = null;
@@ -9001,6 +9027,7 @@ async function mountMapEditor(doc){
     try { map.remove(); } catch(_){}
     doc.mapInstance = null;
     doc.mapSearchFor = null;      // 닫힌 탭의 검색칸을 다른 문서가 계속 부르지 않게
+    doc.mapShowCoordinate = null;
     doc.printMap = null;          // 닫힌 지도를 머리글 인쇄 단추가 계속 부르지 않게
   });
 

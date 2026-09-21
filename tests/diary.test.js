@@ -177,6 +177,27 @@ test("줄 무늬는 줄 간격과 글줄 높이가 같고, 줄 공책엔 여백�
   }
   assert.equal(diary.diaryLineBackground({ lines:"blank" }).image, "none");
   assert.match(diary.diaryLineBackground({ lines:"dots", gap:"normal" }).image, /radial-gradient/);
+  assert.equal(diary.DIARY_LINES.length, 14);
+  for (const lines of diary.DIARY_LINES){
+    assert.equal(diary.diaryNormalizeStyle({ lines }).lines, lines);
+    if (lines === "blank" || lines === "picture" || lines === "genko") continue;
+    for (const gap of Object.keys(diary.DIARY_GAPS)){
+      const bg = diary.diaryLineBackground({ lines, gap });
+      assert.notEqual(bg.image, "none", lines + " / " + gap);
+      assert.ok(bg.size && bg.position && bg.repeat, lines + " / " + gap);
+    }
+  }
+  assert.equal(diary.diaryLineMetrics({ lines:"list", gap:"normal" }).padLeft, 64);
+});
+
+test("새 줄 무늬는 전체와 날짜별 꾸미기로 저장했다 열어도 유지된다", async () => {
+  const model = diary.diaryEmpty();
+  model.style.lines = "double";
+  model.entries = [{ date:"2026-09-21", title:"", text:"기록", style:{ ...diary.diaryDefaultStyle(), lines:"diagonal" }, stickers:[] }];
+  const back = await diary.diaryUnpack(diary.diaryPack(model, new Map()));
+  assert.equal(back.model.version, 12);
+  assert.equal(back.model.style.lines, "double");
+  assert.equal(back.model.entries[0].style.lines, "diagonal");
 });
 
 test("따로 꾸민 날은 그 날의 꾸미기를, 나머지는 일기장 꾸미기를 쓴다", () => {
@@ -540,9 +561,9 @@ test("내장 그림·글상자만 붙인 날도 빈 날로 버리지 않는다",
   }
 });
 
-test("내장 그림 스티커가 확장된 파일은 version 11 이고 다음 버전은 거절한다", () => {
-  assert.equal(diary.DIARY_VERSION, 11);
-  const json = JSON.stringify({ format:"classdock-diary", version:12, title:"미래", entries:[] });
+test("줄 무늬가 확장된 파일은 version 12 이고 다음 버전은 거절한다", () => {
+  assert.equal(diary.DIARY_VERSION, 12);
+  const json = JSON.stringify({ format:"classdock-diary", version:13, title:"미래", entries:[] });
   assert.throws(() => diary.diaryNormalize(JSON.parse(json)), /diary-version/);
 });
 

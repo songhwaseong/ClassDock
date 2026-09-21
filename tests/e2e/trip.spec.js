@@ -446,6 +446,33 @@ test("찍힌 날짜와 같은 날이 여정에 있으면 그 날로 간다", asy
   expect(model.days[1].spots.length).toBe(0);
 });
 
+test("서로 다른 촬영 날짜는 날짜별 날을 자동으로 만들고 같은 날짜 사진은 함께 모은다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-23");
+  await page.locator(".trip-day-title").fill("나중 일정");
+  const files = await page.evaluate(make => {
+    const makeJpeg = eval(make);
+    return [
+      [...makeJpeg("2026:07:22 17:30:00", 33.5, 126.9)],
+      [...makeJpeg("2026:07:21 08:20:00", 33.4, 126.8)],
+      [...makeJpeg("2026:07:22 14:10:00", 33.6, 127.0)]
+    ];
+  }, EXIF_JPEG_MAKER);
+  await page.setInputFiles(".trip-exif-btn + input[type=file]", files.map((bytes, i) => ({
+    name:"여행사진" + (i + 1) + ".jpg", mimeType:"image/jpeg", buffer:Buffer.from(bytes)
+  })));
+
+  const model = await modelOf(page);
+  expect(model.days.map(day => day.date)).toEqual(["2026-07-21", "2026-07-22", "2026-07-23"]);
+  expect(model.days.map(day => day.spots.length)).toEqual([1, 2, 0]);
+  expect(model.days[1].spots.map(spot => spot.at)).toEqual(["14:10", "17:30"]);
+  await expect(page.locator(".trip-day-date")).toHaveValue("2026-07-21");
+  await expect(page.locator(".trip-spot")).toHaveCount(1);
+  await expect(page.locator(".trip-map-note")).toBeHidden();
+});
+
 test("EXIF 가 없는 사진은 장소를 만들지 않고 그렇다고 알려 준다", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

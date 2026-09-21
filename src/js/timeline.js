@@ -149,9 +149,19 @@ function timelineNormalizePhoto(raw){
   };
 }
 
+function timelineCoordinate(value, limit){
+  if (value == null || (typeof value === "string" && !value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number) <= limit ? number : null;
+}
+function timelineHasCoordinates(event){
+  return !!event && Number.isFinite(event.lat) && Number.isFinite(event.lng);
+}
 function timelineNormalizeEvent(raw, index){
   const value = raw && typeof raw === "object" ? raw : {};
   const color = TIMELINE_COLORS.some(item => item.id === value.color) ? value.color : "blue";
+  const lat = timelineCoordinate(value.lat, 85);
+  const lng = timelineCoordinate(value.lng, 180);
   return {
     id:String(value.id || "") || timelineEventId(),
     title:String(value.title == null ? "" : value.title).slice(0, 120),
@@ -160,6 +170,8 @@ function timelineNormalizeEvent(raw, index){
     category:String(value.category == null ? "" : value.category).trim().slice(0, 60),
     placeName:String(value.placeName == null ? "" : value.placeName).trim().slice(0, 120),
     placeAddress:String(value.placeAddress == null ? "" : value.placeAddress).trim().slice(0, 200),
+    lat:lat == null || lng == null ? null : lat,
+    lng:lat == null || lng == null ? null : lng,
     description:String(value.description == null ? "" : value.description).slice(0, 4000),
     color,
     imageFileName:String(value.imageFileName == null ? "" : value.imageFileName).trim().replace(/\\/g, "/").slice(0, 260),
@@ -797,7 +809,7 @@ function timelineSafeName(value){
 function timelineDownload(name, blob){ MNDownload.saveBlob(blob, name); }
 
 async function timelinePreparePhoto(file){
-  if (!file || !/^image\/(?:png|jpeg|webp)$/i.test(String(file.type || ""))) throw new Error("photo-type");
+  if (!file || !/^image\/(?:png|jpeg|webp|gif)$/i.test(String(file.type || ""))) throw new Error("photo-type");
   if (file.size > 20 * 1024 * 1024) throw new Error("photo-too-large");
   const url = URL.createObjectURL(file);
   try {
@@ -1053,7 +1065,7 @@ function mountTimelineEditor(doc){
     contextLaterBtn.title = timelineT(trip ? "같은 시작 시각에서 뒤 일정으로 이동" : "같은 날짜에서 뒤 사건으로 이동");
     contextLaterBtn.disabled = !timelineCanMoveEvent(model.events, event.id, 1);
     contextMapBtn.textContent = timelineT(trip ? "지도에서 장소 찾기" : "지도에서 유적지 찾기");
-    contextMapBtn.hidden = !(event.placeName || event.placeAddress);
+    contextMapBtn.hidden = !(event.placeName || event.placeAddress || timelineHasCoordinates(event));
     contextDeleteBtn.textContent = timelineT(trip ? "일정 삭제" : "사건 삭제");
     contextMenu.hidden = false;
     const pad = 8;
@@ -1221,14 +1233,20 @@ function mountTimelineEditor(doc){
 
   const placeText = event => [event && event.placeName, event && event.placeAddress].filter(Boolean).join(" · ");
   async function searchTimelinePlace(event){
+    const hasCoordinates = timelineHasCoordinates(event);
     const query = String(event && (event.placeAddress || event.placeName) || "").trim();
-    if (!query) return;
-    if (typeof globalThis.searchMapForPlace !== "function"){
+    if (!hasCoordinates && !query) return;
+    const show = hasCoordinates ? globalThis.showMapCoordinate : globalThis.searchMapForPlace;
+    if (typeof show !== "function"){
       if (typeof toast === "function") toast(timelineT("지도를 열 수 없어요."), 2400, { type:"error" });
       return;
     }
-    try { await globalThis.searchMapForPlace(query); }
-    catch(_){ if (typeof toast === "function") toast(timelineT(tripMode() ? "지도에서 장소를 찾지 못했어요." : "지도에서 유적지를 찾지 못했어요."), 2800, { type:"error" }); }
+    try {
+      if (hasCoordinates) await show(event.lat, event.lng, event.placeName || event.title || "");
+      else await show(query);
+    } catch(_){
+      if (typeof toast === "function") toast(timelineT(tripMode() ? "지도에서 장소를 찾지 못했어요." : "지도에서 유적지를 찾지 못했어요."), 2800, { type:"error" });
+    }
   }
 
   function timelinePlaceButton(event, className){
@@ -1608,6 +1626,7 @@ function mountTimelineEditor(doc){
         id:existing ? existing.id : timelineEventId(),
         title:title.value.trim(), start:start.value.trim(), end:end.value.trim(),
         category:category.value.trim(), placeName:placeName.value.trim(), placeAddress:placeAddress.value.trim(),
+        lat:existing ? existing.lat : null, lng:existing ? existing.lng : null,
         description:description.value, color:color.value,
         imageFileName:draftImage ? draftImage.name : (existing && !existing.image ? existing.imageFileName : ""),
         image:draftImage, order:existing ? existing.order : model.events.length

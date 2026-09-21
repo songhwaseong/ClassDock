@@ -34,7 +34,7 @@ function loadMapViewer(windowOverrides){
       , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, mapKakaoPlaceSlides, MAP_SPOT_MIN_ZOOM
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
-      , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, MAP_SEARCH_QUERY_MAX, mapSearchTextFrom, mapSearchQueryFrom, mapSearchMenuItem
+      , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, MAP_SEARCH_QUERY_MAX, mapSearchTextFrom, mapSearchQueryFrom, mapSearchMenuItem, showMapCoordinate
       , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
       , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
@@ -48,6 +48,7 @@ function loadMapViewer(windowOverrides){
       , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_TOTAL_CHOICES, MAP_NEARBY_DEFAULT_TOTAL
       , MAP_NEARBY_MAX_PER_KIND, mapNearbyKindLimits, mapNearbyKindColors
     };`, context);
+  context.__map.__context = context;
   return context.__map;
 }
 
@@ -1769,6 +1770,24 @@ test("고른 낱말은 최근에 보던 지도로, 열린 지도가 없으면 �
   assert.match(source, /function searchMapForPlace\(raw\)\{ return searchMapForText\(raw, \{ allowAddress:true \}\); \}/);
 });
 
+test("일정의 좌표는 주소 검색 없이 열린 지도에 표시 요청을 보낸다", async () => {
+  const api = loadMapViewer();
+  const context = api.__context;
+  const shown = [];
+  const doc = { id:17, kind:"map", closed:false, mapShowCoordinate:point => shown.push(point) };
+  context.docs = [doc];
+  context.activeMru = [17];
+  context.setActiveDoc = id => { assert.equal(id, 17); };
+  context.ensureRendered = async value => { assert.equal(value, doc); };
+  const opened = await api.showMapCoordinate(33.458, 126.942, "성산일출봉");
+  assert.equal(opened, doc);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].lat, 33.458);
+  assert.equal(shown[0].lng, 126.942);
+  assert.equal(shown[0].label, "성산일출봉");
+  assert.equal(doc._mapPendingCoordinate, null);
+  assert.equal(await api.showMapCoordinate(91, 126.942, "잘못된 좌표"), null);
+});
 test("지도 탭은 검색칸이 준비된 자리에서 다른 문서의 부탁을 받는다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   assert.match(source, /closeResults\.searchFor = \(text\) => \{/);

@@ -3137,6 +3137,7 @@
     "검정": "Black",
     "지도를 클릭하면 그 자리에 표시가 생겨요 (Esc 로 취소)": "Click the map to drop a pin there (Esc to cancel)",
     "찾은 곳을 빨간 점으로 표시했어요 (Esc 로 지우기)": "Marked the place you found with a red dot (Esc to clear)",
+    "고른 좌표를 빨간 점으로 표시했어요 (Esc 로 지우기)": "Marked the selected coordinates with a red dot (Esc to clear)",
     "이 검색어 지우기": "Remove this search",
     "검색 기록 지우기": "Clear search history",
     "인터넷이 없어 배경지도를 못 받았어요 — 표시와 메모는 그대로 저장돼요.":

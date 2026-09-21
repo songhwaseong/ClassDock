@@ -102,6 +102,22 @@ test("날짜는 실제 있는 날만, 없어도 된다(학습지·답사는 날�
   assert.equal(none.date, "");
 });
 
+test("새 여행일지 지도는 한국 전국에서 시작하고 저장된 유효 좌표는 유지한다", () => {
+  const fresh = trip.tripEmpty("새 여행", "trip");
+  assert.deepEqual(fresh.map.center, [36.5, 127.9]);
+  assert.equal(fresh.map.zoom, 7);
+  assert.deepEqual(trip.tripNormalizeMap({ center:null }).center, [36.5, 127.9]);
+  assert.deepEqual(trip.tripNormalizeMap({ center:[37.5665, 126.978], zoom:12 }).center, [37.5665, 126.978]);
+  assert.equal(trip.tripNormalizeMap({ center:[37.5665, 126.978], zoom:12 }).zoom, 12);
+  assert.deepEqual(trip.tripNormalizeMap({ center:[0, 0] }).center, [0, 0], "실제로 저장한 0, 0은 유지한다");
+});
+
+test("비어 있는 장소 좌표를 적도 원점으로 잘못 읽지 않는다", () => {
+  const spot = trip.tripNormalizeSpot({ name:"좌표 없는 곳", lat:null, lng:null });
+  assert.equal(spot.lat, null);
+  assert.equal(spot.lng, null);
+});
+
 test("좌표와 시각은 믿지 않는다", () => {
   const day = trip.tripNormalizeDay({ spots:[
     { name:"a", lat:33.4, lng:126.9, at:"9:30" },
@@ -113,6 +129,18 @@ test("좌표와 시각은 믿지 않는다", () => {
   assert.equal(day.spots[1].lat, null);
   assert.equal(day.spots[1].at, "");
   assert.equal(day.spots[2].lng, null, "위도만 맞고 경도가 틀리면 좌표가 없는 것으로 본다");
+});
+
+test("들른 곳은 시각순으로 정렬하고 빈 시각과 같은 시각은 기존 차례를 지킨다", () => {
+  const spots = [
+    { id:"none-a", at:"" }, { id:"late", at:"18:20" }, { id:"early-a", at:"8:05" },
+    { id:"early-b", at:"08:05" }, { id:"middle", at:"12:30" }, { id:"none-b", at:"" }
+  ];
+  assert.deepEqual(trip.tripSortSpotsByTime(spots).map(spot => spot.id),
+    ["early-a", "early-b", "middle", "late", "none-a", "none-b"]);
+  assert.deepEqual(spots.map(spot => spot.id), ["none-a", "late", "early-a", "early-b", "middle", "none-b"]);
+  const day = trip.tripNormalizeDay({ spots:spots.map(spot => ({ ...spot, name:spot.id })) });
+  assert.deepEqual(day.spots.map(spot => spot.id), ["early-a", "early-b", "middle", "late", "none-a", "none-b"]);
 });
 
 test("가리키는 사진이 ZIP 에 없으면 버린다", () => {
@@ -173,6 +201,11 @@ test("굳힌 지도 그림도 참조 목록에 든다(빠뜨리면 다음 저장
   })];
   const used = [...trip.tripReferencedAssets(model)].sort();
   assert.deepEqual(used, ["assets/dayday.jpg", "assets/mapmap.jpg", "assets/photo1.jpg"]);
+  model.map.still = "";
+  model.map.stillKey = "";
+  model.days[0].still = "";
+  model.days[0].stillKey = "";
+  assert.deepEqual([...trip.tripReferencedAssets(model)], ["assets/photo1.jpg"]);
 });
 
 test("ZIP 으로 묶었다 풀면 그대로이고, 안 쓰는 사진은 빠진다", async () => {
@@ -308,14 +341,48 @@ test("EXIF 가 없거나 JPEG 가 아니면 빈 값이고 던지지 않는다", 
   assert.deepEqual(trip.tripReadExif(new Uint8Array(0)), { date:"", at:"", lat:null, lng:null });
 });
 
-test("사진에서 만든 장소 사진은 카드에 보이고 빈 여행일지에는 첫날을 만든다", () => {
+test("사진 묶음의 새 촬영 날짜는 중복 없이 시간순으로 날을 만든다", () => {
+  assert.deepEqual(trip.tripMissingPhotoDates(
+    [{ date:"2026-07-20" }],
+    [{ date:"2026-07-22" }, { date:"2026-07-21" }, { date:"2026-07-22" }, { date:"" }]
+  ), ["2026-07-21", "2026-07-22"]);
+  assert.deepEqual(trip.tripMissingPhotoDates(null, [{ date:"2026-02-30" }, null]), []);
+});
+
+test("사진 날짜로 날을 정렬하되 같은 날짜와 날짜 없는 기록의 기존 차례는 지킨다", () => {
+  const days = [
+    { id:"late", date:"2026-09-11" }, { id:"none-a", date:"" },
+    { id:"early-a", date:"2026-09-08" }, { id:"early-b", date:"2026-09-08" },
+    { id:"middle", date:"2026-09-09" }, { id:"none-b", date:"" }
+  ];
+  assert.deepEqual(trip.tripSortDaysByDate(days).map(day => day.id),
+    ["early-a", "early-b", "middle", "late", "none-a", "none-b"]);
+  assert.deepEqual(days.map(day => day.id), ["late", "none-a", "early-a", "early-b", "middle", "none-b"]);
+});
+
+test("사진에서 만든 장소 사진은 카드에 보이고 날짜 없는 사진도 빈 여행일지에서 받는다", () => {
   const source = read("src/js/trip.js");
   const css = read("src/styles.css");
-  assert.match(source, /if \(!target\)\{[\s\S]{0,180}target = ensureDay\(""\)/);
+  assert.match(source, /const missingDates = tripMissingPhotoDates/);
+  assert.match(source, /daysByDate\.set\(date, day\)/);
+  assert.match(source, /if \(!target\)\{[\s\S]{0,120}target = ensureDay\(""\)/);
   assert.match(source, /className = "trip-spot-photos"/);
   assert.match(source, /window\.openImageLightbox\(spotPhotos\.map/);
   assert.match(source, /renderRail\(\); renderPage\(\);/);
   assert.match(css, /\.trip-spot-photo-view img\{[^}]*object-fit:cover/);
+});
+
+test("사진이 있는 지도 표식은 미리보기로, 없는 표식은 이름 툴팁으로 보인다", () => {
+  const source = read("src/js/trip.js");
+  const css = read("src/styles.css");
+  assert.match(source, /function tripMapPhotoCard\(spot, markerNumber\)/);
+  assert.match(source, /photos\.slice\(0, 4\)/);
+  assert.match(source, /window\.openImageLightbox\(photos\.map/);
+  assert.match(source, /if \(!\(spot\.photos \|\| \[\]\)\.some\(name => assets\.has\(name\)\)\)\{/);
+  assert.match(source, /marker\.bindTooltip\(markerNumber/);
+  assert.match(source, /marker\.on\("mouseover", openPreview\)/);
+  assert.match(source, /marker\.on\("click", openPreview\)/);
+  assert.match(css, /\.trip-map-photo-gallery\{[^}]*grid-template-columns:repeat\(2/);
 });
 
 test("스티커·꾸미기 창은 Leaflet 동선 지도 위에 뜬다", () => {
@@ -344,9 +411,10 @@ test("편집 화면과 지도 화면 사이 분할 바는 폭을 조절하고 �
   assert.match(css, /\.trip-map-divider,\.trip-map-pane\{display:none\}/);
 });
 
-test("여행일지 상단 편집 도구는 일기장처럼 글자 없는 공용 아이콘 버튼이다", () => {
+test("여행일지 상단 편집 도구는 공용 아이콘과 짧은 이름을 함께 보인다", () => {
   const source = read("src/js/trip.js");
   const icons = read("src/js/icons.js");
+  const css = read("src/styles.css");
   for (const [className, icon] of [
     ["trip-photo-btn", "image"], ["trip-exif-btn", "map"], ["trip-sticker-btn", "sticker"],
     ["trip-style-btn", "sliders"], ["trip-print-btn", "print"], ["trip-export-btn", "export"],
@@ -354,8 +422,36 @@ test("여행일지 상단 편집 도구는 일기장처럼 글자 없는 공용 
   ]) {
     assert.match(source, new RegExp('diaryButton\\("",[^\\n]*"[^"]*' + className + '[^"]*"[^\\n]*"' + icon + '"\\)'));
   }
+  for (const label of ["되돌리기", "다시하기", "사진추가", "사진정보", "꾸미기", "편집/설정", "인쇄", "내보내기", "저장"]){
+    assert.match(source, new RegExp('toolLabel\\([^\\n]*"' + label.replace("/", "\\/") + '"'));
+  }
+  assert.match(source, /className = "trip-brand"/);
+  assert.match(source, /className = "trip-map-guide"/);
   assert.match(icons, /\bmap:\s*['"]/);
+  assert.match(icons, /\bsun:\s*['"]/);
   assert.match(icons, /,export:\s*['"]/);
+  assert.match(css, /\.trip-page-head\.diary-page-head\{[^}]*flex-direction:row/);
+});
+
+test("날짜 입력은 브라우저의 빈 요일 괄호 대신 날짜 글자만 따로 표시한다", () => {
+  const source = read("src/js/trip.js");
+  const css = read("src/styles.css");
+  assert.match(source, /className = "trip-day-date-display"/);
+  assert.match(source, /dayDateField\.append\(dayDateDisplay, dayDateIcon, dayDate\)/);
+  assert.match(source, /dayDateDisplay\.textContent = day \? \(day\.date/);
+  assert.match(css, /\.trip-day-date-field \.trip-day-date\{[^}]*opacity:0/);
+  assert.match(css, /\.trip-day-date-display\{[^}]*font-variant-numeric:tabular-nums/);
+});
+
+test("마지막 날 삭제로 초점을 잃어도 활성 여행일지는 Ctrl+S로 저장한다", () => {
+  const source = read("src/js/trip.js");
+  const onKey = source.slice(source.indexOf("  const onKey = (e) => {"), source.indexOf("  document.addEventListener(\"keydown\", onKey, true);"));
+  const activeGuard = onKey.indexOf("activeId !== doc.id");
+  const saveKey = onKey.indexOf('toLowerCase() === "s"');
+  const focusGuard = onKey.indexOf("doc.el.contains(document.activeElement)");
+  assert.ok(activeGuard >= 0 && activeGuard < saveKey, "현재 활성 문서만 저장한다");
+  assert.ok(saveKey < focusGuard, "저장은 문서 내부의 입력 초점에 의존하지 않는다");
+  assert.match(onKey, /e\.preventDefault\(\); saveTrip\(doc\); return;/);
 });
 
 test("들른 곳을 지우면 지도 표식·동선과 날씨도 즉시 갱신한다", () => {
@@ -373,6 +469,38 @@ test("찍은 때 글은 실제 있는 날만 받는다", () => {
   assert.equal(trip.tripExifWhen("0000:00:00 00:00:00"), null);
 });
 
+test("일정 내보내기는 장소마다 첫 사용 가능한 사진을 문서에 담는다", async () => {
+  const vm = require("node:vm");
+  const context = vm.createContext({
+    File,
+    diaryAssetMime:() => "image/jpeg"
+  });
+  vm.runInContext(read("src/js/timeline.js"), context);
+  vm.runInContext(read("src/js/trip.js"), context);
+  const convert = vm.runInContext("tripToTimelineDoc", context);
+  const assets = new Map([
+    ["assets/one.jpg", { bytes:jpg(1) }],
+    ["assets/two.jpg", { bytes:jpg(2) }]
+  ]);
+  const model = { title:"제주", purpose:"trip", days:[{ date:"2026-07-20", spots:[
+    { name:"첫 장소", at:"09:00", lat:33.458, lng:126.942, photos:["assets/one.jpg"] },
+    { name:"둘째 장소", at:"10:00", photos:["assets/missing.jpg", "assets/two.jpg"] },
+    { name:"셋째 장소", at:"11:00", photos:[] }
+  ] }] };
+  const out = await convert(model, assets, async file => ({
+    name:file.name, dataUrl:"data:image/jpeg;base64,AA==", width:1, height:1
+  }));
+  const events = JSON.parse(out.text).events;
+  assert.deepEqual(events.map(e => e.title), ["첫 장소", "둘째 장소", "셋째 장소"]);
+  assert.equal(events[0].lat, 33.458);
+  assert.equal(events[0].lng, 126.942);
+  assert.equal(events[1].lat, null);
+  assert.equal(events[0].image.name, "첫 장소.jpg");
+  assert.equal(events[1].image.name, "둘째 장소.jpg");
+  assert.equal(events[2].image, null);
+  assert.equal(out.photoCount, 2);
+  assert.equal(out.skippedPhotos, 0);
+});
 /* ---------- 문서에 적어 둔 것과 어긋나지 않게 ---------- */
 
 test("설계 문서가 말하는 개수와 실제가 같다", () => {

@@ -34,7 +34,7 @@ test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게
   model.viewMode = "scale";
   model.events.push(timeline.timelineNormalizeEvent({
     id:"event-1", title:"광복", start:"1945-08-15", end:"1948-08-15", category:"현대",
-    placeName:"대한민국역사박물관", placeAddress:"서울특별시 종로구 세종대로 198",
+    placeName:"대한민국역사박물관", placeAddress:"서울특별시 종로구 세종대로 198", lat:37.572, lng:126.978,
     description:"해방 이후 정부 수립까지", color:"rose", imageFileName:"images/광복.jpg",
     image:{ name:"사진.jpg", dataUrl:"data:image/jpeg;base64,AA==", width:10, height:8 }
   }, 0));
@@ -45,6 +45,8 @@ test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게
   assert.equal(again.events[0].title, "광복");
   assert.equal(again.events[0].placeName, "대한민국역사박물관");
   assert.equal(again.events[0].placeAddress, "서울특별시 종로구 세종대로 198");
+  assert.equal(again.events[0].lat, 37.572);
+  assert.equal(again.events[0].lng, 126.978);
   assert.equal(again.events[0].imageFileName, "images/광복.jpg");
   assert.equal(again.events[0].image.dataUrl, "data:image/jpeg;base64,AA==");
   assert.equal(timeline.timelineDocContentKey(again), timeline.timelineDocContentKey(model));
@@ -57,6 +59,11 @@ test(".timeline은 사건·기간·분류·사진을 한 JSON으로 안전하게
   assert.equal(hostile.events[0].color, "blue");
 });
 
+test("일정 좌표는 두 값이 모두 유효할 때만 남긴다", () => {
+  assert.equal(timeline.timelineNormalizeEvent({ lat:37.5, lng:127 }, 0).lat, 37.5);
+  assert.equal(timeline.timelineNormalizeEvent({ lat:37.5, lng:null }, 0).lat, null);
+  assert.equal(timeline.timelineNormalizeEvent({ lat:91, lng:127 }, 0).lng, null);
+});
 test("같은 날짜·시각의 항목은 수동 순서를 바꾸되 다른 시각의 순서는 유지한다", () => {
   const events = [
     timeline.timelineNormalizeEvent({ id:"a", title:"아침", start:"2026-08-21 09:00", order:0 }, 0),
@@ -251,7 +258,7 @@ test("연대표 도구막대는 CSV 이미지 파일명과 폴더 사진을 연�
 test("유적지 주소는 카드와 발표 화면에서 기존 지도 검색으로 연결된다", () => {
   const root = path.join(__dirname, "..");
   const source = fs.readFileSync(path.join(root, "src/js/timeline.js"), "utf8");
-  assert.match(source, /globalThis\.searchMapForPlace\(query\)/);
+  assert.match(source, /hasCoordinates \? globalThis\.showMapCoordinate : globalThis\.searchMapForPlace/);
   assert.match(source, /className = className/);
   assert.match(source, /timeline-form-place-name/);
   assert.match(source, /timeline-form-place-address/);
@@ -280,7 +287,7 @@ test("연대표 항목 우클릭 메뉴는 수정·같은 시각 순서·지도�
   assert.match(source, /contextEditBtn = timelineContextItem\(id => openEventDialog\(id\)\)/);
   assert.match(source, /contextEarlierBtn\.disabled = !timelineCanMoveEvent\(model\.events, event\.id, -1\)/);
   assert.match(source, /contextLaterBtn\.disabled = !timelineCanMoveEvent\(model\.events, event\.id, 1\)/);
-  assert.match(source, /contextMapBtn\.hidden = !\(event\.placeName \|\| event\.placeAddress\)/);
+  assert.match(source, /contextMapBtn\.hidden = !\(event\.placeName \|\| event\.placeAddress \|\| timelineHasCoordinates\(event\)\)/);
   assert.match(source, /contextDeleteBtn = timelineContextItem\(id => removeEvent\(id\)\)/);
   assert.match(source, /workspace\.removeEventListener\("contextmenu", onTimelineContextMenu\)/);
   assert.match(source, /contextMenu\.remove\(\)/);
