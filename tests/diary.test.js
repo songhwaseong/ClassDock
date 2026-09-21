@@ -495,6 +495,17 @@ test("글상자는 글·글자 크기·맞춤을 저장하고 높이(ar)는 저�
   assert.equal(diary.diaryNormalizeSticker({ kind:"text", text:"가".repeat(diary.DIARY_TEXT_MAX + 50) }).text.length, diary.DIARY_TEXT_MAX);
 });
 
+test("사진 스티커는 투명도를 따로 저장하고 옛 사진은 불투명하게 읽는다", () => {
+  const asset = "assets/a000.png";
+  const old = diary.diaryNormalizeSticker({ asset });
+  assert.equal(old.opacity == null ? 1 : old.opacity, 1);
+  assert.equal(diary.diaryCleanSticker(old).opacity, undefined, "기본값은 옛 저장 형식과 같다");
+  const faded = diary.diaryNormalizeSticker({ asset, opacity:0.4 });
+  assert.equal(diary.diaryCleanSticker(faded).opacity, 0.4);
+  assert.equal(diary.diaryNormalizeSticker(diary.diaryCleanSticker(faded)).opacity, 0.4);
+  assert.equal(diary.diaryNormalizeSticker({ asset, opacity:0 }).opacity, 0.1);
+});
+
 test("kind 가 없던 옛 스티커는 사진으로 읽고, 갈래는 필드로도 가른다", () => {
   assert.equal(diary.diaryStickerKind({ asset:"assets/a000.png" }), "photo");
   assert.equal(diary.diaryStickerKind({ art:"heart" }), "art");

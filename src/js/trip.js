@@ -287,6 +287,21 @@ function tripNormalizePrompts(raw){
     .filter(item => item && (item.q.trim() || item.a.trim()));
 }
 
+function tripNormalizePhotoOpacity(raw, photos){
+  const result = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return result;
+  for (const asset of photos){
+    const value = raw[asset];
+    const n = Number(value);
+    if (value != null && value !== "" && Number.isFinite(n) && n < 1)
+      result[asset] = Math.max(0.1, Math.round(n * 100) / 100);
+  }
+  return result;
+}
+function tripPhotoOpacity(spot, asset){
+  return (spot.photoOpacity && spot.photoOpacity[asset]) || 1;
+}
+
 function tripNormalizeSpot(raw, hasAsset){
   if (!raw || typeof raw !== "object") return null;
   const name = String(raw.name == null ? "" : raw.name).trim().slice(0, 120);
@@ -312,7 +327,7 @@ function tripNormalizeSpot(raw, hasAsset){
     kind:typeof raw.kind === "string" ? raw.kind.trim().slice(0, 24) : "",
     lat, lng:lat == null ? null : lng,
     color:String(raw.color || "").trim().slice(0, 12) || "",
-    cost, photos, videos, fields
+    cost, photos, photoOpacity:tripNormalizePhotoOpacity(raw.photoOpacity, photos), videos, fields
   };
 }
 /* 영상 한 개 = { v:영상, p:첫 장면 그림(없어도 된다), d:길이(초) }. 영상 바이트가 없으면 버린다. */
@@ -503,7 +518,11 @@ function tripCleanSpot(s){
   if (s.lat != null && s.lng != null){ out.lat = s.lat; out.lng = s.lng; }
   if (s.color) out.color = s.color;
   if (s.cost) out.cost = s.cost;
-  if (s.photos && s.photos.length) out.photos = s.photos.slice();
+  if (s.photos && s.photos.length){
+    out.photos = s.photos.slice();
+    const photoOpacity = tripNormalizePhotoOpacity(s.photoOpacity, out.photos);
+    if (Object.keys(photoOpacity).length) out.photoOpacity = photoOpacity;
+  }
   if (s.videos && s.videos.length) out.videos = s.videos.map(v => {
     const o = { v:v.v };
     if (v.p) o.p = v.p;
@@ -1693,7 +1712,15 @@ function mountTripEditor(doc){
     history:() => history,
     penColor:() => penColor,
     penSize:() => penSize,
-    eraser:() => eraser
+    eraser:() => eraser,
+    photoOpacity:true,
+    openStickerOpacityPanel:() => {
+      if (!panels) return;
+      panels.setArtPanelOpen(true);
+      panels.artOpacityRange.focus({ preventScroll:true });
+    },
+    contextMenuActions:() => [{ label:tripIsEn() ? "Travel journal tools" : "여행일지 편집 도구",
+      children:tripEditorMenuItems() }]
   });
   const { addStickers, addAsset, applyStyle, layout, redrawDrawing, renderStickers, setDrawMode, clearSelection,
     addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers,
@@ -1719,6 +1746,7 @@ function mountTripEditor(doc){
     selectedStickers:(...a) => selectedStickers(...a),
     stickerColorNow:(...a) => stickerColorNow(...a),
     stickerOpacityNow:(...a) => stickerOpacityNow(...a),
+    photoOpacity:true,
     current:() => current,
     history:() => history
   });
@@ -2160,7 +2188,8 @@ function mountTripEditor(doc){
   /* 표식 미리보기 카드. 사진 먼저, 그다음 영상(첫 장면 + ▶) — 모두 합쳐 4칸까지.
      사진을 누르면 사진끼리 크게 보고, 영상을 누르면 그 장소 영상들을 곧바로 튼다. */
   function tripMapPhotoCard(spot, markerNumber){
-    const photos = (spot.photos || []).map(assetUrl).filter(Boolean);
+    const photos = (spot.photos || []).map(asset => ({ src:assetUrl(asset), opacity:tripPhotoOpacity(spot, asset) }))
+      .filter(photo => photo.src);
     const videos = (spot.videos || []).filter(v => assets.has(v.v));
     if (!photos.length && !videos.length) return null;
     const placeName = spot.name || tripWord(model.purpose, "spot");
@@ -2184,7 +2213,7 @@ function mountTripEditor(doc){
       meta.textContent = metaText;
       card.append(meta);
     }
-    const items = [...photos.map((src, at) => ({ kind:"photo", src, at })),
+    const items = [...photos.map((photo, at) => ({ kind:"photo", src:photo.src, opacity:photo.opacity, at })),
       ...videos.map((video, at) => ({ kind:"video", src:video.p ? assetUrl(video.p) : "", at, video }))];
     const shown = items.slice(0, 4);
     const gallery = document.createElement("div");
@@ -2198,6 +2227,7 @@ function mountTripEditor(doc){
       if (item.src){
         const img = document.createElement("img");
         img.src = item.src;
+        if (item.kind === "photo") img.style.opacity = String(item.opacity);
         img.alt = placeName + (items.length > 1 ? " (" + (slot + 1) + "/" + items.length + ")" : "");
         img.loading = "lazy";
         button.append(img);
@@ -2230,8 +2260,8 @@ function mountTripEditor(doc){
           return;
         }
         if (typeof window.openImageLightbox !== "function") return;
-        window.openImageLightbox(photos.map((photoSrc, index) => ({
-          src:photoSrc,
+        window.openImageLightbox(photos.map((photo, index) => ({
+          src:photo.src,
           alt:placeName + (photos.length > 1 ? " (" + (index + 1) + "/" + photos.length + ")" : "")
         })), item.at);
       });
@@ -2623,12 +2653,13 @@ function mountTripEditor(doc){
         strip.className = "trip-spot-photos";
         for (const photo of spotPhotos){
           const tile = document.createElement("div");
-          tile.className = "trip-spot-photo";
+          tile.className = "trip-spot-photo has-opacity";
           const view = document.createElement("button");
           view.type = "button"; view.className = "trip-spot-photo-view";
           view.title = tripT("사진 크게 보기");
           const img = document.createElement("img");
           img.src = photo.src; img.alt = spot.name || tripT("장소 사진");
+          img.style.opacity = String(tripPhotoOpacity(spot, photo.asset));
           view.append(img);
           view.addEventListener("click", () => {
             if (typeof window.openImageLightbox !== "function") return;
@@ -2636,14 +2667,35 @@ function mountTripEditor(doc){
               src:item.src, alt:(spot.name || tripT("장소 사진")) + (spotPhotos.length > 1 ? " (" + (i + 1) + "/" + spotPhotos.length + ")" : "")
             })), photo.at);
           });
+          const opacityBar = document.createElement("label");
+          opacityBar.className = "trip-spot-photo-opacity";
+          const opacityRange = document.createElement("input");
+          opacityRange.type = "range"; opacityRange.min = "10"; opacityRange.max = "100"; opacityRange.step = "5";
+          opacityRange.value = String(Math.round(tripPhotoOpacity(spot, photo.asset) * 100));
+          opacityRange.setAttribute("aria-label", tripIsEn() ? "Photo opacity" : "사진 투명도");
+          const opacityValue = document.createElement("span");
+          opacityValue.textContent = opacityRange.value + "%";
+          opacityBar.append(opacityRange, opacityValue);
+          opacityRange.addEventListener("pointerdown", () => { if (history) history.flush(); });
+          opacityRange.addEventListener("input", () => {
+            const value = Number(opacityRange.value) / 100;
+            if (!spot.photoOpacity) spot.photoOpacity = {};
+            if (value >= 1) delete spot.photoOpacity[photo.asset];
+            else spot.photoOpacity[photo.asset] = value;
+            img.style.opacity = String(value);
+            opacityValue.textContent = opacityRange.value + "%";
+            refreshDirty(); scheduleRecovery();
+          });
+          opacityRange.addEventListener("change", () => { renderMap(); touch(true); });
           const removePhoto = diaryButton("", "이 사진 빼기", "diary-btn trip-spot-photo-remove", "close");
           removePhoto.addEventListener("click", () => {
             if (history) history.flush();
             spot.photos = (spot.photos || []).filter(name2 => name2 !== photo.asset);
+            if (spot.photoOpacity) delete spot.photoOpacity[photo.asset];
             renderSpots(); touch(true);
             setStatus(tripT("사진을 뺐어요. Ctrl+Z 로 되돌릴 수 있어요."));
           });
-          tile.append(view, removePhoto);
+          tile.append(view, opacityBar, removePhoto);
           strip.append(tile);
         }
         spotVideos.forEach((video, videoAt) => {
@@ -3236,6 +3288,83 @@ function mountTripEditor(doc){
       { label:tripWord(model.purpose, "exportMap"), action:exportMap }
     ], { autoFocus:true });
   });
+
+  /* 상단 단추와 같은 동작을 종이·본문 우클릭에서도 쓴다. 입력칸과 스티커는
+     각자의 편집 메뉴가 있으므로 그 위에서 이 메뉴가 대신 열리지 않게 한다. */
+  function tripEditorMenuItems(){
+    const day = dayOf(current);
+    const pictureItems = els.pictureBox.hidden ? [] : [
+      { label:tripIsEn() ? "Add photo to picture area" : "그림 칸에 사진 넣기", action:() => els.pictureBtn.click() },
+      { label:tripIsEn() ? "Draw in picture area" : "그림 칸에 그리기", action:() => els.pictureDrawBtn.click() }
+    ];
+    if (!els.drawBar.hidden){
+      pictureItems.push(
+        { separator:true },
+        { label:tripIsEn() ? "Pen color" : "펜 색", children:DIARY_PENS.map(([color, ko, en], i) => ({
+          label:tripIsEn() ? en : ko, active:!eraser && color === penColor,
+          action:() => penButtons[i].click()
+        })) },
+        { label:tripIsEn() ? "Pen size" : "펜 굵기", children:DIARY_PEN_SIZES.map(([id, , ko, en], i) => ({
+          label:tripIsEn() ? en : ko, active:id === penSize, action:() => sizeButtons[i].click()
+        })) },
+        { label:tripIsEn() ? "Eraser" : "지우개", active:eraser, action:() => eraserBtn.click() },
+        { label:tripIsEn() ? "Clear drawing" : "그림 전체 지우기", disabled:drawClearBtn.disabled,
+          action:() => drawClearBtn.click() },
+        { label:tripIsEn() ? "Finish drawing" : "그리기 끝내기", action:() => drawDoneBtn.click() }
+      );
+    }
+    return [
+      { label:tripIsEn() ? "Undo" : "되돌리기", title:"Ctrl+Z", disabled:!history || !history.canUndo(),
+        action:() => undoBtn.click() },
+      { label:tripIsEn() ? "Redo" : "다시하기", title:"Ctrl+Shift+Z", disabled:!history || !history.canRedo(),
+        action:() => redoBtn.click() },
+      { separator:true },
+      { label:tripIsEn() ? "Add photo" : "사진 추가", action:() => photoBtn.click() },
+      { label:tripIsEn() ? "Create places from photo info" : "사진정보로 장소 만들기", action:() => exifBtn.click() },
+      { label:tripIsEn() ? "Pictures and text boxes" : "그림·글상자 붙이기", action:() => stickerBtn.click() },
+      { label:tripIsEn() ? "Paper style and settings" : "종이 꾸미기·설정", action:() => styleBtn.click() },
+      pictureItems.length ? { label:tripIsEn() ? "Picture area" : "그림 칸", children:pictureItems } : null,
+      { separator:true },
+      { label:tripIsEn() ? "Print" : "인쇄", children:[
+        { label:tripWord(model.purpose, "printDay"), disabled:!day, action:() => printDays(day ? [day] : []) },
+        { label:tripWord(model.purpose, "printAll"), disabled:!(model.days || []).length,
+          action:() => printDays(model.days || []) }
+      ] },
+      { label:tripIsEn() ? "Export" : "내보내기", children:[
+        { label:tripWord(model.purpose, "exportTimeline"), disabled:exportBtn.disabled, action:exportTimeline },
+        { label:tripWord(model.purpose, "exportMap"), disabled:exportBtn.disabled, action:exportMap }
+      ] },
+      { label:tripIsEn() ? "Save" : "저장", title:"Ctrl+S", action:() => saveBtn.click() }
+    ];
+  }
+
+  main.addEventListener("contextmenu", (event) => {
+    if (typeof MNContextMenu === "undefined") return;
+    const target = event.target;
+    if (target.closest("input, textarea, select, button, [contenteditable], .diary-sticker, .diary-draw-bar")) return;
+    event.preventDefault();
+    MNContextMenu.open(event.clientX, event.clientY, tripEditorMenuItems());
+  });
+  mapPane.addEventListener("contextmenu", (event) => {
+    if (typeof MNContextMenu === "undefined" || !mapStage.contains(event.target)) return;
+    if (event.target.closest("button, input, select, .leaflet-control")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const holder = stillHolder();
+    MNContextMenu.open(event.clientX, event.clientY, [
+      { label:tripIsEn() ? "This day / whole trip" : "이 날 / 여행 전체", active:mapScope === "all",
+        action:() => scopeBtn.click() },
+      { label:tripWord(model.purpose, "route"), active:!!(model.map && model.map.route),
+        action:() => routeBtn.click() },
+      { label:tripWord(model.purpose, "mapStill"), disabled:freezeBtn.disabled,
+        action:() => freezeBtn.click() },
+      { label:tripWord(model.purpose, "mapRemove"), disabled:!(holder && holder.still),
+        action:() => stillRemoveBtn.click() },
+      { separator:true },
+      { label:tripIsEn() ? "Travel journal tools" : "여행일지 편집 도구",
+        children:tripEditorMenuItems() }
+    ]);
+  }, true);
 
   undoBtn.addEventListener("click", () => history.undo());
   redoBtn.addEventListener("click", () => history.redo());

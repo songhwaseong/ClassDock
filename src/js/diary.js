@@ -920,7 +920,7 @@ function diaryNormalizeSticker(raw, hasAsset){
   }
   const asset = String(raw.asset || "");
   if (!DIARY_ASSET_RE.test(asset) || (hasAsset && !hasAsset(asset))) return null;
-  return { ...base, asset };
+  return { ...base, asset, ...(opacity < 1 ? { opacity } : {}) };
 }
 // 각도는 -180 초과 ~ 180 이하로 모은다(돌리기를 여러 바퀴 해도 같은 값이 저장되게).
 function diaryNormalizeAngle(deg){
@@ -1063,7 +1063,8 @@ function diaryCleanSticker(s){
     return { ...box, kind:"text", text:s.text, color:s.color || DIARY_TEXT_DEFAULT_COLOR, opacity:s.opacity == null ? 1 : s.opacity,
       font:s.font || "gothic", size:s.size, align:s.align || "left", flip:false };
   }
-  return { ...box, kind:"photo", asset:s.asset, ar:s.ar };
+  return { ...box, kind:"photo", asset:s.asset, ar:s.ar,
+    ...(s.opacity != null && s.opacity < 1 ? { opacity:s.opacity } : {}) };
 }
 // 저장본과 같은지 가르는 열쇠 — 시각(updatedAt)은 빼야 저장 → 편집 → 되돌리기 뒤 다시 '깨끗'이 된다.
 function diaryContentKey(model){
@@ -2119,7 +2120,8 @@ function mountDiaryPaper(els, paperEnv){
     event.preventDefault();
     await addStickers(imgs);
   });
-  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
+  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area,
+    { contextMenuActions:paperEnv.contextMenuActions });
   paper.addEventListener("pointerdown", (e) => { if (!e.target.closest(".diary-sticker")) selectSticker(""); });
   genkoLayer.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !genkoLay) return;
@@ -2299,7 +2301,7 @@ function mountDiaryPaper(els, paperEnv){
         body.alt = "";
         body.draggable = false;
       }
-      if (kind !== "photo") body.style.opacity = String(s.opacity == null ? 1 : s.opacity);
+      body.style.opacity = String(s.opacity == null ? 1 : s.opacity);
       const handle = document.createElement("span");
       handle.className = "diary-sticker-handle";
       handle.title = kind === "text" ? "너비 바꾸기" : "크기 바꾸기";
@@ -2649,6 +2651,8 @@ function mountDiaryPaper(els, paperEnv){
       (kind !== "photo" || many) ? null : { separator:true },
       colorful ? { label:diaryT("색 바꾸기"), children:colorChildren } : null,
       colorful ? { separator:true } : null,
+      paperEnv.photoOpacity && list.some(item => diaryStickerKind(item) === "photo")
+        ? { label:diaryT("사진 투명도 조절…"), action:() => paperEnv.openStickerOpacityPanel() } : null,
       { label:diaryT("맨 앞으로"), title:"Ctrl+Shift+]", disabled:atFront, action:() => reorderStickers("front") },
       { label:diaryT("한 칸 앞으로"), title:"Ctrl+]", disabled:atFront, action:() => reorderStickers("forward") },
       { label:diaryT("한 칸 뒤로"), title:"Ctrl+[", disabled:atBack, action:() => reorderStickers("backward") },
@@ -2964,8 +2968,8 @@ function mountDiaryPaper(els, paperEnv){
   }
   function applyStickerOpacity(opacity, live){
     const value = Math.max(0.1, Math.min(1, Number(opacity) || 1));
-    const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo");
-    artOpacity = value;
+    const list = selectedStickers().filter(s => diaryStickerKind(s) !== "photo" || paperEnv.photoOpacity);
+    if (!list.length || list.some(s => diaryStickerKind(s) !== "photo")) artOpacity = value;
     if (!list.length){
       onStickerSelect();
       if (!live) setStatus(diaryT("다음에 붙일 스티커 투명도를 바꿨어요."));
@@ -3208,7 +3212,7 @@ function mountDiaryPanels(panelEnv){
   let artOpacityGesture = false;
   const beginArtOpacity = () => {
     if (artOpacityGesture) return;
-    if (selectedStickers().some(s => diaryStickerKind(s) !== "photo") && panelEnv.history()) panelEnv.history().flush();
+    if (selectedStickers().some(s => diaryStickerKind(s) !== "photo" || panelEnv.photoOpacity) && panelEnv.history()) panelEnv.history().flush();
     artOpacityGesture = true;
   };
   artOpacityRange.addEventListener("pointerdown", beginArtOpacity);
@@ -3306,13 +3310,18 @@ function mountDiaryPanels(panelEnv){
     artCustomColor.classList.toggle("is-on", !!shown && !DIARY_PENS.some(p => p[0] === shown));
     artCustomColor.title = diaryT("색 직접 고르기");
     artCustomColor.setAttribute("aria-label", artCustomColor.title);
-    const opacities = new Set(picked.map(s => s.opacity == null ? 1 : s.opacity));
-    const shownOpacity = picked.length ? (opacities.size === 1 ? [...opacities][0] : null) : stickerOpacityNow();
+    const opacityPicked = selectedStickers().filter(s => diaryStickerKind(s) !== "photo" || panelEnv.photoOpacity);
+    const opacities = new Set(opacityPicked.map(s => s.opacity == null ? 1 : s.opacity));
+    const shownOpacity = opacityPicked.length ? (opacities.size === 1 ? [...opacities][0] : null) : stickerOpacityNow();
+    artColorChips.parentElement.hidden = !!panelEnv.photoOpacity && !!opacityPicked.length && !picked.length;
     artOpacityRange.value = String(Math.round((shownOpacity == null ? 1 : shownOpacity) * 100));
     artOpacityValue.textContent = shownOpacity == null ? "—" : Math.round(shownOpacity * 100) + "%";
-    artOpacityRange.title = diaryT("스티커 투명도");
+    artOpacityRange.title = diaryT(panelEnv.photoOpacity && opacityPicked.length && !picked.length
+      ? "사진 투명도" : "스티커 투명도");
     artOpacityRange.setAttribute("aria-label", artOpacityRange.title);
-    artTextNote.textContent = picked.length
+    artTextNote.textContent = panelEnv.photoOpacity && opacityPicked.length && !picked.length
+      ? diaryTf("고른 사진 {n}장의 투명도를 바꿔요.", { n:opacityPicked.length })
+      : picked.length
       ? diaryTf("고른 스티커 {n}개의 색을 바꿔요.", { n:picked.length })
       : diaryT("색을 먼저 고르면 그림도 글상자도 그 색으로 붙어요.");
     artButtons.forEach(b => { b.title = diaryArtName(diaryArtInfo(b.dataset.art)); b.setAttribute("aria-label", b.title); });
@@ -3330,7 +3339,7 @@ function mountDiaryPanels(panelEnv){
   };
   stickerBtn.addEventListener("click", (e) => { e.stopPropagation(); setPanelOpen(false); setArtPanelOpen(artPanel.hidden); });
 
-  return { panel, artPanel, artCustomColor, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen, changeStyle };
+  return { panel, artPanel, artCustomColor, artOpacityRange, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen, changeStyle };
 }
 
 /* ===== 인쇄 층의 종이 한 장(일기장·여행일지 공용) =====
@@ -3408,7 +3417,7 @@ function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
       transform:st.rot ? `rotate(${st.rot}deg)` : "" });
     // 글상자만 높이를 글에 맡긴다 — 글자 크기가 종이 폭 비율이라 680px 에서도 화면과 같은 자리에서 줄이 바뀐다.
     if (kind !== "text") node.style.height = st.w * st.ar * width + "px";
-    if (kind !== "photo") node.style.opacity = String(st.opacity == null ? 1 : st.opacity);
+    node.style.opacity = String(st.opacity == null ? 1 : st.opacity);
     if (kind === "art"){
       const art = document.createElement("span");
       art.className = "diary-sticker-body diary-sticker-art";

@@ -149,6 +149,24 @@ test("가리키는 사진이 ZIP 에 없으면 버린다", () => {
   assert.deepEqual(day.spots[0].photos, ["assets/aaaa.jpg"]);
 });
 
+test("장소 사진별 투명도는 ZIP 왕복 뒤에도 서로 다르고 옛 사진은 100%다", async () => {
+  const a = "assets/aaaa.jpg", b = "assets/bbbb.jpg";
+  const model = trip.tripEmpty("사진 여행", "trip");
+  model.days = [trip.tripNormalizeDay({ title:"첫날", spots:[{
+    name:"사진 두 장", photos:[a, b], photoOpacity:{ [a]:0.35, [b]:1, "assets/ghost.jpg":0.2 }
+  }] }, () => true)];
+  const clean = trip.tripCleanSpot(model.days[0].spots[0]);
+  assert.deepEqual(clean.photoOpacity, { [a]:0.35 }, "완전 불투명과 없는 사진의 값은 저장하지 않는다");
+  const assets = new Map([[a, { bytes:jpg(1) }], [b, { bytes:jpg(9) }]]);
+  const back = await trip.tripUnpack(trip.tripPack(model, assets, 1770000000000));
+  const spot = back.model.days[0].spots[0];
+  assert.equal(spot.photoOpacity[a], 0.35);
+  assert.equal(spot.photoOpacity[b], undefined);
+  assert.deepEqual(spot.photos, [a, b]);
+  const old = trip.tripNormalizeSpot({ name:"옛 장소", photos:[a] });
+  assert.deepEqual(old.photoOpacity, {});
+});
+
 test("빈 장소 줄은 버린다", () => {
   const day = trip.tripNormalizeDay({ title:"첫날", spots:[{ name:"" }, { name:"성산" }] });
   assert.equal(day.spots.length, 1);

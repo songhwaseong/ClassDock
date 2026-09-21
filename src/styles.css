@@ -7963,6 +7963,11 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-spot-photo{position:relative;width:96px;height:72px;border:1px solid var(--border);border-radius:7px;overflow:hidden;background:var(--panel)}
 .trip-spot-photo-view{display:block;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:zoom-in}
 .trip-spot-photo-view img{display:block;width:100%;height:100%;object-fit:cover}
+.trip-spot-photo.has-opacity{height:102px}
+.trip-spot-photo.has-opacity .trip-spot-photo-view{height:72px}
+.trip-spot-photo-opacity{display:flex;align-items:center;gap:2px;height:29px;padding:0 4px;color:var(--ink)}
+.trip-spot-photo-opacity input[type="range"]{flex:1;width:0;min-width:0;margin:0;padding:0;border:0;background:transparent;cursor:pointer}
+.trip-spot-photo-opacity span{flex:none;min-width:27px;text-align:right;font-size:10px;font-variant-numeric:tabular-nums}
 .trip-spot-photo-remove{position:absolute;top:3px;right:3px;width:24px;min-height:24px;padding:0;border-radius:999px;background:color-mix(in srgb,var(--bg) 82%,transparent)}
 /* 장소 영상 — 사진 칸과 같은 자리에 ▶ 와 길이를 얹는다. 누르면 영상 창에서 곧바로 틀린다. */
 .trip-spot-video-view{position:relative;background:#111;cursor:pointer}
