@@ -13,7 +13,9 @@
 
 const TRIP_FORMAT = "classdock-trip";
 // 2: 공용 종이에 줄 무늬 8종을 추가했다. 옛 앱이 새 무늬를 지우지 못하게 한다.
-const TRIP_VERSION = 2;
+// 3: 장소에 짧은 영상(videos)을 단다. 옛 앱은 영상 이름을 모르는 자산으로 버리고 그대로 저장하므로
+//    영상이 조용히 사라진다 — 판을 올려 옛 앱이 아예 열지 않게 한다.
+const TRIP_VERSION = 3;
 const TRIP_JSON_NAME = "trip.json";
 const TRIP_MAX_DAYS = 400;
 const TRIP_MAX_SPOTS = 60;            // 하루에 들를 곳
@@ -21,6 +23,23 @@ const TRIP_MAX_PROMPTS = 20;          // 하루에 물을 것(학습지)
 const TRIP_MAX_FIELDS = 12;           // 지점 하나의 조사 항목(답사)
 const TRIP_MAX_HEADER = 8;            // 인쇄 머리의 자유 칸
 const TRIP_ASSET_RE = /^assets\/[a-z0-9_-]{4,64}\.(png|jpe?g|webp|gif)$/;
+/* 장소 영상. 사진처럼 ZIP 안에 그대로 담는다(옆 파일로 두면 .trip 만 옮길 때 끊긴다).
+   저장·복구본이 ZIP 전체를 매번 다시 쓰므로 '짧은' 영상만 받는다 — 한도는 여기 한 곳에서 정한다.
+   한 개 상한은 ZIP 읽기 상한(DIARY_MAX_ENTRY_BYTES 64MB)보다 작아야 한다. 넘으면 열 때 조용히 빠진다.
+   .mov 는 아이폰 H.264 영상이 흔해서 받는다 — 재생 가능 여부는 넣을 때 실제 <video> 로 확인한다. */
+const TRIP_VIDEO_RE = /^assets\/[a-z0-9_-]{4,64}\.(mp4|webm|mov)$/;
+const TRIP_VIDEO_MIME = { mp4:"video/mp4", webm:"video/webm", mov:"video/mp4" };
+const TRIP_VIDEO_MAX_BYTES = 40 * 1024 * 1024;
+const TRIP_VIDEO_TOTAL_MAX_BYTES = 150 * 1024 * 1024;   // 한 문서의 영상 합계
+const TRIP_VIDEO_MAX_SEC = 30;
+const TRIP_MAX_VIDEOS = 3;                               // 장소 하나에
+const TRIP_VIDEO_POSTER_DIM = 640;                       // 첫 장면 그림(목록 칸 썸네일)
+/* 2단계: EXE 에 ffmpeg 가 있으면 넣기 전에 줄인다(런처 /shrink-media). 긴 변 1280(720p)·평균 2Mbps·
+   앞 30초·위치 메타데이터 지움. 이보다 작고 그대로 틀리는 영상은 화질을 잃지 않게 손대지 않는다.
+   원본은 HTTP 본문으로 보내므로 런처 본문 상한(약 1GB) 안에서만 받는다. */
+const TRIP_VIDEO_SHRINK_OVER = 8 * 1024 * 1024;
+const TRIP_VIDEO_SHRINK_MAX_BYTES = 1024 * 1024 * 1024;
+const TRIP_VIDEO_SHRINK_DIM = 1280;
 const TRIP_DEFAULT_MAP_CENTER = [36.5, 127.9]; // 한반도 중심
 const TRIP_DEFAULT_MAP_ZOOM = 7;               // 전국이 보이는 배율
 
@@ -273,11 +292,16 @@ function tripNormalizeSpot(raw, hasAsset){
   const note = String(raw.note == null ? "" : raw.note).slice(0, 2000);
   const photos = (Array.isArray(raw.photos) ? raw.photos : [])
     .filter(n => typeof n === "string" && TRIP_ASSET_RE.test(n) && (!hasAsset || hasAsset(n))).slice(0, 12);
+  const seenVideos = new Set();
+  const videos = (Array.isArray(raw.videos) ? raw.videos : [])
+    .map(v => tripNormalizeVideo(v, hasAsset))
+    .filter(v => v && !seenVideos.has(v.v) && seenVideos.add(v.v))
+    .slice(0, TRIP_MAX_VIDEOS);
   const fields = tripNormalizePairs(raw.fields, TRIP_MAX_FIELDS);
   const cost = tripNormalizeCost(raw.cost);
   // 이름도 주소도 좌표도 없고 적은 것도 없으면 자리만 차지하는 줄이다.
   const lat = tripClampLat(raw.lat), lng = tripClampLng(raw.lng);
-  if (!name && !address && lat == null && !note && !cost && !photos.length && !fields.length) return null;
+  if (!name && !address && lat == null && !note && !cost && !photos.length && !videos.length && !fields.length) return null;
   return {
     id:String(raw.id || "") || tripSpotId(),
     at:tripNormalizeTime(raw.at),
@@ -286,8 +310,22 @@ function tripNormalizeSpot(raw, hasAsset){
     kind:typeof raw.kind === "string" ? raw.kind.trim().slice(0, 24) : "",
     lat, lng:lat == null ? null : lng,
     color:String(raw.color || "").trim().slice(0, 12) || "",
-    cost, photos, fields
+    cost, photos, videos, fields
   };
+}
+/* 영상 한 개 = { v:영상, p:첫 장면 그림(없어도 된다), d:길이(초) }. 영상 바이트가 없으면 버린다. */
+function tripNormalizeVideo(raw, hasAsset){
+  if (!raw || typeof raw !== "object") return null;
+  const v = typeof raw.v === "string" && TRIP_VIDEO_RE.test(raw.v) && (!hasAsset || hasAsset(raw.v)) ? raw.v : "";
+  if (!v) return null;
+  const p = typeof raw.p === "string" && TRIP_ASSET_RE.test(raw.p) && (!hasAsset || hasAsset(raw.p)) ? raw.p : "";
+  const d = Number(raw.d);
+  return { v, p, d:Number.isFinite(d) && d > 0 ? Math.round(Math.min(d, 36000) * 10) / 10 : 0 };
+}
+function tripAssetMime(name){
+  const ext = String(name).split(".").pop().toLowerCase();
+  if (TRIP_VIDEO_MIME[ext]) return TRIP_VIDEO_MIME[ext];
+  return typeof diaryAssetMime === "function" ? diaryAssetMime(name) : "application/octet-stream";
 }
 
 function tripNormalizeDay(raw, hasAsset){
@@ -464,6 +502,12 @@ function tripCleanSpot(s){
   if (s.color) out.color = s.color;
   if (s.cost) out.cost = s.cost;
   if (s.photos && s.photos.length) out.photos = s.photos.slice();
+  if (s.videos && s.videos.length) out.videos = s.videos.map(v => {
+    const o = { v:v.v };
+    if (v.p) o.p = v.p;
+    if (v.d) o.d = v.d;
+    return o;
+  });
   if (s.fields && s.fields.length) out.fields = s.fields.map(f => ({ k:f.k, v:f.v }));
   return out;
 }
@@ -513,16 +557,31 @@ function tripContentKey(model){
    빠뜨리면 다음 저장에서 조용히 사라진다(일기장이 스티커 갈래마다 겪은 함정). */
 function tripReferencedAssets(model){
   const used = new Set();
-  const add = name => { if (typeof name === "string" && TRIP_ASSET_RE.test(name)) used.add(name); };
+  const add = name => { if (typeof name === "string" && (TRIP_ASSET_RE.test(name) || TRIP_VIDEO_RE.test(name))) used.add(name); };
   add(model.style && model.style.bg);
   add(model.map && model.map.still);
   for (const day of (model.days || [])){
     add(day.style && day.style.bg);
     add(day.still);
     for (const s of (day.stickers || [])) add(s.asset);
-    for (const s of (day.spots || [])) for (const p of (s.photos || [])) add(p);
+    for (const s of (day.spots || [])){
+      for (const p of (s.photos || [])) add(p);
+      for (const v of (s.videos || [])){ add(v && v.v); add(v && v.p); }
+    }
   }
   return used;
+}
+/* 문서가 가리키는 영상의 바이트 합(한 문서 상한·복구본 간격을 정할 때 쓴다). */
+function tripVideoBytes(model, assets){
+  let total = 0;
+  const seen = new Set();
+  for (const day of (model.days || [])) for (const s of (day.spots || [])) for (const v of (s.videos || [])){
+    if (!v || seen.has(v.v)) continue;
+    seen.add(v.v);
+    const asset = assets && assets.get(v.v);
+    if (asset && asset.bytes) total += asset.bytes.length;
+  }
+  return total;
 }
 
 function tripPack(model, assets, now){
@@ -542,7 +601,7 @@ async function tripUnpack(bytes){
   if (!jsonBytes) throw new Error("trip-format");
   const assets = new Map();
   for (const [name, data] of files){
-    if (TRIP_ASSET_RE.test(name)) assets.set(name, { bytes:data });
+    if (TRIP_ASSET_RE.test(name) || TRIP_VIDEO_RE.test(name)) assets.set(name, { bytes:data });
   }
   const model = tripNormalize(JSON.parse(new TextDecoder("utf-8").decode(jsonBytes)), name => assets.has(name));
   const used = tripReferencedAssets(model);
@@ -881,7 +940,7 @@ function tripSpotRows(model){
   return rows;
 }
 
-/* 여행일지 → 연대표(.timeline) 의 '여행 일정'. 장소의 첫 사진도 일정 안에 담는다. */
+/* 여행일지 → 연대표(.timeline) 의 '여행 일정'. 장소의 첫 사진(없으면 첫 영상의 첫 장면)도 일정 안에 담는다. */
 async function tripToTimelineDoc(model, assets, preparePhoto = timelinePreparePhoto){
   const purpose = tripPurpose(model.purpose);
   const doc = timelineDocEmpty(model.title || tripWord(purpose, "docName"));
@@ -901,7 +960,8 @@ async function tripToTimelineDoc(model, assets, preparePhoto = timelinePreparePh
   const prepared = new Map();
   let photoCount = 0, skippedPhotos = 0, totalChars = 0;
   for (let index = 0; index < rows.length; index++){
-    const names = rows[index].spot.photos || [];
+    // 사진이 없으면 영상의 첫 장면 그림을 쓴다(연대표는 영상을 담지 않는다).
+    const names = [...(rows[index].spot.photos || []), ...(rows[index].spot.videos || []).map(v => v && v.p).filter(Boolean)];
     if (!names.length) continue;
     let photo = null;
     for (const name of names){
@@ -988,9 +1048,232 @@ function tripPrintSources(model){
   return { app:out, user };
 }
 
+/* ---------- 장소 영상: 넣기 전 살피기 · 틀기 ---------- */
+
+function tripIsVideoFile(file){
+  if (!file) return false;
+  const type = String(file.type || "").toLowerCase();
+  if (/^video\/(mp4|webm|quicktime|x-m4v)$/.test(type)) return true;
+  return !type.startsWith("image/") && /\.(mp4|m4v|webm|mov)$/i.test(String(file.name || ""));
+}
+/* ffmpeg 로 바꿔 넣을 수 있는 영상까지(mkv·avi·휴대폰 HEVC 등). ffmpeg 가 없으면 이 가운데
+   tripIsVideoFile 만 받는다. */
+function tripIsAnyVideoFile(file){
+  if (!file) return false;
+  if (tripIsVideoFile(file)) return true;
+  const type = String(file.type || "").toLowerCase();
+  if (type.startsWith("video/")) return true;
+  return !type.startsWith("image/") && /\.(mkv|avi|wmv|3gp|3g2|mts|m2ts|ts|flv|mpe?g|ogv)$/i.test(String(file.name || ""));
+}
+function tripVideoExt(file){
+  const type = String(file.type || "").toLowerCase(), name = String(file.name || "").toLowerCase();
+  if (type === "video/webm" || name.endsWith(".webm")) return "webm";
+  if (type === "video/quicktime" || name.endsWith(".mov")) return "mov";
+  return "mp4";
+}
+/* 실제 <video> 에 올려 첫 장면이 나오는지 본다 — 확장자만 보고 받으면 HEVC 처럼 이 컴퓨터에서
+   안 틀리는 영상이 문서에 들어가 버린다. 되는 영상이면 길이와 첫 장면 그림(JPEG)을 함께 돌려준다. */
+async function tripPrepareVideo(file){
+  if (!tripIsVideoFile(file)) throw new Error("trip-video-type");
+  if (!(file.size > 0) || file.size > TRIP_VIDEO_MAX_BYTES) throw new Error("trip-video-size");
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.muted = true; video.playsInline = true; video.preload = "auto";
+  const wait = (ok, ms) => new Promise((resolve, reject) => {
+    const done = () => { clearTimeout(timer); video.removeEventListener(ok, pass); video.removeEventListener("error", fail); };
+    const pass = () => { done(); resolve(); };
+    const fail = () => { done(); reject(new Error("trip-video-play")); };
+    const timer = setTimeout(fail, ms);
+    video.addEventListener(ok, pass);
+    video.addEventListener("error", fail);
+  });
+  try {
+    const loaded = wait("loadeddata", 20000);
+    video.src = url;
+    await loaded;
+    if (!video.videoWidth || !video.videoHeight) throw new Error("trip-video-play");
+    // MediaRecorder 로 만든 webm 은 길이가 Infinity 로 온다 — 그땐 크기 상한만 믿는다.
+    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    if (duration > TRIP_VIDEO_MAX_SEC + 0.5) throw new Error("trip-video-long");
+    // 첫 장면은 까만 화면인 일이 흔해 조금 들어가서 뜬다. 못 넘어가도 지금 장면으로 그린다.
+    const at = duration ? Math.min(1, duration * 0.1) : 0;
+    if (at > 0){
+      const seeked = wait("seeked", 5000);
+      video.currentTime = at;
+      try { await seeked; } catch(_){}
+    }
+    let poster = null;
+    try {
+      const scale = Math.min(1, TRIP_VIDEO_POSTER_DIM / Math.max(video.videoWidth, video.videoHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+      poster = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    } catch(_){ poster = null; }
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return { bytes, ext:tripVideoExt(file), duration:Math.round(duration * 10) / 10, poster };
+  } finally {
+    video.removeAttribute("src");
+    try { video.load(); } catch(_){}
+    URL.revokeObjectURL(url);
+  }
+}
+async function tripMediaBackend(){
+  return typeof vvMediaBackendAvailable === "function" ? !!(await vvMediaBackendAvailable()) : false;
+}
+/* 넣을 영상 한 개를 준비한다. 작고 그대로 틀리면 그대로, 아니면(크다·길다·안 틀린다·다른 형식) ffmpeg 로
+   줄인 MP4 를 받아 같은 검사를 한 번 더 거친다. 줄인 쪽이 오히려 크면 원본을 쓴다.
+   돌려주는 것: { prepared, shrunk, trimmed } — prepared 는 tripPrepareVideo 와 같은 모양. */
+async function tripReadyVideo(file, backend, onShrink){
+  let direct = null, directError = null;
+  if (!tripIsAnyVideoFile(file)) throw new Error("trip-video-type");
+  if (tripIsVideoFile(file)){
+    try { direct = await tripPrepareVideo(file); } catch(error){ directError = error; }
+  } else directError = new Error("trip-video-type");
+  if (direct && (!backend || file.size <= TRIP_VIDEO_SHRINK_OVER)) return { prepared:direct, shrunk:false, trimmed:false };
+  if (!backend) throw directError;
+  if (file.size > TRIP_VIDEO_SHRINK_MAX_BYTES){
+    if (direct) return { prepared:direct, shrunk:false, trimmed:false };
+    throw new Error("trip-video-source-size");
+  }
+  if (typeof onShrink === "function") onShrink();
+  let res = null;
+  try {
+    res = await fetch("/shrink-media?dim=" + TRIP_VIDEO_SHRINK_DIM + "&sec=" + TRIP_VIDEO_MAX_SEC, {
+      method:"POST", headers:{ "Content-Type":"application/octet-stream" }, body:file
+    });
+  } catch(_){ res = null; }
+  if (!res || !res.ok){
+    if (direct) return { prepared:direct, shrunk:false, trimmed:false };
+    throw new Error("trip-video-shrink");
+  }
+  const sourceMs = Number(res.headers.get("X-Media-Source-Duration-Ms")) || 0;
+  const base = String(file.name || "video").replace(/\.[^.]+$/, "") || "video";
+  const small = new File([await res.blob()], base + ".mp4", { type:"video/mp4" });
+  let prepared;
+  try { prepared = await tripPrepareVideo(small); }
+  catch(error){ if (direct) return { prepared:direct, shrunk:false, trimmed:false }; throw error; }
+  if (direct && prepared.bytes.length >= direct.bytes.length) return { prepared:direct, shrunk:false, trimmed:false };
+  return { prepared, shrunk:true, trimmed:sourceMs > (TRIP_VIDEO_MAX_SEC + 0.5) * 1000 };
+}
+function tripVideoProblem(error){
+  const code = String((error && error.message) || error || "");
+  const en = tripIsEn();
+  const mb = n => Math.round(n / 1048576);
+  if (code === "trip-video-type") return en ? "Only mp4, webm or mov videos can be added." : "mp4·webm·mov 영상만 넣을 수 있어요.";
+  if (code === "trip-video-size") return en
+    ? "The video is too large (up to " + mb(TRIP_VIDEO_MAX_BYTES) + "MB)."
+    : "영상이 너무 커요(" + mb(TRIP_VIDEO_MAX_BYTES) + "MB까지).";
+  if (code === "trip-video-long") return en
+    ? "The video is too long (up to " + TRIP_VIDEO_MAX_SEC + " seconds)."
+    : "영상이 너무 길어요(" + TRIP_VIDEO_MAX_SEC + "초까지).";
+  if (code === "trip-video-total") return en
+    ? "This document can hold up to " + mb(TRIP_VIDEO_TOTAL_MAX_BYTES) + "MB of video in total."
+    : "이 문서에 넣을 수 있는 영상은 모두 합해 " + mb(TRIP_VIDEO_TOTAL_MAX_BYTES) + "MB까지예요.";
+  if (code === "trip-video-count") return en
+    ? "Each place can have up to " + TRIP_MAX_VIDEOS + " videos."
+    : "장소 하나에 영상은 " + TRIP_MAX_VIDEOS + "개까지예요.";
+  if (code === "trip-video-same") return en ? "That video is already here." : "이미 넣은 영상이에요.";
+  if (code === "trip-video-source-size") return en
+    ? "The original video is too large to shrink (up to 1GB)."
+    : "원본 영상이 너무 커서 줄일 수 없어요(1GB까지).";
+  if (code === "trip-video-shrink") return en
+    ? "Couldn't shrink this video. Please convert it to mp4 (H.264) and try again."
+    : "영상을 줄이지 못했어요. mp4(H.264)로 바꿔서 넣어 주세요.";
+  return en
+    ? "This video can't be played on this computer. Please convert it to mp4 (H.264) and try again."
+    : "이 컴퓨터에서 재생할 수 없는 영상이에요. mp4(H.264)로 바꿔서 넣어 주세요.";
+}
+function tripFormatDuration(sec){
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
+
+/* 누르면 곧바로 틀리는 창. 사용자가 누른 동작 안에서 play() 를 부르므로 소리까지 바로 나온다.
+   껍데기를 .modal 로 두어 화면보호기의 '바쁨' 판정에도 걸린다. 창은 하나만 만들어 계속 쓴다. */
+let _tripVideoPlayer = null;
+function tripOpenVideoPlayer(list, start){
+  const items = (list || []).filter(it => it && it.src);
+  if (!items.length || typeof document === "undefined") return;
+  if (!_tripVideoPlayer){
+    const modal = document.createElement("div");
+    modal.className = "modal trip-video-modal";
+    modal.hidden = true;
+    const card = document.createElement("div");
+    card.className = "modal-card trip-video-card";
+    card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+    const head = document.createElement("div"); head.className = "trip-video-head";
+    const title = document.createElement("h3"); title.className = "trip-video-title";
+    const count = document.createElement("span"); count.className = "trip-video-count";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button"; closeBtn.className = "trip-video-x"; closeBtn.textContent = "×";
+    head.append(title, count, closeBtn);
+    const body = document.createElement("div"); body.className = "trip-video-body";
+    const video = document.createElement("video");
+    video.className = "trip-video-player"; video.controls = true; video.playsInline = true; video.preload = "auto";
+    const prev = document.createElement("button"); prev.type = "button"; prev.className = "trip-video-nav prev"; prev.textContent = "‹";
+    const next = document.createElement("button"); next.type = "button"; next.className = "trip-video-nav next"; next.textContent = "›";
+    body.append(prev, video, next);
+    card.append(head, body);
+    modal.append(card);
+    document.body.append(modal);
+    const player = { modal, card, title, count, video, prev, next, closeBtn, items:[], index:0, lastFocus:null };
+    const show = (i) => {
+      player.index = (i + player.items.length) % player.items.length;
+      const item = player.items[player.index];
+      video.poster = item.poster || "";
+      video.src = item.src;
+      title.textContent = item.title || "";
+      count.textContent = player.items.length > 1 ? (player.index + 1) + " / " + player.items.length : "";
+      prev.hidden = next.hidden = player.items.length < 2;
+      const playing = video.play();
+      if (playing && typeof playing.catch === "function") playing.catch(() => {});
+    };
+    // Esc 는 여기서 먹는다 — 흘려보내면 편집기·다른 창이 같은 키로 또 무언가를 닫는다.
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation();
+      close();
+    };
+    const close = () => {
+      if (modal.hidden) return;
+      modal.hidden = true;
+      video.pause();
+      video.removeAttribute("src"); video.removeAttribute("poster");
+      try { video.load(); } catch(_){}
+      player.items = [];
+      window.removeEventListener("keydown", onKey, true);
+      const back = player.lastFocus; player.lastFocus = null;
+      if (back && typeof back.focus === "function" && back.isConnected){ try { back.focus(); } catch(_){} }
+    };
+    closeBtn.addEventListener("click", close);
+    prev.addEventListener("click", () => show(player.index - 1));
+    next.addEventListener("click", () => show(player.index + 1));
+    modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); });
+    player.show = show; player.close = close; player.onKey = onKey;
+    _tripVideoPlayer = player;
+  }
+  const player = _tripVideoPlayer;
+  const en = tripIsEn();
+  player.closeBtn.title = en ? "Close" : "닫기"; player.closeBtn.setAttribute("aria-label", player.closeBtn.title);
+  player.prev.setAttribute("aria-label", en ? "Previous video" : "이전 영상");
+  player.next.setAttribute("aria-label", en ? "Next video" : "다음 영상");
+  player.card.setAttribute("aria-label", en ? "Play video" : "영상 보기");
+  if (player.modal.hidden){
+    player.lastFocus = document.activeElement;
+    window.addEventListener("keydown", player.onKey, true);
+  }
+  player.items = items;
+  player.modal.hidden = false;
+  player.show(Math.max(0, Math.min(items.length - 1, start | 0)));
+  try { player.video.focus(); } catch(_){}
+}
+
 /* ---------- 편집기 ---------- */
 
 const TRIP_RECOVERY_DELAY = 1500;
+const TRIP_RECOVERY_VIDEO_DELAY = 8000;
 
 function tripDayLabel(model, day){
   const at = (model.days || []).indexOf(day);
@@ -1019,7 +1302,7 @@ function mountTripEditor(doc){
     if (!name || !assets.has(name)) return "";
     if (!urls.has(name)){
       const asset = assets.get(name);
-      urls.set(name, URL.createObjectURL(new Blob([asset.bytes], { type:diaryAssetMime(name) })));
+      urls.set(name, URL.createObjectURL(new Blob([asset.bytes], { type:tripAssetMime(name) })));
     }
     return urls.get(name);
   };
@@ -1288,7 +1571,10 @@ function mountTripEditor(doc){
   const scheduleRecovery = () => {
     clearTimeout(recoveryTimer);
     if (typeof appSettings === "object" && appSettings && appSettings.pdfRecovery === false) return;
-    recoveryTimer = setTimeout(() => { recoveryTimer = 0; flushRecovery(); }, TRIP_RECOVERY_DELAY);
+    // 복구본은 ZIP 전체를 다시 쓴다. 영상이 들어 있으면 글자 몇 개마다 수십 MB 를 새로 쓰게 되므로
+    // 간격을 넓힌다(사진만 있는 문서는 그대로).
+    const delay = tripVideoBytes(model, assets) > 0 ? TRIP_RECOVERY_VIDEO_DELAY : TRIP_RECOVERY_DELAY;
+    recoveryTimer = setTimeout(() => { recoveryTimer = 0; flushRecovery(); }, delay);
   };
   const flushRecovery = async () => {
     clearTimeout(recoveryTimer); recoveryTimer = 0;
@@ -1643,6 +1929,83 @@ function mountTripEditor(doc){
     if (files.length) await addStickers(files);
   });
 
+  /* ----- 장소 영상 -----
+     장소 줄의 영상 단추나 줄 위로 떨어뜨린 영상을 그 장소에 단다. 살피는 동안(비동기) 되돌리기로
+     모델이 바뀔 수 있으므로 장소는 id 로 붙잡고, 다 준비한 뒤 지금 모델에서 다시 찾아 한 번에 넣는다. */
+  const videoInput = document.createElement("input");
+  videoInput.type = "file"; videoInput.multiple = true; videoInput.hidden = true; videoInput.className = "trip-video-input";
+  videoInput.accept = "video/*,.mp4,.m4v,.webm,.mov,.mkv,.avi,.wmv,.3gp,.mts,.m2ts";
+  root.append(videoInput);
+  let videoTarget = "", videoBusy = false;
+  const spotById = (id) => {
+    for (const day of (model.days || [])) for (const spot of (day.spots || [])) if (spot.id === id) return spot;
+    return null;
+  };
+  async function addVideosToSpot(spotId, files){
+    if (!files.length) return;
+    if (videoBusy){ setStatus(tripIsEn() ? "Still adding a video — try again in a moment." : "영상을 넣는 중이에요. 잠시 뒤에 다시 해 주세요."); return; }
+    videoBusy = true;
+    const picked = [], problems = [];
+    let shrunkCount = 0, trimmedCount = 0;
+    try {
+      const first = spotById(spotId);
+      const have = new Set(((first && first.videos) || []).map(v => v.v));
+      let room = TRIP_MAX_VIDEOS - have.size;
+      let total = tripVideoBytes(model, assets);
+      const backend = await tripMediaBackend();
+      for (const file of files){
+        try {
+          if (room <= 0) throw new Error("trip-video-count");
+          setStatus((tripIsEn() ? "Checking video… " : "영상을 살펴보는 중… ") + (file.name || ""));
+          const ready = await tripReadyVideo(file, backend, () => setStatus(tripIsEn()
+            ? "Shrinking video… " + (file.name || "") + " (may take a few dozen seconds)"
+            : "영상을 작게 줄이는 중… " + (file.name || "") + " (몇십 초 걸릴 수 있어요)"));
+          const prepared = ready.prepared;
+          const name = "assets/" + await diaryHashBytes(prepared.bytes) + "." + prepared.ext;
+          if (have.has(name)) throw new Error("trip-video-same");
+          if (!assets.has(name) && total + prepared.bytes.length > TRIP_VIDEO_TOTAL_MAX_BYTES) throw new Error("trip-video-total");
+          if (ready.shrunk) shrunkCount++;
+          if (ready.trimmed) trimmedCount++;
+          let poster = "";
+          if (prepared.poster){
+            const made = await addAsset(prepared.poster, TRIP_VIDEO_POSTER_DIM);
+            if (made) poster = made.name;
+          }
+          if (!assets.has(name)){ assets.set(name, { bytes:prepared.bytes }); total += prepared.bytes.length; }
+          have.add(name);
+          picked.push({ v:name, p:poster, d:prepared.duration });
+          room--;
+        } catch(error){
+          const message = tripVideoProblem(error);
+          if (!problems.includes(message)) problems.push(message);
+          if (String(error && error.message) === "trip-video-count") break;
+        }
+      }
+    } finally { videoBusy = false; }
+    const spot = spotById(spotId);
+    if (picked.length && spot){
+      if (history) history.flush();
+      spot.videos = [...(spot.videos || []), ...picked].slice(0, TRIP_MAX_VIDEOS);
+      renderSpots(); touch(true);
+    }
+    const added = spot ? picked.length : 0;
+    const notes = [];
+    if (added && shrunkCount) notes.push(tripIsEn() ? shrunkCount + " shrunk" : "작게 줄임 " + shrunkCount + "개");
+    if (added && trimmedCount) notes.push(tripIsEn()
+      ? trimmedCount + " cut to the first " + TRIP_VIDEO_MAX_SEC + "s"
+      : "앞 " + TRIP_VIDEO_MAX_SEC + "초만 " + trimmedCount + "개");
+    const tail = notes.length ? (tripIsEn() ? " (" + notes.join(", ") + ")" : "(" + notes.join(" · ") + ")") : "";
+    const done = added ? (tripIsEn() ? "Added " + added + " video" + (added > 1 ? "s" : "") + tail + "." : "영상 " + added + "개를 넣었어요" + tail + ".") : "";
+    setStatus([done, ...problems].filter(Boolean).join(" "));
+    if (problems.length && typeof toast === "function") toast(problems.join("\n"), 6000, { type:"error" });
+  }
+  videoInput.addEventListener("change", async () => {
+    const files = [...(videoInput.files || [])]; videoInput.value = "";
+    const target = videoTarget; videoTarget = "";
+    if (files.length && target) await addVideosToSpot(target, files);
+  });
+  const hasVideoItems = (dt) => !!dt && [...(dt.items || [])].some(it => it.kind === "file" && tripIsAnyVideoFile({ type:it.type, name:"" }));
+
   /* ----- 지도 칸 -----
      지도 만들기·타일·저작권 줄은 .map 문서 것을 그대로 부른다(mapCreateTileLayer·mapAttachNetworkNotice).
      인터넷이 없으면 타일이 안 오지만 칸은 그대로 두고 알림만 띄운다 — 좌표는 여전히 볼 수 있다. */
@@ -1783,9 +2146,12 @@ function mountTripEditor(doc){
     }
   }
 
+  /* 표식 미리보기 카드. 사진 먼저, 그다음 영상(첫 장면 + ▶) — 모두 합쳐 4칸까지.
+     사진을 누르면 사진끼리 크게 보고, 영상을 누르면 그 장소 영상들을 곧바로 튼다. */
   function tripMapPhotoCard(spot, markerNumber){
     const photos = (spot.photos || []).map(assetUrl).filter(Boolean);
-    if (!photos.length) return null;
+    const videos = (spot.videos || []).filter(v => assets.has(v.v));
+    if (!photos.length && !videos.length) return null;
     const placeName = spot.name || tripWord(model.purpose, "spot");
     const card = document.createElement("div");
     card.className = "trip-map-photo-card";
@@ -1794,7 +2160,10 @@ function mountTripEditor(doc){
     const title = document.createElement("strong");
     title.textContent = markerNumber + ". " + placeName;
     const count = document.createElement("span");
-    count.textContent = tripIsEn() ? photos.length + " photos" : "사진 " + photos.length + "장";
+    const counts = [];
+    if (photos.length) counts.push(tripIsEn() ? photos.length + " photos" : "사진 " + photos.length + "장");
+    if (videos.length) counts.push(tripIsEn() ? videos.length + (videos.length > 1 ? " videos" : " video") : "영상 " + videos.length + "개");
+    count.textContent = counts.join(" · ");
     head.append(title, count);
     card.append(head);
     const metaText = [spot.at || "", spot.address || ""].filter(Boolean).join(" · ");
@@ -1804,33 +2173,56 @@ function mountTripEditor(doc){
       meta.textContent = metaText;
       card.append(meta);
     }
+    const items = [...photos.map((src, at) => ({ kind:"photo", src, at })),
+      ...videos.map((video, at) => ({ kind:"video", src:video.p ? assetUrl(video.p) : "", at, video }))];
+    const shown = items.slice(0, 4);
     const gallery = document.createElement("div");
     gallery.className = "trip-map-photo-gallery";
-    gallery.dataset.count = String(Math.min(photos.length, 4));
-    for (const [photoIndex, src] of photos.slice(0, 4).entries()){
+    gallery.dataset.count = String(shown.length);
+    for (const [slot, item] of shown.entries()){
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "trip-map-photo-thumb";
-      button.title = tripT("사진 크게 보기");
-      const img = document.createElement("img");
-      img.src = src;
-      img.alt = placeName + (photos.length > 1 ? " (" + (photoIndex + 1) + "/" + photos.length + ")" : "");
-      img.loading = "lazy";
-      button.append(img);
-      if (photoIndex === 3 && photos.length > 4){
+      button.className = "trip-map-photo-thumb" + (item.kind === "video" ? " trip-map-video-thumb" : "");
+      button.title = item.kind === "video" ? (tripIsEn() ? "Play video" : "영상 틀기") : tripT("사진 크게 보기");
+      if (item.src){
+        const img = document.createElement("img");
+        img.src = item.src;
+        img.alt = placeName + (items.length > 1 ? " (" + (slot + 1) + "/" + items.length + ")" : "");
+        img.loading = "lazy";
+        button.append(img);
+      }
+      if (item.kind === "video"){
+        const badge = document.createElement("span");
+        badge.className = "trip-spot-video-badge";
+        if (typeof window.uiIcon === "function") badge.innerHTML = window.uiIcon("play");
+        button.append(badge);
+        if (item.video.d){
+          const length = document.createElement("span");
+          length.className = "trip-spot-video-dur";
+          length.textContent = tripFormatDuration(item.video.d);
+          button.append(length);
+        }
+      }
+      if (slot === 3 && items.length > 4){
         const more = document.createElement("span");
         more.className = "trip-map-photo-more";
-        more.textContent = "+" + (photos.length - 4);
+        more.textContent = "+" + (items.length - 4);
         button.append(more);
       }
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (item.kind === "video"){
+          tripOpenVideoPlayer(videos.map(video => ({
+            src:assetUrl(video.v), poster:video.p ? assetUrl(video.p) : "", title:placeName
+          })), item.at);
+          return;
+        }
         if (typeof window.openImageLightbox !== "function") return;
         window.openImageLightbox(photos.map((photoSrc, index) => ({
           src:photoSrc,
           alt:placeName + (photos.length > 1 ? " (" + (index + 1) + "/" + photos.length + ")" : "")
-        })), photoIndex);
+        })), item.at);
       });
       gallery.append(button);
     }
@@ -1839,7 +2231,7 @@ function mountTripEditor(doc){
   }
 
   function bindTripMarkerPreview(marker, spot, markerNumber){
-    if (!(spot.photos || []).some(name => assets.has(name))){
+    if (!(spot.photos || []).some(name => assets.has(name)) && !(spot.videos || []).some(v => assets.has(v.v))){
       marker.bindTooltip(markerNumber + ". " + (spot.name || tripWord(model.purpose, "spot")), { direction:"top" });
       return;
     }
@@ -2178,8 +2570,29 @@ function mountTripEditor(doc){
       const pickBtn = diaryButton("", spot.lat == null ? "지도에서 자리 찍기" : "지도에서 자리 다시 찍기",
         "diary-btn trip-spot-pick" + (spot.lat == null ? "" : " is-on"), "map");
       const removeBtn = diaryButton("", "이 줄 빼기", "diary-btn trip-spot-remove", "close");
-      line1.append(at, icon, kindSelect, name, pickBtn, removeBtn);
+      const videoBtn = diaryButton("", tripIsEn()
+        ? "Add a short video (up to " + TRIP_VIDEO_MAX_SEC + "s)"
+        : "짧은 영상 넣기 (" + TRIP_VIDEO_MAX_SEC + "초까지)", "diary-btn trip-spot-video-add", "video");
+      line1.append(at, icon, kindSelect, name, videoBtn, pickBtn, removeBtn);
       pickBtn.addEventListener("click", () => startPicking(spot.id));
+      videoBtn.addEventListener("click", () => { videoTarget = spot.id; videoInput.click(); });
+      row.addEventListener("dragover", (e) => {
+        if (!hasVideoItems(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        row.classList.add("is-drop");
+      });
+      row.addEventListener("dragleave", (e) => { if (!row.contains(e.relatedTarget)) row.classList.remove("is-drop"); });
+      row.addEventListener("drop", (e) => {
+        row.classList.remove("is-drop");
+        const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+        const videos = files.filter(tripIsAnyVideoFile);
+        if (!videos.length) return;
+        // 영상만 떨어뜨렸으면 새 탭으로 열리지 않게 여기서 끝낸다(섞였으면 나머지는 평소처럼 열린다).
+        e.preventDefault();
+        if (videos.length === files.length) e.stopPropagation();
+        addVideosToSpot(spot.id, videos);
+      });
 
       const line2 = document.createElement("div");
       line2.className = "trip-spot-line";
@@ -2193,7 +2606,8 @@ function mountTripEditor(doc){
       row.append(line1, line2);
 
       const spotPhotos = (spot.photos || []).map((asset, at2) => ({ asset, at:at2, src:assetUrl(asset) })).filter(item => item.src);
-      if (spotPhotos.length){
+      const spotVideos = (spot.videos || []).filter(v => assets.has(v.v));
+      if (spotPhotos.length || spotVideos.length){
         const strip = document.createElement("div");
         strip.className = "trip-spot-photos";
         for (const photo of spotPhotos){
@@ -2221,6 +2635,45 @@ function mountTripEditor(doc){
           tile.append(view, removePhoto);
           strip.append(tile);
         }
+        spotVideos.forEach((video, videoAt) => {
+          const tile = document.createElement("div");
+          tile.className = "trip-spot-photo trip-spot-video";
+          const view = document.createElement("button");
+          view.type = "button"; view.className = "trip-spot-photo-view trip-spot-video-view";
+          view.title = tripIsEn() ? "Play video" : "영상 틀기";
+          const posterSrc = video.p ? assetUrl(video.p) : "";
+          if (posterSrc){
+            const img = document.createElement("img");
+            img.src = posterSrc; img.alt = spot.name || (tripIsEn() ? "Place video" : "장소 영상");
+            view.append(img);
+          }
+          const badge = document.createElement("span");
+          badge.className = "trip-spot-video-badge";
+          if (typeof window.uiIcon === "function") badge.innerHTML = window.uiIcon("play");
+          view.append(badge);
+          if (video.d){
+            const length = document.createElement("span");
+            length.className = "trip-spot-video-dur";
+            length.textContent = tripFormatDuration(video.d);
+            view.append(length);
+          }
+          view.addEventListener("click", () => {
+            const label = spot.name || (tripIsEn() ? "Place video" : "장소 영상");
+            tripOpenVideoPlayer(spotVideos.map(item => ({
+              src:assetUrl(item.v), poster:item.p ? assetUrl(item.p) : "", title:label
+            })), videoAt);
+          });
+          const removeVideo = diaryButton("", tripIsEn() ? "Remove this video" : "이 영상 빼기",
+            "diary-btn trip-spot-photo-remove", "close");
+          removeVideo.addEventListener("click", () => {
+            if (history) history.flush();
+            spot.videos = (spot.videos || []).filter(item => item.v !== video.v);
+            renderSpots(); touch(true);
+            setStatus(tripIsEn() ? "Video removed. Use Undo to bring it back." : "영상을 뺐어요. 되돌리기 단추로 되살릴 수 있어요.");
+          });
+          tile.append(view, removeVideo);
+          strip.append(tile);
+        });
         row.append(strip);
       }
 
@@ -2625,6 +3078,17 @@ function mountTripEditor(doc){
         for (const text of cells){
           const td = document.createElement("td"); td.textContent = text; row.append(td);
         }
+        // 종이는 영상을 틀 수 없다 — 있다는 것과 길이만 적는다(첫 장면 그림을 찍으면 사진으로 오해한다).
+        const printVideos = (spot.videos || []).filter(v => assets.has(v.v));
+        if (printVideos.length && row.children[1]){
+          const mark = document.createElement("div");
+          mark.className = "trip-print-video";
+          const lengths = printVideos.map(v => v.d ? tripFormatDuration(v.d) : "").filter(Boolean);
+          mark.textContent = "▶ " + (tripIsEn()
+            ? printVideos.length + (printVideos.length > 1 ? " videos" : " video")
+            : "영상 " + printVideos.length + "개") + (lengths.length ? " · " + lengths.join(", ") : "");
+          row.children[1].append(mark);
+        }
         table.append(row);
       }
       page.append(table);
@@ -2789,6 +3253,7 @@ function mountTripEditor(doc){
     document.removeEventListener("pointerdown", onOutside, true);
     if (typeof paperApi.destroyPaper === "function") paperApi.destroyPaper();
     if (leafletMap){ leafletMap.remove(); leafletMap = null; }
+    if (_tripVideoPlayer) _tripVideoPlayer.close();   // 아래에서 영상 주소를 거두기 전에 닫는다
     if (history) history.cancel();
     for (const url of urls.values()) URL.revokeObjectURL(url);
     urls.clear();
@@ -2812,6 +3277,8 @@ if (typeof module !== "undefined" && module.exports){
     tripMissingPhotoDates, tripPlaceDayByDate, tripDateTakenBy, tripNextDayDate,
     tripNormalizePairs, tripNormalizePrompts, tripNormalizeCost, tripNormalizeMap, tripNormalizeBudget,
     tripEmpty, tripNormalize, tripCleanDays, tripCleanSpot, tripModelJson, tripContentKey,
+    TRIP_VIDEO_MAX_BYTES, TRIP_VIDEO_TOTAL_MAX_BYTES, TRIP_VIDEO_MAX_SEC, TRIP_MAX_VIDEOS,
+    tripNormalizeVideo, tripAssetMime, tripVideoBytes, tripIsVideoFile, tripIsAnyVideoFile,
     tripReferencedAssets, tripPack, tripUnpack, tripIsDomestic, tripPlainText,
     tripReadExif, tripExifWhen,
     tripScratchFileName, tripStarterBytes

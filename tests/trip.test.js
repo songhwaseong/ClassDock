@@ -10,7 +10,7 @@ const diary = require("../src/js/diary.js");
 for (const name of ["diaryCrc32", "diaryZipBuild", "diaryZipRead", "diaryNormalizeSticker", "diaryNormalizeStroke",
   "diaryNormalizeStyle", "diaryNormalizeTags", "diaryCleanSticker", "diaryDefaultStyle", "diaryWeatherInfo",
   "diaryMoodInfo", "diaryStickerKind", "diaryNormalizeAngle", "DIARY_ART_DEFAULT_COLOR", "DIARY_TEXT_DEFAULT_COLOR",
-  "DIARY_MAX_STROKES", "DIARY_MAX_STICKERS"]) {
+  "DIARY_MAX_STROKES", "DIARY_MAX_STICKERS", "diaryAssetMime"]) {
   if (diary[name] !== undefined) globalThis[name] = diary[name];
 }
 const trip = require("../src/js/trip.js");
@@ -232,6 +232,71 @@ test("ZIP 으로 묶었다 풀면 그대로이고, 안 쓰는 사진은 빠진�
   assert.equal(trip.tripContentKey(back.model), trip.tripContentKey(model), "왕복해도 저장 열쇠가 같다");
 });
 
+/* ---------- 장소 영상 ---------- */
+
+test("장소 영상은 ZIP 에 있는 것만, 겹치지 않게, 장소마다 정한 개수까지 받는다", () => {
+  const has = name => name !== "assets/gone.mp4" && name !== "assets/nopo.jpg";
+  const spot = trip.tripNormalizeSpot({ name:"a", videos:[
+    { v:"assets/aaaa.mp4", p:"assets/poster.jpg", d:12.34 },
+    { v:"assets/aaaa.mp4" },
+    { v:"assets/gone.mp4" },
+    { v:"http://x/y.mp4" },
+    { v:"assets/bbbb.webm", p:"assets/nopo.jpg", d:"x" },
+    { v:"assets/cccc.mov", d:-3 },
+    { v:"assets/dddd.mp4" }
+  ] }, has);
+  assert.deepEqual(spot.videos, [
+    { v:"assets/aaaa.mp4", p:"assets/poster.jpg", d:12.3 },
+    { v:"assets/bbbb.webm", p:"", d:0 },
+    { v:"assets/cccc.mov", p:"", d:0 }
+  ]);
+  assert.equal(spot.videos.length, trip.TRIP_MAX_VIDEOS);
+});
+
+test("영상만 있는 장소 줄도 버리지 않는다", () => {
+  const day = trip.tripNormalizeDay({ title:"a", spots:[{ videos:[{ v:"assets/aaaa.mp4" }] }] }, () => true);
+  assert.equal(day.spots.length, 1);
+});
+
+test("영상은 영상 MIME 으로 틀고, 판은 3 이라 옛 앱(판 2)은 영상 문서를 열지 않는다", () => {
+  assert.equal(trip.tripAssetMime("assets/aaaa.mp4"), "video/mp4");
+  assert.equal(trip.tripAssetMime("assets/aaaa.mov"), "video/mp4");
+  assert.equal(trip.tripAssetMime("assets/aaaa.webm"), "video/webm");
+  assert.equal(trip.tripAssetMime("assets/aaaa.jpg"), "image/jpeg");
+  assert.ok(trip.TRIP_VERSION >= 3);
+  assert.ok(trip.TRIP_VIDEO_MAX_BYTES < 64 * 1024 * 1024, "ZIP 읽기 상한(64MB)을 넘으면 열 때 조용히 빠진다");
+});
+
+test("영상과 첫 장면 그림도 ZIP 에 담겨 왕복하고, 뺀 영상은 다음 저장에서 빠진다", async () => {
+  const model = trip.tripEmpty("제주", "trip");
+  model.days = [trip.tripNormalizeDay({ id:"dy-1", title:"첫째 날", spots:[
+    { id:"sp-1", name:"성산", videos:[{ v:"assets/clip1.mp4", p:"assets/post1.jpg", d:8.5 }] }
+  ] }, () => true)];
+  const clip = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 1, 2, 3]);
+  const assets = new Map([
+    ["assets/clip1.mp4", { bytes:clip }],
+    ["assets/post1.jpg", { bytes:jpg(3) }],
+    ["assets/clip2.mp4", { bytes:clip.slice(1) }]
+  ]);
+  assert.equal(trip.tripVideoBytes(model, assets), clip.length);
+  assert.deepEqual([...trip.tripReferencedAssets(model)].sort(), ["assets/clip1.mp4", "assets/post1.jpg"]);
+  const back = await trip.tripUnpack(trip.tripPack(model, assets, 1770000000000));
+  assert.deepEqual(back.model.days[0].spots[0].videos, [{ v:"assets/clip1.mp4", p:"assets/post1.jpg", d:8.5 }]);
+  assert.deepEqual([...back.assets.keys()].sort(), ["assets/clip1.mp4", "assets/post1.jpg"]);
+  assert.deepEqual([...back.assets.get("assets/clip1.mp4").bytes], [...clip]);
+  assert.equal(trip.tripContentKey(back.model), trip.tripContentKey(model));
+
+  back.model.days[0].spots[0].videos = [];
+  const again = await trip.tripUnpack(trip.tripPack(back.model, back.assets, 1770000000000));
+  assert.deepEqual([...again.assets.keys()], [], "안 쓰는 영상·그림은 안 담긴다");
+  assert.equal(again.model.days[0].spots[0].videos.length, 0);
+});
+
+test("영상을 넣지 않은 장소는 저장 모양에 videos 칸이 없다(예전 문서와 같은 바이트)", () => {
+  const out = trip.tripCleanSpot(trip.tripNormalizeSpot({ id:"sp-1", name:"a" }));
+  assert.equal("videos" in out, false);
+});
+
 /* ---------- 국내·해외 ---------- */
 
 test("국내·해외는 한 곳에서 정하고, 좌표가 없으면 국내로 본다", () => {
@@ -365,9 +430,11 @@ test("사진이 있는 지도 표식은 미리보기로, 없는 표식은 이름
   const source = read("src/js/trip.js");
   const css = read("src/styles.css");
   assert.match(source, /function tripMapPhotoCard\(spot, markerNumber\)/);
-  assert.match(source, /photos\.slice\(0, 4\)/);
+  assert.match(source, /items\.slice\(0, 4\)/, "사진과 영상을 합쳐 4칸까지");
   assert.match(source, /window\.openImageLightbox\(photos\.map/);
-  assert.match(source, /if \(!\(spot\.photos \|\| \[\]\)\.some\(name => assets\.has\(name\)\)\)\{/);
+  assert.match(source, /if \(!\(spot\.photos \|\| \[\]\)\.some\(name => assets\.has\(name\)\) && !\(spot\.videos \|\| \[\]\)\.some\(v => assets\.has\(v\.v\)\)\)\{/,
+    "영상만 있는 장소도 미리보기를 띄운다");
+  assert.match(source, /tripOpenVideoPlayer\(videos\.map/);
   assert.match(source, /marker\.bindTooltip\(markerNumber/);
   assert.match(source, /marker\.on\("mouseover", openPreview\)/);
   assert.match(source, /marker\.on\("click", openPreview\)/);
@@ -489,6 +556,48 @@ test("일정 내보내기는 장소마다 첫 사용 가능한 사진을 문서�
   assert.equal(events[2].image, null);
   assert.equal(out.photoCount, 2);
   assert.equal(out.skippedPhotos, 0);
+});
+
+test("사진 없이 영상만 있는 장소는 영상의 첫 장면 그림을 일정에 담는다", async () => {
+  const vm = require("node:vm");
+  const context = vm.createContext({ File, diaryAssetMime:() => "image/jpeg" });
+  vm.runInContext(read("src/js/timeline.js"), context);
+  vm.runInContext(read("src/js/trip.js"), context);
+  const convert = vm.runInContext("tripToTimelineDoc", context);
+  const seen = [];
+  const assets = new Map([["assets/poster.jpg", { bytes:jpg(4) }], ["assets/clip.mp4", { bytes:jpg(5) }]]);
+  const model = { title:"제주", purpose:"trip", days:[{ date:"2026-07-20", spots:[
+    { name:"폭포", at:"09:00", videos:[{ v:"assets/clip.mp4", p:"assets/poster.jpg", d:5 }] }
+  ] }] };
+  const out = await convert(model, assets, async file => {
+    seen.push(file.size);
+    return { name:file.name, dataUrl:"data:image/jpeg;base64,AA==", width:1, height:1 };
+  });
+  assert.equal(JSON.parse(out.text).events[0].image.name, "폭포.jpg");
+  assert.deepEqual(seen, [jpg(4).length], "영상 바이트가 아니라 첫 장면 그림을 보낸다");
+});
+
+test("ffmpeg 로 바꿔 넣을 수 있는 영상은 넓게, 그대로 넣을 영상은 좁게 가른다", () => {
+  const f = (name, type) => ({ name, type });
+  assert.equal(trip.tripIsVideoFile(f("a.mp4", "video/mp4")), true);
+  assert.equal(trip.tripIsVideoFile(f("a.MOV", "")), true);
+  assert.equal(trip.tripIsVideoFile(f("a.mkv", "video/x-matroska")), false);
+  assert.equal(trip.tripIsAnyVideoFile(f("a.mkv", "video/x-matroska")), true);
+  assert.equal(trip.tripIsAnyVideoFile(f("a.avi", "")), true);
+  assert.equal(trip.tripIsAnyVideoFile(f("a.jpg", "image/jpeg")), false);
+  assert.equal(trip.tripIsAnyVideoFile(f("a.mp4", "image/png")), false, "그림 MIME 이면 이름이 영상이어도 아니다");
+});
+
+test("영상 줄이기 창구는 런처 한 곳이고, 토큰이 필요하며, 한도가 JS 와 맞는다", () => {
+  const cs = read("desktop/launcher.cs");
+  const source = read("src/js/trip.js");
+  assert.match(cs, /if \(path\.StartsWith\("\/shrink-media", StringComparison\.Ordinal\)\) return true;/, "토큰 목록");
+  assert.match(cs, /internal const int MediaShrinkMaxDim = 1280;/);
+  assert.match(source, /const TRIP_VIDEO_SHRINK_DIM = 1280;/);
+  assert.match(cs, /-map_metadata -1/, "휴대폰 영상의 촬영 위치를 지운다");
+  const bodyCap = /const int MaxHttpRequestBodyBytes = (\d+) \* 1024 \* 1024;/.exec(cs);
+  assert.ok(bodyCap && Number(bodyCap[1]) * 1024 * 1024 >= 1024 * 1024 * 1024, "JS 가 보내는 1GB 를 런처가 받아야 한다");
+  assert.match(source, /const TRIP_VIDEO_SHRINK_MAX_BYTES = 1024 \* 1024 \* 1024;/);
 });
 /* ---------- 문서에 적어 둔 것과 어긋나지 않게 ---------- */
 

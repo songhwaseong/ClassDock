@@ -89,7 +89,30 @@ static class MediaConvertTest
                 if (kind != "encode" && kind != "force") Require(Hash(ffmpeg, input, "v") == Hash(ffmpeg, output, "v"), "video packets changed during copy: " + kind);
                 if (kind != "audio") Require(Hash(ffmpeg, input, "a") == Hash(ffmpeg, output, "a"), "AAC packets changed during copy: " + kind);
             }
+
+            // 문서에 담을 짧은 영상: 세로 1080x1920 → 긴 변 1280, 앞 2초만, 위치 메타데이터는 지운다.
+            string tall = Path.Combine(folder, "세로 영상.mov");
+            Require(Run(ffmpeg, "-y -v error -f lavfi -i testsrc2=s=1080x1920:r=30 -f lavfi -i sine=frequency=440:sample_rate=48000"
+                + " -t 3 -c:v libx264 -pix_fmt yuv420p -c:a aac -metadata location=+37.5665+126.9780/ -metadata title=secret \"" + tall + "\""), "fixture failed: tall");
+            long sourceUs;
+            byte[] small = ClassDockLauncher.ShrinkMediaBytes(ffmpeg, File.ReadAllBytes(tall), 1280, 2, out sourceUs);
+            Require(sourceUs >= 2900000 && sourceUs <= 3100000, "source duration must be reported: " + sourceUs);
+            string shrunk = Path.Combine(folder, "shrunk.mp4");
+            File.WriteAllBytes(shrunk, small);
+            string info;
+            object[] call = new object[] { ffmpeg, "-hide_banner -nostdin -i \"" + shrunk + "\"", 20000, null };
+            typeof(ClassDockLauncher).GetMethod("ReadFfmpegInfo", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, call);
+            info = (string)call[3];
+            var parsed = ClassDockLauncher.ParseMediaInputInfo(info);
+            Require(parsed.CopyVideo && parsed.CopyAudio, "shrunk output must be browser H.264/AAC: " + info);
+            Require(parsed.DurationUs > 1500000 && parsed.DurationUs <= 2200000, "must be trimmed to 2s: " + parsed.DurationUs);
+            Require(info.Contains("720x1280"), "portrait must keep ratio with long side 1280: " + info);
+            Require(info.IndexOf("location", StringComparison.OrdinalIgnoreCase) < 0 && info.IndexOf("secret", StringComparison.Ordinal) < 0,
+                "metadata (GPS location) must be stripped: " + info);
         }
+        string shrinkArgs = ClassDockLauncher.MediaShrinkArgs("in.bin", "out.mp4", "libx264", 99999, 99999);
+        Require(shrinkArgs.Contains("min(1280,iw)") && shrinkArgs.Contains("-t 600") && shrinkArgs.Contains("-map_metadata -1"), "shrink limits: " + shrinkArgs);
+        Require(ClassDockLauncher.MediaShrinkPlan().TrueForAll(a => a.Encoder != "copy"), "shrink must always re-encode");
         Console.WriteLine("Media conversion checks passed");
     }
 }

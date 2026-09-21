@@ -944,6 +944,7 @@ class ClassDockLauncher
             if (path.StartsWith("/workspace-save", StringComparison.Ordinal)) return true;
             if (path == "/workspace-clear" || path == "/workspace-remove") return true;
             if (path == "/convert-pptx" || path == "/convert-media" || path == "/install-ffmpeg") return true;
+            if (path.StartsWith("/shrink-media", StringComparison.Ordinal)) return true;
             // 경로 방식 변환은 디스크의 파일을 읽고 쓴다 → 토큰 대상. 재생 표 발급도 같다
             // (표를 확인해 파일을 흘려보내는 GET /media-stream 만 예외 — <video> 는 헤더를 못 붙인다).
             if (path.StartsWith("/convert-media-path", StringComparison.Ordinal)
@@ -1784,6 +1785,37 @@ class ClassDockLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("convert-media-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                // 문서에 담을 짧은 영상: 줄이고 자르고 메타데이터를 지운 MP4. 원래 길이는 머리글로 알려
+                // 앱이 '앞부분만 넣었다'고 말할 수 있게 한다.
+                else if (method == "POST" && (path == "/shrink-media" || path.StartsWith("/shrink-media?", StringComparison.Ordinal)))
+                {
+                    if (body.Length == 0)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("empty-body"));
+                        return;
+                    }
+                    try
+                    {
+                        string ffmpeg = FindFfmpeg();
+                        if (ffmpeg == null) throw new FfmpegMissingException();
+                        int dim, sec;
+                        if (!int.TryParse(QueryValue(path, "dim"), NumberStyles.None, CultureInfo.InvariantCulture, out dim)) dim = 1280;
+                        if (!int.TryParse(QueryValue(path, "sec"), NumberStyles.None, CultureInfo.InvariantCulture, out sec)) sec = 30;
+                        byte[] mp4;
+                        long durationUs;
+                        lock (MediaConvLock) { mp4 = ShrinkMediaBytes(ffmpeg, body, dim, sec, out durationUs); }
+                        WriteResponse(stream, "200 OK", "video/mp4", mp4,
+                            "X-Media-Source-Duration-Ms: " + (durationUs / 1000).ToString(CultureInfo.InvariantCulture) + "\r\n");
+                    }
+                    catch (FfmpegMissingException)
+                    {
+                        WriteResponse(stream, "501 Not Implemented", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("no-ffmpeg"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "500 Internal Server Error", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("shrink-media-failed: " + FlattenMessage(ex)));
                     }
                 }
                 // 큰 영상은 본문으로 주고받지 않는다 — 앱이 경로만 넘기고 ffmpeg 가 디스크에서 직접 처리한다.
@@ -9812,6 +9844,72 @@ class ClassDockLauncher
         {
             File.WriteAllBytes(inPath, media);
             bool ok = ConvertMediaFile(ffmpeg, inPath, outPath, null, forceVideo);
+            if (!ok) throw new Exception("ffmpeg-failed");
+            return File.ReadAllBytes(outPath);
+        }
+        finally
+        {
+            try { if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true); } catch { }
+        }
+    }
+
+    /* ===== 문서에 담을 짧은 영상 만들기(/shrink-media) =====
+     * 여행일지 장소 영상처럼 문서 파일 '안에' 담을 영상은 작아야 한다 — 저장·복구본이 문서 전체를 다시 쓴다.
+     * 늘 다시 인코딩한다(복사하면 크기가 그대로다): 긴 변 dim 이하 · 비트레이트 상한 · 앞 sec 초까지 ·
+     * H.264/AAC MP4. 휴대폰 영상에 박힌 촬영 위치 등 메타데이터는 지운다(문서를 나눠 주면 같이 퍼진다).
+     * 회전 정보는 ffmpeg 가 필터 앞에서 화면에 반영하므로(autorotate) 지워도 눕지 않는다. */
+    internal const int MediaShrinkMaxDim = 1280;
+    internal const int MediaShrinkMaxSec = 600;
+    internal const int MediaShrinkVideoKbps = 2000;   // 평균 목표. 순간 상한은 그 1.25배
+
+    internal static List<MediaConvertAttempt> MediaShrinkPlan()
+    {
+        List<MediaConvertAttempt> plan = new List<MediaConvertAttempt>();
+        foreach (string encoder in new string[] { "h264_nvenc", "h264_qsv", "h264_amf", "libx264" })
+            plan.Add(new MediaConvertAttempt { Encoder = encoder, CopyAudio = false });
+        return plan;
+    }
+
+    internal static string MediaShrinkArgs(string inPath, string outPath, string encoder, int dim, int sec)
+    {
+        int d = Math.Max(160, Math.Min(MediaShrinkMaxDim, dim));
+        int s = Math.Max(1, Math.Min(MediaShrinkMaxSec, sec));
+        int avg = MediaShrinkVideoKbps, peak = MediaShrinkVideoKbps * 5 / 4;
+        string rate = " -b:v " + avg + "k -maxrate " + peak + "k -bufsize " + (peak * 2) + "k";
+        string options;
+        switch (encoder)
+        {
+            case "h264_nvenc": options = " -preset p4 -rc vbr" + rate; break;
+            case "h264_qsv": options = " -preset veryfast" + rate; break;
+            case "h264_amf": options = " -usage transcoding -quality speed -rc vbr_peak" + rate; break;
+            default: options = " -preset veryfast -crf 26 -maxrate " + peak + "k -bufsize " + (peak * 2) + "k"; break;
+        }
+        // 가로 영상은 폭을, 세로 영상은 높이를 d 로 묶고 다른 쪽은 비율대로(짝수). 작은 영상은 키우지 않는다.
+        string scale = "scale='if(gte(iw,ih),trunc(min(" + d + ",iw)/2)*2,-2)':'if(gte(iw,ih),-2,trunc(min(" + d + ",ih)/2)*2)'";
+        return "-y -hide_banner -loglevel error -nostdin -i " + QuoteProcessArgument(inPath)
+            + " -map 0:v:0 -map 0:a:0? -map_metadata -1 -map_chapters -1 -sn -dn -t " + s
+            + " -c:v " + encoder + options + " -vf \"" + scale + "\" -pix_fmt yuv420p"
+            + " -c:a aac -b:a 128k -ac 2 -movflags +faststart -f mp4 " + QuoteProcessArgument(outPath);
+    }
+
+    internal static byte[] ShrinkMediaBytes(string ffmpeg, byte[] media, int dim, int sec, out long durationUs)
+    {
+        string tmpDir = Path.Combine(Path.GetTempPath(), "moida_av_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tmpDir);
+        string inPath = Path.Combine(tmpDir, "in.bin");
+        string outPath = Path.Combine(tmpDir, "out.mp4");
+        try
+        {
+            File.WriteAllBytes(inPath, media);
+            durationUs = ProbeMediaInput(ffmpeg, inPath).DurationUs;
+            bool ok = false;
+            foreach (MediaConvertAttempt attempt in MediaShrinkPlan())
+            {
+                if (attempt.Stage == "hardware" && !CanEncodeMediaHardware(ffmpeg, attempt.Encoder)) continue;
+                if (File.Exists(outPath)) File.Delete(outPath);
+                if (RunFfmpeg(ffmpeg, MediaShrinkArgs(inPath, outPath, attempt.Encoder, dim, sec), 600000)
+                    && File.Exists(outPath) && new FileInfo(outPath).Length > 0) { ok = true; break; }
+            }
             if (!ok) throw new Exception("ffmpeg-failed");
             return File.ReadAllBytes(outPath);
         }

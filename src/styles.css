@@ -7964,6 +7964,27 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-spot-photo-view{display:block;width:100%;height:100%;padding:0;border:0;background:transparent;cursor:zoom-in}
 .trip-spot-photo-view img{display:block;width:100%;height:100%;object-fit:cover}
 .trip-spot-photo-remove{position:absolute;top:3px;right:3px;width:24px;min-height:24px;padding:0;border-radius:999px;background:color-mix(in srgb,var(--bg) 82%,transparent)}
+/* 장소 영상 — 사진 칸과 같은 자리에 ▶ 와 길이를 얹는다. 누르면 영상 창에서 곧바로 틀린다. */
+.trip-spot-video-view{position:relative;background:#111;cursor:pointer}
+/* ▶ 는 왼쪽 아래 — 가운데 두면 오른쪽 위 빼기(×) 단추와 좁은 칸에서 맞닿는다. */
+.trip-spot-video-badge{position:absolute;left:4px;bottom:3px;display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;pointer-events:none}
+.trip-spot-video-badge .ui-icon{width:12px;height:12px;fill:currentColor}
+.trip-spot-video-view:hover .trip-spot-video-badge{background:var(--accent)}
+.trip-spot-video-dur{position:absolute;right:4px;bottom:3px;padding:0 4px;border-radius:4px;background:rgba(0,0,0,.62);color:#fff;font-size:11px;line-height:16px;font-variant-numeric:tabular-nums;pointer-events:none}
+.trip-spot.is-drop{outline:2px dashed var(--accent);outline-offset:2px}
+.trip-video-modal{z-index:1400}
+.trip-video-card{display:flex;flex-direction:column;gap:10px;width:min(1000px,96vw);max-height:94vh;padding:12px 14px 14px;overflow:hidden}
+.trip-video-head{display:flex;align-items:center;gap:10px;flex:none}
+.trip-video-title{margin:0;min-width:0;overflow:hidden;font-size:16px;text-overflow:ellipsis;white-space:nowrap}
+.trip-video-count{flex:none;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.trip-video-x{flex:none;margin-left:auto;padding:0 4px;border:0;background:transparent;color:var(--muted);font-size:22px;line-height:1;cursor:pointer}
+.trip-video-x:hover{color:var(--ink)}
+.trip-video-body{position:relative;display:flex;align-items:center;justify-content:center;min-height:0;border-radius:8px;background:#000;overflow:hidden}
+.trip-video-player{display:block;width:100%;max-height:calc(94vh - 80px);background:#000}
+.trip-video-nav{position:absolute;top:50%;z-index:1;width:36px;height:52px;margin-top:-26px;border:0;border-radius:8px;background:rgba(0,0,0,.45);color:#fff;font-size:26px;line-height:1;cursor:pointer}
+.trip-video-nav:hover{background:rgba(0,0,0,.7)}
+.trip-video-nav.prev{left:8px}
+.trip-video-nav.next{right:8px}
 .trip-spot-cost{width:110px;text-align:right}
 .trip-spot-cost-unit{color:var(--muted);font-size:12px}
 .trip-kind-foreign{color:var(--muted)}
@@ -8084,6 +8105,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-map-photo-thumb img{display:block;width:100%;height:100%;object-fit:cover}
 .trip-map-photo-more{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,35,68,.64);color:#fff;font-size:17px;font-weight:800}
 .trip-map-photo-thumb:focus-visible{outline:2px solid var(--trip-blue);outline-offset:2px}
+.trip-map-video-thumb{background:#111;cursor:pointer}
 .trip-regions,.trip-still{border-color:rgba(125,158,193,.2);background:rgba(255,255,255,.28)}
 .trip-region-chip{border-color:rgba(125,158,193,.25);background:rgba(255,255,255,.68)}
 .trip-root>.diary-style-panel,.trip-root>.diary-art-panel{top:98px;border-radius:14px}
@@ -8507,6 +8529,7 @@ a.diary-school-card-value{color:var(--accent)}
 .trip-print-spots{width:100%;margin:4mm 0 0;border-collapse:collapse;font-size:10.5pt}
 .trip-print-spots th,.trip-print-spots td{border:1px solid #cbd5e1;padding:1.6mm 2mm;text-align:left;vertical-align:top}
 .trip-print-spots th{background:#f1f5f9;font-weight:600}
+.trip-print-video{margin-top:1mm;color:#475569;font-size:9pt}
 .trip-print-map{display:block;width:100%;margin:4mm 0 0;border:1px solid #e5e7eb;border-radius:3px}
 .trip-print-sources{margin:5mm 0 0;padding-top:2mm;border-top:1px solid #cbd5e1;font-size:9.5pt;color:#475569}
 .trip-print-sources-app{margin-top:1mm;color:#64748b}
