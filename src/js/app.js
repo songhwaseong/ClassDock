@@ -159,6 +159,7 @@ function wire(){
   if (byId("dzNewTimeline")) byId("dzNewTimeline").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTimelineScratch === "function") newTimelineScratch(); });
   if (byId("dzNewConcept")) byId("dzNewConcept").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newConceptScratch === "function") newConceptScratch(); });
   if (byId("dzNewDiary")) byId("dzNewDiary").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newDiaryScratch === "function") newDiaryScratch(); });
+  if (byId("dzNewTrip")) byId("dzNewTrip").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTripScratch === "function") newTripScratch("trip"); });
   if (byId("dzNewStudy")) byId("dzNewStudy").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newStudyScratch === "function") newStudyScratch(); });
   if (byId("dzNewExam")) byId("dzNewExam").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newExamPaper === "function") newExamPaper(); });
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
@@ -509,6 +510,7 @@ function wire(){
   if (byId("sbNewDbConn")) byId("sbNewDbConn").onclick = () => { if (typeof newDbConnScratch === "function") newDbConnScratch(); };
   if (byId("sbNewConcept")) byId("sbNewConcept").onclick = () => { if (typeof newConceptScratch === "function") newConceptScratch(); };
   if (byId("sbNewDiary")) byId("sbNewDiary").onclick = () => { if (typeof newDiaryScratch === "function") newDiaryScratch(); };
+  if (byId("sbNewTrip")) byId("sbNewTrip").onclick = () => { if (typeof newTripScratch === "function") newTripScratch("trip"); };
   if (byId("sbNewStudy")) byId("sbNewStudy").onclick = () => { if (typeof newStudyScratch === "function") newStudyScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };

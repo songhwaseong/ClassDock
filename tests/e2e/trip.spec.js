@@ -20,6 +20,22 @@ const modelOf = page => page.evaluate(() => {
   return doc ? JSON.parse(JSON.stringify(doc.trip)) : null;
 });
 
+test("빈 화면의 '새로 만들기'로도 여행일지를 만들 수 있다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko");
+      localStorage.setItem("sidebarCollapsed", "false");
+    } catch (_) {}
+  });
+  await page.goto("/");
+  await expect(page.locator("#commandPaletteOpen")).toBeVisible();
+  await page.locator("#dzNew").click();                 // 빈 화면의 새로 만들기 메뉴를 먼저 연다
+  await page.locator("#dzNewTrip").click();
+  await expect(page.locator(".trip-bar")).toBeVisible();
+  await expect(page.locator(".tab.active")).toContainText("여행일지.trip");
+});
+
 test("새 여행일지가 탭으로 열리고 갈래에 따라 이름이 다르다", async ({ page }) => {
   await boot(page, "field");
   await expect(page.locator(".tab.active")).toContainText("체험학습.trip");

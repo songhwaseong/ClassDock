@@ -2630,6 +2630,13 @@ function openSidebarGroupMenu(node, x, y){
   add("+Dia 새 일기장", () => {
     if (typeof newDiaryScratchInFolder === "function") newDiaryScratchInFolder(node.newPythonContext);
   });
+  // 폴더에서 만들 때는 갈래를 물을 수 없다(makeContent 가 동기여야 한다) — 갈래마다 한 줄씩 둔다.
+  for (const [label, purpose] of [["+Trip 새 여행일지", "trip"], ["+Trip 새 체험학습 보고서", "field"],
+    ["+Trip 새 답사 보고서", "survey"]]){
+    add(label, () => {
+      if (typeof newTripScratchInFolder === "function") newTripScratchInFolder(node.newPythonContext, purpose);
+    });
+  }
   if (typeof canCreateFolderOnDisk === "function" && canCreateFolderOnDisk(node)){
     add("＋ 새 폴더", () => {
       if (typeof createFolderOnDisk === "function") createFolderOnDisk(node);
