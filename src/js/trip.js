@@ -845,6 +845,42 @@ function tripToMapDoc(model){
   return { text:mapDocSerialize(doc), sent:rows.length, skipped:tripSpotRows(model).length - rows.length };
 }
 
+/* ---------- 인쇄 ----------
+   화면을 찍지 않고 A4 폭으로 다시 배치한다(일기장과 같은 방식). 종이는 공용 함수가 그리고
+   여기서는 갈래마다 다른 머리 칸과 장소·질문 표를 붙인다.
+   인쇄 층에는 Leaflet 저작권 줄이 따라오지 않으므로 **자료 출처 한 줄을 앱이 직접 넣는다**(설계 2.5). */
+
+const TRIP_PRINT_WIDTH = 680;
+
+/* 갈래마다 다른 머리 칸의 기본값. 사용자가 header 에 적어 둔 것이 있으면 그것을 쓴다. */
+const TRIP_HEADER_DEFAULTS = {
+  trip:   [],
+  field:  [["학교", ""], ["학년·반", ""], ["이름", ""]],
+  survey: [["주제", ""], ["조사자", ""], ["조사일", ""]]
+};
+function tripPrintHeader(model){
+  const rows = (model.header || []).filter(item => item.k || item.v);
+  if (rows.length) return rows;
+  return (TRIP_HEADER_DEFAULTS[tripPurpose(model.purpose)] || []).map(([k, v]) => ({ k, v }));
+}
+
+/* 앱이 쓴 자료의 출처. 쓴 것만 적는다 — 안 쓴 자료의 출처를 적는 것은 틀린 표시다(설계 2.5 규칙 2). */
+function tripPrintSources(model){
+  const out = [];
+  const usedMap = !!(model.map && model.map.still) || (model.days || []).some(d => d.still);
+  if (usedMap && typeof MAP_BASEMAPS !== "undefined"){
+    const spec = MAP_BASEMAPS[(model.map && model.map.basemap) || "osm"];
+    // 굳힌 그림에는 이미 새겨져 있으므로 그림이 있는 쪽은 그림이 맡는다. 여기는 그림 밖에서 쓴 것만.
+    if (spec && !usedMap) out.push(spec.attribution);
+  }
+  const anyCoord = (model.days || []).some(d => (d.spots || []).some(s => s.lat != null));
+  // 경계 자료(공공누리 1유형)는 지연 로드라 전역에 있을 때만 이름을 댄다.
+  const regions = typeof globalThis !== "undefined" ? globalThis.MN_KOREA_REGIONS : null;
+  if (anyCoord && regions && regions.attribution && tripIsDomestic(model)) out.push(regions.attribution);
+  const user = String(model.source || "").trim();
+  return { app:out, user };
+}
+
 /* ---------- 편집기 ---------- */
 
 const TRIP_RECOVERY_DELAY = 1500;
@@ -920,10 +956,11 @@ function mountTripEditor(doc){
   const styleBtn = diaryButton("꾸미기", "종이 꾸미기", "diary-btn trip-style-btn", "palette");
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
+  const printBtn = diaryButton("인쇄", "인쇄 · PDF 로 저장", "diary-btn trip-print-btn", "print");
   const exportBtn = diaryButton("내보내기", "일정·지도로 내보내기", "diary-btn trip-export-btn", "export");
   const saveBtn = diaryButton("저장", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
   bar.append(titleInput, purposeSelect, status, undoBtn, redoBtn, photoBtn, photoInput,
-    exifBtn, exifInput, stickerBtn, styleBtn, bgInput, exportBtn, saveBtn);
+    exifBtn, exifInput, stickerBtn, styleBtn, bgInput, printBtn, exportBtn, saveBtn);
 
   /* ----- 본문: 여정 띠 + 종이 ----- */
   const body = document.createElement("div");
@@ -2001,6 +2038,175 @@ function mountTripEditor(doc){
     },
     onChange:updateHistoryButtons
   });
+  /* ----- 인쇄 ----- */
+  function buildPrintPage(day, index, first){
+    const purpose = tripPurpose(model.purpose);
+    const W = TRIP_PRINT_WIDTH;
+    const waits = [];
+    const page = document.createElement("section");
+    page.className = "trip-print-page";
+    if (first){
+      const top = document.createElement("div");
+      top.className = "trip-print-title";
+      top.textContent = model.title || tripWord(purpose, "docName");
+      page.append(top);
+      const rows = tripPrintHeader(model);
+      if (rows.length){
+        const head = document.createElement("div");
+        head.className = "trip-print-header";
+        for (const item of rows){
+          const cell = document.createElement("span");
+          cell.className = "trip-print-header-cell";
+          cell.textContent = item.k + " " + (item.v || "____________");
+          head.append(cell);
+        }
+        page.append(head);
+      }
+    }
+    // header 태그는 쓰지 않는다 — 전역 header{color:#fff} 를 물려받아 흰 종이에 흰 글자가 된다.
+    const dayHead = document.createElement("div");
+    dayHead.className = "trip-print-day";
+    dayHead.textContent = [tripWordf(purpose, "dayNth", { n:index + 1 }), day.date, day.title]
+      .filter(Boolean).join(" · ");
+    page.append(dayHead);
+
+    const style = diaryEffectiveStyle(model, day);
+    const built = diaryBuildPrintPaper(day, style, W, model.printPlain, { assetUrl });
+    built.paperEl.style.width = W + "px";
+    page.append(built.paperEl);
+    waits.push(...built.waits);
+
+    if ((day.prompts || []).length && tripHasWord(purpose, "prompts")){
+      const box = document.createElement("div");
+      box.className = "trip-print-prompts";
+      for (const prompt of day.prompts){
+        const row = document.createElement("div");
+        row.className = "trip-print-prompt";
+        const q = document.createElement("div"); q.className = "trip-print-q"; q.textContent = prompt.q;
+        const a = document.createElement("div"); a.className = "trip-print-a";
+        a.textContent = prompt.a || "";           // 비어 있으면 답 쓸 자리로 남는다
+        row.append(q, a);
+        box.append(row);
+      }
+      page.append(box);
+    }
+
+    if ((day.spots || []).length){
+      const table = document.createElement("table");
+      table.className = "trip-print-spots";
+      const head = document.createElement("tr");
+      for (const label of [tripWord(purpose, "spotAt"), tripWord(purpose, "spot"),
+        tripWord(purpose, "spotNote"), tripHasWord(purpose, "cost") ? tripWord(purpose, "cost") : ""]){
+        if (!label) continue;
+        const th = document.createElement("th"); th.textContent = label; head.append(th);
+      }
+      table.append(head);
+      for (const spot of day.spots){
+        const row = document.createElement("tr");
+        const cells = [spot.at || "",
+          [spot.name, spot.kind ? "(" + tripSpotKindName(purpose, spot.kind) + ")" : "", spot.address]
+            .filter(Boolean).join(" "),
+          [spot.note, ...(spot.fields || []).map(f => f.k + ": " + f.v)].filter(Boolean).join(" / ")];
+        if (tripHasWord(purpose, "cost")) cells.push(spot.cost ? moneyText(spot.cost.amount, spot.cost.currency) : "");
+        for (const text of cells){
+          const td = document.createElement("td"); td.textContent = text; row.append(td);
+        }
+        table.append(row);
+      }
+      page.append(table);
+    }
+
+    /* 굳힌 지도 그림. 없으면 그 자리를 비운다 — 회색 지도를 넣느니 아무것도 안 넣는다(설계 2.3 규칙 5). */
+    const stillUrl = day.still ? assetUrl(day.still) : "";
+    if (stillUrl){
+      const img = document.createElement("img");
+      img.className = "trip-print-map";
+      img.alt = tripWord(purpose, "mapPane");
+      img.src = stillUrl;
+      if (img.decode) waits.push(img.decode().catch(() => {}));
+      page.append(img);
+    }
+    return { page, waits };
+  }
+
+  async function printDays(list){
+    if (!list.length) return false;
+    const fonts = new Set(list.map(d => diaryEffectiveStyle(model, d).font));
+    for (const d of list) for (const st of (d.stickers || [])) if (diaryStickerKind(st) === "text") fonts.add(st.font);
+    await Promise.all([...fonts].map(diaryEnsureFont));
+    const old = document.getElementById("tripPrintLayer");
+    if (old) old.remove();
+    const layer = document.createElement("div");
+    layer.id = "tripPrintLayer";
+    layer.className = "trip-print diary-doc ui-keep-symbols";
+    const waits = [];
+    list.forEach((day, i) => {
+      const built = buildPrintPage(day, (model.days || []).indexOf(day), i === 0);
+      layer.append(built.page);
+      waits.push(...built.waits);
+    });
+    // 표지에 여행 전체 지도가 굳어 있으면 맨 뒤에 한 장 더 붙인다.
+    const allStill = model.map && model.map.still ? assetUrl(model.map.still) : "";
+    if (allStill){
+      const page = document.createElement("section");
+      page.className = "trip-print-page";
+      const img = document.createElement("img");
+      img.className = "trip-print-map";
+      img.alt = tripWord(model.purpose, "mapPane");
+      img.src = allStill;
+      if (img.decode) waits.push(img.decode().catch(() => {}));
+      page.append(img);
+      layer.append(page);
+    }
+    // 자료 출처 — 인쇄는 화면을 찍지 않아 저작권 줄이 따라오지 않는다(설계 2.5).
+    const sources = tripPrintSources(model);
+    if (sources.app.length || sources.user){
+      const foot = document.createElement("div");
+      foot.className = "trip-print-sources";
+      if (sources.user){
+        const mine = document.createElement("div");
+        mine.textContent = tripWord(model.purpose, "source") || "자료 출처";
+        mine.append(document.createElement("br"));
+        mine.append(sources.user);
+        foot.append(mine);
+      }
+      if (sources.app.length){
+        const app = document.createElement("div");
+        app.className = "trip-print-sources-app";
+        app.textContent = sources.app.join(" · ");
+        foot.append(app);
+      }
+      layer.append(foot);
+    }
+    document.body.appendChild(layer);
+    await Promise.all(waits);
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("afterprint", cleanup);
+      document.body.classList.remove("trip-printing");
+      layer.remove();
+    };
+    try {
+      window.addEventListener("afterprint", cleanup);
+      document.body.classList.add("trip-printing");
+      window.print();
+    } finally { cleanup(); }
+    return true;
+  }
+  doc.printTrip = () => printDays(model.days || []);
+
+  printBtn.addEventListener("click", () => {
+    const day = dayOf(current);
+    const r = printBtn.getBoundingClientRect();
+    MNContextMenu.open(r.left, r.bottom + 4, [
+      { label:tripWord(model.purpose, "printDay"), disabled:!day, action:() => printDays(day ? [day] : []) },
+      { label:tripWord(model.purpose, "printAll"), disabled:!(model.days || []).length,
+        action:() => printDays(model.days || []) }
+    ], { autoFocus:true });
+  });
+
   /* ----- 내보내기 ----- */
   async function openAsDoc(text, name, mime){
     if (typeof handleFiles !== "function") return false;

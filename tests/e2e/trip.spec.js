@@ -665,6 +665,104 @@ test("받아 둔 특일이 없으면 배지 없이 그냥 뜬다", async ({ page
   await expect(page.locator(".trip-day-special")).toHaveCount(0);
 });
 
+/* 인쇄는 window.print 를 막고 '찍는 순간의 층'을 들여다본다(일기장 인쇄 시험과 같은 방식). */
+async function printAndPeek(page, which){
+  await page.evaluate(() => {
+    window.__printed = null;
+    window.print = () => {
+      const layer = document.getElementById("tripPrintLayer");
+      window.__printed = {
+        printing:document.body.classList.contains("trip-printing"),
+        pages:layer.querySelectorAll(".trip-print-page").length,
+        title:(layer.querySelector(".trip-print-title") || {}).textContent || "",
+        header:[...layer.querySelectorAll(".trip-print-header-cell")].map(el => el.textContent),
+        days:[...layer.querySelectorAll(".trip-print-day")].map(el => el.textContent),
+        // 종이는 공용이라 글칸 클래스가 일기장 것이다(diaryBuildPrintPaper)
+        texts:[...layer.querySelectorAll(".diary-print-text")].map(el => el.textContent),
+        spotHeads:[...layer.querySelectorAll(".trip-print-spots th")].map(el => el.textContent),
+        spotCells:[...layer.querySelectorAll(".trip-print-spots td")].map(el => el.textContent),
+        prompts:[...layer.querySelectorAll(".trip-print-q")].map(el => el.textContent),
+        maps:layer.querySelectorAll(".trip-print-map").length,
+        sources:(layer.querySelector(".trip-print-sources") || {}).textContent || "",
+        // 전역 header{color:#fff} 를 물려받으면 흰 종이에 흰 글자로 찍힌다
+        dayColor:getComputedStyle(layer.querySelector(".trip-print-day")).color
+      };
+    };
+  });
+  await page.locator(".trip-print-btn").click();
+  await page.getByRole("menuitem", { name:which }).click();
+  await expect.poll(() => page.evaluate(() => !!window.__printed)).toBe(true);
+  return page.evaluate(() => window.__printed);
+}
+
+test("인쇄 층이 A4 폭으로 다시 배치되고, 장소 표와 종이가 함께 찍힌다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-title").fill("제주 3박 4일");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-20");
+  await page.locator(".trip-day-title").fill("성산");
+  await page.locator(".diary-text").fill("바람이 셌다");
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot-name").fill("성산일출봉");
+  await page.locator(".trip-spot-at").fill("9:30");
+  await page.locator(".trip-spot-at").blur();
+  await page.locator(".trip-spot-cost").fill("5000");
+
+  const out = await printAndPeek(page, "여행 전체 인쇄");
+  expect(out.printing).toBe(true);
+  expect(out.pages).toBe(1);
+  expect(out.title).toBe("제주 3박 4일");
+  expect(out.days[0]).toContain("1째 날");
+  expect(out.days[0]).toContain("2026-07-20");
+  expect(out.texts[0]).toBe("바람이 셌다");
+  expect(out.spotHeads).toEqual(["들른 시각", "들른 곳", "메모", "쓴 돈"]);
+  expect(out.spotCells[0]).toBe("09:30");
+  expect(out.spotCells[1]).toContain("성산일출봉");
+  expect(out.spotCells[3]).toContain("5,000원");
+  expect(out.dayColor).not.toBe("rgb(255, 255, 255)");   // header 태그를 쓰면 흰 글자가 된다
+  await expect(page.locator("#tripPrintLayer")).toHaveCount(0);   // 찍고 나면 치운다
+});
+
+test("학습지 갈래는 이름 칸과 답 쓸 자리가 함께 찍힌다", async ({ page }) => {
+  await boot(page, "field");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-title").fill("박물관 견학");
+  await page.locator(".trip-add-prompt").click();
+  await page.locator(".trip-prompt-q").fill("무엇을 보았나요?");
+
+  const out = await printAndPeek(page, "보고서 전체 인쇄");
+  expect(out.header).toEqual(["학교 ____________", "학년·반 ____________", "이름 ____________"]);
+  expect(out.days[0]).toContain("활동 1");
+  expect(out.prompts).toEqual(["무엇을 보았나요?"]);
+  expect(out.spotHeads.length).toBe(0);                  // 장소가 없으면 표도 없다
+});
+
+test("굳힌 지도 그림이 있으면 인쇄에 들어가고, 자료 출처가 한 줄 붙는다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page, "survey");
+  await page.locator(".trip-add-day").click();
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    const day = doc.trip.days[0];
+    day.spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"observe",
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+    doc.trip.source = "제주도청 누리집";
+    // 1x1 PNG 를 굳힌 그림인 척 넣는다
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="),
+      c => c.charCodeAt(0));
+    doc.tripAssets.set("assets/stillmap.png", { bytes:png });
+    day.still = "assets/stillmap.png";
+    day.stillKey = "k";
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+
+  const out = await printAndPeek(page, "답사 전체 인쇄");
+  expect(out.maps).toBe(1);
+  expect(out.sources).toContain("자료 출처");
+  expect(out.sources).toContain("제주도청 누리집");
+  expect(out.sources).toMatch(/공공누리|SGIS|admdongkor/);   // 경계 자료를 썼으면 그 출처도
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

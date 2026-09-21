@@ -3285,6 +3285,126 @@ function mountDiaryPanels(panelEnv){
   return { panel, artPanel, artCustomColor, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen, changeStyle };
 }
 
+/* ===== 인쇄 층의 종이 한 장(일기장·여행일지 공용) =====
+   화면을 찍지 않고 A4 폭으로 다시 배치한다. 배경 효과·배경 그림·스티커·원고지 칸·그림 획까지
+   화면과 같은 함수로 그리므로 줄바꿈 자리가 흔들리지 않는다.
+   printEnv = { assetUrl } · plain 이면 배경을 빼고 찍는다(잉크를 아낀다). */
+function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
+  const e = entry;                     // 아래 몸통이 쓰던 이름을 그대로 둔다
+  const waits = [];
+  const paperEl = document.createElement("div");
+  paperEl.className = "diary-print-paper";
+  paperEl.dataset.lines = style.lines;
+  paperEl.style.width = width + "px";
+  // 배경 효과 — 화면과 같은 함수로 그린다. 인쇄 층엔 print-color-adjust:exact 가 걸려 있어 그라디언트도 찍힌다.
+  if (!plain && style.paper && style.paper !== "none"){
+    const art = document.createElement("div");
+    art.className = "diary-paper-art";
+    paperEl.dataset.paper = diaryPaintPaper(art, style).kind;
+    paperEl.append(art);
+  }
+  const url = plain ? "" : printEnv.assetUrl(style.bg);
+  if (url){
+    const bg = document.createElement("div");
+    bg.className = "diary-paper-bg";
+    bg.dataset.fit = style.fit;
+    bg.style.backgroundImage = `url("${url}")`;
+    const veil = document.createElement("div");
+    veil.className = "diary-paper-veil";
+    veil.style.opacity = String(style.veil);
+    paperEl.append(bg, veil);
+    const pre = new Image(); pre.src = url;
+    if (pre.decode) waits.push(pre.decode().catch(() => {}));
+  }
+  let stickerBottom = 0;
+  for (const st of entry.stickers) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(st) * width);
+  const font = DIARY_FONT_STACKS[style.font] || "";
+  if (diaryUsesGenko(style)){
+    const gm = diaryGenkoMetrics(style, width);
+    const lay = diaryGenkoLayout(e.text, gm.cols);
+    const layer = document.createElement("div");
+    layer.className = "diary-genko";
+    layer.style.fontFamily = font;
+    const grid = document.createElement("div");
+    grid.className = "diary-genko-grid";
+    layer.append(grid);
+    const rows = diaryRenderGenko(grid, lay, gm, { minRows:Math.ceil((stickerBottom - gm.padTop) / gm.pitch) + 1 });
+    layer.style.height = (gm.padTop + rows * gm.pitch + gm.cell / 2) + "px";
+    paperEl.append(layer);
+    const pm = diaryLineMetrics(style, width);
+    if (pm.box){
+      const box = document.createElement("div");
+      box.className = "diary-picture-box";
+      Object.assign(box.style, { left:pm.box.left + "px", top:pm.box.top + "px", width:(width - pm.box.left - pm.box.right) + "px", height:pm.box.height + "px" });
+      paperEl.append(box);
+    }
+  } else {
+    const m = diaryLineMetrics(style, width);
+    const bgc = diaryLineBackground(style);
+    const text = document.createElement("div");
+    text.className = "diary-print-text";
+    text.textContent = e.text;
+    Object.assign(text.style, {
+      backgroundImage:bgc.image, backgroundSize:bgc.size, backgroundPosition:bgc.position, backgroundRepeat:bgc.repeat,
+      lineHeight:m.gap + "px", fontSize:m.fontSize + "px", fontFamily:font,
+      paddingTop:m.padTop + "px", paddingBottom:m.gap + "px", paddingLeft:m.padLeft + "px", paddingRight:m.padRight + "px",
+      minHeight:Math.ceil((stickerBottom + m.gap) / m.gap) * m.gap + "px"
+    });
+    paperEl.append(text);
+  }
+  for (const st of entry.stickers){
+    const kind = diaryStickerKind(st);
+    const node = document.createElement("div");
+    node.className = "diary-print-sticker diary-sticker-is-" + kind;
+    Object.assign(node.style, { left:st.x * width + "px", top:st.y * width + "px", width:st.w * width + "px",
+      transform:st.rot ? `rotate(${st.rot}deg)` : "" });
+    // 글상자만 높이를 글에 맡긴다 — 글자 크기가 종이 폭 비율이라 680px 에서도 화면과 같은 자리에서 줄이 바뀐다.
+    if (kind !== "text") node.style.height = st.w * st.ar * width + "px";
+    if (kind !== "photo") node.style.opacity = String(st.opacity == null ? 1 : st.opacity);
+    if (kind === "art"){
+      const art = document.createElement("span");
+      art.className = "diary-sticker-body diary-sticker-art";
+      art.innerHTML = diaryArtSvg(st.art);
+      art.style.color = st.color || DIARY_ART_DEFAULT_COLOR;
+      if (st.flip) art.style.transform = "scaleX(-1)";
+      node.append(art);
+    } else if (kind === "text"){
+      const box = document.createElement("div");
+      box.className = "diary-sticker-body diary-sticker-text";
+      box.textContent = st.text;
+      Object.assign(box.style, { fontSize:(st.size * width) + "px", fontFamily:DIARY_FONT_STACKS[st.font] || "",
+        color:st.color || DIARY_TEXT_DEFAULT_COLOR, textAlign:st.align || "left" });
+      node.append(box);
+    } else {
+      const img = document.createElement("img");
+      img.className = "diary-sticker-body";
+      img.src = printEnv.assetUrl(st.asset);
+      img.alt = "";
+      if (st.flip) img.style.transform = "scaleX(-1)";
+      if (img.decode) waits.push(img.decode().catch(() => {}));
+      node.append(img);
+    }
+    paperEl.append(node);
+  }
+  const pbox = diaryUsesGenko(style) ? diaryLineMetrics(style, width).box : null;
+  if (pbox && entry.drawing && entry.drawing.length){
+    const bw = width - pbox.left - pbox.right;
+    const canvas = document.createElement("canvas");
+    canvas.width = bw * 2; canvas.height = pbox.height * 2;               // 인쇄는 두 배로 그려 선이 거칠지 않게
+    const ctx = canvas.getContext("2d");
+    ctx.scale(2, 2);
+    diaryDrawStrokes(ctx, entry.drawing, bw);
+    const img = document.createElement("img");
+    img.className = "diary-print-drawing";
+    img.alt = "";
+    img.src = canvas.toDataURL("image/png");
+    Object.assign(img.style, { left:pbox.left + "px", top:pbox.top + "px", width:bw + "px", height:pbox.height + "px" });
+    if (img.decode) waits.push(img.decode().catch(() => {}));
+    paperEl.append(img);
+  }
+  return { paperEl, waits };
+}
+
 function mountDiaryEditor(doc){
   const model = doc.diary;
   const assets = doc.diaryAssets || (doc.diaryAssets = new Map());
@@ -5119,116 +5239,9 @@ function mountDiaryEditor(doc){
     if (e.title){ const h = document.createElement("h2"); h.textContent = e.title; head.append(h); }
     page.append(head);
     const style = diaryEffectiveStyle(model, e);
-    const paperEl = document.createElement("div");
-    paperEl.className = "diary-print-paper";
-    paperEl.dataset.lines = style.lines;
-    paperEl.style.width = W + "px";
-    // 배경 효과 — 화면과 같은 함수로 그린다. 인쇄 층엔 print-color-adjust:exact 가 걸려 있어 그라디언트도 찍힌다.
-    if (!model.printPlain && style.paper && style.paper !== "none"){
-      const art = document.createElement("div");
-      art.className = "diary-paper-art";
-      paperEl.dataset.paper = diaryPaintPaper(art, style).kind;
-      paperEl.append(art);
-    }
-    const url = model.printPlain ? "" : assetUrl(style.bg);
-    if (url){
-      const bg = document.createElement("div");
-      bg.className = "diary-paper-bg";
-      bg.dataset.fit = style.fit;
-      bg.style.backgroundImage = `url("${url}")`;
-      const veil = document.createElement("div");
-      veil.className = "diary-paper-veil";
-      veil.style.opacity = String(style.veil);
-      paperEl.append(bg, veil);
-      const pre = new Image(); pre.src = url;
-      if (pre.decode) waits.push(pre.decode().catch(() => {}));
-    }
-    let stickerBottom = 0;
-    for (const st of e.stickers) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(st) * W);
-    const font = DIARY_FONT_STACKS[style.font] || "";
-    if (diaryUsesGenko(style)){
-      const gm = diaryGenkoMetrics(style, W);
-      const lay = diaryGenkoLayout(e.text, gm.cols);
-      const layer = document.createElement("div");
-      layer.className = "diary-genko";
-      layer.style.fontFamily = font;
-      const grid = document.createElement("div");
-      grid.className = "diary-genko-grid";
-      layer.append(grid);
-      const rows = diaryRenderGenko(grid, lay, gm, { minRows:Math.ceil((stickerBottom - gm.padTop) / gm.pitch) + 1 });
-      layer.style.height = (gm.padTop + rows * gm.pitch + gm.cell / 2) + "px";
-      paperEl.append(layer);
-      const pm = diaryLineMetrics(style, W);
-      if (pm.box){
-        const box = document.createElement("div");
-        box.className = "diary-picture-box";
-        Object.assign(box.style, { left:pm.box.left + "px", top:pm.box.top + "px", width:(W - pm.box.left - pm.box.right) + "px", height:pm.box.height + "px" });
-        paperEl.append(box);
-      }
-    } else {
-      const m = diaryLineMetrics(style, W);
-      const bgc = diaryLineBackground(style);
-      const text = document.createElement("div");
-      text.className = "diary-print-text";
-      text.textContent = e.text;
-      Object.assign(text.style, {
-        backgroundImage:bgc.image, backgroundSize:bgc.size, backgroundPosition:bgc.position, backgroundRepeat:bgc.repeat,
-        lineHeight:m.gap + "px", fontSize:m.fontSize + "px", fontFamily:font,
-        paddingTop:m.padTop + "px", paddingBottom:m.gap + "px", paddingLeft:m.padLeft + "px", paddingRight:m.padRight + "px",
-        minHeight:Math.ceil((stickerBottom + m.gap) / m.gap) * m.gap + "px"
-      });
-      paperEl.append(text);
-    }
-    for (const st of e.stickers){
-      const kind = diaryStickerKind(st);
-      const node = document.createElement("div");
-      node.className = "diary-print-sticker diary-sticker-is-" + kind;
-      Object.assign(node.style, { left:st.x * W + "px", top:st.y * W + "px", width:st.w * W + "px",
-        transform:st.rot ? `rotate(${st.rot}deg)` : "" });
-      // 글상자만 높이를 글에 맡긴다 — 글자 크기가 종이 폭 비율이라 680px 에서도 화면과 같은 자리에서 줄이 바뀐다.
-      if (kind !== "text") node.style.height = st.w * st.ar * W + "px";
-      if (kind !== "photo") node.style.opacity = String(st.opacity == null ? 1 : st.opacity);
-      if (kind === "art"){
-        const art = document.createElement("span");
-        art.className = "diary-sticker-body diary-sticker-art";
-        art.innerHTML = diaryArtSvg(st.art);
-        art.style.color = st.color || DIARY_ART_DEFAULT_COLOR;
-        if (st.flip) art.style.transform = "scaleX(-1)";
-        node.append(art);
-      } else if (kind === "text"){
-        const box = document.createElement("div");
-        box.className = "diary-sticker-body diary-sticker-text";
-        box.textContent = st.text;
-        Object.assign(box.style, { fontSize:(st.size * W) + "px", fontFamily:DIARY_FONT_STACKS[st.font] || "",
-          color:st.color || DIARY_TEXT_DEFAULT_COLOR, textAlign:st.align || "left" });
-        node.append(box);
-      } else {
-        const img = document.createElement("img");
-        img.className = "diary-sticker-body";
-        img.src = assetUrl(st.asset);
-        img.alt = "";
-        if (st.flip) img.style.transform = "scaleX(-1)";
-        if (img.decode) waits.push(img.decode().catch(() => {}));
-        node.append(img);
-      }
-      paperEl.append(node);
-    }
-    const pbox = diaryUsesGenko(style) ? diaryLineMetrics(style, W).box : null;
-    if (pbox && e.drawing && e.drawing.length){
-      const bw = W - pbox.left - pbox.right;
-      const canvas = document.createElement("canvas");
-      canvas.width = bw * 2; canvas.height = pbox.height * 2;               // 인쇄는 두 배로 그려 선이 거칠지 않게
-      const ctx = canvas.getContext("2d");
-      ctx.scale(2, 2);
-      diaryDrawStrokes(ctx, e.drawing, bw);
-      const img = document.createElement("img");
-      img.className = "diary-print-drawing";
-      img.alt = "";
-      img.src = canvas.toDataURL("image/png");
-      Object.assign(img.style, { left:pbox.left + "px", top:pbox.top + "px", width:bw + "px", height:pbox.height + "px" });
-      if (img.decode) waits.push(img.decode().catch(() => {}));
-      paperEl.append(img);
-    }
+    const built = diaryBuildPrintPaper(e, style, W, model.printPlain, { assetUrl });
+    const paperEl = built.paperEl;
+    waits.push(...built.waits);
     page.append(paperEl);
     return { page, waits };
   }
