@@ -45,7 +45,17 @@ html = html.replace(headerMarkHref, () => `href="data:image/png;base64,${headerM
 
 const localStyleTag = `<link rel="stylesheet" href="${manifest.styles.local}">`;
 requireTag(html, localStyleTag, "Local stylesheet");
-html = html.replace(localStyleTag, () => `<style>\n${read(manifest.styles.local)}\n</style>`);
+// 일기장 바탕 그림은 외부 CSS 에선 상대 경로로 읽고, 단일 HTML/EXE 에선 바이트를 직접 담는다.
+const diaryBackdropAssets = new Set();
+const localCss = read(manifest.styles.local).replace(/url\(["']?assets\/diary-backdrops\/([a-z-]+)\.webp["']?\)/g, (_, name) => {
+  const relative = `src/assets/diary-backdrops/${name}.webp`;
+  diaryBackdropAssets.add(name);
+  const base64 = fs.readFileSync(path.join(root, relative)).toString("base64");
+  if (base64.length > 1500000) throw new Error(`Diary backdrop data URL too long: ${relative}`);
+  return `url("data:image/webp;base64,${base64}")`;
+});
+if (diaryBackdropAssets.size !== 5) throw new Error(`Expected five diary background assets, found ${diaryBackdropAssets.size}`);
+html = html.replace(localStyleTag, () => `<style>\n${localCss}\n</style>`);
 
 // Wheels bundled for Pyodide's offline micropip path.
 const bundledPyodideWheels = [

@@ -8165,8 +8165,49 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .diary-screen-lock-icon .ui-icon{width:30px;height:30px}.diary-screen-lock strong{font-size:18px}.diary-screen-lock p{margin:0;color:var(--muted);font-size:13px}
 .diary-doc.is-screen-locked>.diary-bar,.diary-doc.is-screen-locked>.diary-body,.diary-doc.is-screen-locked>.diary-style-panel,.diary-doc.is-screen-locked>.diary-art-panel,.diary-doc.is-screen-locked>.diary-pick-pop,.diary-doc.is-screen-locked>.diary-template-panel,.diary-doc.is-screen-locked>.diary-school-panel{visibility:hidden}
 /* 칸 폭을 변수로 둔다 — 접으면 칸 수가 줄어드는데, 틀을 그대로 두면 남은 칸이 앞 칸의 폭을 물려받아 짜부라진다. */
-.diary-body{--diary-c-side:224px;--diary-c-rail:300px;display:grid;
-  grid-template-columns:var(--diary-c-side) var(--diary-c-rail) minmax(0,1fr);flex:1;min-height:0}
+.diary-body{--diary-c-side:224px;--diary-c-rail:300px;position:relative;isolation:isolate;display:grid;
+  grid-template-columns:var(--diary-c-side) var(--diary-c-rail) minmax(0,1fr);flex:1;min-height:0;background-color:var(--bg)}
+/* 일기 쓰는 종이와 별개의 바탕. 사진을 골라도 달력·목록·종이 둘레에만 나타난다. */
+.diary-body[data-backdrop="blossom"]{background-color:#f6e8ed;background-image:
+  radial-gradient(ellipse at 7% 13%,#f6bdd1 0,transparent 39%),
+  radial-gradient(ellipse at 86% 12%,#f7d9a9 0,transparent 38%),
+  radial-gradient(ellipse at 80% 88%,#c8d9c0 0,transparent 42%),
+  radial-gradient(ellipse at 19% 79%,#e7cadf 0,transparent 45%),
+  linear-gradient(125deg,#fff9f1,#f8edf1 52%,#f1f6ec);background-position:center;background-size:cover}
+.diary-body[data-backdrop="linen"]{background-color:#eee1c9;background-image:
+  repeating-linear-gradient(0deg,transparent 0 9px,#d6c6aa45 10px),
+  repeating-linear-gradient(90deg,transparent 0 9px,#d6c6aa45 10px),
+  linear-gradient(145deg,#f5ecd9,#e8dcc5)}
+.diary-body[data-backdrop="night"]{background-color:#17233f;background-image:
+  radial-gradient(circle at 78% 23%,#f4dda277 0 38px,transparent 39px),
+  radial-gradient(circle at 15% 24%,#ffffff77 0 1px,transparent 2px),
+  radial-gradient(circle at 70% 58%,#ffffff88 0 1px,transparent 2px),
+  radial-gradient(circle at 38% 72%,#ffffff88 0 1px,transparent 2px),
+  linear-gradient(140deg,#17233f,#45506f 56%,#80637a)}
+.diary-body[data-backdrop="custom"]{background-color:var(--bg)}
+/* 첨부 시안에서 만든 다섯 그림. 경로는 외부 CSS 기준이고, 오프라인 빌드가 data URL 로 바꾼다. */
+.diary-body[data-backdrop="paper-flowers"],.diary-backdrop-sample[data-backdrop="paper-flowers"]{--diary-backdrop-photo:url("assets/diary-backdrops/paper-flowers.webp")}
+.diary-body[data-backdrop="pastel-sky"],.diary-backdrop-sample[data-backdrop="pastel-sky"]{--diary-backdrop-photo:url("assets/diary-backdrops/pastel-sky.webp")}
+.diary-body[data-backdrop="wood-desk"],.diary-backdrop-sample[data-backdrop="wood-desk"]{--diary-backdrop-photo:url("assets/diary-backdrops/wood-desk.webp")}
+.diary-body[data-backdrop="moonlit-sky"],.diary-backdrop-sample[data-backdrop="moonlit-sky"]{--diary-backdrop-photo:url("assets/diary-backdrops/moonlit-sky.webp")}
+.diary-body[data-backdrop="leafy-bokeh"],.diary-backdrop-sample[data-backdrop="leafy-bokeh"]{--diary-backdrop-photo:url("assets/diary-backdrops/leafy-bokeh.webp")}
+.diary-body[data-backdrop="paper-flowers"],.diary-body[data-backdrop="pastel-sky"],.diary-body[data-backdrop="wood-desk"],.diary-body[data-backdrop="moonlit-sky"],.diary-body[data-backdrop="leafy-bokeh"]{background-image:var(--diary-backdrop-photo);background-size:cover;background-position:center;background-repeat:no-repeat}
+[data-theme="dark"] .diary-body[data-backdrop="blossom"]{background-color:#222638;background-image:
+  radial-gradient(ellipse at 7% 13%,#914b72 0,transparent 39%),
+  radial-gradient(ellipse at 86% 12%,#946f5b 0,transparent 38%),
+  radial-gradient(ellipse at 80% 88%,#536b64 0,transparent 42%),
+  radial-gradient(ellipse at 19% 79%,#584e7b 0,transparent 45%),
+  linear-gradient(125deg,#263044,#2c2635 52%,#273444)}
+[data-theme="dark"] .diary-body[data-backdrop="linen"]{background-color:#302b29;background-image:
+  repeating-linear-gradient(0deg,transparent 0 9px,#b3a38b22 10px),
+  repeating-linear-gradient(90deg,transparent 0 9px,#b3a38b22 10px),
+  linear-gradient(145deg,#302b29,#3d3933)}
+.diary-body[data-backdrop]:not([data-backdrop="none"])::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:var(--bg);opacity:var(--diary-backdrop-veil,.15)}
+.diary-body[data-backdrop="blossom"]::after{content:"✿";position:absolute;z-index:0;top:48px;right:5%;color:rgba(199,105,135,.17);font-size:130px;line-height:1;pointer-events:none}
+.diary-body[data-backdrop]:not([data-backdrop="none"])>.diary-side,.diary-body[data-backdrop]:not([data-backdrop="none"])>.diary-entry-rail,.diary-body[data-backdrop]:not([data-backdrop="none"])>.diary-main{position:relative;z-index:1}
+.diary-body[data-backdrop]:not([data-backdrop="none"])>.diary-side{margin:12px 0 12px 12px;border:1px solid var(--border);border-radius:11px;background:color-mix(in srgb,var(--panel) 95%,transparent);box-shadow:0 5px 18px rgba(15,23,42,.1)}
+.diary-body[data-backdrop]:not([data-backdrop="none"])>.diary-entry-rail{margin:12px 0 12px 10px;border:1px solid var(--border);border-radius:11px;background:color-mix(in srgb,var(--panel) 95%,transparent);box-shadow:0 5px 18px rgba(15,23,42,.1)}
+.diary-body[data-backdrop]:not([data-backdrop="none"]) .diary-page-head{box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--panel) 96%,transparent);box-shadow:0 4px 16px rgba(15,23,42,.08)}
 .diary-side{min-width:0;display:flex;flex-direction:column;gap:10px;padding:10px;border-right:1px solid var(--border);background:var(--panel);overflow:auto}
 .diary-side-mobile-toggle{display:none}
 .diary-side-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;padding:3px;border-radius:9px;background:var(--panel-2)}
@@ -8391,6 +8432,16 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-paper-color:disabled,.diary-style-controls input[type="range"]:disabled{opacity:.45;cursor:default}
 .diary-bg-thumb{width:52px;height:34px;border-radius:4px;border:1px solid var(--border);background:var(--diary-paper) center/cover no-repeat}
 .diary-bg-thumb.is-empty{background-image:linear-gradient(135deg,transparent 46%,var(--border) 46%,var(--border) 54%,transparent 54%)!important}
+.diary-backdrop-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+.diary-backdrop-chip{min-width:0;padding:5px 3px;gap:4px;font-size:11px}
+.diary-backdrop-sample{display:block;position:relative;overflow:hidden;width:100%;height:32px;border:1px solid var(--border);border-radius:4px}
+.diary-backdrop-sample[data-backdrop="none"]{background:var(--bg)}
+.diary-backdrop-sample[data-backdrop="blossom"]{background:radial-gradient(circle at 15% 25%,#f6bdd1,transparent 45%),radial-gradient(circle at 85% 70%,#c8d9c0,transparent 50%),linear-gradient(125deg,#fff9f1,#f8edf1 60%,#f1f6ec)}
+.diary-backdrop-sample[data-backdrop="linen"]{background:repeating-linear-gradient(0deg,transparent 0 5px,#d6c6aa55 6px),repeating-linear-gradient(90deg,transparent 0 5px,#d6c6aa55 6px),#f5ecd9}
+.diary-backdrop-sample[data-backdrop="night"]{background:radial-gradient(circle at 75% 28%,#f4dda2 0 5px,transparent 6px),linear-gradient(130deg,#17233f,#80637a)}
+.diary-backdrop-sample[data-backdrop="paper-flowers"],.diary-backdrop-sample[data-backdrop="pastel-sky"],.diary-backdrop-sample[data-backdrop="wood-desk"],.diary-backdrop-sample[data-backdrop="moonlit-sky"],.diary-backdrop-sample[data-backdrop="leafy-bokeh"]{background-image:var(--diary-backdrop-photo);background-position:center;background-size:cover;background-repeat:no-repeat}
+.diary-backdrop-chip.is-on .diary-backdrop-sample:not([data-backdrop="none"])::after{content:"";position:absolute;inset:0;background:var(--bg);opacity:var(--diary-backdrop-veil,.15);pointer-events:none}
+.diary-backdrop-thumb.is-on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
 .diary-select{height:32px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;padding:0 8px}
 .diary-style-controls input[type="range"]{flex:1;min-width:120px;accent-color:var(--accent)}
 .diary-veil-value{min-width:38px;text-align:right;font-size:12.5px;color:var(--muted)}
@@ -8417,6 +8468,8 @@ a.diary-school-card-value{color:var(--accent)}
 }
 @media(max-width:760px){
   .diary-body{display:flex;flex-direction:column}
+  .diary-body[data-backdrop]:not([data-backdrop="none"])>.diary-side,.diary-body[data-backdrop]:not([data-backdrop="none"])>.diary-entry-rail{margin:8px 8px 0;border-radius:9px}
+  .diary-body[data-backdrop]:not([data-backdrop="none"]) .diary-page-head{margin-bottom:10px}
   .diary-bar{gap:6px;flex-wrap:wrap}.diary-bar-identity{flex-basis:100%}.diary-bar-actions{width:100%;justify-content:flex-end;overflow-x:auto}
   .diary-side{flex:0 0 auto;max-height:46vh;border-right:0;border-bottom:1px solid var(--border);padding:7px 10px}
   .diary-side-mobile-toggle{display:inline-flex;width:100%;min-height:32px}
@@ -8432,6 +8485,7 @@ a.diary-school-card-value{color:var(--accent)}
 }
 @media print{
   .diary-bar,.diary-side,.diary-entry-rail,.diary-page-head .diary-btn,.diary-style-panel{display:none!important}
+  .diary-body{background:none!important}.diary-body::before,.diary-body::after{display:none!important}
   .diary-main{overflow:visible}
   .diary-paper{box-shadow:none}
 }

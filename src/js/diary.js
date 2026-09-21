@@ -17,8 +17,10 @@ const DIARY_FORMAT = "classdock-diary";
 // · 9: 종이 배경 효과(paper·paperColor·paperTone)·인쇄할 땐 배경 빼기(printPlain).
 // · 10: 내장 그림 스티커·글상자 투명도(opacity) · 11: 내장 그림 스티커 80종으로 확장.
 // · 12: 줄 무늬 8종 추가(두 줄·세 줄·점선·목록·세로줄·십자·오선·사선 격자).
+// · 13: 종이 밖 일기장 바탕(backdrop) — 템플릿·사용자 그림·맞춤·밝기.
+// · 14: 일기장 바탕 그림 템플릿 5종 추가.
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 12;
+const DIARY_VERSION = 14;
 const DIARY_JSON_NAME = "diary.json";
 const DIARY_LINES = ["ruled", "double", "triple", "dashed", "list", "grid", "columns", "dots", "crosses", "staff", "diagonal", "blank", "picture", "genko"];
 const DIARY_LINE_LABELS = { ruled:"줄 공책", double:"두 줄", triple:"세 줄", dashed:"점선", list:"목록", grid:"모눈", columns:"세로줄", dots:"점", crosses:"십자", staff:"오선", diagonal:"사선 격자", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
@@ -352,6 +354,25 @@ const DIARY_GENKO_COLS = [0, 8, 10, 12, 16, 20, 24];
 function diaryDefaultStyle(){
   return { lines:"ruled", gap:"normal", bg:"", fit:"cover", veil:0.4, font:"gothic", genkoCols:0,
     paper:"none", paperColor:DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5 };
+}
+const DIARY_BACKDROP_THEMES = ["none", "blossom", "linen", "night",
+  "paper-flowers", "pastel-sky", "wood-desk", "moonlit-sky", "leafy-bokeh", "custom"];
+function diaryDefaultBackdrop(theme = "none"){
+  return { theme, bg:"", fit:"cover", veil:0.15 };
+}
+function diaryNormalizeBackdrop(raw, hasAsset){
+  const base = diaryDefaultBackdrop();
+  if (!raw || typeof raw !== "object") return base;
+  const theme = DIARY_BACKDROP_THEMES.includes(raw.theme) ? raw.theme : base.theme;
+  const name = String(raw.bg || "");
+  const bg = theme === "custom" && DIARY_ASSET_RE.test(name) && (!hasAsset || hasAsset(name)) ? name : "";
+  const veil = Number(raw.veil);
+  return {
+    theme:theme === "custom" && !bg ? "none" : theme,
+    bg,
+    fit:DIARY_FITS.includes(raw.fit) ? raw.fit : base.fit,
+    veil:raw.veil === "" || raw.veil == null || !Number.isFinite(veil) ? base.veil : Math.max(0, Math.min(0.9, veil))
+  };
 }
 function diaryNormalizeStyle(raw, hasAsset){
   const base = diaryDefaultStyle();
@@ -1021,7 +1042,7 @@ function diaryEntryIsEmpty(entry){
 function diaryEmpty(title){
   const now = Date.now();
   return { format:DIARY_FORMAT, version:DIARY_VERSION, title:String(title || "일기장").slice(0, 200),
-    createdAt:now, updatedAt:now, style:diaryDefaultStyle(), printPlain:false, entries:[] };
+    createdAt:now, updatedAt:now, style:diaryDefaultStyle(), backdrop:diaryDefaultBackdrop("blossom"), printPlain:false, entries:[] };
 }
 // 신뢰할 수 없는 diary.json 을 안전한 모델로. hasAsset(이름) 이 주어지면 ZIP 에 없는 사진을 가리키는 칸은 버린다.
 function diaryNormalize(raw, hasAsset){
@@ -1038,6 +1059,7 @@ function diaryNormalize(raw, hasAsset){
     createdAt:Number(raw.createdAt) || Date.now(),
     updatedAt:Number(raw.updatedAt) || Date.now(),
     style:diaryNormalizeStyle(raw.style, hasAsset),
+    backdrop:diaryNormalizeBackdrop(raw.backdrop, hasAsset),
     // 인쇄할 땐 배경 빼기 — 꾸미기와 달리 날짜별로 갈리지 않는다(한 번 인쇄에 여러 날이 함께 나가므로).
     printPlain:!!raw.printPlain,
     entries:[...byDate.values()].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
@@ -1068,13 +1090,13 @@ function diaryCleanSticker(s){
 }
 // 저장본과 같은지 가르는 열쇠 — 시각(updatedAt)은 빼야 저장 → 편집 → 되돌리기 뒤 다시 '깨끗'이 된다.
 function diaryContentKey(model){
-  return JSON.stringify({ title:model.title || "", style:model.style, printPlain:!!model.printPlain, entries:diaryCleanEntries(model) });
+  return JSON.stringify({ title:model.title || "", style:model.style, backdrop:model.backdrop, printPlain:!!model.printPlain, entries:diaryCleanEntries(model) });
 }
 function diaryModelJson(model){
   return JSON.stringify({
     format:DIARY_FORMAT, version:DIARY_VERSION, title:model.title || "일기장",
     createdAt:model.createdAt || Date.now(), updatedAt:model.updatedAt || Date.now(),
-    style:model.style, printPlain:!!model.printPlain, entries:diaryCleanEntries(model)
+    style:model.style, backdrop:model.backdrop, printPlain:!!model.printPlain, entries:diaryCleanEntries(model)
   }, null, 2);
 }
 function diaryEffectiveStyle(model, entry){
@@ -1083,6 +1105,7 @@ function diaryEffectiveStyle(model, entry){
 function diaryReferencedAssets(model){
   const used = new Set();
   if (model.style && model.style.bg) used.add(model.style.bg);
+  if (model.backdrop && model.backdrop.bg) used.add(model.backdrop.bg);
   for (const e of diaryCleanEntries(model)){
     if (e.style && e.style.bg) used.add(e.style.bg);
     for (const s of e.stickers) if (s.asset) used.add(s.asset);      // 내장 그림·글상자는 사진 바이트가 없다
@@ -3003,7 +3026,8 @@ function mountDiaryPaper(els, paperEnv){
    창을 화면에 붙이는 것도 부르는 쪽 몫이다 — 일기장은 잠금 덮개 아래, 여행일지는 다른 자리다.
    (매개변수를 ctx 로 지으면 안 된다 — 그리기 코드가 캔버스 컨텍스트 이름으로 쓴다.) */
 function mountDiaryPanels(panelEnv){
-  const { model, assets, assetUrl, addAsset, entryOf, ensureEntry, touch, setStatus, applyStyle, layout, renderCalendar, bgInput, styleBtn, stickerBtn, addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers, stickerColorNow, stickerOpacityNow } = panelEnv;
+  const { model, assets, assetUrl, addAsset, entryOf, ensureEntry, touch, setStatus, applyStyle, applyBackdrop, layout, renderCalendar, bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers, stickerColorNow, stickerOpacityNow } = panelEnv;
+  const supportsBackdrop = !!backdropInput && typeof applyBackdrop === "function";
   /* ----- 꾸미기 창 ----- */
   const panel = document.createElement("div");
   panel.className = "diary-style-panel";
@@ -3027,6 +3051,50 @@ function mountDiaryPanels(panelEnv){
   const scopeNote = document.createElement("div");
   scopeNote.className = "diary-style-note";
   panel.append(scopeRow, scopeNote);
+  // 종이 밖 바탕은 날짜별 꾸미기와 별개다. 달력·목록·종이 주변에 한 번에 적용한다.
+  const backdropChips = section("일기장 바탕");
+  backdropChips.classList.add("diary-backdrop-grid");
+  const backdropNames = {
+    none:["없음", "None"], blossom:["봄빛", "Blossom"], linen:["크림 린넨", "Linen"], night:["밤하늘", "Night sky"],
+    "paper-flowers":["꽃빛 종이", "Floral paper"], "pastel-sky":["파스텔 하늘", "Pastel sky"],
+    "wood-desk":["햇살 책상", "Sunny desk"], "moonlit-sky":["초승달 밤", "Moonlit sky"],
+    "leafy-bokeh":["초록 숲", "Leafy light"]
+  };
+  const backdropButtons = Object.keys(backdropNames).map(id => {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "diary-chip diary-backdrop-chip"; button.dataset.backdrop = id;
+    const preview = document.createElement("span"); preview.className = "diary-backdrop-sample"; preview.dataset.backdrop = id;
+    const label = document.createElement("span"); label.className = "diary-chip-label";
+    button.append(preview, label);
+    button.addEventListener("click", () => changeBackdrop({ theme:id, bg:"" }, true));
+    backdropChips.append(button);
+    return button;
+  });
+  const backdropImageControls = section("내 그림");
+  const backdropThumb = document.createElement("span"); backdropThumb.className = "diary-bg-thumb diary-backdrop-thumb";
+  const backdropPick = diaryButton("바탕 그림 고르기", "일기장 바탕에 넣을 그림 고르기", "diary-btn");
+  const backdropClear = diaryButton("그림 빼기", "일기장 바탕 그림 빼기", "diary-btn");
+  backdropImageControls.append(backdropThumb, backdropPick, backdropClear);
+  const backdropFitControls = section("바탕 그림 맞춤");
+  const backdropFit = document.createElement("select"); backdropFit.className = "diary-select";
+  backdropFit.setAttribute("aria-label", "일기장 바탕 그림 맞춤");
+  DIARY_FITS.forEach(id => { const option = document.createElement("option"); option.value = id; backdropFit.append(option); });
+  backdropFitControls.append(backdropFit);
+  const backdropVeilControls = section("바탕 흐리게");
+  const backdropVeil = document.createElement("input");
+  backdropVeil.type = "range"; backdropVeil.min = "0"; backdropVeil.max = "90"; backdropVeil.step = "5";
+  backdropVeil.setAttribute("aria-label", "일기장 바탕을 흐리게 하는 정도");
+  const backdropVeilValue = document.createElement("span"); backdropVeilValue.className = "diary-veil-value";
+  backdropVeilControls.append(backdropVeil, backdropVeilValue);
+  const backdropNote = document.createElement("div"); backdropNote.className = "diary-style-note";
+  panel.append(backdropNote);
+  if (!supportsBackdrop){
+    for (const controls of [backdropChips, backdropImageControls, backdropFitControls, backdropVeilControls]){
+      controls.parentElement.hidden = true;
+      controls.parentElement.style.display = "none";
+    }
+    backdropNote.hidden = true;
+  }
   const lineChips = section("줄 무늬");
   const lineButtons = DIARY_LINES.map(id => {
     const b = document.createElement("button");
@@ -3139,6 +3207,30 @@ function mountDiaryPanels(panelEnv){
     scopeNote.textContent = diaryT(own
       ? "이 날짜만 따로 꾸몄어요. 체크를 풀면 일기장 전체 꾸미기로 돌아가요."
       : "바꾸면 따로 꾸민 날을 뺀 일기장 전체에 적용돼요.");
+    const backdrop = model.backdrop || diaryDefaultBackdrop();
+    backdropChips.parentElement.querySelector(".diary-style-label").textContent = diaryEn("일기장 바탕", "Diary background");
+    backdropImageControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("내 그림", "My image");
+    backdropFitControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("바탕 그림 맞춤", "Background fit");
+    backdropVeilControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("바탕 흐리게", "Fade background");
+    backdropButtons.forEach(button => {
+      const on = button.dataset.backdrop === backdrop.theme;
+      button.classList.toggle("is-on", on); button.setAttribute("aria-pressed", String(on));
+      button.querySelector(".diary-chip-label").textContent = backdropNames[button.dataset.backdrop][diaryIsEn() ? 1 : 0];
+    });
+    const backdropUrl = assetUrl(backdrop.bg);
+    backdropThumb.style.backgroundImage = backdropUrl ? `url("${backdropUrl}")` : "none";
+    backdropThumb.classList.toggle("is-empty", !backdropUrl);
+    backdropThumb.classList.toggle("is-on", backdrop.theme === "custom");
+    backdropClear.disabled = backdrop.theme !== "custom";
+    backdropPick.textContent = diaryEn("바탕 그림 고르기", "Choose image");
+    backdropClear.textContent = diaryEn("그림 빼기", "Remove image");
+    for (const option of backdropFit.options) option.textContent = diaryLabel(DIARY_FIT_LABELS, DIARY_FIT_LABELS_EN, option.value);
+    backdropFit.value = backdrop.fit; backdropFit.disabled = backdrop.theme !== "custom";
+    backdropVeil.value = String(Math.round(backdrop.veil * 100));
+    backdropVeil.disabled = backdrop.theme === "none";
+    backdropVeilValue.textContent = Math.round(backdrop.veil * 100) + "%";
+    backdropChips.style.setProperty("--diary-backdrop-veil", String(backdrop.veil));
+    backdropNote.textContent = diaryEn("종이 밖 바탕은 날짜와 관계없이 이 일기장 전체에 적용돼요. 인쇄에는 나오지 않아요.", "This background covers the diary outside the paper. It does not print.");
     lineButtons.forEach(b => { const on = b.dataset.lines === style.lines; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
     gapButtons.forEach(b => { const on = b.dataset.gap === style.gap; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
     fontButtons.forEach(b => { const on = b.dataset.font === style.font; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
@@ -3252,6 +3344,28 @@ function mountDiaryPanels(panelEnv){
     applyStyle();
     layout();
     touch(immediate);
+  }
+  function changeBackdrop(patch, immediate){
+    if (!supportsBackdrop) return;
+    if (panelEnv.history() && immediate) panelEnv.history().flush();
+    model.backdrop = diaryNormalizeBackdrop({ ...(model.backdrop || diaryDefaultBackdrop()), ...patch }, name => assets.has(name));
+    applyBackdrop(); syncPanel(); touch(immediate);
+  }
+  if (supportsBackdrop){
+    backdropPick.addEventListener("click", () => backdropInput.click());
+    backdropInput.addEventListener("change", async () => {
+      const file = backdropInput.files && backdropInput.files[0];
+      backdropInput.value = "";
+      if (!file) return;
+      setStatus(diaryT("일기장 바탕 그림을 넣는 중…"));
+      const asset = await addAsset(file, DIARY_BG_MAX_DIM);
+      if (!asset){ setStatus(diaryT("그림을 읽지 못했어요.")); return; }
+      changeBackdrop({ theme:"custom", bg:asset.name }, true);
+    });
+    backdropClear.addEventListener("click", () => changeBackdrop({ theme:"none", bg:"" }, true));
+    backdropFit.addEventListener("change", () => changeBackdrop({ fit:backdropFit.value }, true));
+    backdropVeil.addEventListener("input", () => changeBackdrop({ veil:Number(backdropVeil.value) / 100 }, false));
+    backdropVeil.addEventListener("change", () => changeBackdrop({ veil:Number(backdropVeil.value) / 100 }, true));
   }
   scopeBox.addEventListener("change", () => {
     if (panelEnv.history()) panelEnv.history().flush();
@@ -3517,7 +3631,7 @@ function mountDiaryEditor(doc){
   const stickerBtn = diaryButton("", "스티커 붙이기 — 내장 그림과 글상자", "diary-btn diary-sticker-btn", "sticker");
   stickerBtn.setAttribute("aria-haspopup", "dialog");
   stickerBtn.setAttribute("aria-expanded", "false");
-  const styleBtn = diaryButton("", "줄 무늬·배경 그림 바꾸기", "diary-btn diary-style-btn", "sliders");
+  const styleBtn = diaryButton("", "줄 무늬·일기장 바탕·배경 그림 바꾸기", "diary-btn diary-style-btn", "sliders");
   styleBtn.setAttribute("aria-haspopup", "dialog");
   styleBtn.setAttribute("aria-expanded", "false");
   const protectBtn = diaryButton("", "파일 암호 설정·변경", "diary-btn", "lock");
@@ -3532,16 +3646,28 @@ function mountDiaryEditor(doc){
   photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
+  const backdropInput = document.createElement("input");
+  backdropInput.type = "file"; backdropInput.accept = "image/*"; backdropInput.hidden = true;
   const barIdentity = document.createElement("div");
   barIdentity.className = "diary-bar-identity";
   barIdentity.append(sideToggleBtn, railToggleBtn, focusBtn, barViewSep, titleInput, status);
   const barActions = document.createElement("div");
   barActions.className = "diary-bar-actions";
   barActions.append(undoBtn, redoBtn, photoBtn, stickerBtn, styleBtn, protectBtn, saveBtn);
-  bar.append(barIdentity, barActions, photoInput, bgInput);
+  bar.append(barIdentity, barActions, photoInput, bgInput, backdropInput);
 
   const body = document.createElement("div");
   body.className = "diary-body";
+  function applyBackdrop(){
+    const backdrop = model.backdrop || diaryDefaultBackdrop();
+    body.dataset.backdrop = backdrop.theme;
+    const url = backdrop.theme === "custom" ? assetUrl(backdrop.bg) : "";
+    body.style.backgroundImage = url ? `url("${url}")` : "";
+    body.style.backgroundSize = url ? (backdrop.fit === "tile" ? "320px auto" : backdrop.fit) : "";
+    body.style.backgroundRepeat = url && backdrop.fit === "tile" ? "repeat" : "no-repeat";
+    body.style.backgroundPosition = url && backdrop.fit === "tile" ? "0 0" : "center";
+    body.style.setProperty("--diary-backdrop-veil", String(backdrop.veil));
+  }
   const side = document.createElement("aside");
   side.className = "diary-side";
   side.setAttribute("aria-label", "달력");
@@ -4694,7 +4820,7 @@ function mountDiaryEditor(doc){
   /* ----- 꾸미기 바꾸기 ----- */
   /* ----- 꾸미기 창·스티커 창 ----- */
   // 창은 종이 뒤에 세운다 — 창이 종이의 스티커 색·투명도를 되비추기 때문이다.
-  const panels = mountDiaryPanels({ model, assets, assetUrl:(...a) => assetUrl(...a), addAsset:(...a) => addAsset(...a), entryOf:(...a) => entryOf(...a), ensureEntry:(...a) => ensureEntry(...a), touch:(...a) => touch(...a), setStatus:(...a) => setStatus(...a), applyStyle:(...a) => applyStyle(...a), layout:(...a) => layout(...a), renderCalendar:(...a) => renderCalendar(...a), bgInput, styleBtn, stickerBtn, addArtSticker:(...a) => addArtSticker(...a), addTextSticker:(...a) => addTextSticker(...a), applyStickerColor:(...a) => applyStickerColor(...a), applyStickerOpacity:(...a) => applyStickerOpacity(...a), selectedStickers:(...a) => selectedStickers(...a), stickerColorNow:(...a) => stickerColorNow(...a), stickerOpacityNow:(...a) => stickerOpacityNow(...a), current:() => current, history:() => history });
+  const panels = mountDiaryPanels({ model, assets, assetUrl:(...a) => assetUrl(...a), addAsset:(...a) => addAsset(...a), entryOf:(...a) => entryOf(...a), ensureEntry:(...a) => ensureEntry(...a), touch:(...a) => touch(...a), setStatus:(...a) => setStatus(...a), applyStyle:(...a) => applyStyle(...a), applyBackdrop, layout:(...a) => layout(...a), renderCalendar:(...a) => renderCalendar(...a), bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker:(...a) => addArtSticker(...a), addTextSticker:(...a) => addTextSticker(...a), applyStickerColor:(...a) => applyStickerColor(...a), applyStickerOpacity:(...a) => applyStickerOpacity(...a), selectedStickers:(...a) => selectedStickers(...a), stickerColorNow:(...a) => stickerColorNow(...a), stickerOpacityNow:(...a) => stickerOpacityNow(...a), current:() => current, history:() => history });
   const { panel, artPanel, artCustomColor, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen } = panels;
   // 덮개(잠금)보다 아래에 오도록 자리를 지켜 끼운다.
   root.insertBefore(panel, pickPop);
@@ -5183,7 +5309,7 @@ function mountDiaryEditor(doc){
   });
 
   /* ----- 되돌리기 ----- */
-  const snapshot = () => JSON.stringify({ title:model.title, style:model.style, entries:model.entries });
+  const snapshot = () => JSON.stringify({ title:model.title, style:model.style, backdrop:model.backdrop, entries:model.entries });
   history = MNEditHistory.create({
     limit:80,
     sizeOf:(s) => s.length,
@@ -5194,8 +5320,10 @@ function mountDiaryEditor(doc){
       let parsed; try { parsed = JSON.parse(state); } catch(_){ return; }
       model.title = parsed.title;
       model.style = parsed.style;
+      model.backdrop = parsed.backdrop || diaryDefaultBackdrop();
       model.entries = parsed.entries;
       titleInput.value = model.title || "";
+      applyBackdrop();
       renderCalendar();
       renderPage();
       refreshDirty();
@@ -5394,6 +5522,7 @@ function mountDiaryEditor(doc){
   });
 
   renderCalendar();
+  applyBackdrop();
   renderPage();
   translateUi(bar); translateUi(pageHead); translateUi(panel); translateUi(pictureBox); translateUi(side);
   applyPanels();            // translateUi 다음에 — 단추 글자는 상태까지 봐야 해서 여기서 확정한다
@@ -5409,7 +5538,7 @@ if (typeof module !== "undefined" && module.exports){
     DIARY_FORMAT, DIARY_VERSION, DIARY_LINES, DIARY_GAPS, DIARY_ENCRYPTED_MAGIC, DIARY_PBKDF2_ITER,
     DIARY_PAPERS, DIARY_PAPER_DARK, DIARY_PAPER_DEFAULT_COLOR, diaryPaperBackground,
     diaryDateKey, diaryIsDateKey, diaryAddDays, diaryDateLabel, diaryMonthGrid,
-    diaryDefaultStyle, diaryNormalizeStyle, diaryNormalizeSticker, diaryNormalizeTags, diaryNormalizeEntry, diaryEntryIsEmpty,
+    diaryDefaultStyle, diaryNormalizeStyle, diaryDefaultBackdrop, diaryNormalizeBackdrop, diaryNormalizeSticker, diaryNormalizeTags, diaryNormalizeEntry, diaryEntryIsEmpty,
     diaryEmpty, diaryNormalize, diaryContentKey, diaryModelJson, diaryEffectiveStyle, diaryReferencedAssets,
     DIARY_FONTS, DIARY_HAND_FONTS, DIARY_FONT_STACKS, diaryFontScale, diaryEnsureFont, DIARY_WEATHERS, DIARY_MOODS, diaryNormalizeAngle, diaryWeatherInfo, diaryMoodInfo, diaryWeatherMoodLabel,
     DIARY_PENS, DIARY_PEN_SIZES, diaryNormalizeStroke, diaryDrawStrokes,

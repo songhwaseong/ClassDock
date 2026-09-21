@@ -195,7 +195,7 @@ test("새 줄 무늬는 전체와 날짜별 꾸미기로 저장했다 열어도 
   model.style.lines = "double";
   model.entries = [{ date:"2026-09-21", title:"", text:"기록", style:{ ...diary.diaryDefaultStyle(), lines:"diagonal" }, stickers:[] }];
   const back = await diary.diaryUnpack(diary.diaryPack(model, new Map()));
-  assert.equal(back.model.version, 12);
+  assert.equal(back.model.version, diary.DIARY_VERSION);
   assert.equal(back.model.style.lines, "double");
   assert.equal(back.model.entries[0].style.lines, "diagonal");
 });
@@ -572,10 +572,42 @@ test("내장 그림·글상자만 붙인 날도 빈 날로 버리지 않는다",
   }
 });
 
-test("줄 무늬가 확장된 파일은 version 12 이고 다음 버전은 거절한다", () => {
-  assert.equal(diary.DIARY_VERSION, 12);
-  const json = JSON.stringify({ format:"classdock-diary", version:13, title:"미래", entries:[] });
+test("새 바탕 템플릿이 추가된 파일은 version 14 이고 다음 버전은 거절한다", () => {
+  assert.equal(diary.DIARY_VERSION, 14);
+  const json = JSON.stringify({ format:"classdock-diary", version:15, title:"미래", entries:[] });
   assert.throws(() => diary.diaryNormalize(JSON.parse(json)), /diary-version/);
+});
+
+test("다섯 바탕 그림 템플릿은 일기장에 저장되고 별도 첨부 파일을 요구하지 않는다", () => {
+  for (const theme of ["paper-flowers", "pastel-sky", "wood-desk", "moonlit-sky", "leafy-bokeh"]){
+    const model = diary.diaryEmpty("바탕");
+    model.backdrop = diary.diaryNormalizeBackdrop({ theme });
+    assert.equal(model.backdrop.theme, theme);
+    assert.deepEqual([...diary.diaryReferencedAssets(model)], []);
+    assert.equal(diary.diaryNormalize(JSON.parse(JSON.stringify(model))).backdrop.theme, theme);
+  }
+});
+
+test("일기장 바탕은 90%까지 흐리게 저장하고 범위 밖 값은 제한한다", () => {
+  assert.equal(diary.diaryNormalizeBackdrop({ theme:"paper-flowers", veil:0.85 }).veil, 0.85);
+  assert.equal(diary.diaryNormalizeBackdrop({ theme:"moonlit-sky", veil:2 }).veil, 0.9);
+  assert.equal(diary.diaryNormalizeBackdrop({ theme:"wood-desk", veil:-1 }).veil, 0);
+});
+
+test("종이 밖 바탕은 일기장 전체에 저장되고, 옛 파일은 기존 바탕으로 열린다", async () => {
+  const model = diary.diaryEmpty("바탕");
+  assert.equal(model.backdrop.theme, "blossom");
+  const before = diary.diaryContentKey(model);
+  model.backdrop = diary.diaryNormalizeBackdrop({ theme:"custom", bg:"assets/backdrop01.png", fit:"contain", veil:0.35 }, name => name === "assets/backdrop01.png");
+  assert.notEqual(diary.diaryContentKey(model), before);
+  assert.deepEqual([...diary.diaryReferencedAssets(model)], ["assets/backdrop01.png"]);
+  const { model:back, assets } = await diary.diaryUnpack(diary.diaryPack(model, new Map([["assets/backdrop01.png", { bytes:png(9) }]])));
+  assert.deepEqual(back.backdrop, model.backdrop);
+  assert.equal(assets.has("assets/backdrop01.png"), true);
+  assert.equal(diary.diaryContentKey(back), diary.diaryContentKey(model));
+  const old = diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:12, title:"옛 일기", entries:[] });
+  assert.equal(old.backdrop.theme, "none");
+  assert.equal(diary.diaryNormalizeBackdrop({ theme:"custom", bg:"assets/missing.png" }, () => false).theme, "none");
 });
 
 /* ---------- 종이 배경 효과 ---------- */
