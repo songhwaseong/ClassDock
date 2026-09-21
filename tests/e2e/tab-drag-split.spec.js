@@ -18,7 +18,7 @@ async function openTwoDocs(page) {
 async function dragTabTo(page, tabName, fraction) {
   return page.evaluate(({ tabName, fraction }) => {
     const tab = [...document.querySelectorAll("#tabBar .tab")]
-      .find(el => el.querySelector(".tab-name").textContent === tabName);
+      .find(el => el.title.startsWith(tabName + " ·"));
     if (!tab) throw new Error("탭을 찾지 못함: " + tabName);
     const dt = new DataTransfer();
     tab.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
@@ -173,13 +173,13 @@ test("탭에 없던 사이드바 파일을 참고 칸으로 끌어도 탭이 생
   await openTwoDocs(page);
   // ref-note.txt 를 탭바에서만 제거한다(파일은 사이드바에 남는다) → tabOrder 에서 빠진 상태
   await page.evaluate(() => untabDoc(docs.find(d => d.name === "ref-note.txt").id));
-  expect(await tabNames(page)).not.toContain("ref-note.txt");
+  expect(await tabNames(page)).not.toContain("ref-note");
 
   await dragSidebarItemTo(page, "ref-note.txt", 0.25);   // 참고 칸(왼쪽)으로
 
   await expect(page.locator("#content")).toHaveClass(/study-mode/);
   expect((await paneNames(page)).refName).toBe("ref-note.txt");
-  expect(await tabNames(page)).toContain("ref-note.txt");   // 참고 칸 경로에서도 탭 복구
+  expect(await tabNames(page)).toContain("ref-note");   // 참고 칸 경로에서도 탭 복구
   expect(errors).toEqual([]);
 });
 

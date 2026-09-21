@@ -51,7 +51,7 @@ test.describe("예제 갤러리", () => {
     await expect(page.locator("textarea.code-input")).toHaveValue(/public class TimesTable/);
     // 파일 이름은 public 클래스 이름과 같아야 한다(자바 저장 규칙).
     await expect(page.locator(".tab.active .tab-name, .tab.is-active .tab-name").first())
-      .toHaveText(/TimesTable\.java/);
+      .toHaveText(/TimesTable/);
   });
 
   test("짝 링크로 두 언어를 오가고, 건너간 카드가 표시된다", async ({ page }) => {

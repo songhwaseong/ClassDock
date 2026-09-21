@@ -132,7 +132,7 @@ module.exports = [
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "commonjs",
-      globals: projectGlobals
+      globals: { ...globals.node, ...globals.commonjs, ...projectGlobals }
     },
     rules: sourceRules
   }

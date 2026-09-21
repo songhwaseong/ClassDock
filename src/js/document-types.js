@@ -40,6 +40,46 @@ const MNDocumentTypes = (() => {
     const base = String(name || "");
     return isEnvFile(base) ? "env" : (base.split(".").pop() || "").toLowerCase();
   }
+  function tabNameStem(name){
+    const value = String(name || "");
+    const dot = value.lastIndexOf(".");
+    return value.startsWith(".") ? value : dot > 0 && dot < value.length - 1 ? value.slice(0, dot) : value;
+  }
+  function tabDisplayNames(items){
+    const entries = items.map(item => ({
+      id:item.id, name:String(item.name || ""), stem:tabNameStem(item.name),
+      folders:String(item.path || "").replace(/\\/g, "/").split("/").slice(0, -1).filter(Boolean)
+    }));
+    const counts = new Map();
+    entries.forEach(entry => {
+      const key = entry.stem.toLocaleLowerCase();
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    const labels = new Map(entries.map(entry => [entry.id,
+      counts.get(entry.stem.toLocaleLowerCase()) > 1 ? entry.name : entry.stem]));
+    const fullNameGroups = new Map();
+    entries.forEach(entry => {
+      const key = entry.name.toLocaleLowerCase();
+      if (!fullNameGroups.has(key)) fullNameGroups.set(key, []);
+      fullNameGroups.get(key).push(entry);
+    });
+    fullNameGroups.forEach(group => {
+      if (group.length < 2) return;
+      const maxDepth = Math.max(...group.map(entry => entry.folders.length));
+      for (let depth = 1; depth <= maxDepth; depth++){
+        const suffixes = group.map(entry => entry.folders.slice(-depth).join("/"));
+        if (suffixes.every(Boolean) && new Set(suffixes.map(s => s.toLocaleLowerCase())).size === group.length){
+          group.forEach((entry, index) => labels.set(entry.id, entry.name + " · " + suffixes[index]));
+          return;
+        }
+      }
+      group.forEach((entry, index) => {
+        const folder = entry.folders.join("/");
+        labels.set(entry.id, entry.name + (folder ? " · " + folder : "") + " (" + (index + 1) + ")");
+      });
+    });
+    return labels;
+  }
   function isHiddenFolderEntry(rel){
     const parts = String(rel || "").replace(/\\/g, "/").split("/").filter(Boolean);
     if (!parts.length) return true;
@@ -106,7 +146,7 @@ const MNDocumentTypes = (() => {
   return {
     IMG_EXTS, SQLITE_EXTS, BINARY_ASSET_EXTS, CODE_EXTS, TEXT_ENCODING_EXTS,
     ZIP_OPENABLE, ZIP_MIME, ZIP_EXTRACT_CAP, ZIP_ENTRY_CAP, ZIP_MODE_NOTICE,
-    isEnvFile, fileExtOf, isHiddenFolderEntry, iconFor, extCategory
+    isEnvFile, fileExtOf, tabNameStem, tabDisplayNames, isHiddenFolderEntry, iconFor, extCategory
   };
 })();
 

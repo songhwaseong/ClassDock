@@ -7,7 +7,7 @@ const documentTypesApi = typeof MNDocumentTypes !== "undefined"
 const {
   IMG_EXTS, SQLITE_EXTS, BINARY_ASSET_EXTS, CODE_EXTS, TEXT_ENCODING_EXTS,
   ZIP_OPENABLE, ZIP_MIME, ZIP_EXTRACT_CAP, ZIP_ENTRY_CAP, ZIP_MODE_NOTICE,
-  isEnvFile, fileExtOf, isHiddenFolderEntry, iconFor, extCategory
+  isEnvFile, fileExtOf, tabDisplayNames, isHiddenFolderEntry, iconFor, extCategory
 } = documentTypesApi;
 
 // 문서 단위 테스트처럼 작업공간 모듈을 싣지 않은 환경은 기존 단일 작업공간으로 본다.
@@ -1973,6 +1973,7 @@ function renderTabs(){
     });
     tabBarResizeObserver.observe(bar);
   }
+  const tabLabels = tabDisplayNames(tabOrder.map(id => docs.find(d => d.id === id)).filter(Boolean).map(d => ({ id:d.id, name:d.name, path:docStableKey(d) })));
   const visibleCount = Math.min(tabLayoutLimit, tabOrder.length);
   const activeIndex = Math.max(0, tabOrder.indexOf(activeId));
   // 탭이 줄거나 창이 좁아지면 오른쪽에 빈 자리가 생기지 않도록 창을 왼쪽으로 당긴다.
@@ -1994,7 +1995,8 @@ function renderTabs(){
     tab.draggable = canDragTab;
     const cat = extCategory(d.kind, d.name);
     if (cat) tab.dataset.cat = cat;
-    tab.title = d.name + (d.hasUnsavedEdits ? " · 저장 후 수정됨" : "") +
+    const tabLabel = tabLabels.get(d.id) || d.name;
+    tab.title = d.name + (tabLabel.startsWith(d.name + " ") ? tabLabel.slice(d.name.length) : "") + (d.hasUnsavedEdits ? " · 저장 후 수정됨" : "") +
       (d.textEncoding ? " · 인코딩: " + d.textEncoding.label : "") +
       (canDragTab ? " · 드래그: 탭바에서 위치 변경 · 본문 좌우로 끌면 분할" : " · 탭이 하나일 때는 분할 드래그 안 됨") +
       " · 우클릭: 탭 정리";
@@ -2033,7 +2035,7 @@ function renderTabs(){
     });
     tab.addEventListener("dragend", resetDocumentDragState);
     const ic = document.createElement("span"); ic.className = "tab-ic"; ic.textContent = iconFor(d.kind, d.name);
-    const nm = document.createElement("span"); nm.className = "tab-name"; nm.textContent = d.name;
+    const nm = document.createElement("span"); nm.className = "tab-name"; nm.textContent = tabLabel;
     // 수정된 탭은 오른쪽 끝에 점(●)을 보이고, 마우스를 올리면 그 자리에 닫기(✕)가 나온다(사이드바 표시와 톤 통일).
     const dot = document.createElement("span"); dot.className = "tab-dot"; dot.textContent = "●";
     dot.setAttribute("aria-hidden", "true");
@@ -2087,12 +2089,14 @@ function renderTabs(){
         if (!doc || (query && !doc.name.toLocaleLowerCase().includes(query))) return;
         const item = document.createElement("button"); item.type = "button"; item.className = "tab-overflow-item";
         const badge = document.createElement("span"); badge.className = "tab-ic"; badge.textContent = iconFor(doc.kind, doc.name);
-        const name = document.createElement("span"); name.className = "tab-overflow-name"; name.textContent = doc.name;
+        const name = document.createElement("span"); name.className = "tab-overflow-name"; name.textContent = tabLabels.get(doc.id) || doc.name;
         item.append(badge, name);
+        const overflowLabel = tabLabels.get(doc.id) || doc.name;
+        item.title = doc.name + (overflowLabel.startsWith(doc.name + " ") ? overflowLabel.slice(doc.name.length) : "");
         if (doc.hasUnsavedEdits){
           const dirty = document.createElement("span"); dirty.className = "tab-overflow-dirty"; dirty.textContent = "●";
           dirty.setAttribute("aria-hidden", "true"); item.appendChild(dirty);
-          item.title = doc.name + " · 저장 후 수정됨"; item.setAttribute("aria-label", item.title);
+          item.title += " · 저장 후 수정됨"; item.setAttribute("aria-label", item.title);
         }
         item.onclick = () => openDocInTargetPane(id); list.appendChild(item); count++;
       });
