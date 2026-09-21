@@ -132,6 +132,10 @@ const TRIP_WORDS_EN = {
 
 function tripIsEn(){ return typeof MNI18N !== "undefined" && !!MNI18N && MNI18N.lang === "en"; }
 function tripT(ko){ return (typeof window !== "undefined" && typeof window.t === "function") ? window.t(ko) : ko; }
+function tripTf(tmpl, vars){
+  if (typeof window !== "undefined" && typeof window.tf === "function") return window.tf(tmpl, vars);
+  return String(tmpl).replace(/\{(\w+)\}/g, (whole, key) => (vars && vars[key] != null ? String(vars[key]) : whole));
+}
 
 /* 갈래의 낱말 하나. 빈 문자열이면 '그 갈래에는 없는 것'이라 부르는 쪽이 단추를 감춘다. */
 function tripWord(purpose, id){
@@ -516,6 +520,130 @@ function newTripScratchInFolder(folder, purpose){
     name => tripStarterBytes(name, kind), "application/zip", "새 여행일지를");
 }
 
+/* ---------- 사진에서 찍은 때·자리 읽기(EXIF) ----------
+   여행일지의 절반은 사진이 이미 알고 있다 — 언제 어디서 찍었는지. 다만 읽을 자리가 까다롭다.
+   - 사진을 넣을 때 줄여 다시 굽는 길(diaryPrepareImage)을 지나면 EXIF 가 통째로 날아간다.
+     그래서 **굽기 전 원본 바이트**에서 읽어야 한다.
+   - 메신저로 받은 사진은 보낸 쪽이 EXIF 를 지워서 아무것도 없는 것이 정상이다.
+   - GPS 는 개인정보다. 집 근처 사진 한 장이 주소를 드러낸다 — 그래서 저절로 읽지 않고,
+     사용자가 '사진에서 장소'를 눌렀을 때만 읽는다. */
+
+const TRIP_EXIF_MAX_SCAN = 512 * 1024;      // 앞부분만 본다(EXIF 는 파일 머리에 있다)
+
+function tripExifRational(view, at, little){
+  const num = view.getUint32(at, little), den = view.getUint32(at + 4, little);
+  return den ? num / den : 0;
+}
+/* 도·분·초 세 쌍을 도(度)로. 남/서면 음수. */
+function tripExifDegrees(view, at, little, ref){
+  const d = tripExifRational(view, at, little);
+  const m = tripExifRational(view, at + 8, little);
+  const s = tripExifRational(view, at + 16, little);
+  const value = d + m / 60 + s / 3600;
+  if (!Number.isFinite(value)) return null;
+  return (ref === "S" || ref === "W") ? -value : value;
+}
+/* "2026:07:20 09:30:11" → { date:"2026-07-20", at:"09:30" } */
+function tripExifWhen(text){
+  const m = String(text || "").match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2})/);
+  if (!m) return null;
+  const date = m[1] + "-" + m[2] + "-" + m[3];
+  return tripIsDateKey(date) ? { date, at:m[4] + ":" + m[5] } : null;
+}
+
+/* JPEG 바이트에서 찍은 때와 자리를 읽는다. 못 읽으면 빈 값을 돌려준다(던지지 않는다) —
+   사진 한 장이 이상해서 나머지가 안 붙으면 안 된다. */
+function tripReadExif(bytes){
+  const empty = { date:"", at:"", lat:null, lng:null };
+  try {
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    if (data.length < 16 || data[0] !== 0xFF || data[1] !== 0xD8) return empty;   // JPEG 가 아니다
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    let at = 2;
+    const limit = Math.min(data.length, TRIP_EXIF_MAX_SCAN);
+    while (at + 4 <= limit){
+      if (view.getUint8(at) !== 0xFF) break;
+      const marker = view.getUint8(at + 1);
+      if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)){ at += 2; continue; }
+      if (marker === 0xDA) break;                       // 그림 자료가 시작된다
+      const size = view.getUint16(at + 2, false);
+      if (size < 2) break;
+      if (marker === 0xE1 && at + 4 + 6 <= limit){
+        const tag = String.fromCharCode(...data.slice(at + 4, at + 8));
+        if (tag === "Exif") return tripReadExifTiff(view, at + 10, Math.min(at + 2 + size, limit)) || empty;
+      }
+      at += 2 + size;
+    }
+  } catch(error){ console.warn("EXIF 를 읽지 못했어요:", error); }
+  return empty;
+}
+
+function tripReadExifTiff(view, start, end){
+  const out = { date:"", at:"", lat:null, lng:null };
+  if (start + 8 > end) return out;
+  const order = view.getUint16(start, false);
+  if (order !== 0x4949 && order !== 0x4D4D) return out;
+  const little = order === 0x4949;
+  if (view.getUint16(start + 2, little) !== 42) return out;
+  const ifd0 = start + view.getUint32(start + 4, little);
+
+  const readEntries = (base, onEntry) => {
+    if (base + 2 > end) return;
+    const count = view.getUint16(base, little);
+    if (count > 512) return;                       // 손으로 고친 파일 방어
+    for (let i = 0; i < count; i++){
+      const at = base + 2 + i * 12;
+      if (at + 12 > end) return;
+      onEntry(view.getUint16(at, little), view.getUint16(at + 2, little), view.getUint32(at + 4, little), at + 8);
+    }
+  };
+  const asciiAt = (offset, length) => {
+    const from = start + offset;
+    if (from + length > end) return "";
+    let text = "";
+    for (let i = 0; i < length; i++){
+      const code = view.getUint8(from + i);
+      if (!code) break;
+      text += String.fromCharCode(code);
+    }
+    return text;
+  };
+
+  let exifIfd = 0, gpsIfd = 0;
+  readEntries(ifd0, (tag, type, count, valueAt) => {
+    if (tag === 0x8769) exifIfd = start + view.getUint32(valueAt, little);
+    else if (tag === 0x8825) gpsIfd = start + view.getUint32(valueAt, little);
+    else if (tag === 0x0132 && type === 2 && count <= 32 && !out.date){    // DateTime(찍은 때가 없을 때의 보루)
+      const when = tripExifWhen(asciiAt(view.getUint32(valueAt, little), count));
+      if (when){ out.date = when.date; out.at = when.at; }
+    }
+  });
+  if (exifIfd) readEntries(exifIfd, (tag, type, count, valueAt) => {
+    if ((tag === 0x9003 || tag === 0x9004) && type === 2 && count <= 32){   // DateTimeOriginal/Digitized
+      const when = tripExifWhen(asciiAt(view.getUint32(valueAt, little), count));
+      if (when && (tag === 0x9003 || !out.date)){ out.date = when.date; out.at = when.at; }
+    }
+  });
+  if (gpsIfd){
+    let latRef = "", lngRef = "", latAt = 0, lngAt = 0;
+    readEntries(gpsIfd, (tag, type, count, valueAt) => {
+      if (tag === 0x0001 && type === 2) latRef = asciiAt(valueAt - start, 2).trim().toUpperCase();
+      else if (tag === 0x0003 && type === 2) lngRef = asciiAt(valueAt - start, 2).trim().toUpperCase();
+      else if (tag === 0x0002 && type === 5 && count === 3) latAt = start + view.getUint32(valueAt, little);
+      else if (tag === 0x0004 && type === 5 && count === 3) lngAt = start + view.getUint32(valueAt, little);
+    });
+    if (latAt && lngAt && latAt + 24 <= end && lngAt + 24 <= end){
+      const lat = tripExifDegrees(view, latAt, little, latRef);
+      const lng = tripExifDegrees(view, lngAt, little, lngRef);
+      if (lat != null && lng != null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng)){
+        out.lat = Math.round(lat * 1e6) / 1e6;
+        out.lng = Math.round(lng * 1e6) / 1e6;
+      }
+    }
+  }
+  return out;
+}
+
 /* ---------- 문서 열고 닫기 ---------- */
 
 function tripAttachDoc(doc, unpacked){
@@ -705,13 +833,16 @@ function mountTripEditor(doc){
   const photoBtn = diaryButton("사진", "사진 붙이기", "diary-btn trip-photo-btn", "image");
   const photoInput = document.createElement("input");
   photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
+  const exifBtn = diaryButton("사진에서", "사진에 찍힌 때·자리로 장소 만들기", "diary-btn trip-exif-btn", "map");
+  const exifInput = document.createElement("input");
+  exifInput.type = "file"; exifInput.accept = "image/jpeg,image/jpg"; exifInput.multiple = true; exifInput.hidden = true;
   const stickerBtn = diaryButton("스티커", "그림·글상자 붙이기", "diary-btn trip-sticker-btn", "sticker");
   const styleBtn = diaryButton("꾸미기", "종이 꾸미기", "diary-btn trip-style-btn", "palette");
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
   const saveBtn = diaryButton("저장", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
   bar.append(titleInput, purposeSelect, status, undoBtn, redoBtn, photoBtn, photoInput,
-    stickerBtn, styleBtn, bgInput, saveBtn);
+    exifBtn, exifInput, stickerBtn, styleBtn, bgInput, saveBtn);
 
   /* ----- 본문: 여정 띠 + 종이 ----- */
   const body = document.createElement("div");
@@ -980,6 +1111,47 @@ function mountTripEditor(doc){
     const files = [...(els.pictureInput.files || [])]; els.pictureInput.value = "";
     if (files.length) await addStickers(files, null, true);
   });
+  /* ----- 사진에서 장소 만들기 -----
+     EXIF 는 **줄여 굽기 전 원본 바이트**에서 읽어야 한다 — diaryPrepareImage 를 지나면 통째로 날아간다.
+     찍힌 날짜와 같은 날이 여정에 있으면 그 날에, 없으면 보고 있는 날에 넣는다. 새 날을 멋대로 만들지는 않는다.
+     GPS 는 개인정보라 저절로 읽지 않는다 — 이 단추를 누른 사진만 읽는다. */
+  async function makeSpotsFromPhotos(files){
+    const day = dayOf(current);
+    if (!day && !files.length) return;
+    let made = 0, noExif = 0, noGps = 0;
+    if (history) history.flush();
+    for (const file of files){
+      let info;
+      try { info = tripReadExif(new Uint8Array(await file.arrayBuffer())); }
+      catch(_){ info = { date:"", at:"", lat:null, lng:null }; }
+      if (!info.date && info.lat == null){ noExif++; continue; }
+      if (info.lat == null) noGps++;
+      const target = (info.date && (model.days || []).find(d => d.date === info.date)) || day;
+      if (!target) continue;
+      if (target.spots.length >= TRIP_MAX_SPOTS) continue;
+      const asset = await addAsset(file, DIARY_STICKER_MAX_DIM);
+      const name = String(file.name || "").replace(/\.[a-z0-9]+$/i, "").slice(0, 120);
+      target.spots.push({
+        id:tripSpotId(), at:info.at || "", name, address:"", note:"", kind:"",
+        lat:info.lat, lng:info.lat == null ? null : info.lng,
+        color:"", cost:null, photos:asset ? [asset.name] : [], fields:[]
+      });
+      made++;
+    }
+    renderSpots(); renderRail(); renderMap();
+    if (made) touch(true);
+    const parts = [];
+    if (made) parts.push(tripTf("{n}곳을 만들었어요", { n:made }));
+    if (noGps) parts.push(tripTf("{n}장은 찍은 자리가 없어 때만 적었어요", { n:noGps }));
+    if (noExif) parts.push(tripTf("{n}장은 찍은 때·자리가 없어요(메신저로 받은 사진은 지워져 있어요)", { n:noExif }));
+    setStatus(parts.join(" · ") || tripT("사진에서 읽을 것이 없었어요."));
+  }
+  exifBtn.addEventListener("click", () => exifInput.click());
+  exifInput.addEventListener("change", async () => {
+    const files = [...(exifInput.files || [])]; exifInput.value = "";
+    if (files.length) await makeSpotsFromPhotos(files);
+  });
+
   photoBtn.addEventListener("click", () => photoInput.click());
   photoInput.addEventListener("change", async () => {
     const files = [...(photoInput.files || [])]; photoInput.value = "";
@@ -1577,6 +1749,7 @@ if (typeof module !== "undefined" && module.exports){
     tripNormalizePairs, tripNormalizePrompts, tripNormalizeCost, tripNormalizeMap, tripNormalizeBudget,
     tripEmpty, tripNormalize, tripCleanDays, tripCleanSpot, tripModelJson, tripContentKey,
     tripReferencedAssets, tripPack, tripUnpack, tripIsDomestic, tripPlainText,
+    tripReadExif, tripExifWhen,
     tripScratchFileName, tripStarterBytes
   };
 }

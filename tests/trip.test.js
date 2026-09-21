@@ -223,6 +223,97 @@ test("새 문서 뼈대는 동기로 만들어진다(폴더에서 만들 때 필
   assert.equal(String.fromCharCode(bytes[0], bytes[1]), "PK");
 });
 
+/* ---------- 사진에서 찍은 때·자리 읽기(EXIF) ---------- */
+
+/* 시험용 JPEG 를 손으로 짠다. 실제 사진을 저장소에 넣지 않으려는 것도 있지만,
+   무엇이 들어 있는지 한눈에 보이는 쪽이 이 파서에는 더 낫다. */
+function exifJpeg({ when = "2026:07:20 09:30:11", lat = null, lng = null, little = true } = {}) {
+  const parts = [];                                   // TIFF 블록 안의 조각들
+  const u16 = v => { const b = Buffer.alloc(2); little ? b.writeUInt16LE(v) : b.writeUInt16BE(v); return b; };
+  const u32 = v => { const b = Buffer.alloc(4); little ? b.writeUInt32LE(v) : b.writeUInt32BE(v); return b; };
+  const rat = (n, d) => Buffer.concat([u32(n), u32(d)]);
+  const entry = (tag, type, count, valueBuf) => Buffer.concat([u16(tag), u16(type), u32(count), valueBuf]);
+
+  const whenBytes = Buffer.from(when + "\0", "latin1");
+  // TIFF 머리(8) + IFD0 + ExifIFD + GPS + 자료
+  const header = Buffer.concat([Buffer.from(little ? "II" : "MM", "latin1"), u16(42), u32(8)]);
+  const hasGps = lat != null && lng != null;
+  const ifd0Count = 1 + (hasGps ? 1 : 0);
+  const ifd0At = 8;
+  const ifd0Size = 2 + ifd0Count * 12 + 4;
+  const exifAt = ifd0At + ifd0Size;
+  const exifSize = 2 + 1 * 12 + 4;
+  const gpsAt = exifAt + exifSize;
+  const gpsSize = hasGps ? 2 + 4 * 12 + 4 : 0;
+  let dataAt = gpsAt + gpsSize;
+
+  const whenAt = dataAt; dataAt += whenBytes.length;
+  const latAt = dataAt; if (hasGps) dataAt += 24;
+  const lngAt = dataAt; if (hasGps) dataAt += 24;
+
+  const ifd0 = [u16(ifd0Count), entry(0x8769, 4, 1, u32(exifAt))];
+  if (hasGps) ifd0.push(entry(0x8825, 4, 1, u32(gpsAt)));
+  ifd0.push(u32(0));
+  parts.push(Buffer.concat(ifd0));
+  parts.push(Buffer.concat([u16(1), entry(0x9003, 2, whenBytes.length, u32(whenAt)), u32(0)]));
+  if (hasGps) {
+    parts.push(Buffer.concat([u16(4),
+      entry(0x0001, 2, 2, Buffer.from((lat < 0 ? "S" : "N") + "\0\0\0", "latin1")),
+      entry(0x0002, 5, 3, u32(latAt)),
+      entry(0x0003, 2, 2, Buffer.from((lng < 0 ? "W" : "E") + "\0\0\0", "latin1")),
+      entry(0x0004, 5, 3, u32(lngAt)),
+      u32(0)]));
+  }
+  parts.push(whenBytes);
+  if (hasGps) {
+    const triple = v => Buffer.concat([rat(Math.floor(Math.abs(v)), 1),
+      rat(Math.floor((Math.abs(v) - Math.floor(Math.abs(v))) * 60), 1),
+      rat(Math.round((((Math.abs(v) - Math.floor(Math.abs(v))) * 60) % 1) * 60 * 100), 100)]);
+    parts.push(triple(lat), triple(lng));
+  }
+  const tiff = Buffer.concat([header, ...parts]);
+  const app1Body = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), tiff]);
+  const size = Buffer.alloc(2); size.writeUInt16BE(app1Body.length + 2);
+  return new Uint8Array(Buffer.concat([
+    Buffer.from([0xFF, 0xD8, 0xFF, 0xE1]), size, app1Body, Buffer.from([0xFF, 0xDA, 0x00, 0x02])
+  ]));
+}
+
+test("사진에서 찍은 때를 읽는다", () => {
+  const out = trip.tripReadExif(exifJpeg({ when:"2026:07:20 09:30:11" }));
+  assert.equal(out.date, "2026-07-20");
+  assert.equal(out.at, "09:30");
+  assert.equal(out.lat, null);
+});
+
+test("사진에서 찍은 자리를 읽는다(남·서는 음수)", () => {
+  const north = trip.tripReadExif(exifJpeg({ lat:33.458, lng:126.942 }));
+  assert.ok(Math.abs(north.lat - 33.458) < 0.001, "위도 " + north.lat);
+  assert.ok(Math.abs(north.lng - 126.942) < 0.001, "경도 " + north.lng);
+  const south = trip.tripReadExif(exifJpeg({ lat:-33.87, lng:-151.21 }));
+  assert.ok(south.lat < 0 && south.lng < 0, "남·서는 음수여야 한다");
+});
+
+test("바이트 차례(MM)도 읽는다", () => {
+  const out = trip.tripReadExif(exifJpeg({ lat:37.5665, lng:126.978, little:false }));
+  assert.equal(out.date, "2026-07-20");
+  assert.ok(Math.abs(out.lat - 37.5665) < 0.001);
+});
+
+test("EXIF 가 없거나 JPEG 가 아니면 빈 값이고 던지지 않는다", () => {
+  assert.deepEqual(trip.tripReadExif(new Uint8Array([0x89, 0x50, 0x4e, 0x47])), { date:"", at:"", lat:null, lng:null });
+  assert.deepEqual(trip.tripReadExif(new Uint8Array([0xFF, 0xD8, 0xFF, 0xDA, 0, 2])), { date:"", at:"", lat:null, lng:null });
+  assert.deepEqual(trip.tripReadExif(null), { date:"", at:"", lat:null, lng:null });
+  assert.deepEqual(trip.tripReadExif(new Uint8Array(0)), { date:"", at:"", lat:null, lng:null });
+});
+
+test("찍은 때 글은 실제 있는 날만 받는다", () => {
+  assert.deepEqual(trip.tripExifWhen("2026:07:20 09:30:11"), { date:"2026-07-20", at:"09:30" });
+  assert.equal(trip.tripExifWhen("2026:02:30 09:30:11"), null, "없는 날");
+  assert.equal(trip.tripExifWhen(""), null);
+  assert.equal(trip.tripExifWhen("0000:00:00 00:00:00"), null);
+});
+
 /* ---------- 문서에 적어 둔 것과 어긋나지 않게 ---------- */
 
 test("설계 문서가 말하는 개수와 실제가 같다", () => {

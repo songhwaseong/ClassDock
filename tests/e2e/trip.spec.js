@@ -348,6 +348,97 @@ test("굳힌 그림이 있으면 보이고, 장소가 바뀌면 낡았다고 알
   expect(used).toContain("assets/frozenmap.png");
 });
 
+/* EXIF 가 든 작은 JPEG 를 브라우저 안에서 만들어 넣는다(실제 사진을 저장소에 두지 않으려고). */
+const EXIF_JPEG_MAKER = `(when, lat, lng) => {
+  const b = [];
+  const u16 = v => { b.push(v & 255, (v >> 8) & 255); };
+  const u32 = v => { b.push(v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255); };
+  const entry = (tag, type, count, val) => { u16(tag); u16(type); u32(count); u32(val); };
+  const tiff = [];
+  const push = (arr, fn) => { const save = b.length; fn(); while (b.length > save) arr.push(b.shift()); };
+  // 자리 계산: 머리 8 + IFD0(2+2*12+4=30) + Exif(2+12+4=18) + GPS(2+4*12+4=54)
+  const exifAt = 8 + 30, gpsAt = exifAt + 18, dataAt = gpsAt + 54;
+  const whenBytes = [...when].map(c => c.charCodeAt(0)).concat([0]);
+  const latAt = dataAt + whenBytes.length, lngAt = latAt + 24;
+  push(tiff, () => { b.push(0x49, 0x49); u16(42); u32(8); });
+  push(tiff, () => { u16(2); entry(0x8769, 4, 1, exifAt); entry(0x8825, 4, 1, gpsAt); u32(0); });
+  push(tiff, () => { u16(1); entry(0x9003, 2, whenBytes.length, dataAt); u32(0); });
+  push(tiff, () => {
+    u16(4);
+    u16(1); u16(2); u32(2); b.push(lat < 0 ? 83 : 78, 0, 0, 0);
+    entry(2, 5, 3, latAt);
+    u16(3); u16(2); u32(2); b.push(lng < 0 ? 87 : 69, 0, 0, 0);
+    entry(4, 5, 3, lngAt);
+    u32(0);
+  });
+  tiff.push(...whenBytes);
+  const triple = v => { const a = Math.abs(v), d = Math.floor(a), m = Math.floor((a - d) * 60);
+    const s = Math.round((((a - d) * 60) % 1) * 60 * 100);
+    push(tiff, () => { u32(d); u32(1); u32(m); u32(1); u32(s); u32(100); }); };
+  triple(lat); triple(lng);
+  const head = [0xFF, 0xD8, 0xFF, 0xE1];
+  const body = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff];
+  const size = body.length + 2;
+  return new Uint8Array([...head, (size >> 8) & 255, size & 255, ...body, 0xFF, 0xDA, 0, 2]);
+}`;
+
+test("사진에서 장소 만들기 — 찍은 때·자리를 읽어 그 날에 넣는다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-20");
+
+  await page.setInputFiles(".trip-exif-btn + input[type=file]", []);
+  const files = await page.evaluate(make => {
+    const makeJpeg = eval(make);
+    const a = makeJpeg("2026:07:20 09:30:11", 33.458, 126.942);
+    const b = makeJpeg("2026:07:20 14:05:00", 33.506, 126.951);
+    return [[...a], [...b]];
+  }, EXIF_JPEG_MAKER);
+  await page.setInputFiles(".trip-exif-btn + input[type=file]", files.map((bytes, i) => ({
+    name:"사진" + (i + 1) + ".jpg", mimeType:"image/jpeg", buffer:Buffer.from(bytes)
+  })));
+
+  await expect(page.locator(".trip-spot")).toHaveCount(2);
+  const model = await modelOf(page);
+  const spots = model.days[0].spots;
+  expect(spots.map(s => s.at)).toEqual(["09:30", "14:05"]);
+  expect(Math.round(spots[0].lat * 1000) / 1000).toBe(33.458);
+  expect(Math.round(spots[1].lng * 1000) / 1000).toBe(126.951);
+  expect(spots[0].name).toBe("사진1");
+  // 합성 JPEG 는 그림 자료가 없어 못 굽는다 — 그때도 장소는 만들어지고 사진만 빠진다.
+  expect(spots[0].photos.length).toBeLessThanOrEqual(1);
+  await expect(page.locator(".trip-status")).toContainText("2곳을 만들었어요");
+  // 좌표가 생겼으니 지도에 표시가 뜬다
+  await expect(page.locator(".trip-map-stage path.leaflet-interactive")).toHaveCount(3);
+});
+
+test("찍힌 날짜와 같은 날이 여정에 있으면 그 날로 간다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-20");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-day-date").fill("2026-07-21");
+  // 보고 있는 날은 둘째 날인데, 사진은 첫째 날에 찍힌 것이다
+  const bytes = await page.evaluate(make => [...eval(make)("2026:07:20 08:00:00", 33.4, 126.9)], EXIF_JPEG_MAKER);
+  await page.setInputFiles(".trip-exif-btn + input[type=file]",
+    [{ name:"첫날사진.jpg", mimeType:"image/jpeg", buffer:Buffer.from(bytes) }]);
+
+  const model = await modelOf(page);
+  expect(model.days[0].spots.length).toBe(1);
+  expect(model.days[1].spots.length).toBe(0);
+});
+
+test("EXIF 가 없는 사진은 장소를 만들지 않고 그렇다고 알려 준다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.setInputFiles(".trip-exif-btn + input[type=file]",
+    [{ name:"민무늬.jpg", mimeType:"image/jpeg", buffer:Buffer.from([0xFF, 0xD8, 0xFF, 0xDA, 0, 2]) }]);
+  await expect(page.locator(".trip-spot")).toHaveCount(0);
+  await expect(page.locator(".trip-status")).toContainText("찍은 때·자리가 없어요");
+});
+
 test("떼어 낸 종이 엔진이 여행일지에서도 그대로 돈다(스티커·되돌리기)", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();
