@@ -29,9 +29,11 @@ const TRIP_ASSET_RE = /^assets\/[a-z0-9_-]{4,64}\.(png|jpe?g|webp|gif)$/;
    .mov 는 아이폰 H.264 영상이 흔해서 받는다 — 재생 가능 여부는 넣을 때 실제 <video> 로 확인한다. */
 const TRIP_VIDEO_RE = /^assets\/[a-z0-9_-]{4,64}\.(mp4|webm|mov)$/;
 const TRIP_VIDEO_MIME = { mp4:"video/mp4", webm:"video/webm", mov:"video/mp4" };
-const TRIP_VIDEO_MAX_BYTES = 40 * 1024 * 1024;
-const TRIP_VIDEO_TOTAL_MAX_BYTES = 150 * 1024 * 1024;   // 한 문서의 영상 합계
-const TRIP_VIDEO_MAX_SEC = 30;
+// 2026-09-21 늘림(30초·40MB·합계 150MB → 2분·60MB·300MB). 줄인 영상(720p·2Mbps)은 1분에 약 16MB라
+// 2분이면 32MB 안팎이다. 한 개는 64MB 벽, 합계는 작업공간 자동 복원 상한(512MB) 아래에 사진 자리를 남긴다.
+const TRIP_VIDEO_MAX_BYTES = 60 * 1024 * 1024;
+const TRIP_VIDEO_TOTAL_MAX_BYTES = 300 * 1024 * 1024;   // 한 문서의 영상 합계
+const TRIP_VIDEO_MAX_SEC = 120;
 const TRIP_MAX_VIDEOS = 3;                               // 장소 하나에
 const TRIP_VIDEO_POSTER_DIM = 640;                       // 첫 장면 그림(목록 칸 썸네일)
 /* 2단계: EXE 에 ffmpeg 가 있으면 넣기 전에 줄인다(런처 /shrink-media). 긴 변 1280(720p)·평균 2Mbps·
@@ -1157,6 +1159,15 @@ async function tripReadyVideo(file, backend, onShrink){
   if (direct && prepared.bytes.length >= direct.bytes.length) return { prepared:direct, shrunk:false, trimmed:false };
   return { prepared, shrunk:true, trimmed:sourceMs > (TRIP_VIDEO_MAX_SEC + 0.5) * 1000 };
 }
+// 길이 한도를 사람이 읽는 말로: 120 → "2분" / "2 minutes", 45 → "45초" / "45 seconds".
+function tripLimitText(sec){
+  const en = tripIsEn();
+  if (sec >= 60 && sec % 60 === 0){
+    const m = sec / 60;
+    return en ? m + (m > 1 ? " minutes" : " minute") : m + "분";
+  }
+  return en ? sec + " seconds" : sec + "초";
+}
 function tripVideoProblem(error){
   const code = String((error && error.message) || error || "");
   const en = tripIsEn();
@@ -1166,8 +1177,8 @@ function tripVideoProblem(error){
     ? "The video is too large (up to " + mb(TRIP_VIDEO_MAX_BYTES) + "MB)."
     : "영상이 너무 커요(" + mb(TRIP_VIDEO_MAX_BYTES) + "MB까지).";
   if (code === "trip-video-long") return en
-    ? "The video is too long (up to " + TRIP_VIDEO_MAX_SEC + " seconds)."
-    : "영상이 너무 길어요(" + TRIP_VIDEO_MAX_SEC + "초까지).";
+    ? "The video is too long (up to " + tripLimitText(TRIP_VIDEO_MAX_SEC) + ")."
+    : "영상이 너무 길어요(" + tripLimitText(TRIP_VIDEO_MAX_SEC) + "까지).";
   if (code === "trip-video-total") return en
     ? "This document can hold up to " + mb(TRIP_VIDEO_TOTAL_MAX_BYTES) + "MB of video in total."
     : "이 문서에 넣을 수 있는 영상은 모두 합해 " + mb(TRIP_VIDEO_TOTAL_MAX_BYTES) + "MB까지예요.";
@@ -1992,8 +2003,8 @@ function mountTripEditor(doc){
     const notes = [];
     if (added && shrunkCount) notes.push(tripIsEn() ? shrunkCount + " shrunk" : "작게 줄임 " + shrunkCount + "개");
     if (added && trimmedCount) notes.push(tripIsEn()
-      ? trimmedCount + " cut to the first " + TRIP_VIDEO_MAX_SEC + "s"
-      : "앞 " + TRIP_VIDEO_MAX_SEC + "초만 " + trimmedCount + "개");
+      ? trimmedCount + " cut to the first " + tripLimitText(TRIP_VIDEO_MAX_SEC)
+      : "앞 " + tripLimitText(TRIP_VIDEO_MAX_SEC) + "만 " + trimmedCount + "개");
     const tail = notes.length ? (tripIsEn() ? " (" + notes.join(", ") + ")" : "(" + notes.join(" · ") + ")") : "";
     const done = added ? (tripIsEn() ? "Added " + added + " video" + (added > 1 ? "s" : "") + tail + "." : "영상 " + added + "개를 넣었어요" + tail + ".") : "";
     setStatus([done, ...problems].filter(Boolean).join(" "));
@@ -2571,8 +2582,8 @@ function mountTripEditor(doc){
         "diary-btn trip-spot-pick" + (spot.lat == null ? "" : " is-on"), "map");
       const removeBtn = diaryButton("", "이 줄 빼기", "diary-btn trip-spot-remove", "close");
       const videoBtn = diaryButton("", tripIsEn()
-        ? "Add a short video (up to " + TRIP_VIDEO_MAX_SEC + "s)"
-        : "짧은 영상 넣기 (" + TRIP_VIDEO_MAX_SEC + "초까지)", "diary-btn trip-spot-video-add", "video");
+        ? "Add a short video (up to " + tripLimitText(TRIP_VIDEO_MAX_SEC) + ")"
+        : "짧은 영상 넣기 (" + tripLimitText(TRIP_VIDEO_MAX_SEC) + "까지)", "diary-btn trip-spot-video-add", "video");
       line1.append(at, icon, kindSelect, name, videoBtn, pickBtn, removeBtn);
       pickBtn.addEventListener("click", () => startPicking(spot.id));
       videoBtn.addEventListener("click", () => { videoTarget = spot.id; videoInput.click(); });

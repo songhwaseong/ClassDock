@@ -7,6 +7,7 @@ const { collapseSidebar } = require("./helpers");
  * 테스트 크로미엄은 H.264 가 없어 webm(VP8) 조각을 쓴다(tests/fixtures, ffmpeg testsrc 로 만든 것). */
 
 const CLIP = fs.readFileSync(path.join(__dirname, "..", "fixtures", "trip-clip.webm"));
+// 한도(2분)를 넘는 130초짜리 — 작은 화면·낮은 비트레이트라 100KB 남짓이다.
 const LONG = fs.readFileSync(path.join(__dirname, "..", "fixtures", "trip-clip-long.webm"));
 
 async function bootWithSpot(page){
@@ -85,7 +86,7 @@ test("영상은 저장본에 담겨 되살아나고, 빼면 되돌리기로 되�
 test("긴 영상·같은 영상은 받지 않고 까닭을 알린다", async ({ page }) => {
   await bootWithSpot(page);
   await pickVideos(page, [{ name:"long.webm", mimeType:"video/webm", buffer:LONG }]);
-  await expect(page.locator(".trip-status")).toContainText("너무 길어요");
+  await expect(page.locator(".trip-status")).toContainText("너무 길어요(2분까지)");
   await expect(page.locator(".trip-spot-video")).toHaveCount(0);
 
   await pickVideos(page, [
@@ -96,7 +97,7 @@ test("긴 영상·같은 영상은 받지 않고 까닭을 알린다", async ({ 
   await expect(page.locator(".trip-spot-video")).toHaveCount(1);
 });
 
-test("EXE 에 ffmpeg 가 있으면 긴 영상도 런처가 줄이고 앞 30초만 넣는다", async ({ page }) => {
+test("EXE 에 ffmpeg 가 있으면 긴 영상도 런처가 줄이고 앞 2분만 넣는다", async ({ page }) => {
   let sent = null;
   await page.route("**/can-convert-media", route => route.fulfill({ status:200, contentType:"text/plain", body:"yes" }));
   // 런처 대신 답한다: 받은 원본 크기·물음을 적어 두고, 줄인 결과로 2초짜리 조각을 돌려준다
@@ -105,19 +106,19 @@ test("EXE 에 ffmpeg 가 있으면 긴 영상도 런처가 줄이고 앞 30초�
     const req = route.request();
     sent = { url:req.url(), size:(req.postDataBuffer() || Buffer.alloc(0)).length };
     await route.fulfill({ status:200, contentType:"video/mp4", body:CLIP,
-      headers:{ "X-Media-Source-Duration-Ms":"40000" } });
+      headers:{ "X-Media-Source-Duration-Ms":"130000" } });
   });
   await bootWithSpot(page);
   await pickVideos(page, [{ name:"long.webm", mimeType:"video/webm", buffer:LONG }]);
   await expect(page.locator(".trip-spot-video")).toHaveCount(1);
   await expect(page.locator(".trip-status")).toContainText("작게 줄임 1개");
-  await expect(page.locator(".trip-status")).toContainText("앞 30초만 1개");
+  await expect(page.locator(".trip-status")).toContainText("앞 2분만 1개");
   expect(sent.size).toBe(LONG.length);
   expect(sent.url).toContain("dim=1280");
-  expect(sent.url).toContain("sec=30");
+  expect(sent.url).toContain("sec=120");
   const videos = await spotVideos(page);
   expect(videos[0].v).toMatch(/\.webm$|\.mp4$/);
-  expect(videos[0].d).toBeLessThanOrEqual(30);
+  expect(videos[0].d).toBeLessThanOrEqual(120);
 });
 
 test("작고 그대로 틀리는 영상은 ffmpeg 가 있어도 줄이지 않고, 줄이기가 실패하면 까닭을 알린다", async ({ page }) => {
