@@ -1029,6 +1029,42 @@
       "sha384": "sha384-YdwaRq7J6N05HH3jwh0/OMZbniTLrDCY5e8lB/p9OKjJ+Fb2jayYfBVbJTjRWNc7"
     },
     {
+      "src": "vendor/hand-font-hippie.js",
+      "file": "hand-font-hippie.js",
+      "lazy": "handHippie",
+      "sha384": "sha384-qWljECKepOhzmTdoF+m66ukFEdP26qigbRG7ozoRZg2X8f9OVyOUNXN32V2EGVYn"
+    },
+    {
+      "src": "vendor/hand-font-dahaeng.js",
+      "file": "hand-font-dahaeng.js",
+      "lazy": "handDahaeng",
+      "sha384": "sha384-yVKmbOlQ8olORkitVfXdRGBAgHCDaR9JkofSkOyaCxWjP/N2KypZa+5sudxMTzQb"
+    },
+    {
+      "src": "vendor/hand-font-student.js",
+      "file": "hand-font-student.js",
+      "lazy": "handStudent",
+      "sha384": "sha384-QpqQVMpicvEBpYff7yuULcr1av2i6K7jOSBniIU3RWDGFC3bKWyWNPwkPVDonG0F"
+    },
+    {
+      "src": "vendor/hand-font-amsterdam.js",
+      "file": "hand-font-amsterdam.js",
+      "lazy": "handAmsterdam",
+      "sha384": "sha384-hctvcYDg6Kyc0TV+J4gXmimsfK5zGDy0LM9xYyqdAb+dAGqTlV4UrxKVQxFXghwZ"
+    },
+    {
+      "src": "vendor/hand-font-mago.js",
+      "file": "hand-font-mago.js",
+      "lazy": "handMago",
+      "sha384": "sha384-wwUvtdQHhrr7M3wgiMAp7AupdSDfX0WbANBRlFMlqJSVCaOPLgraBjtwuP0ubQER"
+    },
+    {
+      "src": "vendor/hand-font-samples.js",
+      "file": "hand-font-samples.js",
+      "lazy": "handSamples",
+      "sha384": "sha384-ET26itED1IX7poo2CXQV/MavNqIQLPlYent+h5MwgqaWtsEj/UkOA3u9jVBVYt9o"
+    },
+    {
       "src": "vendor/sql-formatter.min.js",
       "file": "sql-formatter.min.js",
       "lazy": "sqlFormat",

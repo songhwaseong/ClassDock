@@ -33,12 +33,12 @@ test("빈 화면의 '새로 만들기'로도 여행일지를 만들 수 있다",
   await page.locator("#dzNew").click();                 // 빈 화면의 새로 만들기 메뉴를 먼저 연다
   await page.locator("#dzNewTrip").click();
   await expect(page.locator(".trip-bar")).toBeVisible();
-  await expect(page.locator(".tab.active")).toContainText("여행일지.trip");
+  await expect(page.locator(".tab.active")).toHaveAttribute("title", /^여행일지\.trip /);   // 탭엔 확장자를 감추므로 전체 이름은 title 로 본다
 });
 
 test("새 여행일지가 탭으로 열리고 갈래에 따라 이름이 다르다", async ({ page }) => {
   await boot(page, "field");
-  await expect(page.locator(".tab.active")).toContainText("체험학습.trip");
+  await expect(page.locator(".tab.active")).toHaveAttribute("title", /^체험학습\.trip /);   // 탭엔 확장자를 감추므로 전체 이름은 title 로 본다
   const model = await modelOf(page);
   expect(model.purpose).toBe("field");
   expect(model.days).toEqual([]);
@@ -909,7 +909,7 @@ test("저장 안 한 채 껐다 켜면 고친 글은 돌아오되 '저장 안 �
     const d = docs.find(x => x.name === "원본.trip");
     return d ? { dirty:!!d.hasUnsavedEdits, text:d.trip.days[0].text } : null;
   });
-  await page.locator("#docTabs .tab", { hasText:"원본.trip" }).first().click();
+  await page.locator('#docTabs .tab[title^="원본.trip "]').first().click();
   expect(await stateOf()).toEqual({ dirty:false, text:"디스크 글" });
 
   await page.evaluate(() => {
@@ -924,7 +924,7 @@ test("저장 안 한 채 껐다 켜면 고친 글은 돌아오되 '저장 안 �
   await page.reload();
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
   await expect.poll(stateOf, { timeout:15_000 }).toEqual({ dirty:true, text:"고친 글" });
-  await page.locator("#docTabs .tab", { hasText:"원본.trip" }).first().click();
+  await page.locator('#docTabs .tab[title^="원본.trip "]').first().click();
   await expect(page.locator(".office:not([hidden]) .diary-text")).toHaveValue("고친 글");
   // 되살린 모습 그대로라도 편집기가 '깨끗함'으로 되돌리지 않는다
   await page.locator(".office:not([hidden]) .diary-text").fill("고친 글!");
@@ -964,7 +964,7 @@ test("장소가 있는 여행일지는 탭을 열어 지도가 저절로 맞춰�
   });
   const dirtyOf = () => page.evaluate(() => { const d = docs.find(x => x.name === "장소.trip"); return d ? !!d.hasUnsavedEdits : null; });
   const openAndSettle = async () => {
-    await page.locator("#docTabs .tab", { hasText:"장소.trip" }).first().click();
+    await page.locator('#docTabs .tab[title^="장소.trip "]').first().click();
     await expect(page.locator(".office:not([hidden]) .trip-map-stage path.leaflet-interactive").first()).toBeVisible();
     // 지도가 장소에 맞춰 움직였는지(= moveend 가 났는지) 확인한 뒤에 본다
     await expect.poll(() => page.evaluate(() => docs.find(x => x.name === "장소.trip").trip.map.zoom)).not.toBe(7);
@@ -983,7 +983,7 @@ test("장소가 있는 여행일지는 탭을 열어 지도가 저절로 맞춰�
   await page.reload();
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
   await expect.poll(dirtyOf, { timeout:15_000 }).toBe(false);
-  await page.locator("#docTabs .tab", { hasText:"장소.trip" }).first().click();
+  await page.locator('#docTabs .tab[title^="장소.trip "]').first().click();
   await expect(page.locator(".office:not([hidden]) .trip-map-stage path.leaflet-interactive").first()).toBeVisible();
   await page.waitForTimeout(500);
   expect(await dirtyOf()).toBe(false);

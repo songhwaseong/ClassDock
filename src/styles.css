@@ -8600,8 +8600,11 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-picture-hint-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .diary-picture-hint-btns .diary-btn{width:34px;padding:0}
 .diary-picture-hint.is-compact>span{display:none}
-.diary-picture-hint.is-compact .diary-picture-hint-btns{opacity:.38;transition:opacity .15s ease}
-.diary-picture-box:hover .diary-picture-hint.is-compact .diary-picture-hint-btns,.diary-picture-hint.is-compact .diary-picture-hint-btns:focus-within{opacity:.95}
+/* 칸에 사진·그림이 들어가면 단추 묶음을 왼쪽 아래 모서리로 옮겨 사진 층 위에 띄운다 — 가운데 두면 칸을 채운 사진에 덮여
+   그리기로 다시 들어갈 길이 없어진다. 왼쪽 위(⋯)·오른쪽 위(✕)·오른쪽 아래(크기 손잡이)는 고른 사진의 단추 자리라 비켜 둔다. */
+.diary-picture-hint.is-compact .diary-picture-hint-btns{position:absolute;left:8px;bottom:8px;z-index:5;gap:6px;opacity:.55;transition:opacity .15s ease}
+.diary-picture-hint.is-compact .diary-picture-hint-btns .diary-btn{width:30px;height:30px;min-height:0;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.diary-picture-hint.is-compact .diary-picture-hint-btns:hover,.diary-picture-hint.is-compact .diary-picture-hint-btns:focus-within{opacity:1}
 .diary-draw-layer{position:absolute;pointer-events:none}
 .diary-draw-layer[hidden]{display:none}
 .diary-draw-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none}

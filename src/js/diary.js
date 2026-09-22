@@ -27,27 +27,65 @@ const DIARY_LINE_LABELS = { ruled:"줄 공책", double:"두 줄", triple:"세 �
 // 짧은 이름은 앱 공용 사전(i18n.js) 대신 여기 영어를 함께 둔다 — "점"·"비"·"눈" 같은 한두 글자를 사전에 넣으면
 // 다른 화면의 같은 글자까지 바뀐다. diaryLabel(한국어 표, 영어 표, 값)으로 고른다.
 const DIARY_LINE_LABELS_EN = { ruled:"Lined", double:"Double line", triple:"Triple line", dashed:"Dashed", list:"List", grid:"Grid", columns:"Columns", dots:"Dots", crosses:"Crosses", staff:"Staff", diagonal:"Diagonal grid", blank:"Blank", picture:"Picture diary", genko:"Manuscript" };
-// 고딕·바탕·궁서·굴림은 Windows·Mac 에 기본으로 있는 글꼴을 쓰고, 손글씨(나눔손글씨 펜·붓, OFL)는 앱에 담아 두었다가
-// 고를 때만 읽는다(vendor/hand-font-*.js, 약 0.8MB 씩 — 오프라인 앱이라 웹 글꼴을 받을 수 없다).
-const DIARY_FONTS = ["gothic", "myeongjo", "gungseo", "gulim", "pen", "brush"];
-const DIARY_FONT_LABELS = { gothic:"고딕", myeongjo:"바탕", gungseo:"궁서", gulim:"굴림", pen:"손글씨 펜", brush:"손글씨 붓" };
-const DIARY_FONT_LABELS_EN = { gothic:"Gothic", myeongjo:"Batang", gungseo:"Gungsuh", gulim:"Gulim", pen:"Hand (pen)", brush:"Hand (brush)" };
+// 고딕·바탕·궁서·굴림은 Windows·Mac 에 기본으로 있는 글꼴을 쓰고, 손글씨(나눔손글씨, OFL)는 앱에 담아 두었다가
+// 고를 때만 읽는다(vendor/hand-font-*.js, 0.65~0.8MB 씩 — 오프라인 앱이라 웹 글꼴을 받을 수 없다).
+// 꾸미기 창에서는 DIARY_PLAIN_FONTS 는 "글꼴" 줄, 나머지(손글씨)는 "손글씨" 줄에 놓는다.
+const DIARY_PLAIN_FONTS = ["gothic", "myeongjo", "gungseo", "gulim"];
+const DIARY_FONTS = [...DIARY_PLAIN_FONTS, "pen", "brush", "hippie", "dahaeng", "student", "amsterdam", "mago"];
+const DIARY_FONT_LABELS = { gothic:"고딕", myeongjo:"바탕", gungseo:"궁서", gulim:"굴림", pen:"손글씨 펜", brush:"손글씨 붓",
+  hippie:"바른히피", dahaeng:"다행체", student:"중학생", amsterdam:"암스테르담", mago:"마고체" };
+const DIARY_FONT_LABELS_EN = { gothic:"Gothic", myeongjo:"Batang", gungseo:"Gungsuh", gulim:"Gulim", pen:"Hand (pen)", brush:"Hand (brush)",
+  hippie:"Hand (hippie)", dahaeng:"Hand (round)", student:"Hand (student)", amsterdam:"Hand (thin)", mago:"Hand (casual)" };
 // 손글씨 글꼴 — 앱 안의 이름(family)으로 등록한다. 컴퓨터에 같은 글꼴이 깔려 있으면 그것을 먼저 쓴다.
+// 나눔손글씨 모음(CLOVA) 다섯 벌은 자주 쓰는 2,350자만 담았다 — 빠진 글자는 fallback(펜)이 그리도록 펜도 함께 읽는다.
 const DIARY_HAND_FONTS = {
   pen:{ bundle:"handPen", family:"ClassDock Nanum Pen" },
-  brush:{ bundle:"handBrush", family:"ClassDock Nanum Brush" }
+  brush:{ bundle:"handBrush", family:"ClassDock Nanum Brush" },
+  hippie:{ bundle:"handHippie", family:"ClassDock Hand Hippie", fallback:"pen" },
+  dahaeng:{ bundle:"handDahaeng", family:"ClassDock Hand Dahaeng", fallback:"pen" },
+  student:{ bundle:"handStudent", family:"ClassDock Hand Student", fallback:"pen" },
+  amsterdam:{ bundle:"handAmsterdam", family:"ClassDock Hand Amsterdam", fallback:"pen" },
+  mago:{ bundle:"handMago", family:"ClassDock Hand Mago", fallback:"pen" }
 };
-// 손글씨 글꼴은 같은 크기에서 글자가 작아 보여 키운다(줄 간격·칸 크기는 그대로).
-const DIARY_FONT_SCALE = { pen:1.35, brush:1.3 };
+// 손글씨 글꼴은 같은 크기에서 글자가 작아 보여 키운다(줄 간격·칸 크기는 그대로). 한글 글자 높이를 재서 펜과 비슷하게 맞췄다.
+const DIARY_FONT_SCALE = { pen:1.35, brush:1.3, hippie:1.25, dahaeng:1.25, student:1.4, amsterdam:1.3, mago:1.45 };
 const DIARY_FONT_STACKS = {
   gothic:"",
   myeongjo:'"Batang", "바탕", "AppleMyungjo", "Noto Serif KR", serif',
   gungseo:'"Gungsuh", "궁서", "GungSeo", "Batang", serif',
   gulim:'"Gulim", "굴림", "AppleGothic", sans-serif',
   pen:'"Nanum Pen Script", "나눔손글씨 펜", "ClassDock Nanum Pen", cursive',
-  brush:'"Nanum Brush Script", "나눔손글씨 붓", "ClassDock Nanum Brush", cursive'
+  brush:'"Nanum Brush Script", "나눔손글씨 붓", "ClassDock Nanum Brush", cursive',
+  hippie:'"Nanum BaReunHiPi", "나눔손글씨 바른히피", "ClassDock Hand Hippie", "ClassDock Nanum Pen", cursive',
+  dahaeng:'"Nanum DaHaengCe", "나눔손글씨 다행체", "ClassDock Hand Dahaeng", "ClassDock Nanum Pen", cursive',
+  student:'"Nanum JungHagSaeng", "나눔손글씨 중학생", "ClassDock Hand Student", "ClassDock Nanum Pen", cursive',
+  amsterdam:'"Nanum AmSeuTeReuDam", "나눔손글씨 암스테르담", "ClassDock Hand Amsterdam", "ClassDock Nanum Pen", cursive',
+  mago:'"Nanum MaGoCe", "나눔손글씨 마고체", "ClassDock Hand Mago", "ClassDock Nanum Pen", cursive'
 };
 function diaryFontScale(font){ return DIARY_FONT_SCALE[font] || 1; }
+// 꾸미기 창 칩 견본 — 손글씨마다 "가나다" 세 글자만 담은 작은 글꼴(hand-font-samples.js, 약 15KB).
+// 칩을 보여 주려고 손글씨 일곱 벌(약 5MB)을 다 읽지 않도록 따로 둔다. 한 번만 올린다.
+let _diarySampleLoad = null;
+function diarySampleFamily(id){ return "ClassDock Hand Sample " + id; }
+function diaryEnsureFontSamples(){
+  if (_diarySampleLoad) return _diarySampleLoad;
+  _diarySampleLoad = (async () => {
+    if (typeof MNLazy === "undefined" || typeof FontFace === "undefined" || typeof document === "undefined" || !document.fonts) return false;
+    if (!await MNLazy.tryNeed("handSamples")) return false;
+    const store = globalThis.__MN_HANDFONT_SAMPLE || {};
+    await Promise.all(Object.keys(DIARY_HAND_FONTS).filter(id => store[id]).map(async id => {
+      const bin = atob(store[id]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const face = new FontFace(diarySampleFamily(id), bytes.buffer);
+      await face.load();
+      document.fonts.add(face);
+    }));
+    return true;
+  })().catch(() => false);
+  _diarySampleLoad.then(ok => { if (!ok) _diarySampleLoad = null; });
+  return _diarySampleLoad;
+}
 // 손글씨 글꼴을 읽어 document.fonts 에 올린다. 한 번만 읽고, 실패하면 다음에 다시 시도한다. 결과는 성공 여부.
 const _diaryFontLoads = new Map();
 function diaryEnsureFont(id){
@@ -55,6 +93,8 @@ function diaryEnsureFont(id){
   if (!info) return Promise.resolve(true);
   if (_diaryFontLoads.has(id)) return _diaryFontLoads.get(id);
   const task = (async () => {
+    // 빠진 글자를 이어 그릴 글꼴도 같이 읽는다 — 그것이 실패해도 이 글꼴은 쓸 수 있다.
+    const fallback = info.fallback ? diaryEnsureFont(info.fallback) : null;
     if (typeof MNLazy === "undefined" || typeof FontFace === "undefined" || typeof document === "undefined" || !document.fonts) return false;
     if (!await MNLazy.tryNeed(info.bundle)) return false;
     const store = globalThis.__MN_HANDFONT || {};
@@ -67,6 +107,7 @@ function diaryEnsureFont(id){
     await face.load();
     document.fonts.add(face);
     delete store[id];                    // 0.8MB 문자열을 들고 있지 않는다(글꼴은 이미 올라갔다)
+    if (fallback) await fallback;
     return true;
   })().catch(() => false);
   _diaryFontLoads.set(id, task);
@@ -2050,10 +2091,7 @@ function mountDiaryPaper(els, paperEnv){
     if (!pictureBox.hidden){
       const entry = entryOf(paperEnv.current());
       const box = pictureBoxRect();
-      const hasContent = !!(entry && entry.drawing && entry.drawing.length) || !!(box && entry && entry.stickers.some(st => {
-        const cx = (st.x + st.w / 2) * w, cy = (st.y + st.w * st.ar / 2) * w;
-        return cx >= box.left && cx <= box.left + box.width && cy >= box.top && cy <= box.top + box.height;
-      }));
+      const hasContent = !!(entry && entry.drawing && entry.drawing.length) || !!(box && entry && entry.stickers.some(st => stickerInPictureBox(st, box)));
       pictureHint.hidden = drawMode;
       pictureHint.classList.toggle("is-compact", hasContent);
     }
@@ -2110,6 +2148,13 @@ function mountDiaryPaper(els, paperEnv){
     if (!m.box) return null;
     const w = paperWidth || paper.clientWidth;
     return { left:m.box.left, top:m.box.top, width:Math.max(40, w - m.box.left - m.box.right), height:m.box.height };
+  }
+  // 스티커 가운데가 그림 칸 안에 있는가 — 칸을 채운 사진은 가운데 단추를 덮으므로 다른 입구가 필요하다.
+  function stickerInPictureBox(st, box = pictureBoxRect()){
+    if (!box || !st) return false;
+    const w = paperWidth || paper.clientWidth;
+    const cx = (st.x + st.w / 2) * w, cy = (st.y + st.w * st.ar / 2) * w;
+    return cx >= box.left && cx <= box.left + box.width && cy >= box.top && cy <= box.top + box.height;
   }
   function placePictureBox(m){
     pictureBox.hidden = !m.box;
@@ -2662,10 +2707,11 @@ function mountDiaryPaper(els, paperEnv){
       })) },
       { label:diaryT("글 맞춤"), children:[["left", "왼쪽", "Left"], ["center", "가운데", "Center"], ["right", "오른쪽", "Right"]]
         .map(([align, ko, en]) => ({ label:diaryIsEn() ? en : ko, active:(s.align || "left") === align, action:() => setTextStickerField({ align }) })) },
-      { label:diaryT("글꼴"), children:DIARY_FONTS.map(font => ({
-        label:diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, font), active:(s.font || "gothic") === font,
-        action:() => setTextStickerField({ font })
-      })) },
+      { label:diaryT("글꼴"), children:DIARY_FONTS.flatMap(font => [
+        font === DIARY_FONTS[DIARY_PLAIN_FONTS.length] ? { separator:true } : null,   // 손글씨는 선 아래에
+        { label:diaryLabel(DIARY_FONT_LABELS, DIARY_FONT_LABELS_EN, font), active:(s.font || "gothic") === font,
+          action:() => setTextStickerField({ font }) }
+      ]).filter(Boolean) },
       { separator:true }
     ];
     MNContextMenu.open(x, y, [
@@ -2702,6 +2748,9 @@ function mountDiaryPaper(els, paperEnv){
             if (paperEnv.history()) paperEnv.history().flush();
             if (fitStickerToBox(s)){ positionStickers(); layout(); touch(true); }
           } },
+      // 칸을 채운 사진이 가운데 연필 단추를 덮어도 사진에 덧그릴 수 있게.
+      (pictureBox.hidden || drawMode || kind !== "photo" || !list.some(item => stickerInPictureBox(item))) ? null
+        : { label:diaryT("그림 칸에 그리기"), icon:"pen", action:() => setDrawMode(true) },
       { separator:true },
       many ? { label:diaryT("모두 고르기"), title:"Ctrl+A", disabled:k === n, action:() => setSelection(entry.stickers.map(x => x.id)) } : null,
       { label:many ? diaryTf("스티커 {n}개 떼기", { n:k }) : diaryT(kind === "photo" ? "사진 떼기" : "스티커 떼기"), icon:"delete", action:() => removeStickers(selection) }
@@ -3128,15 +3177,21 @@ function mountDiaryPanels(panelEnv){
     return b;
   });
   const fontChips = section("글꼴");
+  // 손글씨는 따로 한 줄 — 일곱 벌이라 한 줄에 다 두면 칩이 넘친다.
+  const handChips = section("손글씨");
   const fontButtons = DIARY_FONTS.map(id => {
     const b = document.createElement("button");
     b.type = "button"; b.className = "diary-chip diary-font-chip"; b.dataset.font = id;
     const sample = document.createElement("span"); sample.className = "diary-font-sample"; sample.textContent = "가나다";
-    if (DIARY_FONT_STACKS[id]) sample.style.fontFamily = DIARY_FONT_STACKS[id];
+    // 손글씨 견본은 세 글자짜리 작은 글꼴로 먼저 그린다(아직 안 읽었으면 뒤의 글꼴 목록으로).
+    // 본문처럼 배율만큼 키우되 줄 높이는 고정해 칩 높이는 그대로 둔다.
+    if (DIARY_HAND_FONTS[id]) Object.assign(sample.style, { fontFamily:'"' + diarySampleFamily(id) + '", ' + DIARY_FONT_STACKS[id],
+      fontSize:Math.round(17 * diaryFontScale(id)) + "px", lineHeight:"20px" });
+    else if (DIARY_FONT_STACKS[id]) sample.style.fontFamily = DIARY_FONT_STACKS[id];
     const label = document.createElement("span"); label.className = "diary-chip-label"; label.textContent = DIARY_FONT_LABELS[id];
     b.append(sample, label);
     b.addEventListener("click", () => changeStyle({ font:id }, true));
-    fontChips.append(b);
+    (DIARY_PLAIN_FONTS.includes(id) ? fontChips : handChips).append(b);
     return b;
   });
   // 배경 효과 — 파일에 바이트를 싣지 않는 종이 무늬. 사진 배경과 함께 쓰면 효과가 아래, 사진이 위다.
@@ -3404,8 +3459,8 @@ function mountDiaryPanels(panelEnv){
     styleBtn.classList.toggle("is-on", open);
     if (open){
       syncPanel();
-      // 글꼴 칩 견본도 손글씨로 보이도록 창을 열 때 미리 읽는다(처음 한 번만 무겁다).
-      for (const id of Object.keys(DIARY_HAND_FONTS)) diaryEnsureFont(id);
+      // 글꼴 칩 견본도 손글씨로 보이도록 창을 열 때 "가나다" 견본 글꼴만 읽는다(손글씨 전체는 고를 때 읽는다).
+      diaryEnsureFontSamples();
     }
   };
   styleBtn.addEventListener("click", (e) => { e.stopPropagation(); setArtPanelOpen(false); setPanelOpen(panel.hidden); });

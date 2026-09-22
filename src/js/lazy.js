@@ -43,6 +43,14 @@ const MNLazy = (() => {
     // 일기장 손글씨 글꼴(나눔손글씨 펜·붓, OFL, WOFF2 base64 약 0.8MB 씩). 그 글꼴을 고를 때만 읽는다.
     handPen:     { label:"손글씨 글꼴(펜)",   files:["hand-font-pen.js"] },
     handBrush:   { label:"손글씨 글꼴(붓)",   files:["hand-font-brush.js"] },
+    // 나눔손글씨 모음(CLOVA, OFL)에서 고른 다섯 벌 — 자주 쓰는 2,350자만 남겨 약 0.65MB 씩. 빠진 글자는 펜이 잇는다.
+    handHippie:  { label:"손글씨 글꼴(바른히피)", files:["hand-font-hippie.js"] },
+    handDahaeng: { label:"손글씨 글꼴(다행체)", files:["hand-font-dahaeng.js"] },
+    handStudent: { label:"손글씨 글꼴(중학생)", files:["hand-font-student.js"] },
+    handAmsterdam:{ label:"손글씨 글꼴(암스테르담)", files:["hand-font-amsterdam.js"] },
+    handMago:    { label:"손글씨 글꼴(마고체)", files:["hand-font-mago.js"] },
+    // 꾸미기 창 글꼴 칩 견본 — 손글씨마다 "가나다" 세 글자만 담은 작은 글꼴(약 15KB). 창을 열 때 읽는다.
+    handSamples: { label:"손글씨 견본",        files:["hand-font-samples.js"] },
     // SQL 정렬기(sql-formatter). DB 클라이언트 편집기에서 정렬을 누를 때만 읽는다.
     sqlFormat:   { label:"SQL 정렬",           files:["sql-formatter.min.js"] },
     officeCrypt: { label:"오피스 암호 해제",   files:["crypto-js.min.js", "office-decrypt.js"] },

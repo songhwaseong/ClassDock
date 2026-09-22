@@ -1638,6 +1638,7 @@
     "이 날짜만 따로 꾸몄어요. 체크를 풀면 일기장 전체 꾸미기로 돌아가요.": "This day has its own style. Uncheck to use the diary's style again.",
     "바꾸면 따로 꾸민 날을 뺀 일기장 전체에 적용돼요.": "Changes apply to the whole diary, except days with their own style.",
     "줄 무늬": "Lines",
+    "손글씨": "Handwriting",
     "줄 간격": "Line spacing",
     "글꼴": "Font",
     "배경 효과": "Background effect",

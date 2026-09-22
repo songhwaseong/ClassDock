@@ -716,8 +716,9 @@ test("지우개 획은 이 캔버스만 지우고(destination-out) 다음 획은
 
 /* ---------- 손글씨 글꼴 ---------- */
 
-test("손글씨 글꼴(펜·붓)을 고를 수 있고, 글자는 조금 키우되 줄 간격은 그대로다", () => {
-  for (const id of ["pen", "brush"]){
+test("손글씨 글꼴(펜·붓 등 7벌)을 고를 수 있고, 글자는 조금 키우되 줄 간격은 그대로다", () => {
+  assert.equal(Object.keys(diary.DIARY_HAND_FONTS).length, 7);
+  for (const id of Object.keys(diary.DIARY_HAND_FONTS)){
     assert.ok(diary.DIARY_FONTS.includes(id));
     assert.equal(diary.diaryNormalizeStyle({ font:id }).font, id);
     assert.ok(diary.DIARY_FONT_STACKS[id].includes(diary.DIARY_HAND_FONTS[id].family));
@@ -745,6 +746,24 @@ test("손글씨 글꼴 파일은 지연 로드 묶음·라이선스와 함께 �
     assert.match(head, /SIL OFL 1\.1/);
   }
   assert.match(read("vendor/licenses/nanum-handwriting-OFL.txt"), /SIL OPEN FONT LICENSE Version 1\.1/);
+  assert.match(read("vendor/licenses/nanum-clova-handwriting-OFL.txt"), /SIL OPEN FONT LICENSE Version 1\.1/);
+});
+
+test("글자를 줄인 손글씨는 이름을 바꿔 담고, 빠진 글자는 펜이 잇는다 · 칩 견본은 작은 파일 하나", () => {
+  const pen = diary.DIARY_HAND_FONTS.pen.family;
+  for (const [id, info] of Object.entries(diary.DIARY_HAND_FONTS)){
+    if (!info.fallback) continue;
+    assert.equal(info.fallback, "pen", id);
+    assert.ok(!/Nanum/.test(info.family), id + ": 고친 글꼴은 예약 이름(Nanum)을 쓰지 않는다");
+    const stack = diary.DIARY_FONT_STACKS[id];
+    assert.ok(stack.indexOf(info.family) < stack.indexOf(pen), id + ": 펜은 이 글꼴 뒤에");
+    assert.match(read("vendor/" + require("../src/js/lazy.js").BUNDLES[info.bundle].files[0]).slice(0, 400), /nanum-clova-handwriting-OFL/);
+  }
+  // 시스템 글꼴 줄 + 손글씨 줄 = 전체 글꼴
+  assert.deepEqual([...diary.DIARY_FONTS].sort(), [...Object.keys(diary.DIARY_HAND_FONTS), "gothic", "myeongjo", "gungseo", "gulim"].sort());
+  const samples = read("vendor/hand-font-samples.js");
+  assert.ok(samples.length < 40000, "견본 파일은 작아야 한다");
+  for (const id of Object.keys(diary.DIARY_HAND_FONTS)) assert.ok(samples.includes("  " + id + ":\"d09GMg"), id);
 });
 
 /* ---------- 스티커 여러 장 고르기 ---------- */

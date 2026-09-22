@@ -490,6 +490,23 @@ test("그림일기: 위에 그림 칸, 아래는 원고지 — 사진 넣기는 
   await expect(hint).toHaveClass(/is-compact/);
   await expect(hint.locator("> span")).toBeHidden();
   await expect(hint.locator(".diary-picture-hint-btns .diary-btn")).toHaveCount(2);
+  // 칸을 채운 사진이 단추를 덮지 않는다 — 단추 자리를 눌렀을 때 맨 위에 있는 것이 그 단추여야 한다
+  const drawBtn = page.locator(".diary-picture-draw");
+  const covered = await drawBtn.evaluate(btn => {
+    const r = btn.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !(top && btn.contains(top));
+  });
+  expect(covered).toBe(false);
+  await drawBtn.click();
+  await expect(page.locator(".diary-paper")).toHaveClass(/is-drawing/);
+  await page.locator(".diary-draw-done").click();
+  await expect(page.locator(".diary-paper")).not.toHaveClass(/is-drawing/);
+  // 사진 우클릭 메뉴에서도 그리기로 들어간다
+  await sticker.click({ button:"right" });
+  await page.locator(".text-context-menu button", { hasText:"그림 칸에 그리기" }).click();
+  await expect(page.locator(".diary-paper")).toHaveClass(/is-drawing/);
+  await page.locator(".diary-draw-done").click();
 
   // 두 장을 더 넣으면 먼저 있던 한 장까지 셋이 칸을 나눠 쓴다(먼저 것이 칸을 덮은 채 남지 않는다)
   await box.locator("input[type=file]").setInputFiles([
@@ -773,6 +790,36 @@ test("손글씨 글꼴을 고르면 그때 글꼴을 읽어 본문과 원고지 
     return [model.version === DIARY_VERSION, model.style.font];
   });
   expect(font).toEqual([true, "pen"]);
+});
+
+test("손글씨 줄: 창을 열면 견본만 읽고, 새 손글씨를 고르면 그 글꼴과 빈 글자를 이을 펜을 읽는다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-text").fill("오늘은 바른히피로 쓴다");
+  await page.locator(".diary-bar .diary-style-btn").click();
+  // 손글씨 일곱 벌은 "글꼴" 줄이 아니라 따로 한 줄에
+  const handRow = page.locator(".diary-style-row", { has:page.locator('.diary-font-chip[data-font="hippie"]') });
+  await expect(handRow.locator(".diary-font-chip")).toHaveCount(7);
+  await expect(handRow.locator(".diary-style-label")).toHaveText("손글씨");
+  await expect(handRow.locator('.diary-font-chip[data-font="gothic"]')).toHaveCount(0);
+  // 창을 열면 "가나다" 견본만 — 손글씨 본 글꼴은 아직 안 읽는다
+  await expect.poll(() => page.evaluate(() => document.fonts.check('20px "ClassDock Hand Sample mago"', "가"))).toBe(true);
+  expect(await page.evaluate(() => ["handPen", "handHippie", "handMago"].map(b => MNLazy.isLoaded(b)))).toEqual([false, false, false]);
+
+  await page.locator('.diary-font-chip[data-font="hippie"]').click();
+  await page.keyboard.press("Escape");
+  await expect.poll(() => page.evaluate(() => document.fonts.check('20px "ClassDock Hand Hippie"', "가"))).toBe(true);
+  await expect.poll(() => page.evaluate(() => MNLazy.isLoaded("handPen"))).toBe(true);
+  const area = page.locator(".diary-text");
+  expect(await area.evaluate(el => getComputedStyle(el).fontFamily)).toContain("ClassDock Hand Hippie");
+  expect(await area.evaluate(el => getComputedStyle(el).fontSize)).toBe("20px");        // 16px × 1.25
+  // 담지 않은 드문 글자는 이 글꼴에 없다(펜이 잇는다)
+  expect(await page.evaluate(async () => {
+    const [face] = [...document.fonts].filter(f => f.family.replace(/"/g, "") === "ClassDock Hand Hippie");
+    const c = document.createElement("canvas").getContext("2d");
+    c.font = '40px "ClassDock Hand Hippie", "ClassDock Nanum Pen"'; const a = c.measureText("똠").width;
+    c.font = '40px "ClassDock Nanum Pen"'; const b = c.measureText("똠").width;
+    return Boolean(face) && Math.abs(a - b) < 0.01;
+  })).toBe(true);
 });
 
 test("스티커 여러 장: Shift+클릭·Ctrl+끌기·Ctrl+A 로 고르고, 함께 옮기고 돌리고 떼며, 되돌리기는 한 번에", async ({ page }) => {
@@ -1377,7 +1424,7 @@ test("저장한 일기장은 탭을 열고 둘러보기만 해서는 '저장 안
     await handleFiles([new File([bytes], "원본.diary", { type:"application/zip" })], {});
   });
   const dirtyOf = () => page.evaluate(() => { const d = docs.find(x => x.name === "원본.diary"); return d ? !!d.hasUnsavedEdits : null; });
-  await page.locator("#docTabs .tab", { hasText:"원본.diary" }).first().click();
+  await page.locator('#docTabs .tab[title^="원본.diary "]').first().click();
   const root = page.locator(".office:not([hidden])");
   await expect(root.locator(".diary-paper")).toBeVisible();
   // 고치지 않고 둘러보기만 — 옆 칸 탭, 빈 날·오늘 오가기, 스티커 고르기, 창 크기
@@ -1397,7 +1444,7 @@ test("저장한 일기장은 탭을 열고 둘러보기만 해서는 '저장 안
   await page.reload();
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
   await expect.poll(dirtyOf, { timeout:15_000 }).toBe(false);
-  await page.locator("#docTabs .tab", { hasText:"원본.diary" }).first().click();
+  await page.locator('#docTabs .tab[title^="원본.diary "]').first().click();
   await expect(page.locator(".office:not([hidden]) .diary-paper")).toBeVisible();
   await page.waitForTimeout(500);
   expect(await dirtyOf()).toBe(false);
