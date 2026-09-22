@@ -1545,6 +1545,8 @@
     "새 개념 관계도(.concept)": "New concept map (.concept)",
     "새 암기 카드 (.study)": "New study cards (.study)",
     "새 암기 카드(.study)": "New study cards (.study)",
+    "새 티어표 (.tier)": "New tier list (.tier)",
+    "새 티어표(.tier)": "New tier list (.tier)",
     "새 일기장 (.diary)": "New diary (.diary)",
     "새 일기장(.diary)": "New diary (.diary)",
     /* 일기장(.diary) 편집기 — 짧은 이름(줄 무늬·날씨 등)은 diary.js 안에 영어를 함께 둔다 */

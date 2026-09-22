@@ -46,6 +46,7 @@
     C("newTripField","🎒","새 체험학습 보고서 (.trip)", () => callFn("newTripScratch", "field"), { kw:"trip field 체험학습 현장체험 수학여행 학습지 보고서" }),
     C("newTripSurvey","🧭","새 답사 보고서 (.trip)", () => callFn("newTripScratch", "survey"), { kw:"trip survey 답사 조사 사회과 지역 보고서" }),
     C("newStudy","🧠","새 암기 카드 (.study)", () => callFn("newStudyScratch"), { kw:"study flashcard 암기 카드 단어장 오답 복습 빈칸" }),
+    C("newTier","🏆","새 티어표 (.tier)", () => callFn("newTierScratch"), { kw:"tier list tierlist 티어 티어표 티어리스트 등급 순위 랭킹 S A B C D 분류" }),
     C("mapToBoard","🖊️","지도를 칠판으로", clickBtn(".map-to-board"),
       { when:hasBtn(".map-to-board"), kw:"map board 지도 칠판 화이트보드 판서 필기 스냅샷 캡처" }),
     C("boardInsertMap","🗺️","칠판에 지도 넣기", clickBtn(".wb-map"),

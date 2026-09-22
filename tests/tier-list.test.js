@@ -1,0 +1,84 @@
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const tier = require("../src/js/tier-list.js");
+
+const root = path.join(__dirname, "..");
+const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
+const img = { dataUrl:"data:image/jpeg;base64,AAAA", width:10, height:10 };
+
+function sample(){
+  const model = tier.tierDocEmpty("간식");
+  model.items = ["떡볶이", "라면", "김밥", "순대"].map((text, index) => tier.tierNormalizeItem({ id:"c" + index, text }));
+  return model;
+}
+
+test("새 티어표는 S·A·B·C·D 다섯 줄로 시작하고 JSON 으로 왕복한다", () => {
+  const model = sample();
+  assert.deepEqual(model.tiers.map(row => row.label), ["S", "A", "B", "C", "D"]);
+  model.items[0].image = img; model.items[0].tier = model.tiers[1].id; model.cardSize = "l";
+  const parsed = tier.tierDocParse(tier.tierDocSerialize(model));
+  assert.equal(parsed.title, "간식"); assert.equal(parsed.cardSize, "l"); assert.equal(parsed.items.length, 4);
+  assert.equal(parsed.items[0].tier, model.tiers[1].id); assert.equal(parsed.items[0].image.dataUrl, img.dataUrl);
+  assert.match(tier.tierSearchText(parsed), /간식[\s\S]*떡볶이/);
+});
+
+test("읽을 때 빈 카드·겹친 id 는 버리고, 없는 줄을 가리키는 카드는 아래 모음으로 내린다", () => {
+  const model = sample();
+  const raw = { ...model, items:[...model.items, { id:"c0", text:"중복" }, { id:"empty" }, { id:"lost", text:"떠돌이", tier:"no-such-row" }], cardSize:"xxl" };
+  const parsed = tier.tierDocParse(JSON.stringify(raw));
+  assert.deepEqual(parsed.items.map(item => item.id), ["c0", "c1", "c2", "c3", "lost"]);
+  assert.equal(parsed.items.find(item => item.id === "lost").tier, "");
+  assert.equal(parsed.cardSize, "m");
+  assert.throws(() => tier.tierDocParse('{"type":"x"}'), /tier-format/);
+});
+
+test("카드 옮기기는 고른 카드 앞에, 없으면 그 줄 맨 끝에 놓는다", () => {
+  const model = sample(), [s, a] = model.tiers.map(row => row.id);
+  assert.ok(tier.tierMoveItem(model, "c2", s, ""));
+  assert.ok(tier.tierMoveItem(model, "c0", s, ""));
+  assert.deepEqual(tier.tierItemsIn(model, s).map(item => item.id), ["c2", "c0"]);
+  assert.ok(tier.tierMoveItem(model, "c3", s, "c0"));
+  assert.deepEqual(tier.tierItemsIn(model, s).map(item => item.id), ["c2", "c3", "c0"]);
+  assert.ok(tier.tierMoveItem(model, "c2", "", ""));                 // 아래 모음으로
+  assert.deepEqual(tier.tierItemsIn(model, "").map(item => item.id), ["c1", "c2"]);
+  assert.equal(tier.tierMoveItem(model, "c1", "no-such-row", ""), false);
+  assert.equal(tier.tierMoveItem(model, "c1", a, "c1"), false);
+  assert.equal(model.items.length, 4);
+});
+
+test("줄을 비우거나 지워도 카드는 아래 모음에 남고, 마지막 한 줄은 못 지운다", () => {
+  const model = sample(), [s, a] = model.tiers.map(row => row.id);
+  tier.tierMoveItem(model, "c0", s, ""); tier.tierMoveItem(model, "c1", a, "");
+  assert.equal(tier.tierClearRow(model, s), 1); assert.equal(model.items.find(item => item.id === "c0").tier, "");
+  assert.ok(tier.tierRemoveRow(model, a)); assert.equal(model.tiers.length, 4); assert.equal(model.items.find(item => item.id === "c1").tier, "");
+  model.tiers = model.tiers.slice(0, 1); assert.equal(tier.tierRemoveRow(model, model.tiers[0].id), false);
+  assert.equal(model.items.length, 4);
+});
+
+test("줄 틀을 바꾸면 같은 차례 줄의 카드는 그대로, 사라진 줄의 카드는 아래로 내려간다", () => {
+  const model = sample(), rows = model.tiers.map(row => row.id);
+  tier.tierMoveItem(model, "c0", rows[0], ""); tier.tierMoveItem(model, "c1", rows[4], "");
+  tier.tierApplyPreset(model, "level");
+  assert.deepEqual(model.tiers.map(row => row.label), ["상", "중", "하"]);
+  assert.equal(model.items.find(item => item.id === "c0").tier, rows[0]);
+  assert.equal(model.items.find(item => item.id === "c1").tier, "");
+  assert.equal(tier.tierResetAll(model), 1); assert.ok(model.items.every(item => item.tier === ""));
+});
+
+test("줄 색에 맞춰 글자색을 고른다", () => {
+  assert.equal(tier.tierInkFor("#ffff7f"), "#1f2328");
+  assert.equal(tier.tierInkFor("#1e293b"), "#ffffff");
+});
+
+test("티어표가 셸·불러오기·새로 만들기·검색·복원 목록에 등록되어 있다", () => {
+  const html = read("classdock.html");
+  assert.match(html, /accept="[^"]*\.tier/); assert.match(html, /id="sbNewTier"/); assert.match(html, /id="dzNewTier"/); assert.match(html, /src="src\/js\/tier-list\.js"/);
+  assert.match(read("src/js/file-loaders.js"), /ext === "tier" && typeof loadTierDoc === "function"/);
+  assert.match(read("src/js/command-palette.js"), /newTierScratch/);
+  const docs = read("src/js/documents.js");
+  assert.match(docs, /RESTORE_UNSAVED_KINDS = new Set\(\[[^\]]*"tier"/); assert.match(docs, /newTierScratchInFolder/); assert.match(docs, /isTierSearchable/);
+  assert.match(read("src/js/app.js"), /"study", "tier", "diary"/);
+});

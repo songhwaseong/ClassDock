@@ -97,6 +97,7 @@
     "timeline.js",
     "concept-doc.js",
     "study-doc.js",
+    "tier-list.js",
     "remote-files.js",
     "remote-files-ui.js",
     "remote-terminal.js",
@@ -252,7 +253,8 @@
         "map-viewer.js",
         "timeline.js",
         "concept-doc.js",
-        "study-doc.js"
+        "study-doc.js",
+        "tier-list.js"
       ]
     },
     {
@@ -439,6 +441,13 @@
     "study-doc.js": [
       "timeline.js",
       "concept-doc.js",
+      "documents.js",
+      "file-loaders.js",
+      "history.js",
+      "code-viewer.js"
+    ],
+    "tier-list.js": [
+      "timeline.js",
       "documents.js",
       "file-loaders.js",
       "history.js",

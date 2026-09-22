@@ -1467,11 +1467,11 @@ function mountTripEditor(doc){
   mapGuide.className = "trip-map-guide";
   const mapGuideIcon = document.createElement("span");
   mapGuideIcon.setAttribute("aria-hidden", "true");
-  if (typeof window.uiIcon === "function") mapGuideIcon.innerHTML = window.uiIcon("map");
+  if (typeof window.uiIcon === "function") mapGuideIcon.innerHTML = window.uiIcon("location");
   const mapGuideText = document.createElement("span");
   mapGuideText.textContent = tripIsEn()
-    ? "Use the map button on a place card to set its location."
-    : "장소 카드의 지도 버튼으로 위치를 지정하세요.";
+    ? "Use the location pin button on a place card to set its location."
+    : "장소 카드의 위치 핀 버튼을 눌러 위치를 지정하세요.";
   mapGuide.append(mapGuideIcon, mapGuideText);
   const stillBox = document.createElement("div");
   stillBox.className = "trip-still";
@@ -2660,7 +2660,7 @@ function mountTripEditor(doc){
       name.type = "text"; name.className = "trip-spot-name"; name.maxLength = 120;
       name.value = spot.name || ""; name.placeholder = tripWord(purpose, "spotNameHint");
       const pickBtn = diaryButton("", spot.lat == null ? "지도에서 자리 찍기" : "지도에서 자리 다시 찍기",
-        "diary-btn trip-spot-pick" + (spot.lat == null ? "" : " is-on"), "map");
+        "diary-btn trip-spot-pick" + (spot.lat == null ? "" : " is-on"), "location");
       const removeBtn = diaryButton("", "이 줄 빼기", "diary-btn trip-spot-remove", "close");
       const videoBtn = diaryButton("", tripIsEn()
         ? "Add a short video (up to " + tripLimitText(TRIP_VIDEO_MAX_SEC) + ")"
