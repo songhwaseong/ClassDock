@@ -1531,6 +1531,11 @@
     "📖 자세한 사용법": "📖 Detailed guide",
     "모든 기능을 예시와 함께 설명한 문서를 따로 엽니다": "Open a document explaining every feature with examples in a separate window",
     "자세한 사용법 문서": "Detailed guide",
+    "라이선스": "Licenses",
+    "앱에 들어 있는 오픈소스 라이브러리·글꼴·음원의 라이선스와 저작자 표시를 봅니다":
+      "View licenses and attributions for the open-source libraries, fonts, and sounds bundled in the app",
+    "팝업이 막혀 라이선스 고지를 열지 못했어요. 브라우저 설정에서 이 사이트의 팝업을 허용해 주세요.":
+      "The license notices could not open because pop-ups are blocked. Allow pop-ups for this site in your browser settings.",
     "새 블록 문서 (.mnote)": "New block document (.mnote)",
     "새 악보 (.msheet)": "New music score (.msheet)",
     "새 악보(.msheet)": "New music score (.msheet)",

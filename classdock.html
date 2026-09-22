@@ -983,7 +983,7 @@
     <kbd>Enter / Tab</kbd><span>자동완성 적용</span><kbd>Esc</kbd><span>자동완성 닫기</span>
     <kbd>더블클릭</kbd><span>같은 식별자 동시수정</span><kbd>Ctrl+클릭</kbd><span>함수 정의 열기</span>
     <kbd data-shortcut-action="findInDocument">Ctrl+F</kbd><span>노트북 전체 셀 찾기·바꾸기</span><kbd data-shortcut-action="findInCell">Ctrl+Shift+H</kbd><span>현재 셀에서 찾기·바꾸기</span><kbd>Esc</kbd><span>열린 검색창 모두 닫기</span>
-  </div><div class="modal-actions"><button class="btn" id="helpManual" type="button" title="모든 기능을 예시와 함께 설명한 문서를 따로 엽니다">📖 자세한 사용법</button><button class="btn" id="welcomeReopen" type="button">처음 사용 안내 보기</button><span class="spacer"></span><button class="btn primary" id="helpClose">닫기</button></div></div>
+  </div><div class="modal-actions"><button class="btn" id="helpManual" type="button" title="모든 기능을 예시와 함께 설명한 문서를 따로 엽니다">📖 자세한 사용법</button><button class="btn" id="welcomeReopen" type="button">처음 사용 안내 보기</button><button class="btn" id="helpNotices" type="button" title="앱에 들어 있는 오픈소스 라이브러리·글꼴·음원의 라이선스와 저작자 표시를 봅니다">라이선스</button><span class="spacer"></span><button class="btn primary" id="helpClose">닫기</button></div></div>
 </div>
 
 <div class="toast" id="toast" aria-live="polite"></div>
@@ -1026,6 +1026,9 @@ window.FileReaderJS = window.FileReaderJS || {
 <!-- 자세한 사용법 문서 자리. 단일 파일 빌드는 사용법.html 을 통째로 심어, EXE 하나만 받은
      사용자도 도움말에서 바로 열 수 있게 한다(실행되지 않는 블록이라 시작 비용은 없다). -->
 <!--MN_MANUAL-->
+<!-- 오픈소스 라이선스 고지 자리. 단일 파일 빌드는 THIRD_PARTY_NOTICES.txt 를 통째로 심는다
+     (라이브러리가 exe 안에 인라인되므로 고지도 함께 실어야 한다). 도움말에서 열 때만 읽는다. -->
+<!--MN_NOTICES-->
 <script src="src/js/lazy.js"></script>
 <script src="src/js/interaction-core.js"></script>
 <script src="src/js/context-menu.js"></script>

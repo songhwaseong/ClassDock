@@ -61,6 +61,8 @@ Get-Process classdock -ErrorAction SilentlyContinue | Stop-Process -Force -Error
 
 # [1/5] 오프라인 HTML 다시 인라인
 Write-Host "[1/5] 오프라인 HTML 빌드 (node build-offline.js)..."
+& node tools/build-third-party-notices.mjs
+if ($LASTEXITCODE -ne 0) { Fail "오픈소스 라이선스 고지(THIRD_PARTY_NOTICES.txt) 생성 실패." }
 & node build-offline.js
 if ($LASTEXITCODE -ne 0) { Fail "HTML 빌드 실패. node 가 설치돼 있는지 확인하세요." }
 
@@ -114,9 +116,19 @@ Copy-Item "ClassDock.exe" $stage
 Copy-Item "vendor\pyodide\*" (Join-Path $stage "vendor\pyodide") -Recurse
 Copy-Item "vendor\wheels\*"  (Join-Path $stage "vendor\wheels")  -Recurse
 Copy-Item "docs\API-인증키-안내.md" (Join-Path $stage "API-인증키-안내.md")
+# 앱에 들어간 오픈소스의 라이선스 전문·저작자 표시 — 배포본에 반드시 함께 실어야 한다
+Copy-Item "THIRD_PARTY_NOTICES.txt" $stage
 
 # 런처가 찾는 자리: ffmpeg=exe 옆, jar=vendor\java-libs(배포본 전용 조회 자리), JDK=exe 옆 jdk\<한 겹>\bin\java.exe
-if ($Ffmpeg) { Copy-Item $ffmpegSrc $stage }
+if ($Ffmpeg) {
+  Copy-Item $ffmpegSrc $stage
+  # ffmpeg.exe(gyan.dev essentials 빌드)는 GPL-3.0 이라, 함께 배포할 때는 라이선스 전문과 소스 위치를 옆에 둔다
+  $ffmpegNotice = "ffmpeg.exe 는 FFmpeg 프로젝트(https://ffmpeg.org)의 프로그램으로, gyan.dev 의 공식 Windows 빌드`r`n" +
+    "(ffmpeg-release-essentials)를 고치지 않고 그대로 담았습니다. GPL-3.0 으로 배포되며 전문은 아래와 같습니다.`r`n" +
+    "소스 코드: https://ffmpeg.org/download.html · 빌드 정보: https://www.gyan.dev/ffmpeg/builds/`r`n`r`n"
+  $gpl = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "vendor\licenses\ffmpeg-GPLv3.txt"))
+  [System.IO.File]::WriteAllText((Join-Path $stage "ffmpeg-LICENSE.txt"), $ffmpegNotice + $gpl, (New-Object System.Text.UTF8Encoding $true))
+}
 if ($JavaLibs) {
   New-Item -ItemType Directory -Path (Join-Path $stage "vendor\java-libs") | Out-Null
   Copy-Item (Join-Path $javaLibsSrc "*") (Join-Path $stage "vendor\java-libs") -Recurse
@@ -130,7 +142,7 @@ if ($Jdk) {
 }
 
 $extraLines = @()
-if ($Ffmpeg)   { $extraLines += "  ffmpeg.exe               영상 변환용" }
+if ($Ffmpeg)   { $extraLines += "  ffmpeg.exe               영상 변환용 (GPL-3.0, ffmpeg-LICENSE.txt 참고)" }
 if ($Jdk)      { $extraLines += "  jdk/                     자바 실행·채점용 JDK ($jdkRelease)" }
 if ($JavaLibs) { $extraLines += "  vendor/java-libs/        자바 라이브러리 jar" }
 $missing = @()
@@ -157,6 +169,7 @@ ClassDock - 테스트용 패키지
   vendor/wheels/           추가 파이썬 패키지 오프라인 설치용
 $($extraLines -join "`r`n")
   API-인증키-안내.md       버스·지하철 실시간, 카카오 검색·길찾기, 고시환율에 필요한 인증키 받는 법
+  THIRD_PARTY_NOTICES.txt  앱에 들어 있는 오픈소스 라이브러리·글꼴·음원의 라이선스와 저작자 표시
 
 ■ 참고
   - 버스·지하철 실시간처럼 인터넷과 각자 받은 인증키가 필요한 기능은 예외입니다 (API-인증키-안내.md 참고).$missingNote

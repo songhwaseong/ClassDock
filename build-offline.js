@@ -283,6 +283,17 @@ html = html.replace(
   () => `<script type="text/plain" data-mn-manual="사용법.html">\n${esc(read("사용법.html"))}\n</script>`
 );
 
+// 오픈소스 라이선스 고지도 같은 방식으로 심는다. 라이브러리·글꼴·음원이 전부 이 파일 안에 들어가므로
+// 그 라이선스 전문·저작자 표시도 함께 배포돼야 한다(도움말 → 오픈소스 라이선스, openThirdPartyNotices).
+const noticesPlaceholder = "<!--MN_NOTICES-->";
+requireTag(html, noticesPlaceholder, "Third-party notices placeholder");
+html = html.replace(
+  noticesPlaceholder,
+  () => `<script type="text/plain" data-mn-notices="THIRD_PARTY_NOTICES.txt">
+${esc(read("THIRD_PARTY_NOTICES.txt"))}
+</script>`
+);
+
 const out = "classdock-offline.html";
 if (/\b(?:src|href)=["']src\//.test(html)) {
   console.error("Offline output still contains local source references.");

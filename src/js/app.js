@@ -2173,6 +2173,8 @@ function wire(){
   if (welcomeReopenBtn) welcomeReopenBtn.onclick = () => { byId("helpModal").hidden = true; openWelcome(); };
   const helpManualBtn = byId("helpManual");
   if (helpManualBtn) helpManualBtn.onclick = () => openUserManual();
+  const helpNoticesBtn = byId("helpNotices");
+  if (helpNoticesBtn) helpNoticesBtn.onclick = () => openThirdPartyNotices();
   try { if (!localStorage.getItem(ONBOARDED_KEY)) setTimeout(openWelcome, 700); } catch(_){}
 
   // 정적 모달 공통 ESC 닫기. 단순히 hidden 만 바꾸지 않고 기존 취소 버튼을 눌러
@@ -2621,6 +2623,29 @@ function openUserManual(){
   if (!opened && typeof toast === "function"){
     // 앱 모드 창에는 주소창이 없으므로 '주소창 옆' 같은 위치 안내는 쓰지 않는다.
     toast("팝업이 막혀 사용법을 열지 못했어요. 브라우저 설정에서 이 사이트의 팝업을 허용해 주세요.", 4200, { type: "error" });
+  }
+}
+
+/* 오픈소스 라이선스 고지(THIRD_PARTY_NOTICES.txt). 단일 파일 빌드는 본문을 실행되지 않는 블록으로
+   심어 두므로(build-offline.js) 사용법 문서처럼 Blob 으로 새 탭에 띄우고, 원본 HTML 에서는 파일을 연다. */
+let _noticesUrl = "";
+function openThirdPartyNotices(){
+  const embedded = document.querySelector("script[data-mn-notices]");
+  let url = "THIRD_PARTY_NOTICES.txt";
+  if (embedded){
+    if (!_noticesUrl){
+      try {
+        _noticesUrl = URL.createObjectURL(new Blob([(embedded.textContent || "").trim() + "\n"], { type: "text/plain;charset=utf-8" }));
+      } catch(e){ console.warn("오픈소스 라이선스 고지를 준비하지 못했어요:", e); }
+    }
+    if (_noticesUrl) url = _noticesUrl;
+  }
+  const opened = window.open(url, "_blank");
+  if (opened){
+    try { opened.opener = null; } catch(_){}
+  }
+  if (!opened && typeof toast === "function"){
+    toast("팝업이 막혀 라이선스 고지를 열지 못했어요. 브라우저 설정에서 이 사이트의 팝업을 허용해 주세요.", 4200, { type: "error" });
   }
 }
 

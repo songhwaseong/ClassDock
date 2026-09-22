@@ -84,4 +84,8 @@ for (const [id, [label, expectedCount]] of Object.entries(expectedMusicSamples))
   }
 }
 
+// 라이브러리·글꼴·음원이 전부 단일 파일에 들어가므로 라이선스 고지도 함께 들어 있어야 한다.
+if (!offline.includes('data-mn-notices="THIRD_PARTY_NOTICES.txt"')) fail("offline third-party notices block is missing");
+if (!offline.includes("tonejs-instruments")) fail("offline third-party notices lack the sound sample attribution");
+
 console.log(`릴리스 산출물 검사 완료: vendor ${manifest.vendorScripts.length}개, 단일 HTML ${Math.round(fs.statSync(offlinePath).size / 1024)} KB`);
