@@ -961,6 +961,28 @@ test("내장 스티커: 색을 골라 붙이면 그림으로 그려지고, 고�
   expect(names).toEqual(["diary.json"]);
 });
 
+test("사진 투명도: 우클릭으로 조절기를 열어 고른 사진만 흐리게 하고, 저장해 다시 열어도 남는다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles({ name:"꽃.png", mimeType:"image/png", buffer:solidPng(200, 100, [220, 80, 120]) });
+  const sticker = page.locator(".diary-sticker");
+  await expect(sticker).toHaveCount(1);
+  await sticker.click({ button:"right" });
+  const menu = page.locator(".text-context-menu");
+  await menu.locator("button", { hasText:"사진 투명도 조절" }).click();
+  const panel = page.locator(".diary-art-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".diary-art-opacity")).toBeFocused();
+  await panel.locator(".diary-art-opacity").fill("40");
+  await expect(sticker.locator("img")).toHaveCSS("opacity", "0.4");
+  const reopened = await page.evaluate(async () => {
+    const doc = docs.find(d => d.kind === "diary");
+    const now = doc.diary.entries[0].stickers[0].opacity;
+    const back = await diaryUnpack(diaryPack(doc.diary, doc.diaryAssets || new Map()));
+    return [now, back.model.entries[0].stickers[0].opacity];
+  });
+  expect(reopened).toEqual([0.4, 0.4]);
+});
+
 function assertArt(rows, want){
   expect(rows.length).toBe(want.length);
   rows.forEach((row, i) => {
