@@ -13,7 +13,30 @@ const TIER_RECOVERY_DELAY = 700;
 const TIER_IMAGE_MAX_SIDE = 360;
 const TIER_IMAGE_MAX_CHARS = 400 * 1024;
 const TIER_CARD_SIZES = { s:64, m:88, l:120 };
-const TIER_COLORS = ["#ff7f7f", "#ffbf7f", "#ffdf7f", "#ffff7f", "#bfff7f", "#7fff7f", "#7fffff", "#7fbfff", "#bf7fff", "#ff7fbf", "#cfcfcf", "#8a8a8a"];
+const TIER_COLORS = ["#ff7b82", "#ffab73", "#ffd76a", "#6fdc8c", "#7cc3f7", "#b49cff", "#ff9fcf", "#6fdcd6", "#c6e36b", "#ffe27f", "#cfcfcf", "#8a8a8a"];
+/* 줄 이름 칸 오른쪽의 흐린 장식 그림 — 첫 줄은 왕관, 마지막 줄은 보석, 그 앞은 새싹, 나머지는 별.
+   화면(SVG)과 PNG(Path2D)가 같은 경로 글을 쓴다. */
+const TIER_ICON_PATHS = {
+  crown:"M3.5 8.5l4.3 3.8L12 5.5l4.2 6.8 4.3-3.8-1.8 10H5.3z",
+  star:"M12 3.8l2.5 5.2 5.7.8-4.1 4 1 5.6-5.1-2.7-5.1 2.7 1-5.6-4.1-4 5.7-.8z",
+  sprout:"M12 20.5v-8.2M12 12.3c0-4.2 2.8-7 7.6-7 0 4.2-2.8 7-7.6 7zM12 14.2c0-3.2-2.4-5.6-6.6-5.6 0 3.2 2.4 5.6 6.6 5.6z",
+  gem:"M6.5 4.5h11l3.5 4.8L12 20 3 9.3zM3 9.3h18M9.3 4.5 7.8 9.3 12 20l4.2-10.7-1.5-4.8"
+};
+const TIER_UI_PATHS = {
+  trash:'<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 10.8v5.4M14 10.8v5.4"/>',
+  grip:'<circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.5" fill="currentColor" stroke="none"/>'
+};
+function tierIconName(value){ return Object.prototype.hasOwnProperty.call(TIER_ICON_PATHS, value) ? value : ""; }
+function tierRowIcon(index, count){ return index === 0 ? "crown" : (count >= 3 && index === count - 1) ? "gem" : (count >= 4 && index === count - 2) ? "sprout" : "star"; }
+function tierSvg(name, extraClass){
+  const inner = TIER_UI_PATHS[name] || (TIER_ICON_PATHS[name] ? '<path d="' + TIER_ICON_PATHS[name] + '"/>' : "");
+  return '<svg class="ui-icon' + (extraClass ? " " + extraClass : "") + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
+}
+/* 두 색 섞기(t=0 이면 a, 1 이면 b) — PNG 에서 줄 색을 옅게 깔 때 쓴다. */
+function tierMix(a, b, t){
+  const pa = tierColor(a).slice(1), pb = tierColor(b).slice(1), ch = (hex, i) => parseInt(hex.slice(i, i + 2), 16);
+  return "rgb(" + [0, 2, 4].map(i => Math.round(ch(pa, i) + (ch(pb, i) - ch(pa, i)) * t)).join(",") + ")";
+}
 /* 줄 틀 — 새로 만들 때는 첫째(S~D). ⋯ 메뉴에서 바꾸면 같은 차례의 줄에 있던 카드는 그대로 남는다. */
 const TIER_PRESETS = [
   { id:"sabcd", label:"S · A · B · C · D", tiers:["S", "A", "B", "C", "D"] },
@@ -30,7 +53,7 @@ function tierText(value, max){ return String(value == null ? "" : value).slice(0
 function tierColor(value, fallback){ const text = String(value || "").trim(); return /^#[0-9a-f]{6}$/i.test(text) ? text.toLowerCase() : (fallback || TIER_COLORS[0]); }
 function tierPresetTiers(presetId){
   const preset = TIER_PRESETS.find(item => item.id === presetId) || TIER_PRESETS[0];
-  return preset.tiers.map((label, index) => ({ id:tierId("row"), label, color:TIER_COLORS[Math.min(index, TIER_COLORS.length - 1)] }));
+  return preset.tiers.map((label, index) => ({ id:tierId("row"), label, color:TIER_COLORS[Math.min(index, TIER_COLORS.length - 1)], icon:tierRowIcon(index, preset.tiers.length) }));
 }
 function tierNormalizeImage(raw){
   const value = raw && typeof raw === "object" ? raw : null, dataUrl = value ? String(value.dataUrl || "") : "";
@@ -39,7 +62,7 @@ function tierNormalizeImage(raw){
 }
 function tierNormalizeTier(raw, index){
   const value = raw && typeof raw === "object" ? raw : {};
-  return { id:tierText(value.id, 80) || tierId("row"), label:tierText(value.label, 40), color:tierColor(value.color, TIER_COLORS[Math.min(index || 0, TIER_COLORS.length - 1)]) };
+  return { id:tierText(value.id, 80) || tierId("row"), label:tierText(value.label, 40), color:tierColor(value.color, TIER_COLORS[Math.min(index || 0, TIER_COLORS.length - 1)]), icon:tierIconName(value.icon) };
 }
 function tierNormalizeItem(raw){
   const value = raw && typeof raw === "object" ? raw : {};
@@ -54,6 +77,8 @@ function tierDocParse(text){
   model.cardSize = Object.prototype.hasOwnProperty.call(TIER_CARD_SIZES, raw.cardSize) ? raw.cardSize : "m";
   model.tiers = raw.tiers.slice(0, TIER_MAX_TIERS).map(tierNormalizeTier).filter(tier => !tierIds.has(tier.id) && tierIds.add(tier.id));
   if (!model.tiers.length) model.tiers = tierPresetTiers();
+  // 그림이 없는 예전 파일은 지금 차례로 한 번 정해 두고, 그 뒤로는 줄을 옮겨도 그림이 줄을 따라간다.
+  model.tiers.forEach((row, index, rows) => { if (!row.icon) row.icon = tierRowIcon(index, rows.length); });
   const known = new Set(model.tiers.map(tier => tier.id));
   // 사진도 글도 없는 카드는 보이지 않으니 버린다. 지워진 줄을 가리키는 카드는 아래 모음으로 내린다.
   model.items = raw.items.map(tierNormalizeItem).filter(item => (item.image || item.text.trim()) && !itemIds.has(item.id) && itemIds.add(item.id))
@@ -77,10 +102,12 @@ function tierRemoveRow(model, tier){ if (model.tiers.length <= 1) return false; 
 function tierResetAll(model){ const count = model.items.filter(item => item.tier).length; model.items = tierItemsIn(model, "").concat(model.items.filter(item => item.tier).map(item => ({ ...item, tier:"" }))); return count; }
 function tierApplyPreset(model, presetId){
   const fresh = tierPresetTiers(presetId), old = model.tiers;
-  model.tiers = fresh.map((row, index) => (old[index] ? { ...row, id:old[index].id } : row));
+  model.tiers = fresh.map((row, index) => (old[index] ? { ...row, id:old[index].id } : row));   // 틀을 바꾸면 그림도 새 틀 차례대로
   const keep = new Set(model.tiers.map(row => row.id));
   old.filter(row => !keep.has(row.id)).forEach(row => tierClearRow(model, row.id));
 }
+/* 보유 카드(줄에 안 올린 카드) 가운데 ids 에 든 것만 지운다. 줄에 올린 카드는 ids 에 있어도 건드리지 않는다. */
+function tierRemovePoolItems(model, ids){ const drop = new Set(ids || []), before = model.items.length; model.items = model.items.filter(item => item.tier || !drop.has(item.id)); return before - model.items.length; }
 function tierShufflePool(model, random=Math.random){
   const pool = tierItemsIn(model, ""); for (let i = pool.length - 1; i > 0; i--){ const j = Math.floor(random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
   model.items = model.items.filter(item => item.tier).concat(pool);
@@ -150,41 +177,81 @@ function tierWrapText(ctx, text, maxWidth, maxLines){
   if (lines.length < maxLines && line) lines.push(line);
   return lines;
 }
+function tierRoundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function"){ ctx.roundRect(x, y, w, h, r); return; }
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+/* 화면과 같은 모양 — 옅은 바탕 위 흰 판, 줄마다 둥근 색 칸 + 줄 색을 옅게 깐 점선 칸. 줄 도구(⠿·⚙·🗑)와 빈 줄 안내는 넣지 않는다. */
 async function tierRenderPng(model, opts = {}){
-  const card = TIER_CARD_SIZES[model.cardSize] || TIER_CARD_SIZES.m, gap = 4, labelW = 120, width = opts.width || 1200, contentW = width - labelW - gap * 3;
-  const perRow = Math.max(1, Math.floor((contentW + gap) / (card + gap))), titleH = model.title ? 56 : 0;
-  const rows = model.tiers.map(row => { const items = tierItemsIn(model, row.id); return { row, items, height:Math.max(card + gap * 2, Math.ceil(items.length / perRow) * (card + gap) + gap) }; });
-  const height = titleH + rows.reduce((sum, row) => sum + row.height + 2, 0) + 2;
+  const card = TIER_CARD_SIZES[model.cardSize] || TIER_CARD_SIZES.m, width = opts.width || 1200;
+  const pad = 28, panelPad = 14, rowGap = 10, labelW = 140, labelGap = 10, zonePad = 8, gap = 6;
+  const zoneX = pad + panelPad + labelW + labelGap, zoneW = width - zoneX - pad - panelPad;
+  const perRow = Math.max(1, Math.floor((zoneW - zonePad * 2 + gap) / (card + gap))), titleH = model.title ? 58 : 0;
+  const rows = model.tiers.map(row => { const items = tierItemsIn(model, row.id), lines = Math.max(1, Math.ceil(items.length / perRow)); return { row, items, height:lines * (card + gap) - gap + zonePad * 2 }; });
+  const panelH = rows.reduce((sum, row) => sum + row.height, 0) + rowGap * Math.max(0, rows.length - 1) + panelPad * 2;
+  const height = pad + titleH + panelH + pad;
   const canvas = document.createElement("canvas"), ratio = opts.ratio || 2; canvas.width = width * ratio; canvas.height = height * ratio;
   const ctx = canvas.getContext("2d"); ctx.scale(ratio, ratio);
   const font = '"Pretendard","Malgun Gothic","Apple SD Gothic Neo",sans-serif';
-  ctx.fillStyle = "#1a1a1f"; ctx.fillRect(0, 0, width, height);
-  if (titleH){ ctx.fillStyle = "#ffffff"; ctx.font = "800 26px " + font; ctx.textBaseline = "middle"; ctx.textAlign = "left"; ctx.fillText(model.title, 16, titleH / 2 + 2, width - 32); }
+  ctx.fillStyle = "#f3f4fb"; ctx.fillRect(0, 0, width, height);
+  if (titleH){ ctx.fillStyle = "#1f2340"; ctx.font = "800 28px " + font; ctx.textBaseline = "middle"; ctx.textAlign = "left"; ctx.fillText(model.title, pad + 4, pad + titleH / 2 - 6, width - pad * 2); }
+  const panelY = pad + titleH;
+  ctx.save(); ctx.shadowColor = "rgba(40,45,90,.10)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6; ctx.fillStyle = "#ffffff"; tierRoundRect(ctx, pad, panelY, width - pad * 2, panelH, 18); ctx.fill(); ctx.restore();
   const images = new Map(); await Promise.all(model.items.filter(item => item.image).map(async item => images.set(item.id, await tierLoadImage(item.image.dataUrl))));
-  let y = titleH + 2;
-  for (const { row, items, height:h } of rows){
-    ctx.fillStyle = row.color; ctx.fillRect(2, y, labelW, h);
+  let y = panelY + panelPad;
+  rows.forEach(({ row, items, height:h }, rowIndex) => {
+    const lx = pad + panelPad;
+    ctx.fillStyle = row.color; tierRoundRect(ctx, lx, y, labelW, h, 12); ctx.fill();
+    if (typeof Path2D === "function"){   // 흐린 장식 그림(오른쪽 아래)
+      const icon = new Path2D(TIER_ICON_PATHS[tierIconName(row.icon) || tierRowIcon(rowIndex, rows.length)]), s = 1.75;
+      ctx.save(); ctx.translate(lx + labelW - 24 * s - 8, y + h / 2 - 12 * s); ctx.scale(s, s); ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.stroke(icon); ctx.restore();
+    }
     ctx.fillStyle = tierInkFor(row.color); ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    const size = row.label.length <= 2 ? 30 : row.label.length <= 4 ? 20 : 15; ctx.font = "800 " + size + "px " + font;
-    const lines = tierWrapText(ctx, row.label, labelW - 14, 3); lines.forEach((text, index) => ctx.fillText(text, 2 + labelW / 2, y + h / 2 + (index - (lines.length - 1) / 2) * size * 1.2));
-    ctx.fillStyle = "#26262d"; ctx.fillRect(labelW + 4, y, width - labelW - 6, h);
+    const size = row.label.length <= 2 ? 34 : row.label.length <= 4 ? 21 : 15; ctx.font = "800 " + size + "px " + font;
+    const lines = tierWrapText(ctx, row.label, labelW - 22, 3); lines.forEach((text, index) => ctx.fillText(text, lx + labelW / 2, y + h / 2 + (index - (lines.length - 1) / 2) * size * 1.2));
+    ctx.fillStyle = tierMix(row.color, "#ffffff", 0.86); tierRoundRect(ctx, zoneX, y, zoneW, h, 12); ctx.fill();
+    ctx.save(); ctx.setLineDash([5, 4]); ctx.lineWidth = 1.2; ctx.strokeStyle = tierMix(row.color, "#ffffff", 0.35); tierRoundRect(ctx, zoneX + 0.5, y + 0.5, zoneW - 1, h - 1, 12); ctx.stroke(); ctx.restore();
     items.forEach((item, index) => {
-      const x = labelW + 4 + gap + (index % perRow) * (card + gap), top = y + gap + Math.floor(index / perRow) * (card + gap), img = images.get(item.id);
+      const x = zoneX + zonePad + (index % perRow) * (card + gap), top = y + zonePad + Math.floor(index / perRow) * (card + gap), img = images.get(item.id);
+      ctx.save(); ctx.shadowColor = "rgba(20,25,60,.14)"; ctx.shadowBlur = 5; ctx.shadowOffsetY = 1; ctx.fillStyle = img ? "#ffffff" : "#f7f8fc"; tierRoundRect(ctx, x, top, card, card, 8); ctx.fill(); ctx.restore();
+      ctx.save(); tierRoundRect(ctx, x, top, card, card, 8); ctx.clip();
       if (img){
         const s = Math.max(card / img.width, card / img.height), sw = card / s, sh = card / s;   // 가운데를 꽉 채워 자르기(cover)
         ctx.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, x, top, card, card);
-        if (item.text){ ctx.fillStyle = "rgba(0,0,0,.62)"; ctx.fillRect(x, top + card - 20, card, 20); ctx.fillStyle = "#fff"; ctx.font = "700 11px " + font; ctx.fillText(tierWrapText(ctx, item.text, card - 6, 1)[0] || "", x + card / 2, top + card - 10); }
+        if (item.text){ ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(x, top + card - 20, card, 20); ctx.fillStyle = "#fff"; ctx.font = "700 11px " + font; ctx.fillText(tierWrapText(ctx, item.text, card - 6, 1)[0] || "", x + card / 2, top + card - 10); }
       } else {
-        ctx.fillStyle = "#f4f4f6"; ctx.fillRect(x, top, card, card); ctx.fillStyle = "#1f2328";
+        ctx.strokeStyle = "#e1e4ef"; ctx.lineWidth = 2; tierRoundRect(ctx, x, top, card, card, 8); ctx.stroke(); ctx.fillStyle = "#1f2328";
         const fs = card >= 110 ? 16 : card >= 80 ? 13 : 11; ctx.font = "750 " + fs + "px " + font;
         const text = tierWrapText(ctx, item.text, card - 10, Math.floor((card - 8) / (fs * 1.25)));
         text.forEach((line, i) => ctx.fillText(line, x + card / 2, top + card / 2 + (i - (text.length - 1) / 2) * fs * 1.25));
       }
+      ctx.restore();
     });
-    y += h + 2;
-  }
+    y += h + rowGap;
+  });
   return canvas.toDataURL("image/png");
 }
+
+/* 머리말 오른쪽에서 판 위로 빼꼼 내다보는 삼색 고양이 — 장식일 뿐이라 눌리지 않는다(pointer-events:none). */
+const TIER_MASCOT_SVG = '<svg class="tier-mascot-cat" viewBox="0 0 150 112" aria-hidden="true" focusable="false">'
+  + '<defs><clipPath id="tierCatHead"><ellipse cx="78" cy="66" rx="45" ry="37"/></clipPath></defs>'
+  + '<g stroke="#5b4636" stroke-width="2.4" stroke-linejoin="round">'
+  + '<path d="M40 48 L44 10 L72 33 Z" fill="#f6ad72"/><path d="M116 48 L112 10 L84 33 Z" fill="#fffaf4"/>'
+  + '<path d="M47 40 L49 20 L63 33 Z" fill="#ffc4c8" stroke="none"/><path d="M109 40 L107 20 L93 33 Z" fill="#ffc4c8" stroke="none"/>'
+  + '<ellipse cx="78" cy="66" rx="45" ry="37" fill="#fffaf4"/></g>'
+  + '<g clip-path="url(#tierCatHead)"><path d="M30 30 C48 26 66 36 62 52 C58 64 42 66 30 62 Z" fill="#f6ad72"/><path d="M102 30 C116 30 128 44 124 58 C112 58 100 50 98 40 Z" fill="#8f6547"/></g>'
+  + '<ellipse cx="78" cy="66" rx="45" ry="37" fill="none" stroke="#5b4636" stroke-width="2.4"/>'
+  + '<ellipse cx="62" cy="67" rx="4.6" ry="5.6" fill="#3b2a20"/><ellipse cx="94" cy="67" rx="4.6" ry="5.6" fill="#3b2a20"/>'
+  + '<circle cx="63.6" cy="65" r="1.6" fill="#fff"/><circle cx="95.6" cy="65" r="1.6" fill="#fff"/>'
+  + '<ellipse cx="51" cy="79" rx="6.5" ry="3.8" fill="#ffb3b8" opacity=".75"/><ellipse cx="105" cy="79" rx="6.5" ry="3.8" fill="#ffb3b8" opacity=".75"/>'
+  + '<path d="M75 74 h6 l-3 3.2 z" fill="#ff8f9a" stroke="#5b4636" stroke-width="1.2" stroke-linejoin="round"/>'
+  + '<path d="M78 77.5 q-3.2 4.6 -7 1.4 M78 77.5 q3.2 4.6 7 1.4" fill="none" stroke="#5b4636" stroke-width="1.8" stroke-linecap="round"/>'
+  + '<g fill="#fffaf4" stroke="#5b4636" stroke-width="2.4"><ellipse cx="48" cy="100" rx="16" ry="10.5"/><ellipse cx="108" cy="100" rx="16" ry="10.5"/></g>'
+  + '<path d="M43 97 v5 M49 96 v6 M103 97 v5 M109 96 v6" stroke="#5b4636" stroke-width="1.8" stroke-linecap="round"/>'
+  + '<path d="M20 20 c-3-4-9-1-6 4 l6 5 6-5 c3-5-3-8-6-4z" fill="#ff8fa3"/>'
+  + '<path d="M132 12 l4-7 M138 20 l8-3 M128 6 l1-5" stroke="#ff8fa3" stroke-width="2.6" stroke-linecap="round"/>'
+  + "</svg>";
 
 function tierButton(label, title, className, icon){
   const button = document.createElement("button"); button.type = "button"; button.className = className || "tier-btn";
@@ -205,23 +272,41 @@ function tierModal(titleText, body){
 function mountTierEditor(doc){
   const model = doc.tierDoc, root = document.createElement("div"); root.className = "tier-doc"; doc.el.appendChild(root);
   const bar = document.createElement("div"); bar.className = "tier-bar";
-  const titleInput = document.createElement("input"); titleInput.className = "tier-title"; titleInput.value = model.title; titleInput.maxLength = 160; titleInput.placeholder = "티어표 제목 (예: 최고의 간식)";
-  const photoBtn = tierButton("사진", "사진 카드 넣기 — 여러 장을 한꺼번에 고르거나, 이 화면에 끌어다 놓거나, Ctrl+V 로 붙여 넣을 수 있어요", "tier-btn tier-primary", "image");
-  const textBtn = tierButton("글 카드", "글자만 있는 카드 넣기", "tier-btn", "text");
+  const brand = document.createElement("div"); brand.className = "tier-brand";
+  brand.innerHTML = '<span class="tier-logo" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M24 26.5 5 17 24 7.5 43 17z" fill="#8b80f9" stroke="#2b2d6e" stroke-width="2.6" stroke-linejoin="round"/><path d="M5 24.5 24 34l19-9.5M5 32l19 9.5L43 32" fill="none" stroke="#2b2d6e" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"/></svg></span>'
+    + '<div class="tier-heading"><span class="tier-sub">드래그 앤 드롭으로 손쉽게 정리하세요.</span></div>';
+  const titleInput = document.createElement("input"); titleInput.className = "tier-title"; titleInput.value = model.title; titleInput.maxLength = 160; titleInput.placeholder = "티어표 제목 (예: 최고의 간식)"; titleInput.title = "눌러서 제목 바꾸기";
+  brand.querySelector(".tier-heading").prepend(titleInput);
+  const textBtn = tierButton("카드 추가", "글자만 있는 카드 넣기", "tier-btn", "plus");
+  const photoBtn = tierButton("가져오기", "사진 카드 넣기 — 여러 장을 한꺼번에 고르거나, 이 화면에 끌어다 놓거나, Ctrl+V 로 붙여 넣을 수 있어요", "tier-btn", "image");
   const undoBtn = tierButton("", "실행 취소 (Ctrl+Z)", "tier-btn", "undo"), redoBtn = tierButton("", "다시 실행 (Ctrl+Y)", "tier-btn", "redo");
-  const rowBtn = tierButton("줄", "맨 아래에 등급 줄 추가", "tier-btn", "plus");
-  const boardBtn = tierButton("칠판으로", "티어표를 그림으로 굳혀 새 화이트보드에 넣기", "tier-btn", "board");
-  const saveBtn = tierButton("저장", "티어표 저장 (Ctrl+S)", "tier-btn tier-primary run-save", "save");
-  const moreBtn = tierButton("", "더 보기 — 그림으로 저장·줄 틀·카드 크기·모두 내리기", "tier-btn", "more");
-  bar.append(titleInput, photoBtn, textBtn, undoBtn, redoBtn, rowBtn, boardBtn, saveBtn, moreBtn);
+  const saveBtn = tierButton("저장하기", "티어표 저장 (Ctrl+S)", "tier-btn tier-primary run-save", "save");
+  const moreBtn = tierButton("", "더 보기 — 줄 추가·칠판으로·그림으로 저장·줄 틀·카드 크기", "tier-btn", "more");
+  const actions = document.createElement("div"); actions.className = "tier-actions"; actions.append(textBtn, photoBtn, undoBtn, redoBtn, saveBtn, moreBtn);
+  const mascot = document.createElement("div"); mascot.className = "tier-mascot"; mascot.setAttribute("aria-hidden", "true");
+  mascot.innerHTML = '<span class="tier-mascot-say">좋아하는 걸<br>정리해봐요!</span>' + TIER_MASCOT_SVG;
+  const barInner = document.createElement("div"); barInner.className = "tier-bar-inner"; barInner.append(brand, actions, mascot); bar.appendChild(barInner);
   const board = document.createElement("div"); board.className = "tier-board";
   const rowsEl = document.createElement("div"); rowsEl.className = "tier-rows";
+  const poolSection = document.createElement("section"); poolSection.className = "tier-pool-section";
   const poolHead = document.createElement("div"); poolHead.className = "tier-pool-head";
-  poolHead.innerHTML = '<strong>📌 올릴 카드</strong><span class="tier-hint">카드를 끌어 위 줄에 놓으세요 · 카드를 누른 뒤 숫자 키 1~9 로 그 줄에, 0 으로 여기로 · 두 번 누르면 고치기</span>';
+  poolHead.innerHTML = '<span class="tier-pool-ico" aria-hidden="true"></span><div class="tier-pool-titles"><strong><span class="tier-pool-name">보유 카드</span><span class="tier-pool-count"></span></strong>'
+    + '<span class="tier-sub">카드를 끌어 위의 줄에 놓으세요.<span class="tier-hint"> · 카드를 누른 뒤 숫자 키 1~9 로 그 줄에, 0 으로 여기로 · 두 번 누르면 고치기</span></span></div>'
+    + '<button type="button" class="tier-btn tier-pool-clear" title="보유 카드를 한꺼번에 지우기 — 검색 중이면 찾은 카드만 (Ctrl+Z 로 되돌릴 수 있어요)"><span class="tier-pool-clear-ico" aria-hidden="true"></span><span class="tier-pool-clear-label">모두 지우기</span></button>'
+    + '<label class="tier-search"><span class="tier-search-ico" aria-hidden="true"></span><input type="search" placeholder="카드 검색…" aria-label="보유 카드 검색" maxlength="60"></label>';
+  if (typeof window.uiIcon === "function"){ poolHead.querySelector(".tier-pool-ico").innerHTML = window.uiIcon("image"); poolHead.querySelector(".tier-search-ico").innerHTML = window.uiIcon("search"); }
+  const searchInput = poolHead.querySelector(".tier-search input"), poolClearBtn = poolHead.querySelector(".tier-pool-clear");
+  poolHead.querySelector(".tier-pool-clear-ico").innerHTML = tierSvg("trash");
   const pool = document.createElement("div"); pool.className = "tier-items tier-pool"; pool.dataset.tier = "";
-  board.append(rowsEl, poolHead, pool);
+  poolSection.append(poolHead, pool);
+  board.append(rowsEl, poolSection);
   const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = "image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif"; fileInput.multiple = true; fileInput.hidden = true;
   root.append(bar, board, fileInput);
+  // 고양이 발은 판 윗변에 걸쳐 있다 — 내려 보면 스크롤된 줄 위를 덮으니 슬쩍 숨긴다.
+  board.addEventListener("scroll", () => mascot.classList.toggle("is-away", board.scrollTop > 6), { passive:true });
+  // 판 쪽 스크롤 막대 폭만큼 머리말 오른쪽도 비워 두 틀의 가운데를 맞춘다(막대 폭은 배율·운영체제마다 다르다).
+  const syncGutter = () => root.style.setProperty("--tier-gutter", Math.max(0, board.offsetWidth - board.clientWidth) + "px");
+  const gutterObserver = typeof ResizeObserver === "function" ? new ResizeObserver(syncGutter) : null; if (gutterObserver) gutterObserver.observe(board);
 
   // 되돌리기 기록엔 사진 바이트 대신 짧은 열쇠만 담는다 — 사진 수백 장 × 기록 60칸이면 메모리가 버티지 못한다.
   const imageKeys = new WeakMap(), imageStore = new Map(); let imageSeq = 0;
@@ -251,31 +336,57 @@ function mountTierEditor(doc){
     root.style.setProperty("--tier-card", (TIER_CARD_SIZES[model.cardSize] || TIER_CARD_SIZES.m) + "px");
     rowsEl.innerHTML = "";
     model.tiers.forEach((row, index) => {
-      const rowEl = document.createElement("div"); rowEl.className = "tier-row"; rowEl.dataset.tierRow = row.id;
+      const rowEl = document.createElement("div"); rowEl.className = "tier-row"; rowEl.dataset.tierRow = row.id; rowEl.style.setProperty("--row-color", row.color);
       const label = document.createElement("button"); label.type = "button"; label.className = "tier-label"; label.style.background = row.color; label.style.color = tierInkFor(row.color);
-      label.textContent = row.label; label.title = "줄 이름·색 바꾸기" + (index < 9 ? ` · 카드를 고르고 ${index + 1} 키를 누르면 이 줄로` : "");
+      const labelText = document.createElement("span"); labelText.className = "tier-label-text"; labelText.textContent = row.label;
+      const labelIco = document.createElement("span"); labelIco.className = "tier-label-ico"; labelIco.innerHTML = tierSvg(tierIconName(row.icon) || tierRowIcon(index, model.tiers.length));
+      label.append(labelText, labelIco); label.title = "눌러서 줄 설정 — 이름·색 바꾸기·줄 추가·비우기" + (index < 9 ? ` · 카드를 고르고 ${index + 1} 키를 누르면 이 줄로` : "");
       label.onclick = () => openRowDialog(row.id);
-      const zone = document.createElement("div"); zone.className = "tier-items"; zone.dataset.tier = row.id;
+      const zone = document.createElement("div"); zone.className = "tier-items"; zone.dataset.tier = row.id; zone.dataset.empty = "여기에 카드를 끌어다 놓으세요.";
       tierItemsIn(model, row.id).forEach(item => zone.appendChild(cardEl(item)));
       const tools = document.createElement("div"); tools.className = "tier-row-tools";
-      const gear = tierButton("", "줄 설정", "tier-row-btn tier-row-gear", "settings"), up = tierButton("", "줄을 위로", "tier-row-btn", "chevronUp"), down = tierButton("", "줄을 아래로", "tier-row-btn", "chevronDown");
-      up.disabled = index === 0; down.disabled = index === model.tiers.length - 1;
-      gear.onclick = () => openRowDialog(row.id); up.onclick = () => moveRow(index, -1); down.onclick = () => moveRow(index, 1);
-      const arrows = document.createElement("div"); arrows.className = "tier-row-arrows"; arrows.append(up, down); tools.append(gear, arrows);
+      const grip = document.createElement("button"); grip.type = "button"; grip.className = "tier-row-btn tier-row-grip"; grip.innerHTML = tierSvg("grip"); grip.dataset.rowIndex = String(index);
+      grip.title = "끌어서 줄 순서 바꾸기 (↑·↓ 키로도 옮겨요)"; grip.setAttribute("aria-label", `줄 순서 바꾸기 — ${row.label || "이름 없는 줄"}`);
+      grip.addEventListener("keydown", event => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return; event.preventDefault(); event.stopPropagation();
+        const to = index + (event.key === "ArrowUp" ? -1 : 1); if (!moveRow(index, event.key === "ArrowUp" ? -1 : 1)) return;
+        const again = rowsEl.querySelector(`.tier-row-grip[data-row-index="${to}"]`); if (again) again.focus();
+      });
+      // 줄 설정은 왼쪽 색 칸(줄 이름)을 누르면 열린다 — 따로 ⚙ 버튼을 두지 않고 손잡이·지우기를 크게.
+      const trash = document.createElement("button");
+      trash.type = "button"; trash.className = "tier-row-btn tier-row-trash"; trash.innerHTML = tierSvg("trash"); trash.title = "줄 지우기 (그 줄 카드는 보유 카드로 내려가요)"; trash.setAttribute("aria-label", "줄 지우기");
+      trash.disabled = model.tiers.length <= 1;
+      trash.onclick = () => removeRow(row.id);
+      tools.append(grip, trash);
       rowEl.append(label, zone, tools); rowsEl.appendChild(rowEl);
     });
-    pool.innerHTML = ""; const rest = tierItemsIn(model, "");
-    rest.forEach(item => pool.appendChild(cardEl(item)));
-    if (!model.items.length){ const empty = tierButton("＋ 사진을 여기로 끌어다 놓거나 눌러서 고르세요", "사진 카드 넣기", "tier-empty"); empty.onclick = () => fileInput.click(); pool.appendChild(empty); }
-    poolHead.querySelector("strong").textContent = `📌 올릴 카드 ${rest.length ? rest.length + "장" : ""}`.trim();
+    pool.innerHTML = ""; const rest = tierItemsIn(model, ""), shown = rest.filter(poolMatches);
+    shown.forEach(item => pool.appendChild(cardEl(item)));
+    if (!model.items.length){
+      const empty = document.createElement("button"); empty.type = "button"; empty.className = "tier-empty"; empty.title = "사진 카드 넣기";
+      empty.innerHTML = (typeof window.uiIcon === "function" ? window.uiIcon("image") : "") + '<strong>＋ 사진을 여기로 끌어다 놓거나 클릭해서 추가하세요.</strong><small>사진·글 카드로 나만의 티어표를 만들어 보세요.</small>';
+      empty.onclick = () => fileInput.click(); pool.appendChild(empty);
+    } else if (!shown.length && rest.length){ const none = document.createElement("p"); none.className = "tier-pool-none"; none.textContent = "찾는 카드가 없어요."; pool.appendChild(none); }
+    poolClearBtn.disabled = !shown.length; poolHead.querySelector(".tier-pool-clear-label").textContent = shown.length !== rest.length ? `찾은 카드 ${shown.length}장 지우기` : "모두 지우기";
+    poolHead.querySelector(".tier-pool-count").textContent = rest.length ? (shown.length !== rest.length ? `${shown.length} / ${rest.length}` : String(rest.length)) : "";
   }
-  doc.tierSelectItem = id => { if (!model.items.some(item => item.id === id)) return false; selectedId = id; render(); const el = board.querySelector(`[data-item-id="${CSS.escape(id)}"]`); if (el) el.scrollIntoView({ behavior:"smooth", block:"center" }); return true; };
+  function poolQuery(){ return searchInput.value.trim().toLowerCase(); }
+  function poolMatches(item){ const q = poolQuery(); return !q || [item.text, item.name].join(" ").toLowerCase().includes(q); }
+  doc.tierSelectItem = id => {
+    const found = model.items.find(item => item.id === id); if (!found) return false;
+    if (!found.tier && !poolMatches(found)) searchInput.value = "";   // 검색에 가려진 카드면 검색을 풀어 보이게
+    selectedId = id; render(); const el = board.querySelector(`[data-item-id="${CSS.escape(id)}"]`); if (el) el.scrollIntoView({ behavior:"smooth", block:"center" }); return true;
+  };
+  searchInput.addEventListener("input", () => render());
+  searchInput.addEventListener("keydown", event => { if (event.key === "Escape" && searchInput.value){ event.preventDefault(); event.stopPropagation(); searchInput.value = ""; render(); } });
 
-  function moveRow(index, delta){ const to = index + delta; if (to < 0 || to >= model.tiers.length) return; const [row] = model.tiers.splice(index, 1); model.tiers.splice(to, 0, row); changed(); }
+  function moveRow(index, delta){ return moveRowTo(index, index + delta); }
+  function moveRowTo(from, to){ if (from === to || from < 0 || to < 0 || from >= model.tiers.length || to >= model.tiers.length) return false; const [row] = model.tiers.splice(from, 1); model.tiers.splice(to, 0, row); changed(); return true; }
+  function removeRow(id){ if (tierRemoveRow(model, id)){ changed(); if (typeof toast === "function") toast("줄을 지웠어요 — 그 줄 카드는 보유 카드로 내려갔어요. 되돌리려면 Ctrl+Z", 2800); } }
   function addRow(at){
     if (model.tiers.length >= TIER_MAX_TIERS){ if (typeof toast === "function") toast(`등급 줄은 ${TIER_MAX_TIERS}개까지 만들 수 있어요.`, 2600); return null; }
     const used = new Set(model.tiers.map(row => row.color)), color = TIER_COLORS.find(c => !used.has(c)) || TIER_COLORS[model.tiers.length % TIER_COLORS.length];
-    const row = { id:tierId("row"), label:"새 줄", color }; model.tiers.splice(at == null ? model.tiers.length : at, 0, row); changed(); return row;
+    const row = { id:tierId("row"), label:"새 줄", color, icon:"star" }; model.tiers.splice(at == null ? model.tiers.length : at, 0, row); changed(); return row;
   }
 
   function openRowDialog(id){
@@ -295,9 +406,9 @@ function mountTierEditor(doc){
     labelInput.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing){ event.preventDefault(); body.querySelector(".tf-save").click(); } });
     body.querySelector(".tf-above").onclick = () => { apply(); ui.dispose(); addRow(model.tiers.indexOf(row)); };
     body.querySelector(".tf-below").onclick = () => { apply(); ui.dispose(); addRow(model.tiers.indexOf(row) + 1); };
-    body.querySelector(".tf-clear").onclick = () => { apply(); ui.dispose(); const n = tierClearRow(model, row.id); changed(); if (n && typeof toast === "function") toast(`카드 ${n}장을 아래로 내렸어요. 되돌리려면 Ctrl+Z`, 2600); };
+    body.querySelector(".tf-clear").onclick = () => { apply(); ui.dispose(); const n = tierClearRow(model, row.id); changed(); if (n && typeof toast === "function") toast(`카드 ${n}장을 보유 카드로 내렸어요. 되돌리려면 Ctrl+Z`, 2600); };
     const del = body.querySelector(".tf-delete"); del.disabled = model.tiers.length <= 1;
-    del.onclick = () => { ui.dispose(); if (tierRemoveRow(model, row.id)){ changed(); if (typeof toast === "function") toast("줄을 지웠어요 — 그 줄 카드는 아래로 내려갔어요. 되돌리려면 Ctrl+Z", 2800); } };
+    del.onclick = () => { ui.dispose(); removeRow(row.id); };
     setTimeout(() => { labelInput.focus(); labelInput.select(); }, 0);
   }
 
@@ -330,6 +441,16 @@ function mountTierEditor(doc){
     text.addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing){ event.preventDefault(); body.querySelector(".tf-save").click(); } });
     setTimeout(() => text.focus(), 0);
   }
+  async function clearPool(){
+    const shown = tierItemsIn(model, "").filter(poolMatches); if (!shown.length) return;
+    const filtered = shown.length !== tierItemsIn(model, "").length;
+    const message = (filtered ? `검색으로 찾은 보유 카드 ${shown.length}장을 지울까요?` : `보유 카드 ${shown.length}장을 모두 지울까요?`) + " 줄에 올린 카드는 그대로 남아요.";
+    if (typeof confirmDialog === "function" && !await confirmDialog(message, "지우기", "취소")) return;
+    const removed = tierRemovePoolItems(model, shown.map(item => item.id)); if (!removed) return;
+    if (selectedId && !model.items.some(item => item.id === selectedId)) selectedId = "";
+    changed(); if (typeof toast === "function") toast(`보유 카드 ${removed}장을 지웠어요. 되돌리려면 Ctrl+Z`, 2800);
+  }
+  poolClearBtn.onclick = clearPool;
   function deleteItem(id){
     const before = model.items.length; model.items = model.items.filter(item => item.id !== id); if (model.items.length === before) return;
     if (selectedId === id) selectedId = ""; changed(); if (typeof toast === "function") toast("카드를 지웠어요. 되돌리려면 Ctrl+Z", 2400);
@@ -366,7 +487,35 @@ function mountTierEditor(doc){
     const el = event.target.closest(".tier-item"); if (!el || event.button !== 0) return;
     drag = { id:el.dataset.itemId, el, pointerId:event.pointerId, x:event.clientX, y:event.clientY, started:false, ghost:null, mark:null, zone:null, before:null, dx:0, dy:0 };
   });
+  /* 줄 끌어 옮기기 — 줄 오른쪽 ⠿ 손잡이를 잡고 위아래로. 놓을 자리는 줄 사이 가로 막대로 보여 준다. */
+  let rowDrag = null;
+  rowsEl.addEventListener("pointerdown", event => {
+    const grip = event.target.closest(".tier-row-grip"); if (!grip || event.button !== 0) return;
+    const rowEl = grip.closest(".tier-row"); if (!rowEl) return;
+    rowDrag = { rowEl, from:Number(grip.dataset.rowIndex), pointerId:event.pointerId, y:event.clientY, started:false, ghost:null, mark:null, to:-1, dy:0, left:0 };
+  });
+  const rowMove = event => {
+    const state = rowDrag;
+    if (!state.started){
+      if (Math.abs(event.clientY - state.y) < 4) return;
+      state.started = true; const r = state.rowEl.getBoundingClientRect(); state.dy = state.y - r.top; state.left = r.left;
+      state.ghost = state.rowEl.cloneNode(true); state.ghost.classList.add("tier-row-ghost"); state.ghost.style.width = r.width + "px"; document.body.appendChild(state.ghost);
+      state.rowEl.classList.add("is-dragging"); state.mark = document.createElement("div"); state.mark.className = "tier-row-mark"; root.classList.add("is-row-dragging");
+    }
+    event.preventDefault();
+    state.ghost.style.transform = `translate(${state.left}px, ${event.clientY - state.dy}px)`;
+    const others = Array.from(rowsEl.querySelectorAll(".tier-row")).filter(el => el !== state.rowEl);
+    let at = others.findIndex(el => { const r = el.getBoundingClientRect(); return event.clientY < r.top + r.height / 2; }); if (at < 0) at = others.length;
+    state.to = at; if (at < others.length) rowsEl.insertBefore(state.mark, others[at]); else rowsEl.appendChild(state.mark);
+    autoScroll(event.clientY);
+  };
+  const rowFinish = cancel => {
+    const state = rowDrag; rowDrag = null; if (!state.started) return;
+    state.ghost.remove(); if (state.mark.parentNode) state.mark.remove(); state.rowEl.classList.remove("is-dragging"); root.classList.remove("is-row-dragging");
+    if (cancel || state.to < 0 || !moveRowTo(state.from, state.to)) render();
+  };
   const onMove = event => {
+    if (rowDrag && event.pointerId === rowDrag.pointerId){ rowMove(event); return; }
     if (!drag || event.pointerId !== drag.pointerId) return;
     if (!drag.started){
       if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
@@ -383,6 +532,7 @@ function mountTierEditor(doc){
     autoScroll(event.clientY);
   };
   const finish = (event, cancel) => {
+    if (rowDrag && (!event || event.pointerId === rowDrag.pointerId)){ rowFinish(cancel); return; }
     if (!drag || (event && event.pointerId !== drag.pointerId)) return;
     const state = drag; drag = null;
     if (!state.started){ if (!cancel){ selectedId = state.id; board.querySelectorAll(".tier-item.is-selected").forEach(el => el.classList.remove("is-selected")); state.el.classList.add("is-selected"); } return; }
@@ -418,7 +568,7 @@ function mountTierEditor(doc){
   fileInput.onchange = async () => { const files = Array.from(fileInput.files || []); fileInput.value = ""; await addImageFiles(files); };
   textBtn.onclick = () => openItemDialog("");
   undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo();
-  rowBtn.onclick = () => { const row = addRow(); if (row) openRowDialog(row.id); };
+  const addRowAndEdit = () => { const row = addRow(); if (row) openRowDialog(row.id); };
   titleInput.oninput = () => { model.title = titleInput.value; history.commitSoon(500); touch(); };
   saveBtn.onclick = () => saveTierDoc(doc);
 
@@ -426,9 +576,10 @@ function mountTierEditor(doc){
     try { const png = await tierRenderPng(model); const blob = await (await fetch(png)).blob(); MNDownload.saveBlob(blob, tierSafeName(model.title) + ".png"); }
     catch(error){ console.warn("티어표 그림 저장 실패:", error); if (typeof toast === "function") toast("그림으로 저장하지 못했어요.", 3000, { type:"error" }); }
   };
-  boardBtn.onclick = async () => {
+  let sendingToBoard = false;
+  const sendToBoard = async () => {
     if (typeof newWhiteboard !== "function"){ if (typeof toast === "function") toast("화이트보드를 열 수 없어요.", 2600); return; }
-    boardBtn.disabled = true;
+    if (sendingToBoard) return; sendingToBoard = true;
     try {
       const png = await tierRenderPng(model);
       const boardDoc = newWhiteboard({ name:tierSafeName(model.title), state:{ version:1, savedAt:Date.now(), bg:typeof defaultBoardBg === "function" ? defaultBoardBg() : "#ffffff", items:[] } });
@@ -437,20 +588,24 @@ function mountTierEditor(doc){
       const placed = typeof boardDoc.insertBoardImage === "function" ? await boardDoc.insertBoardImage(png) : false;
       if (typeof toast === "function") toast(placed ? "티어표를 칠판으로 옮겼어요 — 그 위에 바로 판서할 수 있어요." : "칠판에 티어표를 넣지 못했어요.", 3000);
     } catch(error){ console.warn("티어표 칠판 보내기 실패:", error); if (typeof toast === "function") toast("칠판에 티어표를 넣지 못했어요.", 3000, { type:"error" }); }
-    finally { boardBtn.disabled = false; }
+    finally { sendingToBoard = false; }
   };
   moreBtn.onclick = () => {
     if (typeof MNContextMenu === "undefined"){ exportPng(); return; }
     const rect = moreBtn.getBoundingClientRect(); moreBtn.classList.add("is-open");
     MNContextMenu.open(rect.right - 210, rect.bottom + 6, [
+      { label:"줄 추가", title:"맨 아래에 등급 줄 추가", icon:"plus", disabled:model.tiers.length >= TIER_MAX_TIERS, action:addRowAndEdit },
+      { separator:true },
+      { label:"칠판으로", title:"티어표를 그림으로 굳혀 새 화이트보드에 넣기", icon:"board", action:sendToBoard },
       { label:"그림(PNG)으로 저장", title:"등급 줄 전체를 그림 한 장으로 저장", icon:"image", action:exportPng },
       { separator:true },
       { label:"카드 크기", icon:"view", children:[["s", "작게"], ["m", "보통"], ["l", "크게"]].map(([size, label]) => ({ label, active:model.cardSize === size, action:() => { if (model.cardSize !== size){ model.cardSize = size; changed(); } } })) },
       { label:"줄 틀 바꾸기", icon:"list", children:TIER_PRESETS.map(preset => ({ label:preset.label, title:"줄 이름·색을 이 틀로 바꿉니다(카드는 같은 차례의 줄에 그대로)", action:() => { tierApplyPreset(model, preset.id); changed(); } })) },
       { separator:true },
-      { label:"올릴 카드 섞기", title:"아래 모음의 카드 차례를 무작위로 섞기", icon:"shuffle", disabled:tierItemsIn(model, "").length < 2, action:() => { tierShufflePool(model); changed(); } },
-      { label:"모두 아래로 내리기", title:"줄에 올린 카드를 전부 아래 모음으로 되돌리기(다시 매기기)", icon:"refresh", disabled:!model.items.some(item => item.tier),
-        action:async () => { if (typeof confirmDialog === "function" && !await confirmDialog("줄에 올린 카드를 모두 아래로 내릴까요?", "내리기", "취소")) return; tierResetAll(model); changed(); } }
+      { label:"보유 카드 모두 지우기", title:"보유 카드(줄에 안 올린 카드)를 한꺼번에 지우기 — 검색 중이면 찾은 카드만", icon:"delete", disabled:!tierItemsIn(model, "").some(poolMatches), action:clearPool },
+      { label:"보유 카드 섞기", title:"보유 카드의 차례를 무작위로 섞기", icon:"shuffle", disabled:tierItemsIn(model, "").length < 2, action:() => { tierShufflePool(model); changed(); } },
+      { label:"모두 보유 카드로 내리기", title:"줄에 올린 카드를 전부 보유 카드로 되돌리기(다시 매기기)", icon:"refresh", disabled:!model.items.some(item => item.tier),
+        action:async () => { if (typeof confirmDialog === "function" && !await confirmDialog("줄에 올린 카드를 모두 보유 카드로 내릴까요?", "내리기", "취소")) return; tierResetAll(model); changed(); } }
     ], { base:"text-context", onClose:() => moreBtn.classList.remove("is-open") });
   };
 
@@ -467,7 +622,7 @@ function mountTierEditor(doc){
       event.preventDefault(); if (item.tier !== target && tierMoveItem(model, item.id, target, "")) changed(); return;
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight"){
-      const group = tierItemsIn(model, item.tier), at = group.indexOf(item), to = at + (event.key === "ArrowLeft" ? -1 : 1); if (to < 0 || to >= group.length) return;
+      const group = tierItemsIn(model, item.tier).filter(other => item.tier || poolMatches(other) || other === item), at = group.indexOf(item), to = at + (event.key === "ArrowLeft" ? -1 : 1); if (to < 0 || to >= group.length) return;
       event.preventDefault(); tierMoveItem(model, item.id, item.tier, event.key === "ArrowLeft" ? group[to].id : (group[to + 1] ? group[to + 1].id : "")); changed(); return;
     }
     if (event.key === "Delete" || event.key === "Backspace"){ event.preventDefault(); deleteItem(item.id); return; }
@@ -477,8 +632,8 @@ function mountTierEditor(doc){
   window.addEventListener("keydown", keydown);
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
-    clearTimeout(recoveryTimer); if (history) history.cancel(); if (drag && drag.ghost) drag.ghost.remove(); drag = null;
-    window.removeEventListener("keydown", keydown); document.removeEventListener("paste", onPaste);
+    clearTimeout(recoveryTimer); if (history) history.cancel(); if (drag && drag.ghost) drag.ghost.remove(); drag = null; if (rowDrag && rowDrag.ghost) rowDrag.ghost.remove(); rowDrag = null;
+    window.removeEventListener("keydown", keydown); document.removeEventListener("paste", onPaste); if (gutterObserver) gutterObserver.disconnect();
     window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onCancel);
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; delete doc.tierSelectItem; delete doc.tierMarkSaved;
   });
@@ -487,5 +642,5 @@ function mountTierEditor(doc){
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = { TIER_DOC_TYPE, TIER_DOC_VERSION, TIER_PRESETS, TIER_CARD_SIZES, tierDocEmpty, tierDocParse, tierDocSerialize, tierNormalizeItem,
-    tierItemsIn, tierMoveItem, tierClearRow, tierRemoveRow, tierResetAll, tierApplyPreset, tierShufflePool, tierSearchText, tierDefaultTitle, tierScratchFileName, tierInkFor };
+    tierItemsIn, tierMoveItem, tierClearRow, tierRemoveRow, tierResetAll, tierApplyPreset, tierShufflePool, tierRemovePoolItems, tierSearchText, tierDefaultTitle, tierScratchFileName, tierInkFor };
 }

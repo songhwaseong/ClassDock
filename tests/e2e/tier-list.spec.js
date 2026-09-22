@@ -1,6 +1,9 @@
 const { test, expect } = require("@playwright/test");
 const { collapseSidebar } = require("./helpers");
 
+// 머리말·보유 카드 판이 생겨 720px 높이에선 보유 카드가 화면 아래로 밀린다 — 끌기는 두 칸이 함께 보여야 하니 창을 키운다.
+test.use({ viewport:{ width:1280, height:900 } });
+
 /* 티어표 — 카드를 끌어 줄에 올리고, 줄 안 차례를 바꾸고, 숫자 키로 보내고, 되돌리기까지.
    포인터 이벤트로 직접 짠 끌기라 실제 마우스 좌표로 움직여 본다. */
 const TIERS = [
@@ -73,4 +76,45 @@ test("사진 여러 장을 넣으면 아래 모음에 사진 카드로 들어가
   const saved = await page.evaluate(() => { const doc = docs.find(d => d.kind === "tier"); return { dirty:!!doc.hasUnsavedEdits, json:tierDocSerialize(doc.tierDoc) }; });
   expect(saved.dirty).toBe(true);
   expect(JSON.parse(saved.json).items.filter(item => item.image).length).toBe(2);
+});
+
+test("⠿ 손잡이로 줄을 끌어 옮기고, 🗑 로 줄을 지우고, 보유 카드를 검색한다", async ({ page }) => {
+  await openTier(page);
+  const order = () => page.locator(".tier-row").evaluateAll(els => els.map(el => el.dataset.tierRow));
+  const grip = page.locator('.tier-row[data-tier-row="B"] .tier-row-grip'), top = await page.locator('.tier-row[data-tier-row="S"]').boundingBox(), g = await grip.boundingBox();
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2); await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2, top.y + 6, { steps:12 }); await page.mouse.up();
+  await expect.poll(order).toEqual(["B", "S", "A"]);
+
+  // 키보드 ↓ 로도 옮긴다
+  await page.locator('.tier-row[data-tier-row="B"] .tier-row-grip').focus(); await page.keyboard.press("ArrowDown");
+  await expect.poll(order).toEqual(["S", "B", "A"]);
+
+  await drag(page, page.locator('.tier-item[data-item-id="c0"]'), page.locator('.tier-items[data-tier="A"]'));
+  await expect.poll(() => ids(page, '.tier-items[data-tier="A"]')).toEqual(["c0"]);
+  await page.locator('.tier-row[data-tier-row="A"] .tier-row-trash').click();
+  await expect.poll(order).toEqual(["S", "B"]);
+  await expect(page.locator(".tier-pool .tier-item")).toHaveCount(3);
+
+  await page.locator(".tier-search input").fill("라");
+  await expect.poll(() => ids(page, ".tier-pool")).toEqual(["c1"]);
+  await page.locator(".tier-search input").fill("");
+  await expect(page.locator(".tier-pool .tier-item")).toHaveCount(3);
+});
+
+test("보유 카드 모두 지우기 — 검색 중이면 찾은 카드만, 줄 카드는 남고 Ctrl+Z 로 되돌린다", async ({ page }) => {
+  await openTier(page);
+  await page.locator('.tier-item[data-item-id="c0"]').click(); await page.keyboard.press("1");
+  await expect.poll(() => ids(page, '.tier-items[data-tier="S"]')).toEqual(["c0"]);
+  await page.locator(".tier-search input").fill("라");
+  await page.locator(".tier-pool-clear").click(); await page.locator("#confirmOk").click();
+  await page.locator(".tier-search input").fill("");
+  await expect.poll(() => ids(page, ".tier-pool")).toEqual(["c2"]);
+  await page.locator(".tier-pool-clear").click(); await page.locator("#confirmOk").click();
+  await expect(page.locator(".tier-pool .tier-item")).toHaveCount(0);
+  await expect(page.locator(".tier-pool-clear")).toBeDisabled();
+  await expect.poll(() => ids(page, '.tier-items[data-tier="S"]')).toEqual(["c0"]);
+  await page.locator(".tier-doc .tier-title").blur(); await page.mouse.click(5, 400);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => ids(page, ".tier-pool")).toEqual(["c2"]);
 });

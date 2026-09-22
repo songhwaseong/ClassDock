@@ -82,3 +82,21 @@ test("티어표가 셸·불러오기·새로 만들기·검색·복원 목록에
   assert.match(docs, /RESTORE_UNSAVED_KINDS = new Set\(\[[^\]]*"tier"/); assert.match(docs, /newTierScratchInFolder/); assert.match(docs, /isTierSearchable/);
   assert.match(read("src/js/app.js"), /"study", "tier", "diary"/);
 });
+
+test("줄 장식 그림은 줄에 붙어 있어 줄을 옮겨도 따라가고, 그림 없는 예전 파일은 지금 차례로 정한다", () => {
+  const model = tier.tierDocEmpty("간식");
+  assert.deepEqual(model.tiers.map(row => row.icon), ["crown", "star", "star", "sprout", "gem"]);
+  const [s] = model.tiers.splice(0, 1); model.tiers.splice(2, 0, s);          // S 를 가운데로
+  const parsed = tier.tierDocParse(tier.tierDocSerialize(model));
+  assert.equal(parsed.tiers[2].label, "S"); assert.equal(parsed.tiers[2].icon, "crown");
+  const old = tier.tierDocParse({ type:"classdock-tier", tiers:[{ id:"a", label:"A" }, { id:"b", label:"B", icon:"nope" }, { id:"c", label:"C" }], items:[] });
+  assert.deepEqual(old.tiers.map(row => row.icon), ["crown", "star", "gem"]);
+});
+
+test("보유 카드 한꺼번에 지우기는 줄에 올린 카드를 건드리지 않는다", () => {
+  const model = sample(), [s] = model.tiers.map(row => row.id);
+  tier.tierMoveItem(model, "c0", s, "");
+  assert.equal(tier.tierRemovePoolItems(model, ["c0", "c1", "c2"]), 2);
+  assert.deepEqual(model.items.map(item => item.id).sort(), ["c0", "c3"]);
+  assert.equal(model.items.find(item => item.id === "c0").tier, s);
+});

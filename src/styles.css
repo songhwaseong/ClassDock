@@ -7017,40 +7017,80 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 
   /* ===== 티어표(.tier) ===== */
   [data-cat="tier"]{--ic:#e11d48}
-  .tier-doc{--tier-card:88px;--tier-row-bg:color-mix(in srgb,var(--ink) 7%,var(--panel));position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-height:0;background:var(--bg);color:var(--ink)}
-  .tier-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border);z-index:20}
-  .tier-title{flex:1 1 190px;min-width:150px;max-width:360px;border:1px solid var(--border);border-radius:8px;background:var(--field);color:var(--ink);font:inherit;font-weight:750;padding:7px 9px}
-  .tier-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:32px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);padding:5px 10px;font:inherit;cursor:pointer}
-  .tier-btn:hover{border-color:var(--accent);color:var(--accent)}.tier-btn:disabled{opacity:.38;cursor:default}.tier-btn .ui-icon{width:15px;height:15px}
-  .tier-btn.tier-ico{min-width:32px;padding-inline:7px}.tier-btn.is-open{border-color:var(--accent);color:var(--accent)}
-  .tier-primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:750}.tier-primary:hover{background:var(--accent-d);color:#fff}
-  .tier-board{flex:1;min-height:0;overflow:auto;padding:16px clamp(10px,3vw,40px) 28px}
+  .tier-doc{--tier-card:88px;--tier-bg:color-mix(in srgb,var(--accent) 5%,var(--bg));--tier-panel-shadow:0 8px 28px color-mix(in srgb,#282d5a 10%,transparent),0 1px 2px color-mix(in srgb,#282d5a 6%,transparent);position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-height:0;background:var(--tier-bg);color:var(--ink)}
+  /* 머리말 — 로고·제목(고칠 수 있는 입력칸)·부제 / 버튼 / 오른쪽 끝에 판 위로 내다보는 고양이 */
+  /* 머리말은 아래 판과 같은 1400px 틀 안에 둔다 — 넓은 모니터에서 로고·버튼·고양이가 판 양 끝과 맞게.
+     --tier-gutter 는 판 쪽 스크롤 막대 폭(JS 가 잼)이라, 그만큼 오른쪽을 더 비워야 두 틀의 가운데가 같다. */
+  .tier-bar{position:relative;z-index:20;padding:10px calc(clamp(14px,3vw,40px) + var(--tier-gutter,0px)) 6px clamp(14px,3vw,40px)}
+  .tier-bar-inner{position:relative;display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;max-width:1400px;margin:0 auto;padding-right:230px}
+  .tier-brand{display:flex;align-items:center;gap:12px;flex:1 1 260px;min-width:0}
+  .tier-logo{flex:none;display:grid;place-items:center;width:46px;height:46px}.tier-logo svg{width:42px;height:42px}
+  .tier-heading{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+  .tier-title{width:100%;max-width:420px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:clamp(20px,2.2vw,27px);font-weight:850;letter-spacing:-.02em;line-height:1.2;padding:2px 6px;margin-left:-7px;text-overflow:ellipsis}
+  .tier-title:hover{border-color:var(--border)}.tier-title:focus{outline:none;border-color:var(--accent);background:var(--field)}
+  .tier-sub{color:var(--muted);font-size:13px}
+  .tier-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tier-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);padding:6px 15px;font:inherit;font-weight:700;cursor:pointer;box-shadow:0 1px 2px color-mix(in srgb,#282d5a 7%,transparent);transition:border-color .12s,color .12s,background .12s}
+  .tier-btn:hover{border-color:var(--accent);color:var(--accent)}.tier-btn:disabled{opacity:.38;cursor:default}.tier-btn .ui-icon{width:17px;height:17px}
+  .tier-btn.tier-ico{min-width:40px;padding-inline:10px}.tier-btn.is-open{border-color:var(--accent);color:var(--accent)}
+  .tier-primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 30%,transparent)}.tier-primary:hover{background:var(--accent-d);border-color:var(--accent-d);color:#fff}
+  .tier-mascot{position:absolute;right:6px;bottom:-22px;display:flex;align-items:flex-start;pointer-events:none;user-select:none}
+  .tier-mascot-cat{display:block;width:112px;height:auto}
+  .tier-mascot{transition:transform .22s ease,opacity .22s ease}.tier-mascot.is-away{transform:translateY(-14px);opacity:0}
+  .tier-mascot-say{margin:16px -4px 0 0;transform:rotate(-9deg);color:color-mix(in srgb,var(--ink) 78%,transparent);font-size:12.5px;font-weight:700;line-height:1.35;text-align:center;white-space:nowrap}
+  .tier-board{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;padding:12px clamp(14px,3vw,40px) 24px}
   .tier-doc.is-file-over .tier-board{outline:3px dashed var(--accent);outline-offset:-8px}
-  .tier-rows{display:flex;flex-direction:column;gap:2px;border:2px solid #111;border-radius:4px;background:#111;max-width:1400px;margin:0 auto}
-  .tier-row{display:grid;grid-template-columns:clamp(72px,9vw,120px) minmax(0,1fr) auto;min-height:calc(var(--tier-card) + 8px);background:var(--tier-row-bg)}
-  .tier-label{display:grid;place-items:center;padding:6px;border:0;font:inherit;font-size:clamp(15px,1.6vw,22px);font-weight:800;line-height:1.2;text-align:center;word-break:keep-all;overflow-wrap:anywhere;cursor:pointer}
-  .tier-label:hover{filter:brightness(1.06)}.tier-label:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
-  .tier-items{display:flex;flex-wrap:wrap;align-content:flex-start;gap:4px;padding:4px;min-height:calc(var(--tier-card) + 8px);transition:background .12s}
-  .tier-items.is-over{background:color-mix(in srgb,var(--accent) 14%,transparent)}
-  .tier-row-tools{display:flex;align-items:center;gap:4px;padding:0 8px;background:color-mix(in srgb,#000 22%,var(--tier-row-bg))}
-  .tier-row-arrows{display:flex;flex-direction:column}
-  .tier-row-btn{display:grid;place-items:center;width:30px;height:26px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
-  .tier-row-btn .ui-icon{width:18px;height:18px}.tier-row-gear .ui-icon{width:22px;height:22px}
-  .tier-row-btn:hover:not(:disabled){background:color-mix(in srgb,var(--ink) 10%,transparent);color:var(--ink)}.tier-row-btn:disabled{opacity:.25;cursor:default}
-  .tier-item{position:relative;flex:none;width:var(--tier-card);height:var(--tier-card);overflow:hidden;border-radius:3px;background:#fff;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;box-shadow:0 1px 3px #0003}
+  /* 등급 줄 판 */
+  .tier-rows{display:flex;flex-direction:column;gap:8px;max-width:1400px;margin:0 auto;padding:12px;border:1px solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:18px;background:var(--panel);box-shadow:var(--tier-panel-shadow)}
+  .tier-row{--row-color:#cfcfcf;display:grid;grid-template-columns:clamp(84px,11vw,150px) minmax(0,1fr) auto;gap:10px;min-height:calc(var(--tier-card) + 14px)}
+  .tier-row.is-dragging{opacity:.3}
+  .tier-label{position:relative;display:grid;place-items:center;overflow:hidden;padding:6px 10px;border:0;border-radius:12px;font:inherit;font-size:clamp(18px,2.1vw,32px);font-weight:850;line-height:1.15;text-align:center;word-break:keep-all;overflow-wrap:anywhere;cursor:pointer;box-shadow:inset 0 -2px 0 #0000000d}
+  .tier-label-text{position:relative;z-index:1}
+  .tier-label-ico{position:absolute;right:8%;top:50%;transform:translateY(-50%);display:grid;color:#fff;opacity:.62;pointer-events:none}.tier-label-ico .ui-icon{width:clamp(22px,2.6vw,40px);height:clamp(22px,2.6vw,40px);stroke-width:1.5}
+  .tier-label:hover{filter:brightness(1.04)}.tier-label:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .tier-items{display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;padding:6px;min-height:calc(var(--tier-card) + 14px);transition:background .12s,border-color .12s}
+  .tier-row .tier-items{border:1.5px dashed color-mix(in srgb,var(--row-color) 60%,var(--panel));border-radius:12px;background:color-mix(in srgb,var(--row-color) 13%,var(--panel))}
+  .tier-row .tier-items:not(:has(.tier-item)){align-content:center}
+  .tier-row .tier-items:not(:has(.tier-item)):not(.is-over)::before{content:"＋  " attr(data-empty);flex:1;align-self:center;color:color-mix(in srgb,var(--ink) 62%,transparent);font-size:13.5px;text-align:center;white-space:pre}
+  .tier-items.is-over{background:color-mix(in srgb,var(--accent) 12%,var(--panel));border-color:var(--accent)}
+  .tier-row-tools{display:flex;align-items:center;gap:4px;padding:0 8px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--panel) 60%,var(--tier-bg))}
+  .tier-row-btn{display:grid;place-items:center;width:46px;height:46px;border:0;border-radius:10px;background:transparent;color:var(--ink);cursor:pointer}
+  .tier-row-btn .ui-icon{width:25px;height:25px}
+  .tier-row-btn:hover:not(:disabled){background:color-mix(in srgb,var(--ink) 8%,transparent)}.tier-row-btn:disabled{opacity:.25;cursor:default}
+  .tier-row-grip{cursor:grab;touch-action:none}.tier-row-grip:active{cursor:grabbing}
+  .tier-row-trash:hover:not(:disabled){color:var(--danger,#dc2626)}
+  .tier-row-ghost{position:fixed!important;left:0;top:0;z-index:5000;pointer-events:none;opacity:.94;filter:drop-shadow(0 14px 26px #0003)}
+  .tier-row-mark{height:4px;margin:-6px 0;border-radius:3px;background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
+  .tier-doc.is-row-dragging,.tier-doc.is-row-dragging *{cursor:grabbing!important}
+  /* 카드 */
+  .tier-item{position:relative;flex:none;width:var(--tier-card);height:var(--tier-card);overflow:hidden;border-radius:8px;background:#fff;cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;box-shadow:0 1px 4px #141a3c24}
   .tier-item img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}
-  .tier-item-cap{position:absolute;left:0;right:0;bottom:0;padding:2px 4px;background:#000a;color:#fff;font-size:11px;font-weight:700;line-height:1.3;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .tier-item.is-text{display:grid;place-items:center;padding:5px;background:#f4f4f6;color:#1f2328}
+  .tier-item-cap{position:absolute;left:0;right:0;bottom:0;padding:2px 4px;background:#0009;color:#fff;font-size:11px;font-weight:700;line-height:1.3;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tier-item.is-text{display:grid;place-items:center;padding:5px;background:#f7f8fc;color:#1f2328;box-shadow:inset 0 0 0 1.5px #e1e4ef,0 1px 4px #141a3c1a}
   .tier-item-text{font-size:calc(var(--tier-card) * .15);font-weight:750;line-height:1.25;text-align:center;word-break:keep-all;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
   .tier-item.is-selected{outline:3px solid var(--accent);outline-offset:1px}
   .tier-item.is-dragging{opacity:.28}
   .tier-ghost{position:fixed!important;left:0;top:0;z-index:5000;pointer-events:none;opacity:.92;box-shadow:0 12px 30px #0006;cursor:grabbing}
   .tier-doc.is-dragging,.tier-doc.is-dragging *{cursor:grabbing!important}
   .tier-drop-mark{flex:none;width:6px;height:var(--tier-card);border-radius:3px;background:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 30%,transparent)}
-  .tier-pool-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;max-width:1400px;margin:18px auto 6px}
-  .tier-pool-head strong{font-size:14px}.tier-hint{color:var(--muted);font-size:12px}
-  .tier-pool{max-width:1400px;margin:0 auto;min-height:calc(var(--tier-card) * 1.5);border:1px dashed var(--border);border-radius:8px;background:color-mix(in srgb,var(--panel) 70%,var(--bg))}
-  .tier-empty{flex:1;min-height:calc(var(--tier-card) * 1.3);border:0;background:transparent;color:var(--muted);font:inherit;font-weight:750;cursor:pointer}.tier-empty:hover{color:var(--accent)}
+  /* 보유 카드 */
+  .tier-pool-section{max-width:1400px;margin:14px auto 0;padding:12px 16px 16px;border:1px solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:18px;background:var(--panel);box-shadow:var(--tier-panel-shadow)}
+  .tier-pool-head{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-bottom:10px}
+  .tier-pool-ico{flex:none;display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:color-mix(in srgb,var(--accent) 9%,var(--panel));color:color-mix(in srgb,var(--accent) 55%,var(--ink))}.tier-pool-ico .ui-icon{width:24px;height:24px}
+  .tier-pool-titles{display:flex;flex-direction:column;gap:2px;flex:1 1 240px;min-width:0}
+  .tier-pool-titles strong{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:850}
+  .tier-pool-count{min-width:22px;padding:1px 8px;border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--panel));color:var(--accent);font-size:12px;font-weight:800;text-align:center}.tier-pool-count:empty{display:none}
+  .tier-hint{color:var(--muted);font-size:12px}
+  .tier-pool-clear{min-height:40px}.tier-pool-clear:hover:not(:disabled){border-color:var(--danger,#dc2626);color:var(--danger,#dc2626)}
+  .tier-search{display:flex;align-items:center;gap:8px;flex:0 1 280px;min-width:180px;height:40px;padding:0 12px;border:1px solid var(--border);border-radius:10px;background:var(--field);color:var(--muted)}
+  .tier-search:focus-within{border-color:var(--accent)}.tier-search .ui-icon{width:17px;height:17px}
+  .tier-search input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--ink);font:inherit}
+  .tier-pool{min-height:calc(var(--tier-card) * 1.5);border:1.5px dashed var(--border);border-radius:12px;background:color-mix(in srgb,var(--tier-bg) 55%,var(--panel))}
+  .tier-pool.is-over{border-color:var(--accent)}
+  .tier-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:calc(var(--tier-card) * 1.3);border:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+  .tier-empty .ui-icon{width:24px;height:24px;color:color-mix(in srgb,var(--ink) 70%,transparent)}.tier-empty strong{font-size:14px;font-weight:700}.tier-empty small{color:var(--muted);font-size:11.5px}
+  .tier-empty:hover,.tier-empty:hover .ui-icon{color:var(--accent)}
+  .tier-pool-none{flex:1;align-self:center;margin:0;color:var(--muted);font-size:13px;text-align:center}
   .tier-modal{position:fixed;inset:0;z-index:2200;display:grid;place-items:center;padding:20px;background:#0f172a99;backdrop-filter:blur(3px)}
   .tier-modal-card{width:min(520px,96vw);max-height:92vh;overflow:auto;border:1px solid var(--border);border-radius:16px;background:var(--panel);color:var(--ink);box-shadow:0 24px 80px #0006}
   .tier-modal-card header{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;padding:14px 17px;border-bottom:1px solid var(--border);background:var(--panel)}
@@ -7070,7 +7110,9 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .tier-form footer{display:flex;align-items:center;gap:8px}.tier-form footer span{flex:1}
   .tier-form-error{min-height:1em;margin:0;color:#dc2626;font-size:13px}.tier-form-error:empty{display:none}
   .tier-item-preview{display:flex;justify-content:center}.tier-item-preview[hidden]{display:none}.tier-item-preview img{max-width:180px;max-height:180px;border-radius:8px;object-fit:contain;background:#fff}
-  @media(max-width:800px){.tier-row{grid-template-columns:64px minmax(0,1fr) auto}.tier-row-tools{padding:0 3px}.tier-hint{display:none}}
+  @media(max-width:1180px){.tier-mascot-say{display:none}.tier-bar-inner{padding-right:128px}.tier-hint{display:none}}
+  @media(max-width:860px),(max-height:620px){.tier-mascot{display:none}.tier-bar-inner{padding-right:0}.tier-heading .tier-sub{display:none}}
+  @media(max-width:800px){.tier-row{grid-template-columns:64px minmax(0,1fr) auto;gap:6px}.tier-row-tools{flex-direction:column;justify-content:center;padding:2px}.tier-row-btn{width:38px;height:38px}.tier-row-btn .ui-icon{width:22px;height:22px}.tier-actions .tier-btn span{display:none}.tier-actions .tier-btn{padding-inline:10px}.tier-label-ico{display:none}}
 
 /* 지도: 표시 묶기·영역 분석·자료 교환·길찾기 비교 설정 */
 .map-marker-cluster{display:grid!important;place-items:center;border:0!important;background:transparent!important}
