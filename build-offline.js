@@ -47,7 +47,11 @@ const localStyleTag = `<link rel="stylesheet" href="${manifest.styles.local}">`;
 requireTag(html, localStyleTag, "Local stylesheet");
 // 일기장 바탕 그림은 외부 CSS 에선 상대 경로로 읽고, 단일 HTML/EXE 에선 바이트를 직접 담는다.
 const diaryBackdropAssets = new Set();
-const localCss = read(manifest.styles.local).replace(/url\(["']?assets\/diary-backdrops\/([a-z-]+)\.webp["']?\)/g, (_, name) => {
+const pencilCursorCssUrl = 'url("assets/diary-pencil-cursor.png")';
+const localCssSource = read(manifest.styles.local);
+requireTag(localCssSource, pencilCursorCssUrl, "Pencil drawing cursor");
+const pencilCursorData = fs.readFileSync(path.join(root, "src/assets/diary-pencil-cursor.png")).toString("base64");
+const localCss = localCssSource.replace(pencilCursorCssUrl, `url("data:image/png;base64,${pencilCursorData}")`).replace(/url\(["']?assets\/diary-backdrops\/([a-z-]+)\.webp["']?\)/g, (_, name) => {
   const relative = `src/assets/diary-backdrops/${name}.webp`;
   diaryBackdropAssets.add(name);
   const base64 = fs.readFileSync(path.join(root, relative)).toString("base64");

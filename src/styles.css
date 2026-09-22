@@ -8605,7 +8605,7 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-draw-layer{position:absolute;pointer-events:none}
 .diary-draw-layer[hidden]{display:none}
 .diary-draw-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;touch-action:none}
-.diary-paper.is-drawing .diary-draw-canvas{pointer-events:auto;cursor:crosshair}
+.diary-paper.is-drawing .diary-draw-canvas{pointer-events:auto;cursor:url("assets/diary-pencil-cursor.png") 6 62, crosshair}
 .diary-paper.is-drawing .diary-picture-box{border-color:var(--accent);border-style:solid}
 .diary-draw-bar{position:absolute;left:6px;top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;max-width:calc(100% - 12px);padding:5px 6px;border:1px solid var(--border);border-radius:10px;background:var(--panel);box-shadow:var(--shadow);pointer-events:auto}
 .diary-draw-bar[hidden]{display:none}
