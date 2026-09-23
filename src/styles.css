@@ -187,6 +187,25 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
      락업 높이 26px 은 임의값이 아니다 — 외곽선에는 힌팅이 없어서 20px(세로획 2.17px)에서는 획이
      픽셀 경계에 걸쳐 굵기가 제각각으로 보였다. D 자리 심볼 자체는 이 격자 안에서 20px로 보인다. */
   .brand-lockup{height:26px;width:auto;display:block;flex:0 0 auto}
+  /* 켤 때 한 번: D 심볼이 위에서 내려와 '톡' 붙고(dock), Class·ock 이 심볼 쪽에서 양옆으로 펼쳐진다.
+     이어서 빛 줄기가 글자와 D 심볼 위로 지나가고, 그 뒤로 1분마다, 그리고 마우스를 올릴 때 다시 지나간다.
+     fill-mode 를 backwards 로 두어 끝나면 transform 이 남지 않게 한다 — 남으면 위 픽셀 스냅이 깨진다.
+     빛 줄기는 쉴 때 락업 왼쪽 바깥(x=-18)에 있다. 1분 주기는 60s 한 바퀴 중 앞 1.4s(2.33%)만 움직이고
+     나머지는 오른쪽 바깥에서 쉰다. hover 는 목록 뒤에 다른 이름으로 덧붙여야 다시 재생되고,
+     앞의 주기 애니메이션은 이름·자리가 같아 hover 로 처음부터 다시 시작되지 않는다. */
+  .brand-lockup .brand-mark{animation:brand-dock .6s cubic-bezier(.3,.7,.4,1) backwards}
+  .brand-lockup .brand-class{animation:brand-spread-l .45s .28s ease-out backwards}
+  .brand-lockup .brand-ock{animation:brand-spread-r .45s .28s ease-out backwards}
+  .brand-lockup .brand-sheen{animation:brand-sheen-cycle 60s 1s linear infinite}
+  .brand-lockup:hover .brand-sheen{animation:brand-sheen-cycle 60s 1s linear infinite,brand-sheen-hover 1.4s ease-in-out}
+  @keyframes brand-dock{0%{transform:translateY(-9px);opacity:0}55%{transform:translateY(1.5px);opacity:1}78%{transform:translateY(-.5px)}100%{transform:none}}
+  @keyframes brand-spread-l{from{transform:translateX(6px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes brand-spread-r{from{transform:translateX(-6px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes brand-sheen-cycle{0%{transform:none;animation-timing-function:ease-in-out}2.33%,100%{transform:translateX(136px)}}
+  @keyframes brand-sheen-hover{from{transform:none}to{transform:translateX(136px)}}
+  @media (prefers-reduced-motion:reduce){
+    .brand-lockup .brand-mark,.brand-lockup .brand-class,.brand-lockup .brand-ock,.brand-lockup .brand-sheen{animation:none}
+  }
   /* 작업공간은 세로 색상 막대, 서버 연결 상태는 원형 점으로 구분한다. */
   .workspace-color{display:inline-block;flex:0 0 auto;width:3px;height:14px;border-radius:2px;background:#5b8def;box-shadow:none}
   .workspace-color[data-color="green"]{background:#36a269}.workspace-color[data-color="orange"]{background:#e39435}
@@ -7038,6 +7057,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .tier-mascot-cat{display:block;width:112px;height:auto}
   .tier-mascot{transition:transform .22s ease,opacity .22s ease}.tier-mascot.is-away{transform:translateY(-14px);opacity:0}
   .tier-mascot-say{margin:16px -4px 0 0;transform:rotate(-9deg);color:color-mix(in srgb,var(--ink) 78%,transparent);font-size:12.5px;font-weight:700;line-height:1.35;text-align:center;white-space:nowrap}
+  /* 라이트에선 앱 바탕(사용자가 고른 색일 수 있음)에 보라를 섞으면 탁해져 — 밝은 라벤더로 못박는다. 다크는 위 섞은 색 그대로. */
+  :root:not([data-theme="dark"]) .tier-doc{--tier-bg:#f5f3ff}
   .tier-board{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;padding:12px clamp(14px,3vw,40px) 24px}
   .tier-doc.is-file-over .tier-board{outline:3px dashed var(--accent);outline-offset:-8px}
   /* 등급 줄 판 */
@@ -7058,7 +7079,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .tier-row-btn .ui-icon{width:25px;height:25px}
   .tier-row-btn:hover:not(:disabled){background:color-mix(in srgb,var(--ink) 8%,transparent)}.tier-row-btn:disabled{opacity:.25;cursor:default}
   .tier-row-grip{cursor:grab;touch-action:none}.tier-row-grip:active{cursor:grabbing}
-  .tier-row-trash:hover:not(:disabled){color:var(--danger,#dc2626)}
+  .tier-row-clear:hover:not(:disabled){color:var(--accent,#2563eb)}
   .tier-row-ghost{position:fixed!important;left:0;top:0;z-index:5000;pointer-events:none;opacity:.94;filter:drop-shadow(0 14px 26px #0003)}
   .tier-row-mark{height:4px;margin:-6px 0;border-radius:3px;background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}
   .tier-doc.is-row-dragging,.tier-doc.is-row-dragging *{cursor:grabbing!important}
@@ -8018,7 +8039,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-map-pane{position:relative;z-index:0;isolation:isolate;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--panel)}
 .trip-map-head{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border)}
 .trip-map-title{flex:1;color:var(--muted);font-size:12px;font-weight:600}
-.trip-route-btn.is-on{color:var(--accent);border-color:var(--accent)}
+.trip-route-btn.is-on,.trip-map-photos-btn.is-on{color:var(--accent);border-color:var(--accent)}
 .trip-map-stage{flex:1;min-height:180px}
 .trip-map-stage.is-picking{cursor:crosshair}
 .trip-map-scope.is-on,.trip-freeze-btn:not(:disabled){color:var(--accent)}
@@ -8189,7 +8210,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-map-title{color:#233965;font-size:13px;font-weight:800}
 .trip-map-scope{width:34px!important;min-width:34px;height:34px;min-height:34px!important;padding:0!important;border:0;border-radius:9px;background:#5276f5!important;color:#fff!important}
 .trip-map-scope .ui-icon{width:20px;height:20px}
-.trip-route-btn,.trip-freeze-btn{width:32px;min-height:32px;padding:0;border-color:rgba(125,158,193,.24);border-radius:9px;background:rgba(255,255,255,.66)}
+.trip-route-btn,.trip-map-photos-btn,.trip-freeze-btn{width:32px;min-height:32px;padding:0;border-color:rgba(125,158,193,.24);border-radius:9px;background:rgba(255,255,255,.66)}
 .trip-map-stage{min-height:210px;margin:10px;border:1px solid rgba(85,140,175,.2);border-radius:12px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.35)}
 .trip-map-note{margin:-2px 10px 8px;padding:6px 9px;border-radius:8px;background:rgba(255,255,255,.6);color:#71819d}
 .trip-map-guide{display:flex;align-items:center;gap:7px;margin:0 10px 10px;padding:9px 10px;border:1px solid rgba(125,158,193,.18);border-radius:10px;background:rgba(255,255,255,.74);color:#8090ac;font-size:11.5px}
@@ -8197,7 +8218,20 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-map-photo-popup .leaflet-popup-content-wrapper{padding:0;border:1px solid rgba(134,170,205,.28);border-radius:12px;box-shadow:0 8px 25px rgba(30,68,113,.25);background:var(--panel)}
 .trip-map-photo-popup .leaflet-popup-content{width:240px!important;margin:0}
 .trip-map-photo-popup .leaflet-popup-tip{background:var(--panel)}
-.trip-map-photo-card{padding:10px;color:var(--ink);font-size:12px;line-height:1.35}
+/* 여행일지 지도 표식: 종류 색 핀 + 방문 순서 + 종류 그림 칩 */
+.trip-map-pin{background:none;border:0}
+.trip-map-pin .trip-map-pin-shape{position:absolute;left:0;top:0;overflow:visible;filter:drop-shadow(0 2px 2px rgba(15,23,42,.35))}
+.trip-map-pin .trip-map-pin-num{position:absolute;left:5px;top:6px;width:20px;height:17px;display:flex;align-items:center;justify-content:center;font:800 12px/1 system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif;letter-spacing:-.02em;pointer-events:none}
+.trip-map-pin .trip-map-pin-num.is-long{font-size:9.5px;letter-spacing:-.05em}
+.trip-map-pin .trip-map-pin-kind{position:absolute;left:19px;top:-7px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;pointer-events:none}
+.trip-map-pin .trip-map-pin-art{width:13px;height:13px;color:#334155}
+/* '사진으로 보기': 둥근 사진 + 아래 꼬리 + 번호 배지 */
+.trip-map-photo-pin{background:none;border:0}
+.trip-map-photo-pin .trip-map-photo-pin-frame{position:absolute;left:2px;top:2px;width:40px;height:40px;box-sizing:border-box;border:3px solid;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(15,23,42,.38)}
+.trip-map-photo-pin .trip-map-photo-pin-frame::after{content:"";position:absolute;left:50%;bottom:-10px;margin-left:-6px;border:6px solid transparent;border-top:7px solid var(--pin);border-bottom:0}
+.trip-map-photo-pin .trip-map-photo-pin-frame img{display:block;width:100%;height:100%;border-radius:50%;object-fit:cover;pointer-events:none}
+.trip-map-photo-pin .trip-map-photo-pin-num{position:absolute;right:-4px;top:-4px;min-width:18px;height:18px;padding:0 4px;box-sizing:border-box;border:2px solid #fff;border-radius:9px;color:#fff;display:flex;align-items:center;justify-content:center;font:800 10.5px/1 system-ui,-apple-system,"Segoe UI","Malgun Gothic",sans-serif;box-shadow:0 1px 3px rgba(15,23,42,.35);pointer-events:none}
+.trip-map-photo-pin .trip-map-photo-pin-num.is-long{font-size:9px;letter-spacing:-.04em}.trip-map-photo-card{padding:10px;color:var(--ink);font-size:12px;line-height:1.35}
 .trip-map-photo-head{display:flex;align-items:baseline;gap:8px}
 .trip-map-photo-head strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .trip-map-photo-head span,.trip-map-photo-meta{color:var(--muted);font-size:11px;white-space:nowrap}

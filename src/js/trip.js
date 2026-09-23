@@ -81,6 +81,7 @@ const TRIP_WORDS = {
 
   mapPane:      ["동선", "위치", "조사 범위"],
   route:        ["다닌 길", "이동 경로", "조사 동선"],
+  mapPhotos:    ["사진으로 보기", "사진으로 보기", "사진으로 보기"],
   mapStill:     ["지도 그림으로 굳히기", "지도 그림으로 굳히기", "지도 그림으로 굳히기"],
   mapRemove:    ["굳힌 그림 지우기", "굳힌 그림 지우기", "굳힌 그림 지우기"],
   mapEmpty:     ["장소에 좌표가 없어요", "장소에 좌표가 없어요", "장소에 좌표가 없어요"],
@@ -132,6 +133,7 @@ const TRIP_WORDS_EN = {
 
   mapPane:      ["Route", "Location", "Survey area"],
   route:        ["Trail", "Route", "Survey path"],
+  mapPhotos:    ["Show photos", "Show photos", "Show photos"],
   mapStill:     ["Freeze map image", "Freeze map image", "Freeze map image"],
   mapRemove:    ["Remove frozen image", "Remove frozen image", "Remove frozen image"],
   mapEmpty:     ["No coordinates yet", "No coordinates yet", "No coordinates yet"],
@@ -218,6 +220,43 @@ function tripSpotKindName(purpose, id){
 }
 function tripSpotKindIcon(id){ const info = tripSpotKindInfo(id); return info ? info[1] : ""; }
 function tripSpotKindColor(id){ const info = tripSpotKindInfo(id); return info ? info[2] : "blue"; }
+
+/* 지도 표식: 핀 색 = 장소 종류, 핀 안 = 방문 순서, 오른쪽 위 작은 칩 = 종류 그림.
+   circleMarker(SVG 한 점)로는 번호·그림을 담을 수 없어 divIcon 으로 그린다 — 굳히기(html-to-image)는 DOM 그대로 찍는다. */
+const TRIP_DAY_ROUTE_COLORS = ["#2563eb", "#e11d48", "#16a34a", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d"];
+function tripDayRouteColor(dayIndex){ return TRIP_DAY_ROUTE_COLORS[Math.abs(dayIndex | 0) % TRIP_DAY_ROUTE_COLORS.length]; }
+function tripMapPinIcon(hex, number, kind){
+  const num = String(number);
+  const art = kind && typeof diaryArtSvg === "function" ? diaryArtSvg(tripSpotKindIcon(kind), "trip-map-pin-art") : "";
+  return L.divIcon({
+    className:"trip-map-pin",
+    html:'<svg class="trip-map-pin-shape" viewBox="0 0 30 40" width="30" height="40" aria-hidden="true">'
+      + '<path d="M15 1.5C7.8 1.5 2 7.2 2 14.3c0 9.4 13 24.2 13 24.2s13-14.8 13-24.2C28 7.2 22.2 1.5 15 1.5z"'
+      + ' fill="' + hex + '" stroke="#fff" stroke-width="2"/>'
+      + '<circle cx="15" cy="14.2" r="9" fill="#fff"/></svg>'
+      + '<span class="trip-map-pin-num' + (num.length > 2 ? " is-long" : "") + '" style="color:' + hex + '">' + num + '</span>'
+      + (art ? '<span class="trip-map-pin-kind">' + art + '</span>' : ""),
+    iconSize:[30, 40],
+    iconAnchor:[15, 39],
+    popupAnchor:[0, -36],
+    tooltipAnchor:[0, -36]
+  });
+}
+/* '사진으로 보기' 표식: 둥근 사진 + 종류 색 테두리 + 번호 배지. 사진은 작게 줄인 data URL 만 받는다
+   (1200px 원본을 그대로 넣으면 굳히기가 원본을 전부 다시 담아 느려진다). */
+function tripMapPhotoPinIcon(hex, number, thumbUrl){
+  const num = String(number);
+  return L.divIcon({
+    className:"trip-map-photo-pin",
+    html:'<span class="trip-map-photo-pin-frame" style="border-color:' + hex + ';--pin:' + hex + '">'
+      + '<img src="' + thumbUrl + '" alt="" draggable="false"></span>'
+      + '<span class="trip-map-photo-pin-num' + (num.length > 2 ? " is-long" : "") + '" style="background:' + hex + '">' + num + '</span>',
+    iconSize:[44, 52],
+    iconAnchor:[22, 51],
+    popupAnchor:[0, -48],
+    tooltipAnchor:[0, -48]
+  });
+}
 
 /* ---------- 모델 ---------- */
 
@@ -1457,8 +1496,9 @@ function mountTripEditor(doc){
   mapTitle.className = "trip-map-title";
   const scopeBtn = diaryButton("", "이 날 지도 · 누르면 여행 전체 지도", "diary-btn trip-map-scope", "calendarDay");
   const routeBtn = diaryButton("", "표시를 목록 차례대로 잇기", "diary-btn trip-route-btn", "route");
+  const photosBtn = diaryButton("", "사진으로 보기", "diary-btn trip-map-photos-btn", "image");
   const freezeBtn = diaryButton("", "지도 그림으로 굳히기", "diary-btn trip-freeze-btn", "camera");
-  mapHead.append(mapHeadIcon, mapTitle, scopeBtn, routeBtn, freezeBtn);
+  mapHead.append(mapHeadIcon, mapTitle, scopeBtn, routeBtn, photosBtn, freezeBtn);
   const mapStage = document.createElement("div");
   mapStage.className = "trip-map-stage";
   const mapNote = document.createElement("p");
@@ -2171,19 +2211,58 @@ function mountTripEditor(doc){
      굳힌 그림은 이 둘을 따로 담는다(날마다 한 장 + 전체 한 장, 설계 2.3). */
   let mapScope = "day";
   try { if (localStorage.getItem("mn.tripMapScope") === "all") mapScope = "all"; } catch(_){}
+  // 표식을 사진으로 볼지 — 이것도 보는 사람 편의라 이 브라우저에만 남긴다.
+  let mapPhotos = false;
+  try { mapPhotos = localStorage.getItem("mn.tripMapPhotos") === "1"; } catch(_){}
 
-  const spotsWithCoords = () => {
-    const days = mapScope === "all" ? (model.days || []) : [dayOf(current)].filter(Boolean);
+  /* 사진 표식에 쓸 작은 그림(80px 정사각, 가운데 잘라 냄). 문서에는 담지 않고 이 창이 열려 있는 동안만 둔다.
+     실패(그림 자료가 없는 사진 등)는 ""로 남겨 다시 시도하지 않는다 — 그 곳은 번호 핀으로 보인다. */
+  const mapThumbs = new Map();
+  const spotThumbAsset = (spot) => {
+    const photo = (spot.photos || []).find(name => assets.has(name));
+    if (photo) return photo;
+    const video = (spot.videos || []).find(v => v && v.p && assets.has(v.p));
+    return video ? video.p : "";
+  };
+  const mapThumb = (name) => {
+    if (!mapThumbs.has(name)){
+      mapThumbs.set(name, (async () => {
+        try {
+          const blob = new Blob([assets.get(name).bytes], { type:tripAssetMime(name) });
+          const bitmap = await createImageBitmap(blob);
+          const side = Math.min(bitmap.width, bitmap.height);
+          const size = 80;
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = size;
+          canvas.getContext("2d").drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size);
+          if (bitmap.close) bitmap.close();
+          return canvas.toDataURL("image/jpeg", 0.82);
+        } catch(_){ return ""; }
+      })());
+    }
+    return mapThumbs.get(name);
+  };
+
+  // 날마다 묶은 목록 — 경로 색을 날마다 달리하려면 그 곳이 몇째 날인지 알아야 한다.
+  const spotGroupsWithCoords = () => {
+    const all = model.days || [];
+    const days = mapScope === "all" ? all : [dayOf(current)].filter(Boolean);
     const out = [];
-    for (const day of days) for (const s of (day.spots || [])) if (s.lat != null && s.lng != null) out.push(s);
+    for (const day of days){
+      const spots = (day.spots || []).filter(s => s.lat != null && s.lng != null);
+      if (spots.length) out.push({ dayIndex:Math.max(0, all.indexOf(day)), spots });
+    }
     return out;
   };
+  const spotsWithCoords = () => spotGroupsWithCoords().flatMap(group => group.spots);
   /* 굳힐 때의 서명. 이게 없으면 낡은 지도가 낡은 줄 모르고 인쇄된다(설계 2.3 규칙 4). */
   const stillSignature = () => JSON.stringify({
     scope:mapScope,
     basemap:(model.map && model.map.basemap) || "osm",
     route:!!(model.map && model.map.route),
-    at:spotsWithCoords().map(s => [s.lat, s.lng, s.kind || "", s.color || ""])
+    at:spotsWithCoords().map(s => [s.lat, s.lng, s.kind || "", s.color || ""]),
+    // 꺼져 있으면 키 자체를 안 넣는다 — 넣으면 예전에 굳힌 그림이 모두 '낡았다'고 뜬다.
+    ...(mapPhotos ? { photos:spotsWithCoords().map(spotThumbAsset) } : {})
   });
   // 굳힌 그림이 들어갈 자리 — 이 날 것과 여행 전체 것이 다르다.
   const stillHolder = () => (mapScope === "all" ? model.map : dayOf(current));
@@ -2338,7 +2417,7 @@ function mountTripEditor(doc){
         if (!card) return;
         marker.bindPopup(card, {
           minWidth:220, maxWidth:270, closeButton:false, autoPan:false,
-          offset:[0, -8], className:"trip-map-photo-popup"
+          offset:[0, 2], className:"trip-map-photo-popup"
         });
         card.addEventListener("mouseenter", cancelClose);
         card.addEventListener("mouseleave", closeSoon);
@@ -2363,6 +2442,10 @@ function mountTripEditor(doc){
     scopeBtn.classList.toggle("is-on", mapScope === "all");
     routeBtn.classList.toggle("is-on", !!(model.map && model.map.route));
     routeBtn.title = tripWord(purpose, "route");
+    photosBtn.classList.toggle("is-on", mapPhotos);
+    photosBtn.setAttribute("aria-pressed", String(mapPhotos));
+    photosBtn.title = tripWord(purpose, "mapPhotos");
+    photosBtn.setAttribute("aria-label", photosBtn.title);
     const list = spotsWithCoords();
     mapNote.textContent = list.length ? "" : tripWord(purpose, "mapEmpty");
     mapNote.hidden = !!list.length;
@@ -2376,15 +2459,29 @@ function mountTripEditor(doc){
       const color = tripSpotKindColor(spot.kind);
       const hex = (typeof MAP_MARKER_COLORS !== "undefined"
         ? (MAP_MARKER_COLORS.find(c => c.id === (spot.color || color)) || MAP_MARKER_COLORS[0]).hex : "#2563eb");
-      const marker = L.circleMarker([spot.lat, spot.lng], {
-        radius:9, color:"#fff", weight:2, fillColor:hex, fillOpacity:.95
-      });
+      const marker = L.marker([spot.lat, spot.lng], { icon:tripMapPinIcon(hex, at + 1, spot.kind), riseOnHover:true });
       bindTripMarkerPreview(marker, spot, at + 1);
       marker.addTo(markerLayer);
+      // 사진이 없는 곳, 작은 그림이 아직 안 된 곳은 번호 핀 그대로 — 되면 그 자리에서 갈아 끼운다.
+      const thumbAsset = mapPhotos ? spotThumbAsset(spot) : "";
+      if (thumbAsset) mapThumb(thumbAsset).then(url => {
+        if (!url || !mapPhotos || !markerLayer.hasLayer(marker)) return;
+        marker.setIcon(tripMapPhotoPinIcon(hex, at + 1, url));
+      });
     }
+    /* 경로는 날마다 색을 달리한다 — 번호만으로는 '여행 전체'에서 어느 날 동선인지 안 보인다.
+       날과 날 사이(앞 날 마지막 곳 → 다음 날 첫 곳)는 흐린 회색 점선으로만 잇는다. */
     if (model.map && model.map.route && list.length > 1){
-      routeLine = L.polyline(list.map(s => [s.lat, s.lng]),
-        { color:"#2563eb", weight:3, opacity:.75, dashArray:"6 5", className:"trip-route-line" }).addTo(leafletMap);
+      routeLine = L.layerGroup().addTo(leafletMap);
+      let prevLast = null;
+      for (const group of spotGroupsWithCoords()){
+        const points = group.spots.map(s => [s.lat, s.lng]);
+        if (prevLast) L.polyline([prevLast, points[0]],
+          { color:"#94a3b8", weight:2, opacity:.8, dashArray:"2 6", className:"trip-route-line trip-route-link" }).addTo(routeLine);
+        if (points.length > 1) L.polyline(points,
+          { color:tripDayRouteColor(group.dayIndex), weight:3, opacity:.8, dashArray:"6 5", className:"trip-route-line" }).addTo(routeLine);
+        prevLast = points[points.length - 1];
+      }
     }
     leafletMap.invalidateSize();
     syncFreezeBtn();
@@ -2527,6 +2624,12 @@ function mountTripEditor(doc){
     model.map = { ...model.map, route:!(model.map && model.map.route) };
     renderMap();
     touch(true);
+  });
+
+  photosBtn.addEventListener("click", () => {
+    mapPhotos = !mapPhotos;
+    try { localStorage.setItem("mn.tripMapPhotos", mapPhotos ? "1" : "0"); } catch(_){}
+    renderMap();
   });
 
   function startPicking(spotId){
@@ -3394,6 +3497,8 @@ function mountTripEditor(doc){
         action:() => scopeBtn.click() },
       { label:tripWord(model.purpose, "route"), active:!!(model.map && model.map.route),
         action:() => routeBtn.click() },
+      { label:tripWord(model.purpose, "mapPhotos"), active:mapPhotos,
+        action:() => photosBtn.click() },
       { label:tripWord(model.purpose, "mapStill"), disabled:freezeBtn.disabled,
         action:() => freezeBtn.click() },
       { label:tripWord(model.purpose, "mapRemove"), disabled:!(holder && holder.still),

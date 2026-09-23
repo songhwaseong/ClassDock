@@ -65,11 +65,13 @@ test("카드를 끌어 줄에 올리고 차례를 바꾸고, 숫자 키·되돌�
 
 // 1×1 빨간 점 PNG
 const DOT = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==", "base64");
+// 다른 색 1×1 PNG — 같은 사진은 한 번만 들어가므로 두 장은 서로 달라야 한다
+const DOT2 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 
 test("사진 여러 장을 넣으면 아래 모음에 사진 카드로 들어가고 저장 안 됨이 된다", async ({ page }) => {
   await openTier(page);
   await page.locator(".tier-doc input[type=file]").setInputFiles([
-    { name:"a.png", mimeType:"image/png", buffer:DOT }, { name:"b.png", mimeType:"image/png", buffer:DOT }
+    { name:"a.png", mimeType:"image/png", buffer:DOT }, { name:"b.png", mimeType:"image/png", buffer:DOT2 }
   ]);
   await expect(page.locator(".tier-pool .tier-item img")).toHaveCount(2);
   await expect(page.locator(".tier-pool .tier-item")).toHaveCount(5);
@@ -78,7 +80,7 @@ test("사진 여러 장을 넣으면 아래 모음에 사진 카드로 들어가
   expect(JSON.parse(saved.json).items.filter(item => item.image).length).toBe(2);
 });
 
-test("⠿ 손잡이로 줄을 끌어 옮기고, 🗑 로 줄을 지우고, 보유 카드를 검색한다", async ({ page }) => {
+test("⠿ 손잡이로 줄을 끌어 옮기고, 지우개로 줄을 비우고, 보유 카드를 검색한다", async ({ page }) => {
   await openTier(page);
   const order = () => page.locator(".tier-row").evaluateAll(els => els.map(el => el.dataset.tierRow));
   const grip = page.locator('.tier-row[data-tier-row="B"] .tier-row-grip'), top = await page.locator('.tier-row[data-tier-row="S"]').boundingBox(), g = await grip.boundingBox();
@@ -92,9 +94,10 @@ test("⠿ 손잡이로 줄을 끌어 옮기고, 🗑 로 줄을 지우고, 보�
 
   await drag(page, page.locator('.tier-item[data-item-id="c0"]'), page.locator('.tier-items[data-tier="A"]'));
   await expect.poll(() => ids(page, '.tier-items[data-tier="A"]')).toEqual(["c0"]);
-  await page.locator('.tier-row[data-tier-row="A"] .tier-row-trash').click();
-  await expect.poll(order).toEqual(["S", "B"]);
+  await page.locator('.tier-row[data-tier-row="A"] .tier-row-clear').click();
+  await expect.poll(order).toEqual(["S", "B", "A"]);
   await expect(page.locator(".tier-pool .tier-item")).toHaveCount(3);
+  await expect(page.locator('.tier-row[data-tier-row="A"] .tier-row-clear')).toBeDisabled();
 
   await page.locator(".tier-search input").fill("라");
   await expect.poll(() => ids(page, ".tier-pool")).toEqual(["c1"]);
@@ -117,4 +120,21 @@ test("보유 카드 모두 지우기 — 검색 중이면 찾은 카드만, 줄 
   await page.locator(".tier-doc .tier-title").blur(); await page.mouse.click(5, 400);
   await page.keyboard.press("Control+z");
   await expect.poll(() => ids(page, ".tier-pool")).toEqual(["c2"]);
+});
+
+test("줄을 지워 보유 카드로 내려온 사진을 다시 올리면 겹쳐 넣지 않는다", async ({ page }) => {
+  await openTier(page);
+  const pngs = await page.evaluate(() => ["#e53935", "#1e88e5"].map(color => { const c = document.createElement("canvas"); c.width = c.height = 8; const x = c.getContext("2d"); x.fillStyle = color; x.fillRect(0, 0, 8, 8); return c.toDataURL("image/png").split(",")[1]; }));
+  const files = names => names.map((name, i) => ({ name, mimeType:"image/png", buffer:Buffer.from(pngs[i], "base64") }));
+  const upload = async list => { const chooser = page.waitForEvent("filechooser"); await page.locator(".tier-bar .tier-btn", { hasText:"가져오기" }).click(); await (await chooser).setFiles(list); };
+  await upload(files(["빨강.png", "파랑.png"]));
+  await expect(page.locator(".tier-pool .tier-item img")).toHaveCount(2);
+  await drag(page, page.locator(".tier-pool .tier-item:has(img)").first(), page.locator('.tier-items[data-tier="S"]'));
+  await expect(page.locator('.tier-items[data-tier="S"] .tier-item')).toHaveCount(1);
+  await page.locator('.tier-row[data-tier-row="S"] .tier-label').click();
+  await page.locator(".tier-modal .tf-delete").click();
+  await expect(page.locator(".tier-pool .tier-item img")).toHaveCount(2);
+  await upload(files(["빨강.png", "파랑.png"]));
+  await expect(page.locator("#toast")).toContainText("이미 있는 사진");
+  await expect(page.locator(".tier-pool .tier-item img")).toHaveCount(2);
 });

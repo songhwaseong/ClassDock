@@ -24,6 +24,7 @@ const TIER_ICON_PATHS = {
 };
 const TIER_UI_PATHS = {
   trash:'<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 10.8v5.4M14 10.8v5.4"/>',
+  eraser:'<path d="M7 20.5 3.2 16.7a2.2 2.2 0 0 1 0-3.1l9.4-9.4a2.2 2.2 0 0 1 3.1 0l4.6 4.6a2.2 2.2 0 0 1 0 3.1L12.4 20.5M20.5 20.5H7M5.6 11.2l7.7 7.7"/>',
   grip:'<circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.5" fill="currentColor" stroke="none"/>'
 };
 function tierIconName(value){ return Object.prototype.hasOwnProperty.call(TIER_ICON_PATHS, value) ? value : ""; }
@@ -352,12 +353,13 @@ function mountTierEditor(doc){
         const to = index + (event.key === "ArrowUp" ? -1 : 1); if (!moveRow(index, event.key === "ArrowUp" ? -1 : 1)) return;
         const again = rowsEl.querySelector(`.tier-row-grip[data-row-index="${to}"]`); if (again) again.focus();
       });
-      // 줄 설정은 왼쪽 색 칸(줄 이름)을 누르면 열린다 — 따로 ⚙ 버튼을 두지 않고 손잡이·지우기를 크게.
-      const trash = document.createElement("button");
-      trash.type = "button"; trash.className = "tier-row-btn tier-row-trash"; trash.innerHTML = tierSvg("trash"); trash.title = "줄 지우기 (그 줄 카드는 보유 카드로 내려가요)"; trash.setAttribute("aria-label", "줄 지우기");
-      trash.disabled = model.tiers.length <= 1;
-      trash.onclick = () => removeRow(row.id);
-      tools.append(grip, trash);
+      // 줄 설정은 왼쪽 색 칸(줄 이름)을 누르면 열린다 — 따로 ⚙ 버튼을 두지 않고 손잡이·비우기를 크게.
+      // 줄 자체를 지우는 건 줄 설정 창에만 둔다(자주 누르는 자리에서 줄이 통째로 사라지지 않게).
+      const clear = document.createElement("button");
+      clear.type = "button"; clear.className = "tier-row-btn tier-row-clear"; clear.innerHTML = tierSvg("eraser"); clear.title = "줄 비우기 (그 줄 카드는 보유 카드로 내려가요)"; clear.setAttribute("aria-label", `줄 비우기 — ${row.label || "이름 없는 줄"}`);
+      clear.disabled = !tierItemsIn(model, row.id).length;
+      clear.onclick = () => clearRow(row.id);
+      tools.append(grip, clear);
       rowEl.append(label, zone, tools); rowsEl.appendChild(rowEl);
     });
     pool.innerHTML = ""; const rest = tierItemsIn(model, ""), shown = rest.filter(poolMatches);
@@ -382,6 +384,7 @@ function mountTierEditor(doc){
 
   function moveRow(index, delta){ return moveRowTo(index, index + delta); }
   function moveRowTo(from, to){ if (from === to || from < 0 || to < 0 || from >= model.tiers.length || to >= model.tiers.length) return false; const [row] = model.tiers.splice(from, 1); model.tiers.splice(to, 0, row); changed(); return true; }
+  function clearRow(id){ const n = tierClearRow(model, id); if (!n) return; changed(); if (typeof toast === "function") toast(`카드 ${n}장을 보유 카드로 내렸어요. 되돌리려면 Ctrl+Z`, 2600); }
   function removeRow(id){ if (tierRemoveRow(model, id)){ changed(); if (typeof toast === "function") toast("줄을 지웠어요 — 그 줄 카드는 보유 카드로 내려갔어요. 되돌리려면 Ctrl+Z", 2800); } }
   function addRow(at){
     if (model.tiers.length >= TIER_MAX_TIERS){ if (typeof toast === "function") toast(`등급 줄은 ${TIER_MAX_TIERS}개까지 만들 수 있어요.`, 2600); return null; }
@@ -406,7 +409,7 @@ function mountTierEditor(doc){
     labelInput.addEventListener("keydown", event => { if (event.key === "Enter" && !event.isComposing){ event.preventDefault(); body.querySelector(".tf-save").click(); } });
     body.querySelector(".tf-above").onclick = () => { apply(); ui.dispose(); addRow(model.tiers.indexOf(row)); };
     body.querySelector(".tf-below").onclick = () => { apply(); ui.dispose(); addRow(model.tiers.indexOf(row) + 1); };
-    body.querySelector(".tf-clear").onclick = () => { apply(); ui.dispose(); const n = tierClearRow(model, row.id); changed(); if (n && typeof toast === "function") toast(`카드 ${n}장을 보유 카드로 내렸어요. 되돌리려면 Ctrl+Z`, 2600); };
+    body.querySelector(".tf-clear").onclick = () => { apply(); ui.dispose(); if (tierItemsIn(model, row.id).length) clearRow(row.id); else changed(); };
     const del = body.querySelector(".tf-delete"); del.disabled = model.tiers.length <= 1;
     del.onclick = () => { ui.dispose(); removeRow(row.id); };
     setTimeout(() => { labelInput.focus(); labelInput.select(); }, 0);
@@ -459,15 +462,20 @@ function mountTierEditor(doc){
   async function addImageFiles(files){
     const list = Array.from(files || []).filter(file => /^image\//i.test(file.type || "")); if (!list.length) return 0;
     const room = TIER_MAX_ITEMS - model.items.length; if (room <= 0){ if (typeof toast === "function") toast(`카드는 ${TIER_MAX_ITEMS}장까지 넣을 수 있어요.`, 2800); return 0; }
-    let added = 0, failed = 0;
+    // 줄을 지우면 그 줄 사진은 보유 카드로 내려와 남는다 — 같은 사진을 다시 올리면 카드가 겹치니 이미 있는 사진은 건너뛴다.
+    const known = new Set(model.items.map(item => item.image && item.image.dataUrl).filter(Boolean));
+    let added = 0, failed = 0, same = 0;
     for (const file of list.slice(0, room)){
-      try { const image = await tierPrepareImage(file); const item = tierNormalizeItem({ name:String(file.name || "").replace(/\.[^.]+$/, "") }); item.image = image; model.items.push(item); added++; }
+      try {
+        const image = await tierPrepareImage(file); if (known.has(image.dataUrl)){ same++; continue; } known.add(image.dataUrl);
+        const item = tierNormalizeItem({ name:String(file.name || "").replace(/\.[^.]+$/, "") }); item.image = image; model.items.push(item); added++;
+      }
       catch(_){ failed++; }
     }
     if (added) changed();
     if (typeof toast === "function"){
       const skipped = list.length - Math.min(list.length, room);
-      toast(`사진 카드 ${added}장을 넣었어요.` + (failed ? ` (${failed}장은 읽지 못함)` : "") + (skipped ? ` (${skipped}장은 한도를 넘어 뺌)` : ""), 2800);
+      toast((added || !same ? `사진 카드 ${added}장을 넣었어요.` : "이미 있는 사진이에요.") + (same ? ` (같은 사진 ${same}장은 이미 있어서 뺌)` : "") + (failed ? ` (${failed}장은 읽지 못함)` : "") + (skipped ? ` (${skipped}장은 한도를 넘어 뺌)` : ""), 3200);
     }
     return added;
   }

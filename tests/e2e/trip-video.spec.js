@@ -147,7 +147,7 @@ test("영상만 있는 장소도 지도 표식 미리보기에 첫 장면이 뜨
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(stage).not.toHaveClass(/is-picking/);
 
-  await stage.locator("path.leaflet-interactive").first().click({ force:true });
+  await stage.locator(".trip-map-pin").first().click({ force:true });
   const thumb = page.locator(".trip-map-video-thumb");
   await expect(thumb).toHaveCount(1);
   await expect(page.locator(".trip-map-photo-head span")).toHaveText("영상 1개");

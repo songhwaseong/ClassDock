@@ -264,7 +264,7 @@ test("지도 칸에서 자리를 찍으면 장소에 좌표가 담기고 표시�
   expect(typeof spot.lat).toBe("number");
   expect(typeof spot.lng).toBe("number");
   await expect(page.locator(".trip-map-note")).toBeHidden();
-  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(1);
+  await expect(stage.locator(".trip-map-pin")).toHaveCount(1);
 });
 
 test("좌표가 둘 이상이면 목록 차례대로 선으로 잇고, 잇기를 끄면 선이 사라진다", async ({ page }) => {
@@ -280,7 +280,8 @@ test("좌표가 둘 이상이면 목록 차례대로 선으로 잇고, 잇기를
   });
   await page.locator(".trip-day-chip").nth(0).click();
   const stage = page.locator(".trip-map-stage");
-  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(3);   // 표시 둘 + 이은 선 하나
+  await expect(stage.locator(".trip-map-pin")).toHaveCount(2);
+  await expect(stage.locator(".trip-map-pin-num")).toHaveText(["1", "2"]);
   await expect(stage.locator("path.trip-route-line")).toHaveCount(1);
 
   await page.locator(".trip-route-btn").click();
@@ -328,12 +329,48 @@ test("이 날 / 여행 전체를 오가면 표시가 달라지고, 그 사실이
   });
   await page.locator(".trip-day-chip").nth(0).click();
   const stage = page.locator(".trip-map-stage");
-  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(1);
+  await expect(stage.locator(".trip-map-pin")).toHaveCount(1);
 
   await page.locator(".trip-map-scope").click();
   await expect(page.locator(".trip-map-title")).toContainText("여행 전체");
-  await expect(stage.locator("path.leaflet-interactive")).toHaveCount(3);   // 표시 둘 + 이은 선
+  await expect(stage.locator(".trip-map-pin")).toHaveCount(2);
+  // 날마다 한 곳뿐이라 날 안의 선은 없고, 날과 날 사이를 잇는 흐린 선 하나만 있다
+  await expect(stage.locator("path.trip-route-link")).toHaveCount(1);
   expect(await page.evaluate(() => localStorage.getItem("mn.tripMapScope"))).toBe("all");
+});
+
+test("사진으로 보기를 켜면 사진 있는 곳만 사진 표식이 되고, 끄면 번호 핀으로 돌아온다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 120; canvas.height = 90;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#f59e0b"; ctx.fillRect(0, 0, 120, 90);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+    const doc = docs.find(d => d.kind === "trip");
+    doc.tripAssets.set("assets/p1.png", { bytes:new Uint8Array(await blob.arrayBuffer()) });
+    doc.trip.days[0].spots.push(
+      { id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight", lat:33.458, lng:126.942, color:"", cost:null, photos:["assets/p1.png"], fields:[] },
+      { id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[], fields:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  const stage = page.locator(".trip-map-stage");
+  await expect(stage.locator(".trip-map-pin")).toHaveCount(2);
+
+  const toggle = page.locator(".trip-map-photos-btn");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(stage.locator(".trip-map-photo-pin")).toHaveCount(1);
+  await expect(stage.locator(".trip-map-photo-pin img")).toHaveAttribute("src", /^data:image\/jpeg/);
+  await expect(stage.locator(".trip-map-photo-pin-num")).toHaveText("1");
+  await expect(stage.locator(".trip-map-pin")).toHaveCount(1);
+  expect(await page.evaluate(() => localStorage.getItem("mn.tripMapPhotos"))).toBe("1");
+
+  await toggle.click();
+  await expect(stage.locator(".trip-map-photo-pin")).toHaveCount(0);
+  await expect(stage.locator(".trip-map-pin")).toHaveCount(2);
 });
 
 test("굳힌 그림이 있으면 보이고, 장소가 바뀌면 낡았다고 알린다", async ({ page }) => {
@@ -430,7 +467,7 @@ test("사진에서 장소 만들기 — 찍은 때·자리를 읽어 그 날에 
   await expect(page.locator(".trip-spot.is-fresh")).toHaveCount(2);
   expect(await page.evaluate(() => !!document.activeElement.closest(".trip-spot"))).toBe(false);
   // 좌표가 생겼으니 지도에 표시가 뜬다
-  await expect(page.locator(".trip-map-stage path.leaflet-interactive")).toHaveCount(3);
+  await expect(page.locator(".trip-map-stage .trip-map-pin")).toHaveCount(2);
 });
 
 test("찍힌 날짜와 같은 날이 여정에 있으면 그 날로 간다", async ({ page }) => {
@@ -965,7 +1002,7 @@ test("장소가 있는 여행일지는 탭을 열어 지도가 저절로 맞춰�
   const dirtyOf = () => page.evaluate(() => { const d = docs.find(x => x.name === "장소.trip"); return d ? !!d.hasUnsavedEdits : null; });
   const openAndSettle = async () => {
     await page.locator('#docTabs .tab[title^="장소.trip "]').first().click();
-    await expect(page.locator(".office:not([hidden]) .trip-map-stage path.leaflet-interactive").first()).toBeVisible();
+    await expect(page.locator(".office:not([hidden]) .trip-map-stage .trip-map-pin").first()).toBeVisible();
     // 지도가 장소에 맞춰 움직였는지(= moveend 가 났는지) 확인한 뒤에 본다
     await expect.poll(() => page.evaluate(() => docs.find(x => x.name === "장소.trip").trip.map.zoom)).not.toBe(7);
     await page.waitForTimeout(300);
@@ -984,7 +1021,7 @@ test("장소가 있는 여행일지는 탭을 열어 지도가 저절로 맞춰�
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
   await expect.poll(dirtyOf, { timeout:15_000 }).toBe(false);
   await page.locator('#docTabs .tab[title^="장소.trip "]').first().click();
-  await expect(page.locator(".office:not([hidden]) .trip-map-stage path.leaflet-interactive").first()).toBeVisible();
+  await expect(page.locator(".office:not([hidden]) .trip-map-stage .trip-map-pin").first()).toBeVisible();
   await page.waitForTimeout(500);
   expect(await dirtyOf()).toBe(false);
 });

@@ -171,7 +171,7 @@ class Lockup(object):
         if embed:
             with open(os.path.join(ROOT, HEADER_MARK), "rb") as f:
                 href = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
-        return ('<image class="brand-mark" x="%s" y="%s" width="%s" height="%s" '
+        return ('<image class="brand-mark" id="brand-lockup-mark" x="%s" y="%s" width="%s" height="%s" '
                 'preserveAspectRatio="xMidYMid meet" href="%s"/>'
                 % (num(self.inline_mark_x), num(self.inline_mark_top),
                    num(INLINE_MARK), num(INLINE_MARK), href))
@@ -182,10 +182,35 @@ class Lockup(object):
                 'role="img" aria-label="ClassDock">\n<title>%s</title>\n'
                 % (self.view_box, num(self.width), num(self.height), title))
         body = ('<g transform="translate(%s 0)">\n'
-                '<path fill="%s" d="%s"/>\n<path fill="%s" d="%s"/>\n</g>\n%s\n</svg>\n'
+                '<path class="brand-class" id="brand-lockup-class" fill="%s" d="%s"/>\n'
+                '<path class="brand-ock" id="brand-lockup-ock" fill="%s" d="%s"/>\n</g>\n%s\n%s</svg>\n'
                 % (num(self.word_x), c1, self.paths[0], c2, self.paths[1],
-                   self._mark(embed=standalone)))
+                   self._mark(embed=standalone),
+                   "" if standalone else self._sheen()))
         return head + body
+
+    def _sheen(self):
+        """헤더에서만 쓰는 빛 줄기 층. 글자와 D 심볼 모양으로 가려 두고 CSS(.brand-sheen)가 옮긴다.
+
+        clipPath 는 그림(<image>)의 투명한 곳을 모르므로 mask-type:alpha 마스크를 쓴다 — 글자는 불투명,
+        심볼은 PNG 알파 그대로가 된다. 마스크 안의 <use> 는 부모 <g> 의 translate 를 물려받지 않으므로
+        같은 값을 직접 준다. 쉴 때는 락업 왼쪽 바깥에 있어 보이지 않는다.
+        id 는 문서 전체에서 겹치지 않게 brand-lockup- 으로 시작.
+        """
+        tx = 'transform="translate(%s 0)" ' % num(self.word_x)
+        return ('<defs><linearGradient id="brand-lockup-sheen-fill" x1="0" y1="0" x2="1" y2="0">'
+                '<stop offset="0" stop-color="#dbeaff" stop-opacity="0"/>'
+                '<stop offset=".5" stop-color="#dbeaff" stop-opacity=".95"/>'
+                '<stop offset="1" stop-color="#dbeaff" stop-opacity="0"/></linearGradient>'
+                '<mask id="brand-lockup-mask" style="mask-type:alpha" maskUnits="userSpaceOnUse" '
+                'x="0" y="%s" width="%s" height="%s">'
+                '<use %shref="#brand-lockup-class"/><use %shref="#brand-lockup-ock"/>'
+                '<use href="#brand-lockup-mark"/></mask></defs>\n'
+                '<g mask="url(#brand-lockup-mask)" aria-hidden="true">'
+                '<rect class="brand-sheen" x="-18" y="%s" width="14" height="%s" '
+                'fill="url(#brand-lockup-sheen-fill)"/></g>\n'
+                % (num(self.top), num(self.width), num(self.height), tx, tx,
+                   num(self.top), num(self.height)))
 
     def mark_svg(self, variant=HEADER_VARIANT):
         with open(os.path.join(ROOT, HEADER_MARK), "rb") as f:
