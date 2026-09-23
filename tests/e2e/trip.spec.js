@@ -1,17 +1,16 @@
 const { test, expect } = require("@playwright/test");
 const { collapseSidebar } = require("./helpers");
 
-/* 여행일지(.trip) — 갈래를 고르면 말이 바뀌되 자료는 그대로인지, 여정 띠로 날을 오가며
- * 종이에 쓴 글이 저장되고 다시 열었을 때 그대로인지. */
+/* 여행일지(.trip) — 여정 띠로 날을 오가며 종이에 쓴 글이 저장되고 다시 열었을 때 그대로인지. */
 
-async function boot(page, purpose = "trip"){
+async function boot(page){
   await page.addInitScript(() => {
     try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch (_) {}
   });
   await collapseSidebar(page);
   await page.goto("/");
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
-  await page.evaluate(p => window.newTripScratch && window.newTripScratch(p), purpose);
+  await page.evaluate(() => window.newTripScratch && window.newTripScratch());
   await expect(page.locator(".trip-bar")).toBeVisible();
 }
 
@@ -36,11 +35,12 @@ test("빈 화면의 '새로 만들기'로도 여행일지를 만들 수 있다",
   await expect(page.locator(".tab.active")).toHaveAttribute("title", /^여행일지\.trip /);   // 탭엔 확장자를 감추므로 전체 이름은 title 로 본다
 });
 
-test("새 여행일지가 탭으로 열리고 갈래에 따라 이름이 다르다", async ({ page }) => {
-  await boot(page, "field");
-  await expect(page.locator(".tab.active")).toHaveAttribute("title", /^체험학습\.trip /);   // 탭엔 확장자를 감추므로 전체 이름은 title 로 본다
+test("새 여행일지가 탭으로 열리고, 갈래 고르개는 없다", async ({ page }) => {
+  await boot(page);
+  await expect(page.locator(".tab.active")).toHaveAttribute("title", /^여행일지\.trip /);   // 탭엔 확장자를 감추므로 전체 이름은 title 로 본다
+  await expect(page.locator(".trip-purpose-select")).toHaveCount(0);
   const model = await modelOf(page);
-  expect(model.purpose).toBe("field");
+  expect(model.purpose).toBeUndefined();
   expect(model.days).toEqual([]);
 });
 
@@ -64,27 +64,6 @@ test("여정 띠로 날을 더하고 오가며, 종이에 쓴 글이 그 날에 
 
   const model = await modelOf(page);
   expect(model.days.map(d => d.text)).toEqual(["바람이 셌다", "둘째 날 글"]);
-});
-
-test("갈래를 바꾸면 말만 바뀌고 자료는 한 글자도 안 바뀐다", async ({ page }) => {
-  await boot(page);
-  await page.locator(".trip-add-day").click();
-  await page.locator(".trip-day-title").fill("성산");
-  await page.locator(".diary-text").fill("본 것");
-  await expect(page.locator(".trip-rail-head")).toHaveText("1일");
-  await expect(page.locator(".trip-add-day")).toHaveText("＋ 날");
-
-  const before = await modelOf(page);
-  await page.locator(".trip-purpose-select").selectOption("survey");
-  await expect(page.locator(".trip-rail-head")).toHaveText("조사 1차례");
-  await expect(page.locator(".trip-add-day")).toHaveText("＋ 조사 차례");
-  await expect(page.locator(".trip-day-chip-head")).toHaveText("1차 조사");
-
-  const after = await modelOf(page);
-  expect(after.purpose).toBe("survey");
-  delete before.purpose; delete after.purpose;
-  delete before.updatedAt; delete after.updatedAt;
-  expect(after).toEqual(before);
 });
 
 test("저장하면 ZIP 으로 쓰이고 다시 열어도 그대로다", async ({ page }) => {
@@ -139,52 +118,31 @@ test("장소를 넣고 고치면 그 날에 담기고, 여정 띠 요약도 따�
   await expect(page.locator(".trip-day-chip-sub")).toHaveText("들른 곳 1");
 });
 
-test("갈래마다 보이는 칸이 다르다 — 경비는 여행만, 조사 항목은 답사만, 질문은 학습지만", async ({ page }) => {
+test("장소마다 쓴 돈 칸이 있고, 옛 학습지·답사 칸(질문·조사 항목)은 없다", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();
   await page.locator(".trip-add-spot").click();
   await expect(page.locator(".trip-spot-cost")).toBeVisible();
   await expect(page.locator(".trip-spot-fields")).toHaveCount(0);
-  await expect(page.locator(".trip-prompts")).toBeHidden();
+  await expect(page.locator(".trip-prompts")).toHaveCount(0);
 
   await page.locator(".trip-spot-cost").fill("5000");
-  await page.locator(".trip-purpose-select").selectOption("survey");
-  await expect(page.locator(".trip-spot-cost")).toHaveCount(0, { timeout:3000 });
-  await expect(page.locator(".trip-spot-fields")).toBeVisible();
-  await expect(page.locator(".trip-spots-title")).toHaveText("조사 지점 목록");
-
-  await page.locator(".trip-purpose-select").selectOption("field");
-  await expect(page.locator(".trip-prompts")).toBeVisible();
-  await expect(page.locator(".trip-spot-fields")).toHaveCount(0);
-
-  // 갈래를 오가도 여행에서 적은 경비는 그대로 남아 있다(무손실)
   const model = await modelOf(page);
   expect(model.days[0].spots[0].cost).toEqual({ amount:5000, currency:"KRW" });
 });
 
-test("다른 갈래에서 고른 종류는 고르개에서 사라지지 않고 맨 아래에 남는다", async ({ page }) => {
+test("모르는 장소 종류(옛 답사 파일의 'observe' 등)는 고르개 맨 아래에 글자 그대로 남는다", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();
-  await page.locator(".trip-add-spot").click();
-  await page.locator(".trip-spot-kind").selectOption("stay");        // '잠자리'는 여행 갈래에만 있다
-
-  await page.locator(".trip-purpose-select").selectOption("survey");
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"observe",
+      lat:null, lng:null, color:"", cost:null, photos:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
   const select = page.locator(".trip-spot-kind");
-  await expect(select).toHaveValue("stay", { timeout:3000 });
-  await expect(select.locator("option.trip-kind-foreign")).toHaveText("잠자리");
-  const model = await modelOf(page);
-  expect(model.days[0].spots[0].kind).toBe("stay");
-});
-
-test("학습지 질문을 넣고 답을 적으면 그 날에 담긴다", async ({ page }) => {
-  await boot(page, "field");
-  await page.locator(".trip-add-day").click();
-  await expect(page.locator(".trip-prompts")).toBeVisible();
-  await page.locator(".trip-add-prompt").click();
-  await page.locator(".trip-prompt-q").fill("가장 기억에 남는 것은?");
-  await page.locator(".trip-prompt-a").fill("바다");
-  const model = await modelOf(page);
-  expect(model.days[0].prompts).toEqual([{ q:"가장 기억에 남는 것은?", a:"바다" }]);
+  await expect(select).toHaveValue("observe");
+  await expect(select.locator("option.trip-kind-foreign")).toHaveText("observe");
 });
 
 test("꾸미기 창이 여행일지에서도 돈다 — 줄 무늬·글꼴을 바꾸면 종이가 따라간다", async ({ page }) => {
@@ -275,8 +233,8 @@ test("좌표가 둘 이상이면 목록 차례대로 선으로 잇고, 잇기를
   await page.evaluate(() => {
     const doc = docs.find(d => d.kind === "trip");
     doc.trip.days[0].spots.push(
-      { id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight", lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
-      { id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[], fields:[] });
+      { id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight", lat:33.458, lng:126.942, color:"", cost:null, photos:[] },
+      { id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
   const stage = page.locator(".trip-map-stage");
@@ -303,7 +261,7 @@ test("굳히기는 좌표가 없거나 배경 지도가 안 오면 막힌다", a
   await page.evaluate(() => {
     const doc = docs.find(d => d.kind === "trip");
     doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
-      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
   // 좌표는 생겼지만 타일이 안 왔으면 여전히 막힌다(회색 사각형이 박히는 것을 막는 규칙)
@@ -323,9 +281,9 @@ test("이 날 / 여행 전체를 오가면 표시가 달라지고, 그 사실이
   await page.evaluate(() => {
     const doc = docs.find(d => d.kind === "trip");
     doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
-      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[] });
     doc.trip.days[1].spots.push({ id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move",
-      lat:33.506, lng:126.951, color:"", cost:null, photos:[], fields:[] });
+      lat:33.506, lng:126.951, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
   const stage = page.locator(".trip-map-stage");
@@ -352,8 +310,8 @@ test("사진으로 보기를 켜면 사진 있는 곳만 사진 표식이 되고
     const doc = docs.find(d => d.kind === "trip");
     doc.tripAssets.set("assets/p1.png", { bytes:new Uint8Array(await blob.arrayBuffer()) });
     doc.trip.days[0].spots.push(
-      { id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight", lat:33.458, lng:126.942, color:"", cost:null, photos:["assets/p1.png"], fields:[] },
-      { id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[], fields:[] });
+      { id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight", lat:33.458, lng:126.942, color:"", cost:null, photos:["assets/p1.png"] },
+      { id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
   const stage = page.locator(".trip-map-stage");
@@ -384,7 +342,7 @@ test("굳힌 그림이 있으면 보이고, 장소가 바뀌면 낡았다고 알
     doc.tripAssets.set("assets/frozenmap.png", { bytes:png });
     const day = doc.trip.days[0];
     day.spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
-      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[] });
     day.still = "assets/frozenmap.png";
     day.stillKey = "낡은-서명";
   });
@@ -606,7 +564,7 @@ test("자동 날씨는 날짜와 장소 좌표가 없으면 표시하지 않는�
   await page.evaluate(() => {
     const doc = docs.find(d => d.kind === "trip");
     doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
-      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
   const home = await check();
@@ -633,9 +591,9 @@ test("연대표로 내보내면 여행 일정 모드로 열리고 장소가 일�
     const doc = docs.find(d => d.kind === "trip");
     doc.trip.days[0].spots.push(
       { id:"sp-a", at:"09:30", name:"성산일출봉", address:"제주 서귀포시", note:"바람", kind:"sight",
-        lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
+        lat:33.458, lng:126.942, color:"", cost:null, photos:[] },
       { id:"sp-b", at:"14:05", name:"우도", address:"", note:"", kind:"move",
-        lat:null, lng:null, color:"", cost:null, photos:[], fields:[] });
+        lat:null, lng:null, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
 
@@ -663,9 +621,9 @@ test("지도로 내보내면 좌표가 있는 곳만 가고, 빠진 수를 알�
     const doc = docs.find(d => d.kind === "trip");
     doc.trip.days[0].spots.push(
       { id:"sp-a", at:"09:30", name:"성산일출봉", address:"제주", note:"바람", kind:"sight",
-        lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
+        lat:33.458, lng:126.942, color:"", cost:null, photos:[] },
       { id:"sp-b", at:"", name:"주소만 아는 곳", address:"어딘가", note:"", kind:"",
-        lat:null, lng:null, color:"", cost:null, photos:[], fields:[] });
+        lat:null, lng:null, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
 
@@ -690,9 +648,9 @@ test("다녀온 지역을 좌표에서 가려 센다(인터넷 없이)", async (
     const doc = docs.find(d => d.kind === "trip");
     doc.trip.days[0].spots.push(
       { id:"sp-a", at:"", name:"성산일출봉", address:"", note:"", kind:"sight",
-        lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] },
+        lat:33.458, lng:126.942, color:"", cost:null, photos:[] },
       { id:"sp-b", at:"", name:"경복궁", address:"", note:"", kind:"sight",
-        lat:37.5796, lng:126.977, color:"", cost:null, photos:[], fields:[] });
+        lat:37.5796, lng:126.977, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
   await expect(page.locator(".trip-regions")).toBeVisible({ timeout:10000 });
@@ -702,25 +660,6 @@ test("다녀온 지역을 좌표에서 가려 센다(인터넷 없이)", async (
   expect(chips.length).toBe(2);
   expect(chips.join(" ")).toMatch(/서귀포시|제주/);
   expect(chips.join(" ")).toMatch(/종로구/);
-});
-
-test("학습지 갈래에는 다녀온 지역 칸이 없다(빈 낱말 = 감춤)", async ({ page }) => {
-  await page.setViewportSize({ width:1400, height:900 });
-  await boot(page, "field");
-  await page.locator(".trip-add-day").click();
-  await page.evaluate(() => {
-    const doc = docs.find(d => d.kind === "trip");
-    doc.trip.days[0].spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
-      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
-  });
-  await page.locator(".trip-day-chip").nth(0).click();
-  await page.waitForTimeout(600);
-  await expect(page.locator(".trip-regions")).toBeHidden();
-
-  // 답사 갈래로 바꾸면 '조사 지역 분포'로 뜬다
-  await page.locator(".trip-purpose-select").selectOption("survey");
-  await expect(page.locator(".trip-regions")).toBeVisible({ timeout:10000 });
-  await expect(page.locator(".trip-regions-head")).toContainText("조사 지역 분포");
 });
 
 test("경비는 날마다·여행 전체로 더하고, 화폐가 섞이면 따로 센다", async ({ page }) => {
@@ -825,7 +764,6 @@ async function printAndPeek(page, which){
         texts:[...layer.querySelectorAll(".diary-print-text")].map(el => el.textContent),
         spotHeads:[...layer.querySelectorAll(".trip-print-spots th")].map(el => el.textContent),
         spotCells:[...layer.querySelectorAll(".trip-print-spots td")].map(el => el.textContent),
-        prompts:[...layer.querySelectorAll(".trip-print-q")].map(el => el.textContent),
         maps:layer.querySelectorAll(".trip-print-map").length,
         sources:(layer.querySelector(".trip-print-sources") || {}).textContent || "",
         // 전역 header{color:#fff} 를 물려받으면 흰 종이에 흰 글자로 찍힌다
@@ -867,29 +805,15 @@ test("인쇄 층이 A4 폭으로 다시 배치되고, 장소 표와 종이가 �
   await expect(page.locator("#tripPrintLayer")).toHaveCount(0);   // 찍고 나면 치운다
 });
 
-test("학습지 갈래는 이름 칸과 답 쓸 자리가 함께 찍힌다", async ({ page }) => {
-  await boot(page, "field");
-  await page.locator(".trip-add-day").click();
-  await page.locator(".trip-day-title").fill("박물관 견학");
-  await page.locator(".trip-add-prompt").click();
-  await page.locator(".trip-prompt-q").fill("무엇을 보았나요?");
-
-  const out = await printAndPeek(page, "보고서 전체 인쇄");
-  expect(out.header).toEqual(["학교 ____________", "학년·반 ____________", "이름 ____________"]);
-  expect(out.days[0]).toContain("활동 1");
-  expect(out.prompts).toEqual(["무엇을 보았나요?"]);
-  expect(out.spotHeads.length).toBe(0);                  // 장소가 없으면 표도 없다
-});
-
 test("굳힌 지도 그림이 있으면 인쇄에 들어가고, 자료 출처가 한 줄 붙는다", async ({ page }) => {
   await page.setViewportSize({ width:1400, height:900 });
-  await boot(page, "survey");
+  await boot(page);
   await page.locator(".trip-add-day").click();
   await page.evaluate(() => {
     const doc = docs.find(d => d.kind === "trip");
     const day = doc.trip.days[0];
-    day.spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"observe",
-      lat:33.458, lng:126.942, color:"", cost:null, photos:[], fields:[] });
+    day.spots.push({ id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight",
+      lat:33.458, lng:126.942, color:"", cost:null, photos:[] });
     doc.trip.source = "제주도청 누리집";
     // 1x1 PNG 를 굳힌 그림인 척 넣는다
     const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="),
@@ -900,7 +824,7 @@ test("굳힌 지도 그림이 있으면 인쇄에 들어가고, 자료 출처가
   });
   await page.locator(".trip-day-chip").nth(0).click();
 
-  const out = await printAndPeek(page, "답사 전체 인쇄");
+  const out = await printAndPeek(page, "여행 전체 인쇄");
   expect(out.maps).toBe(1);
   expect(out.sources).toContain("자료 출처");
   expect(out.sources).toContain("제주도청 누리집");
@@ -935,9 +859,9 @@ test("저장 안 한 채 껐다 켜면 고친 글은 돌아오되 '저장 안 �
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
   // 디스크에서 연 것처럼 저장본 바이트로 연다
   await page.evaluate(async () => {
-    await newTripScratch("trip");
+    await newTripScratch();
     const tmp = docs.find(d => d.kind === "trip");
-    tmp.trip.days.push({ id:"d1", date:"2026-07-20", title:"첫날", text:"디스크 글", spots:[], prompts:[] });
+    tmp.trip.days.push({ id:"d1", date:"2026-07-20", title:"첫날", text:"디스크 글", spots:[] });
     const bytes = tripPack(tmp.trip, tmp.tripAssets, Date.now());
     tmp.name = "임시.trip";
     await handleFiles([new File([bytes], "원본.trip", { type:"application/zip" })], {});
@@ -989,10 +913,10 @@ test("장소가 있는 여행일지는 탭을 열어 지도가 저절로 맞춰�
   await page.goto("/");
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
   await page.evaluate(async () => {
-    await newTripScratch("trip");
+    await newTripScratch();
     const tmp = docs.find(d => d.kind === "trip");
     tmp.trip.map = { ...(tmp.trip.map || {}), center:[37.5, 127], zoom:7 };   // 장소와 먼 자리 — 열면 지도가 옮겨 간다
-    tmp.trip.days.push({ id:"d1", date:"2026-07-20", title:"첫날", text:"글", prompts:[], spots:[
+    tmp.trip.days.push({ id:"d1", date:"2026-07-20", title:"첫날", text:"글", spots:[
       { id:"s1", name:"성산", lat:33.458, lng:126.942 }, { id:"s2", name:"우도", lat:33.506, lng:126.951 }
     ] });
     const bytes = tripPack(tmp.trip, tmp.tripAssets, Date.now());

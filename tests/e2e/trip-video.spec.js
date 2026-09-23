@@ -17,7 +17,7 @@ async function bootWithSpot(page){
   await collapseSidebar(page);
   await page.goto("/");
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
-  await page.evaluate(() => window.newTripScratch && window.newTripScratch("trip"));
+  await page.evaluate(() => window.newTripScratch && window.newTripScratch());
   await expect(page.locator(".trip-bar")).toBeVisible();
   await page.locator(".trip-add-day").click();
   await page.locator(".trip-add-spot").click();

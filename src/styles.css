@@ -8059,19 +8059,18 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
   .trip-map-divider,.trip-map-pane{display:none}}
 @media (max-width:760px){.trip-body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
   .trip-rail{border-right:0;border-bottom:1px solid var(--border);max-height:34vh}}
-.trip-prompts,.trip-spots{max-width:780px;margin:14px auto 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
-.trip-prompts-head,.trip-spots-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--muted);font-size:12px;font-weight:600}
+.trip-spots{max-width:780px;margin:14px auto 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
+.trip-spots-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--muted);font-size:12px;font-weight:600}
 .trip-spots-title{flex:1}
-.trip-prompts-head span{flex:1}
 .trip-spots-empty{margin:2px 0;color:var(--muted);font-size:12px}
 .trip-budget{display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
 .trip-budget-sum{flex:1;min-width:0;color:var(--ink);font-size:13px;font-weight:600}
 .trip-currency{width:56px;text-align:center;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
 .trip-rate{width:96px;text-align:right;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
-.trip-spot-list,.trip-prompt-list{display:flex;flex-direction:column;gap:8px}
+.trip-spot-list{display:flex;flex-direction:column;gap:8px}
 .trip-spot{display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--border);border-radius:7px;background:var(--bg)}
 .trip-spot-line{display:flex;align-items:center;gap:6px}
-.trip-spot input,.trip-prompt input{min-width:0;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font-size:13px}
+.trip-spot input{min-width:0;padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font-size:13px}
 .trip-spot-at{width:64px;text-align:center}
 .trip-spot-icon{display:inline-flex;width:18px;height:18px;flex:0 0 auto;color:var(--accent)}
 .trip-spot-art{width:100%;height:100%}
@@ -8110,14 +8109,6 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-spot-cost{width:110px;text-align:right}
 .trip-spot-cost-unit{color:var(--muted);font-size:12px}
 .trip-kind-foreign{color:var(--muted)}
-.trip-spot-fields{display:grid;grid-template-columns:auto auto;gap:5px;align-items:center}
-.trip-spot-fields-head{grid-column:1;color:var(--muted);font-size:12px;font-weight:600}
-.trip-add-field{grid-column:2;justify-self:start}
-.trip-field-k{grid-column:1}
-.trip-field-v{grid-column:2}
-.trip-prompt{display:flex;align-items:center;gap:6px}
-.trip-prompt-q{flex:1}
-.trip-prompt-a{flex:1.2}
 
 /* 여행 엽서 UI — 문서 자료와 편집 기능은 그대로 두고 화면의 둘레만 여행일지답게 꾸민다. */
 .trip-root{
@@ -8146,7 +8137,6 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-brand-title{max-width:128px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#14234f;font-size:19px;letter-spacing:-.04em}
 .trip-brand-sub{margin-top:5px;color:#5e6f91;font-family:"Segoe Script","Bradley Hand",cursive;font-size:11px;font-style:italic;white-space:nowrap}
 .trip-title{order:2;flex:1 1 220px;max-width:370px;height:40px;padding:0 12px;border-color:rgba(129,165,198,.28);border-radius:10px;background:color-mix(in srgb,var(--bg) 84%,transparent);box-shadow:inset 0 1px 2px rgba(42,94,133,.06)}
-.trip-purpose-select{order:1;flex:0 0 140px;height:40px;padding:0 34px 0 12px;border-color:rgba(129,165,198,.28);border-radius:10px;background-color:color-mix(in srgb,var(--bg) 88%,transparent);font-weight:700}
 .trip-status{order:3;flex:1 1 130px;padding:0 2px;color:#8292af}
 .trip-status:empty::before{content:attr(data-placeholder)}
 .trip-bar-actions{order:4;display:flex;align-items:stretch;gap:4px;flex:0 0 auto;min-width:0}
@@ -8198,7 +8188,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-weather-mark .diary-wx{width:30px;height:30px}
 .trip-weather-text{color:#506483;font-weight:600}
 .trip-main .diary-paper{max-width:900px;border:1px solid rgba(125,158,193,.2);border-radius:16px;box-shadow:0 14px 30px rgba(47,88,124,.17),inset 0 0 0 1px rgba(255,255,255,.7)}
-.trip-prompts,.trip-spots{max-width:900px;border-color:rgba(125,158,193,.25);border-radius:14px;background:var(--trip-card);box-shadow:0 7px 18px rgba(53,107,146,.1)}
+.trip-spots{max-width:900px;border-color:rgba(125,158,193,.25);border-radius:14px;background:var(--trip-card);box-shadow:0 7px 18px rgba(53,107,146,.1)}
 .trip-spot{border-color:rgba(125,158,193,.22);border-radius:11px;background:color-mix(in srgb,var(--bg) 76%,transparent)}
 .trip-spot.is-fresh{animation:trip-spot-fresh 1.8s ease-out}
 @keyframes trip-spot-fresh{0%,35%{border-color:var(--trip-blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--trip-blue) 30%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
@@ -8249,7 +8239,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 
 @media (max-width:1350px){
   .trip-brand{min-width:auto}.trip-brand-words{display:none}.trip-brand-mark{width:50px;height:50px}
-  .trip-status{display:none}.trip-title{max-width:270px}.trip-purpose-select{flex-basis:126px}
+  .trip-status{display:none}.trip-title{max-width:270px}
   .trip-bar-actions .trip-tool-button.diary-ico{width:44px}.trip-tool-label{font-size:8.5px}
 }
 @media (max-width:1100px){
@@ -8257,7 +8247,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
   .trip-map-divider,.trip-map-pane{display:none}
 }
 @media (max-width:860px){
-  .trip-bar{min-height:60px}.trip-brand{display:none}.trip-title{min-width:150px}.trip-purpose-select{flex-basis:116px}
+  .trip-bar{min-height:60px}.trip-brand{display:none}.trip-title{min-width:150px}
   .trip-bar-actions .trip-tool-button.diary-ico{width:34px;height:42px;min-height:42px}.trip-tool-label{display:none}
   .trip-root>.diary-style-panel,.trip-root>.diary-art-panel{top:80px}
 }
@@ -8713,10 +8703,6 @@ a.diary-school-card-value{color:var(--accent)}
 .trip-print-title{font-size:16pt;font-weight:700;margin:0 0 3mm}
 .trip-print-header{display:flex;flex-wrap:wrap;gap:6mm;margin:0 0 4mm;font-size:11pt;color:#334155}
 .trip-print-day{font-size:13pt;font-weight:700;margin:0 0 3mm}
-.trip-print-prompts{margin:4mm 0 0}
-.trip-print-prompt{margin:0 0 3mm}
-.trip-print-q{font-size:11pt;font-weight:600}
-.trip-print-a{min-height:9mm;border-bottom:1px solid #cbd5e1;font-size:11pt}
 .trip-print-spots{width:100%;margin:4mm 0 0;border-collapse:collapse;font-size:10.5pt}
 .trip-print-spots th,.trip-print-spots td{border:1px solid #cbd5e1;padding:1.6mm 2mm;text-align:left;vertical-align:top}
 .trip-print-spots th{background:#f1f5f9;font-weight:600}

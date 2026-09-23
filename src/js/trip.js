@@ -1,9 +1,8 @@
 "use strict";
 
 /* ===== 여행일지(.trip) =====
-   한 파일 = 여행 한 건. 갈래(purpose)가 셋이지만 자료는 한 벌이다 — 개인 여행 기록(trip) ·
-   체험학습 학습지(field) · 사회과 답사 보고서(survey). 갈래는 부르는 말과 기본값·접기만 바꾸고
-   자료를 가르지 않는다. 그래서 갈래를 바꿔도 잃는 것이 없다(연대표 purpose 와 같은 방식).
+   한 파일 = 여행 한 건. 예전에는 체험학습 학습지·답사 보고서 갈래(purpose)도 있었지만 쓰는 사람이 없어
+   2026-09-23 걷어냈다. 옛 파일의 purpose·질문(prompts)·조사 항목(fields)은 읽을 때 버린다.
 
    - 속은 일기장과 같은 무압축 ZIP: trip.json + assets/*(사진 바이트). ZIP·해시·사진 줄이기·스티커
      정규화는 일기장 것을 그대로 부른다(전역 스크립트라 바로 쓸 수 있다).
@@ -19,8 +18,6 @@ const TRIP_VERSION = 3;
 const TRIP_JSON_NAME = "trip.json";
 const TRIP_MAX_DAYS = 400;
 const TRIP_MAX_SPOTS = 60;            // 하루에 들를 곳
-const TRIP_MAX_PROMPTS = 20;          // 하루에 물을 것(학습지)
-const TRIP_MAX_FIELDS = 12;           // 지점 하나의 조사 항목(답사)
 const TRIP_MAX_HEADER = 8;            // 인쇄 머리의 자유 칸
 const TRIP_ASSET_RE = /^assets\/[a-z0-9_-]{4,64}\.(png|jpe?g|webp|gif)$/;
 /* 장소 영상. 사진처럼 ZIP 안에 그대로 담는다(옆 파일로 두면 .trip 만 옮길 때 끊긴다).
@@ -45,117 +42,100 @@ const TRIP_VIDEO_SHRINK_DIM = 1280;
 const TRIP_DEFAULT_MAP_CENTER = [36.5, 127.9]; // 한반도 중심
 const TRIP_DEFAULT_MAP_ZOOM = 7;               // 전국이 보이는 배율
 
-/* ---------- 갈래 ---------- */
-
-const TRIP_PURPOSES = ["trip", "field", "survey"];
-function tripPurpose(raw){ return TRIP_PURPOSES.includes(raw) ? raw : "trip"; }
-function tripPurposeAt(purpose){ return Math.max(0, TRIP_PURPOSES.indexOf(tripPurpose(purpose))); }
-
-/* 갈래마다 갈리는 말은 여기 한 표에 모은다. 값은 [여행, 학습지, 답사] 차례이고 빈 문자열은
-   '그 갈래에서는 감춤'이다. 짧은 말을 앱 공용 사전(i18n.js)에 넣으면 다른 화면의 같은 글자까지
-   바뀐다(일기장 3단계에서 값을 치른 함정) — 그래서 영어도 여기 함께 둔다. */
+/* 여행일지의 낱말은 여기 한 표에 모은다. 짧은 말을 앱 공용 사전(i18n.js)에 넣으면 다른 화면의 같은
+   글자까지 바뀐다(일기장 3단계에서 값을 치른 함정) — 그래서 영어도 여기 함께 둔다. */
 const TRIP_WORDS = {
-  docName:      ["여행일지", "체험학습 보고서", "답사 보고서"],
-  newDoc:       ["새 여행일지", "새 체험학습 보고서", "새 답사 보고서"],
-  titleHint:    ["여행 제목", "체험학습 제목", "답사 주제"],
-  fileBase:     ["여행일지", "체험학습", "답사"],
-  purposeLabel: ["문서 갈래", "문서 갈래", "문서 갈래"],
+  docName:      "여행일지",
+  newDoc:       "새 여행일지",
+  titleHint:    "여행 제목",
+  fileBase:     "여행일지",
 
-  day:          ["첫째 날", "활동", "조사 차례"],
-  dayNth:       ["{n}째 날", "활동 {n}", "{n}차 조사"],
-  dayAdd:       ["＋ 날", "＋ 활동", "＋ 조사 차례"],
-  dayTitleHint: ["그날 제목", "활동 이름", "조사 차례 제목"],
-  dayCount:     ["{n}일", "활동 {n}개", "조사 {n}차례"],
-  dayDelete:    ["이 날 지우기", "이 활동 지우기", "이 차례 지우기"],
-  dayEmpty:     ["아직 쓴 것이 없어요", "아직 쓴 것이 없어요", "아직 쓴 것이 없어요"],
+  day:          "첫째 날",
+  dayNth:       "{n}째 날",
+  dayAdd:       "＋ 날",
+  dayTitleHint: "그날 제목",
+  dayCount:     "{n}일",
+  dayDelete:    "이 날 지우기",
+  dayEmpty:     "아직 쓴 것이 없어요",
 
-  spot:         ["들른 곳", "장소", "조사 지점"],
-  spotAdd:      ["＋ 들른 곳", "＋ 장소", "＋ 조사 지점"],
-  spotList:     ["들른 곳 목록", "장소 목록", "조사 지점 목록"],
-  spotNameHint: ["장소 이름", "장소 이름", "지점 이름"],
-  spotAt:       ["들른 시각", "시각", "조사 시각"],
-  spotNote:     ["메모", "본 것", "관찰 기록"],
-  spotKindLabel:["종류", "활동 종류", "지점 성격"],
-  spotSearchHint:["이름·주소·메모 검색", "이름·주소·본 것 검색", "이름·주소·관찰 검색"],
-  spotEmpty:    ["들른 곳이 아직 없어요", "장소가 아직 없어요", "조사 지점이 아직 없어요"],
+  spot:         "들른 곳",
+  spotAdd:      "＋ 들른 곳",
+  spotList:     "들른 곳 목록",
+  spotNameHint: "장소 이름",
+  spotAt:       "들른 시각",
+  spotNote:     "메모",
+  spotKindLabel:"종류",
+  spotSearchHint:"이름·주소·메모 검색",
+  spotEmpty:    "들른 곳이 아직 없어요",
 
-  mapPane:      ["동선", "위치", "조사 범위"],
-  route:        ["다닌 길", "이동 경로", "조사 동선"],
-  mapPhotos:    ["사진으로 보기", "사진으로 보기", "사진으로 보기"],
-  mapStill:     ["지도 그림으로 굳히기", "지도 그림으로 굳히기", "지도 그림으로 굳히기"],
-  mapRemove:    ["굳힌 그림 지우기", "굳힌 그림 지우기", "굳힌 그림 지우기"],
-  mapEmpty:     ["장소에 좌표가 없어요", "장소에 좌표가 없어요", "장소에 좌표가 없어요"],
-  choro:        ["다녀온 지역", "", "조사 지역 분포"],
+  mapPane:      "동선",
+  route:        "다닌 길",
+  mapPhotos:    "사진으로 보기",
+  mapStill:     "지도 그림으로 굳히기",
+  mapRemove:    "굳힌 그림 지우기",
+  mapEmpty:     "장소에 좌표가 없어요",
+  choro:        "다녀온 지역",
 
-  paper:        ["종이", "종이", "종이"],
-  sticker:      ["스티커", "스티커", "스티커"],
-  photo:        ["사진", "사진", "사진"],
-  draw:         ["그리기", "그리기", "그리기"],
-  decorate:     ["꾸미기", "꾸미기", "꾸미기"],
+  paper:        "종이",
+  sticker:      "스티커",
+  photo:        "사진",
+  draw:         "그리기",
+  decorate:     "꾸미기",
 
-  prompts:      ["", "질문", ""],
-  promptAnswer: ["", "답", ""],
-  cost:         ["쓴 돈", "", ""],
-  costTotal:    ["이 날 {sum}", "", ""],
-  fields:       ["", "", "조사 항목"],
-  source:       ["", "", "자료 출처"],
+  cost:         "쓴 돈",
+  costTotal:    "이 날 {sum}",
 
-  printDay:     ["이 날만 인쇄", "이 활동만 인쇄", "이 차례만 인쇄"],
-  printAll:     ["여행 전체 인쇄", "보고서 전체 인쇄", "답사 전체 인쇄"],
-  exportTimeline:["일정으로 내보내기", "일정으로 내보내기", "일정으로 내보내기"],
-  exportMap:    ["지도로 내보내기", "지도로 내보내기", "지도로 내보내기"]
+  printDay:     "이 날만 인쇄",
+  printAll:     "여행 전체 인쇄",
+  exportTimeline:"일정으로 내보내기",
+  exportMap:    "지도로 내보내기"
 };
 
 const TRIP_WORDS_EN = {
-  docName:      ["Travel journal", "Field trip report", "Fieldwork report"],
-  newDoc:       ["New travel journal", "New field trip report", "New fieldwork report"],
-  titleHint:    ["Trip title", "Field trip title", "Fieldwork topic"],
-  fileBase:     ["Travel journal", "Field trip", "Fieldwork"],
-  purposeLabel: ["Document type", "Document type", "Document type"],
+  docName:      "Travel journal",
+  newDoc:       "New travel journal",
+  titleHint:    "Trip title",
+  fileBase:     "Travel journal",
 
-  day:          ["Day", "Activity", "Visit"],
-  dayNth:       ["Day {n}", "Activity {n}", "Visit {n}"],
-  dayAdd:       ["+ Day", "+ Activity", "+ Visit"],
-  dayTitleHint: ["Day title", "Activity name", "Visit title"],
-  dayCount:     ["{n} days", "{n} activities", "{n} visits"],
-  dayDelete:    ["Delete day", "Delete activity", "Delete visit"],
-  dayEmpty:     ["Nothing written yet", "Nothing written yet", "Nothing written yet"],
+  day:          "Day",
+  dayNth:       "Day {n}",
+  dayAdd:       "+ Day",
+  dayTitleHint: "Day title",
+  dayCount:     "{n} days",
+  dayDelete:    "Delete day",
+  dayEmpty:     "Nothing written yet",
 
-  spot:         ["Place", "Place", "Site"],
-  spotAdd:      ["+ Place", "+ Place", "+ Site"],
-  spotList:     ["Places", "Places", "Sites"],
-  spotNameHint: ["Place name", "Place name", "Site name"],
-  spotAt:       ["Time", "Time", "Time surveyed"],
-  spotNote:     ["Note", "What I saw", "Observation"],
-  spotKindLabel:["Kind", "Activity kind", "Site type"],
-  spotSearchHint:["Search name, address, note", "Search name, address, notes", "Search name, address, observations"],
-  spotEmpty:    ["No places yet", "No places yet", "No sites yet"],
+  spot:         "Place",
+  spotAdd:      "+ Place",
+  spotList:     "Places",
+  spotNameHint: "Place name",
+  spotAt:       "Time",
+  spotNote:     "Note",
+  spotKindLabel:"Kind",
+  spotSearchHint:"Search name, address, note",
+  spotEmpty:    "No places yet",
 
-  mapPane:      ["Route", "Location", "Survey area"],
-  route:        ["Trail", "Route", "Survey path"],
-  mapPhotos:    ["Show photos", "Show photos", "Show photos"],
-  mapStill:     ["Freeze map image", "Freeze map image", "Freeze map image"],
-  mapRemove:    ["Remove frozen image", "Remove frozen image", "Remove frozen image"],
-  mapEmpty:     ["No coordinates yet", "No coordinates yet", "No coordinates yet"],
-  choro:        ["Regions visited", "", "Region distribution"],
+  mapPane:      "Route",
+  route:        "Trail",
+  mapPhotos:    "Show photos",
+  mapStill:     "Freeze map image",
+  mapRemove:    "Remove frozen image",
+  mapEmpty:     "No coordinates yet",
+  choro:        "Regions visited",
 
-  paper:        ["Paper", "Paper", "Paper"],
-  sticker:      ["Sticker", "Sticker", "Sticker"],
-  photo:        ["Photo", "Photo", "Photo"],
-  draw:         ["Draw", "Draw", "Draw"],
-  decorate:     ["Decorate", "Decorate", "Decorate"],
+  paper:        "Paper",
+  sticker:      "Sticker",
+  photo:        "Photo",
+  draw:         "Draw",
+  decorate:     "Decorate",
 
-  prompts:      ["", "Questions", ""],
-  promptAnswer: ["", "Answer", ""],
-  cost:         ["Spending", "", ""],
-  costTotal:    ["Day total {sum}", "", ""],
-  fields:       ["", "", "Survey items"],
-  source:       ["", "", "Sources"],
+  cost:         "Spending",
+  costTotal:    "Day total {sum}",
 
-  printDay:     ["Print this day", "Print this activity", "Print this visit"],
-  printAll:     ["Print all", "Print all", "Print all"],
-  exportTimeline:["Export as timeline", "Export as timeline", "Export as timeline"],
-  exportMap:    ["Export as map", "Export as map", "Export as map"]
+  printDay:     "Print this day",
+  printAll:     "Print all",
+  exportTimeline:"Export as timeline",
+  exportMap:    "Export as map"
 };
 
 function tripIsEn(){ return typeof MNI18N !== "undefined" && !!MNI18N && MNI18N.lang === "en"; }
@@ -165,58 +145,36 @@ function tripTf(tmpl, vars){
   return String(tmpl).replace(/\{(\w+)\}/g, (whole, key) => (vars && vars[key] != null ? String(vars[key]) : whole));
 }
 
-/* 갈래의 낱말 하나. 빈 문자열이면 '그 갈래에는 없는 것'이라 부르는 쪽이 단추를 감춘다. */
-function tripWord(purpose, id){
-  const at = tripPurposeAt(purpose);
+function tripWord(id){
   const table = tripIsEn() ? TRIP_WORDS_EN : TRIP_WORDS;
-  const row = table[id] || TRIP_WORDS[id];
-  if (!row) return "";
-  return row[at] == null ? "" : row[at];
+  return table[id] || TRIP_WORDS[id] || "";
 }
 /* 낱말이 아니라 틀인 것({n}·{sum}) — 한국어는 "첫째 날"·"3일"인데 영어는 "Day 1"·"3 days"라
    자리만 바꿔서는 안 된다. */
-function tripWordf(purpose, id, vars){
-  return String(tripWord(purpose, id)).replace(/\{(\w+)\}/g, (whole, key) =>
+function tripWordf(id, vars){
+  return String(tripWord(id)).replace(/\{(\w+)\}/g, (whole, key) =>
     (vars && vars[key] != null ? String(vars[key]) : whole));
 }
-function tripHasWord(purpose, id){ return !!tripWord(purpose, id); }
 
 /* ---------- 장소의 종류 ---------- */
 
-/* [id, 아이콘(DIARY_ART 에 이미 있는 것), 기본 색, 한국어 [여행,학습지,답사], 영어]
-   저장되는 값은 세 갈래의 합집합이다. 갈래는 고르개에 무엇을 보일지만 정하고, 다른 갈래에서 고른
-   값이 들어 있어도 버리지 않는다(tripSpotKindInfo 가 찾아 주고 고르개는 맨 아래에 덧붙인다).
-   색은 표식이 아니라 처음 찍힐 때의 기본값일 뿐이다 — 지도 표시 색이 여섯뿐이라 한 갈래(일곱)를
+/* [id, 아이콘(DIARY_ART 에 이미 있는 것), 기본 색, 한국어, 영어]
+   색은 표식이 아니라 처음 찍힐 때의 기본값일 뿐이다 — 지도 표시 색이 여섯뿐이라 일곱 종류를
    다 가를 수 없다. 구분은 아이콘이 한다. */
 const TRIP_SPOT_KINDS = [
-  ["sight",     "mountain",  "blue",   ["볼거리", "견학", "지형·시설"],   ["Sight", "Tour", "Landform"]],
-  ["food",      "hamburger", "amber",  ["먹을거리", "식사", ""],          ["Food", "Meal", ""]],
-  ["stay",      "house",     "purple", ["잠자리", "", ""],                ["Stay", "", ""]],
-  ["move",      "train",     "slate",  ["이동", "이동", "이동"],          ["Transport", "Transport", "Transport"]],
-  ["shop",      "gift",      "red",    ["가게", "", ""],                  ["Shop", "", ""]],
-  ["activity",  "soccer",    "green",  ["놀거리", "체험", ""],            ["Activity", "Hands-on", ""]],
-  ["rest",      "coffee",    "green",  ["쉼터", "자유 시간", ""],         ["Rest", "Free time", ""]],
-  ["base",      "flag",      "red",    ["", "모임·집합", "거점"],         ["", "Meeting point", "Base"]],
-  ["safety",    "bell",      "purple", ["", "안전 지점", ""],             ["", "Safety point", ""]],
-  ["observe",   "magnifier", "blue",   ["", "", "관찰·기록"],             ["", "", "Observation"]],
-  ["interview", "speech",    "purple", ["", "", "면담"],                  ["", "", "Interview"]],
-  ["measure",   "ruler",     "amber",  ["", "", "측정"],                  ["", "", "Measurement"]],
-  ["collect",   "backpack",  "green",  ["", "", "채집"],                  ["", "", "Collection"]]
+  ["sight",     "mountain",  "blue",   "볼거리",   "Sight"],
+  ["food",      "hamburger", "amber",  "먹을거리", "Food"],
+  ["stay",      "house",     "purple", "잠자리",   "Stay"],
+  ["move",      "train",     "slate",  "이동",     "Transport"],
+  ["shop",      "gift",      "red",    "가게",     "Shop"],
+  ["activity",  "soccer",    "green",  "놀거리",   "Activity"],
+  ["rest",      "coffee",    "green",  "쉼터",     "Rest"]
 ];
 const TRIP_SPOT_KIND_IDS = TRIP_SPOT_KINDS.map(k => k[0]);
 function tripSpotKindInfo(id){ return TRIP_SPOT_KINDS.find(k => k[0] === id) || null; }
-/* 그 갈래의 고르개에 뜰 것만. 지금 값이 목록에 없으면 부르는 쪽이 맨 아래에 그 값을 덧붙인다. */
-function tripSpotKinds(purpose){
-  const at = tripPurposeAt(purpose);
-  return TRIP_SPOT_KINDS.filter(k => k[3][at]);
-}
-function tripSpotKindName(purpose, id){
+function tripSpotKindName(id){
   const info = tripSpotKindInfo(id);
-  if (!info) return "";
-  const at = tripPurposeAt(purpose);
-  const row = tripIsEn() ? info[4] : info[3];
-  // 다른 갈래에서 고른 값이면 그 갈래의 이름으로라도 보여 준다 — 버리는 것보다 낫다.
-  return row[at] || row.find(Boolean) || "";
+  return info ? (tripIsEn() ? info[4] : info[3]) : "";
 }
 function tripSpotKindIcon(id){ const info = tripSpotKindInfo(id); return info ? info[1] : ""; }
 function tripSpotKindColor(id){ const info = tripSpotKindInfo(id); return info ? info[2] : "blue"; }
@@ -310,20 +268,13 @@ function tripNormalizeCost(raw){
   if (!/^[A-Z]{3}$/.test(currency)) return null;
   return { amount:Math.round(amount * 100) / 100, currency };
 }
-// 자유 항목(답사 조사 항목)과 인쇄 머리 칸은 같은 모양이다 — 이름과 값 한 쌍.
+// 인쇄 머리 칸 — 이름과 값 한 쌍.
 function tripNormalizePairs(raw, max){
   return (Array.isArray(raw) ? raw : []).slice(0, max)
     .map(item => item && typeof item === "object"
       ? { k:String(item.k == null ? "" : item.k).trim().slice(0, 40), v:String(item.v == null ? "" : item.v).slice(0, 300) }
       : null)
     .filter(item => item && (item.k || item.v));
-}
-function tripNormalizePrompts(raw){
-  return (Array.isArray(raw) ? raw : []).slice(0, TRIP_MAX_PROMPTS)
-    .map(item => item && typeof item === "object"
-      ? { q:String(item.q == null ? "" : item.q).slice(0, 300), a:String(item.a == null ? "" : item.a).slice(0, 2000) }
-      : null)
-    .filter(item => item && (item.q.trim() || item.a.trim()));
 }
 
 function tripNormalizePhotoOpacity(raw, photos){
@@ -349,20 +300,19 @@ function tripNormalizeSpot(raw, hasAsset){
     .map(v => tripNormalizeVideo(v, hasAsset))
     .filter(v => v && !seenVideos.has(v.v) && seenVideos.add(v.v))
     .slice(0, TRIP_MAX_VIDEOS);
-  const fields = tripNormalizePairs(raw.fields, TRIP_MAX_FIELDS);
   const cost = tripNormalizeCost(raw.cost);
   // 이름도 주소도 좌표도 없고 적은 것도 없으면 자리만 차지하는 줄이다.
   const lat = tripClampLat(raw.lat), lng = tripClampLng(raw.lng);
-  if (!name && !address && lat == null && !note && !cost && !photos.length && !videos.length && !fields.length) return null;
+  if (!name && !address && lat == null && !note && !cost && !photos.length && !videos.length) return null;
   return {
     id:String(raw.id || "") || tripSpotId(),
     at:tripNormalizeTime(raw.at),
     name, address, note,
-    // 모르는 종류도 버리지 않는다 — 갈래를 바꿨다고 값이 사라지면 무손실 규칙이 깨진다.
+    // 모르는 종류도 버리지 않는다 — 고르개가 글자 그대로 맨 아래에 보여 준다.
     kind:typeof raw.kind === "string" ? raw.kind.trim().slice(0, 24) : "",
     lat, lng:lat == null ? null : lng,
     color:String(raw.color || "").trim().slice(0, 12) || "",
-    cost, photos, photoOpacity:tripNormalizePhotoOpacity(raw.photoOpacity, photos), videos, fields
+    cost, photos, photoOpacity:tripNormalizePhotoOpacity(raw.photoOpacity, photos), videos
   };
 }
 /* 영상 한 개 = { v:영상, p:첫 장면 그림(없어도 된다), d:길이(초) }. 영상 바이트가 없으면 버린다. */
@@ -408,7 +358,6 @@ function tripNormalizeDay(raw, hasAsset){
     favorite:!!raw.favorite,
     tags:typeof diaryNormalizeTags === "function" ? diaryNormalizeTags(raw.tags) : [],
     drawing, stickers, spots,
-    prompts:tripNormalizePrompts(raw.prompts),
     still,
     stillKey:still ? String(raw.stillKey == null ? "" : raw.stillKey).slice(0, 200) : ""
   };
@@ -417,7 +366,7 @@ function tripNormalizeDay(raw, hasAsset){
 function tripDayIsEmpty(day){
   return !day || (!String(day.title || "").trim() && !String(day.text || "").trim()
     && !(day.spots && day.spots.length) && !(day.stickers && day.stickers.length)
-    && !(day.drawing && day.drawing.length) && !(day.prompts && day.prompts.length)
+    && !(day.drawing && day.drawing.length)
     && !day.style && !day.weather && !day.mood && !day.favorite && !day.still
     && !(day.tags && day.tags.length) && !day.date);
 }
@@ -453,17 +402,14 @@ function tripPlaceDayByDate(days, day){
   return list;
 }
 
-/* 여행(날) 갈래에서는 한 날짜에 날이 하나다 — 날 수 세기('5일')·사진 가져오기·날씨가 모두 날짜 하나에
-   날 하나를 기대한다. 체험학습(활동)·답사(조사 차례)는 하루에 여럿일 수 있어 막지 않는다. */
+/* 한 날짜에는 날이 하나다 — 날 수 세기('5일')·사진 가져오기·날씨가 모두 날짜 하나에 날 하나를 기대한다. */
 function tripDateTakenBy(model, day, date){
-  if (!tripIsDateKey(date) || tripPurpose(model && model.purpose) !== "trip") return null;
+  if (!tripIsDateKey(date)) return null;
   return ((model && model.days) || []).find(other => other !== day && other && other.date === date) || null;
 }
 
-/* '＋ 날' 로 더하는 날의 날짜 — 여행 갈래에서 가장 늦은 날짜의 다음 날. 날짜가 하나도 없거나
-   하루에 여럿일 수 있는 활동·조사 차례면 비워 둔다. */
+/* '＋ 날' 로 더하는 날의 날짜 — 가장 늦은 날짜의 다음 날. 날짜가 하나도 없으면 비워 둔다. */
 function tripNextDayDate(model){
-  if (tripPurpose(model && model.purpose) !== "trip") return "";
   const dates = ((model && model.days) || []).map(day => day && day.date).filter(tripIsDateKey).sort();
   if (!dates.length) return "";
   const next = new Date(dates[dates.length - 1] + "T00:00:00Z");
@@ -498,14 +444,12 @@ function tripNormalizeBudget(raw){
   };
 }
 
-function tripEmpty(title, purpose){
+function tripEmpty(title){
   const now = Date.now();
-  const kind = tripPurpose(purpose);
   return {
     format:TRIP_FORMAT, version:TRIP_VERSION,
-    title:String(title || tripWord(kind, "docName")).slice(0, 200),
+    title:String(title || tripWord("docName")).slice(0, 200),
     createdAt:now, updatedAt:now,
-    purpose:kind,
     style:typeof diaryDefaultStyle === "function" ? diaryDefaultStyle() : null,
     printPlain:false,
     header:[],
@@ -520,7 +464,6 @@ function tripNormalize(raw, hasAsset){
   if (!raw || typeof raw !== "object" || raw.format !== TRIP_FORMAT) throw new Error("trip-format");
   // 모르는 판은 거절한다 — 모르는 값을 기본값으로 바꾼 채 덮어써서 자료를 잃는 것보다 낫다.
   if (!(Number(raw.version) >= 1 && Number(raw.version) <= TRIP_VERSION)) throw new Error("trip-version");
-  const purpose = tripPurpose(raw.purpose);
   const days = [];
   const ids = new Set();
   for (const item of (Array.isArray(raw.days) ? raw.days : []).slice(0, TRIP_MAX_DAYS)){
@@ -532,10 +475,9 @@ function tripNormalize(raw, hasAsset){
   }
   return {
     format:TRIP_FORMAT, version:TRIP_VERSION,
-    title:String(raw.title || tripWord(purpose, "docName")).slice(0, 200),
+    title:String(raw.title || tripWord("docName")).slice(0, 200),
     createdAt:Number(raw.createdAt) || Date.now(),
     updatedAt:Number(raw.updatedAt) || Date.now(),
-    purpose,
     style:typeof diaryNormalizeStyle === "function" ? diaryNormalizeStyle(raw.style, hasAsset) : null,
     printPlain:!!raw.printPlain,
     header:tripNormalizePairs(raw.header, TRIP_MAX_HEADER),
@@ -565,7 +507,6 @@ function tripCleanSpot(s){
     if (v.d) o.d = v.d;
     return o;
   });
-  if (s.fields && s.fields.length) out.fields = s.fields.map(f => ({ k:f.k, v:f.v }));
   return out;
 }
 function tripCleanDays(model){
@@ -581,7 +522,6 @@ function tripCleanDays(model){
       spots:(d.spots || []).map(tripCleanSpot)
     };
     if (d.weather && d.weatherSource) out.weatherSource = d.weatherSource;
-    if (d.prompts && d.prompts.length) out.prompts = d.prompts.map(p => ({ q:p.q, a:p.a }));
     if (d.still){ out.still = d.still; out.stillKey = d.stillKey || ""; }
     return out;
   });
@@ -590,7 +530,6 @@ function tripModelJson(model){
   return JSON.stringify({
     format:TRIP_FORMAT, version:TRIP_VERSION,
     title:model.title || "", createdAt:model.createdAt || Date.now(), updatedAt:model.updatedAt || Date.now(),
-    purpose:tripPurpose(model.purpose),
     style:model.style, printPlain:!!model.printPlain,
     header:tripNormalizePairs(model.header, TRIP_MAX_HEADER),
     map:model.map, budget:model.budget, source:model.source || "",
@@ -603,7 +542,7 @@ function tripModelJson(model){
 function tripContentKey(model){
   const map = model.map && typeof model.map === "object" ? { ...model.map, center:undefined, zoom:undefined } : model.map;
   return JSON.stringify({
-    title:model.title || "", purpose:tripPurpose(model.purpose),
+    title:model.title || "",
     style:model.style, printPlain:!!model.printPlain,
     header:tripNormalizePairs(model.header, TRIP_MAX_HEADER),
     map, budget:model.budget, source:model.source || "",
@@ -669,8 +608,7 @@ async function tripUnpack(bytes){
 
 /* ---------- 국내·해외 ---------- */
 
-/* 좌표가 있는 장소로 정한다. 하나도 없으면 국내로 본다 — 주소만 적은 문서가 흔하고
-   학습지·답사는 사실상 국내다. 판정은 여기 한 곳에서만 한다(단추마다 따로 재면 어떤 단추는
+/* 좌표가 있는 장소로 정한다. 하나도 없으면 국내로 본다 — 주소만 적은 문서가 흔하다. 판정은 여기 한 곳에서만 한다(단추마다 따로 재면 어떤 단추는
    감춰지고 어떤 단추는 남는다). */
 function tripIsDomestic(model){
   const inKorea = typeof MNKoreaCoords !== "undefined" && MNKoreaCoords
@@ -690,29 +628,25 @@ function tripIsDomestic(model){
 /* ---------- 새 문서 ---------- */
 
 let _tripScratchCount = 0;
-function tripScratchFileName(purpose, n){
-  const base = TRIP_WORDS.fileBase[tripPurposeAt(purpose)];
+function tripScratchFileName(n){
+  const base = TRIP_WORDS.fileBase;
   return (n && n > 1 ? base + " " + n : base) + ".trip";
 }
-function tripStarterBytes(name, purpose){
-  const title = String(name || "").replace(/\.trip$/i, "") || TRIP_WORDS.docName[tripPurposeAt(purpose)];
-  return tripPack(tripEmpty(title, purpose), new Map());
+function tripStarterBytes(name){
+  const title = String(name || "").replace(/\.trip$/i, "") || TRIP_WORDS.docName;
+  return tripPack(tripEmpty(title), new Map());
 }
-function newTripScratch(purpose){
-  const kind = tripPurpose(purpose);
+function newTripScratch(){
   _tripScratchCount++;
-  const name = tripScratchFileName(kind, _tripScratchCount);
+  const name = tripScratchFileName(_tripScratchCount);
   if (typeof handleFiles !== "function") return Promise.resolve(null);
-  return Promise.resolve(handleFiles([new File([tripStarterBytes(name, kind)], name, { type:"application/zip" })],
+  return Promise.resolve(handleFiles([new File([tripStarterBytes(name)], name, { type:"application/zip" })],
     { isScratch:true }));
 }
-function newTripScratchInFolder(folder, purpose){
+function newTripScratchInFolder(folder){
   if (typeof createScratchInFolder !== "function") return false;
-  const kind = tripPurpose(purpose);
-  // 폴더에서 만들 때는 갈래를 물을 수 없다 — makeContent 가 동기여야 하기 때문이다(code-viewer.js).
-  // 기본 갈래로 만들고 도구막대에서 바꾸게 한다. 갈래 전환이 무손실이라 잃는 것이 없다.
-  return createScratchInFolder(folder, n => tripScratchFileName(kind, n),
-    name => tripStarterBytes(name, kind), "application/zip", "새 여행일지를");
+  return createScratchInFolder(folder, n => tripScratchFileName(n),
+    name => tripStarterBytes(name), "application/zip", "새 여행일지를");
 }
 
 /* ---------- 사진에서 찍은 때·자리 읽기(EXIF) ----------
@@ -901,11 +835,7 @@ function tripPlainText(model){
   for (const day of (model.days || [])){
     parts.push([day.date, day.title].filter(Boolean).join(" "));
     parts.push(day.text || "");
-    for (const p of (day.prompts || [])) parts.push([p.q, p.a].filter(Boolean).join(" "));
-    for (const s of (day.spots || [])){
-      parts.push([s.at, s.name, s.address, s.note].filter(Boolean).join(" "));
-      for (const f of (s.fields || [])) parts.push([f.k, f.v].filter(Boolean).join(" "));
-    }
+    for (const s of (day.spots || [])) parts.push([s.at, s.name, s.address, s.note].filter(Boolean).join(" "));
   }
   return parts.filter(Boolean).join("\n");
 }
@@ -1000,15 +930,14 @@ function tripSpotRows(model){
 
 /* 여행일지 → 연대표(.timeline) 의 '여행 일정'. 장소의 첫 사진(없으면 첫 영상의 첫 장면)도 일정 안에 담는다. */
 async function tripToTimelineDoc(model, assets, preparePhoto = timelinePreparePhoto){
-  const purpose = tripPurpose(model.purpose);
-  const doc = timelineDocEmpty(model.title || tripWord(purpose, "docName"));
+  const doc = timelineDocEmpty(model.title || tripWord("docName"));
   doc.purpose = "trip";
   const allRows = tripSpotRows(model);
   const rows = allRows.slice(0, TIMELINE_MAX_EVENTS);
   doc.events = rows.map(({ day, spot }, index) => timelineNormalizeEvent({
-    title:spot.name || tripWord(purpose, "spot"),
+    title:spot.name || tripWord("spot"),
     start:[day.date, spot.at].filter(Boolean).join(" "),
-    category:spot.kind ? tripSpotKindName(purpose, spot.kind) : "",
+    category:spot.kind ? tripSpotKindName(spot.kind) : "",
     placeName:spot.name || "",
     placeAddress:spot.address || "",
     lat:spot.lat, lng:spot.lng,
@@ -1048,17 +977,16 @@ async function tripToTimelineDoc(model, assets, preparePhoto = timelinePreparePh
 }
 /* 여행일지 → 지도(.map). 좌표가 있는 장소만 간다(주소만 있는 줄은 셈해서 알려 준다). */
 function tripToMapDoc(model){
-  const purpose = tripPurpose(model.purpose);
-  const doc = mapDocEmpty(model.title || tripWord(purpose, "docName"));
+  const doc = mapDocEmpty(model.title || tripWord("docName"));
   const rows = tripSpotRows(model).filter(({ spot }) => spot.lat != null && spot.lng != null);
   doc.markers = rows.map(({ day, spot }) => mapNormalizeMarker({
     lat:spot.lat, lng:spot.lng,
-    label:spot.name || tripWord(purpose, "spot"),
+    label:spot.name || tripWord("spot"),
     note:[[day.date, spot.at].filter(Boolean).join(" "),
-      spot.kind ? tripSpotKindName(purpose, spot.kind) : "",
+      spot.kind ? tripSpotKindName(spot.kind) : "",
       spot.address, spot.note].filter(Boolean).join("\n"),
     // .map 에는 장소의 종류가 없다. 업종 칸에 이름을 실어 보내되 되돌려 읽지는 않는다.
-    category:spot.kind ? tripSpotKindName(purpose, spot.kind) : "",
+    category:spot.kind ? tripSpotKindName(spot.kind) : "",
     address:spot.address || "",
     color:tripSpotKindColor(spot.kind)
   }));
@@ -1072,21 +1000,13 @@ function tripToMapDoc(model){
 
 /* ---------- 인쇄 ----------
    화면을 찍지 않고 A4 폭으로 다시 배치한다(일기장과 같은 방식). 종이는 공용 함수가 그리고
-   여기서는 갈래마다 다른 머리 칸과 장소·질문 표를 붙인다.
+   여기서는 머리 칸과 장소 표를 붙인다.
    인쇄 층에는 Leaflet 저작권 줄이 따라오지 않으므로 **자료 출처 한 줄을 앱이 직접 넣는다**(설계 2.5). */
 
 const TRIP_PRINT_WIDTH = 680;
 
-/* 갈래마다 다른 머리 칸의 기본값. 사용자가 header 에 적어 둔 것이 있으면 그것을 쓴다. */
-const TRIP_HEADER_DEFAULTS = {
-  trip:   [],
-  field:  [["학교", ""], ["학년·반", ""], ["이름", ""]],
-  survey: [["주제", ""], ["조사자", ""], ["조사일", ""]]
-};
 function tripPrintHeader(model){
-  const rows = (model.header || []).filter(item => item.k || item.v);
-  if (rows.length) return rows;
-  return (TRIP_HEADER_DEFAULTS[tripPurpose(model.purpose)] || []).map(([k, v]) => ({ k, v }));
+  return (model.header || []).filter(item => item.k || item.v);
 }
 
 /* 앱이 쓴 자료의 출처. 쓴 것만 적는다 — 안 쓴 자료의 출처를 적는 것은 틀린 표시다(설계 2.5 규칙 2). */
@@ -1344,7 +1264,7 @@ const TRIP_RECOVERY_VIDEO_DELAY = 8000;
 
 function tripDayLabel(model, day){
   const at = (model.days || []).indexOf(day);
-  const nth = tripWordf(model.purpose, "dayNth", { n:at + 1 });
+  const nth = tripWordf("dayNth", { n:at + 1 });
   return day && day.date ? day.date + " " + nth : nth;
 }
 
@@ -1407,14 +1327,6 @@ function mountTripEditor(doc){
   titleInput.className = "trip-title";
   titleInput.maxLength = 200;
   titleInput.value = model.title || "";
-  const purposeSelect = document.createElement("select");
-  purposeSelect.className = "trip-select trip-purpose-select";
-  for (const value of TRIP_PURPOSES){
-    const option = document.createElement("option");
-    option.value = value;
-    option.selected = tripPurpose(model.purpose) === value;
-    purposeSelect.appendChild(option);
-  }
   const status = document.createElement("span");
   status.className = "trip-status";
   status.dataset.placeholder = tripIsEn()
@@ -1455,7 +1367,7 @@ function mountTripEditor(doc){
   actions.className = "trip-bar-actions";
   actions.append(undoBtn, redoBtn, photoBtn, photoInput, exifBtn, exifInput,
     stickerBtn, styleBtn, bgInput, printBtn, exportBtn, saveBtn);
-  bar.append(brand, purposeSelect, titleInput, status, actions);
+  bar.append(brand, titleInput, status, actions);
 
   /* ----- 본문: 여정 띠 + 종이 ----- */
   const body = document.createElement("div");
@@ -1615,22 +1527,7 @@ function mountTripEditor(doc){
   budgetBox.append(budgetSum, currencyInput, rateInput, rateBtn);
   spotsBox.append(spotsHead, spotList, spotsEmpty, budgetBox);
 
-  /* 질문 칸 — 학습지 갈래에서만 뜬다(빈 낱말 = 감춤 규칙). */
-  const promptsBox = document.createElement("section");
-  promptsBox.className = "trip-prompts";
-  const promptsHead = document.createElement("div");
-  promptsHead.className = "trip-prompts-head";
-  const promptsTitle = document.createElement("span");
-  const addPromptBtn = document.createElement("button");
-  addPromptBtn.type = "button";
-  addPromptBtn.className = "diary-btn trip-add-prompt";
-  addPromptBtn.textContent = "＋";
-  promptsHead.append(promptsTitle, addPromptBtn);
-  const promptList = document.createElement("div");
-  promptList.className = "trip-prompt-list";
-  promptsBox.append(promptsHead, promptList);
-
-  main.append(pageHead, els.paper, promptsBox, spotsBox);
+  main.append(pageHead, els.paper, spotsBox);
   body.append(rail, main, mapDivider, mapPane);
   root.append(bar, body);
 
@@ -2022,7 +1919,7 @@ function mountTripEditor(doc){
       target.spots.push({
         id:spotId, at:info.at || "", name, address:"", note:"", kind:"",
         lat:info.lat, lng:info.lat == null ? null : info.lng,
-        color:"", cost:null, photos:asset ? [asset.name] : [], fields:[]
+        color:"", cost:null, photos:asset ? [asset.name] : []
       });
       made++;
     }
@@ -2319,7 +2216,7 @@ function mountTripEditor(doc){
     const photos = (spot.photos || []).map(asset => assetUrl(asset)).filter(Boolean);
     const videos = (spot.videos || []).filter(v => assets.has(v.v));
     if (!photos.length && !videos.length) return null;
-    const placeName = spot.name || tripWord(model.purpose, "spot");
+    const placeName = spot.name || tripWord("spot");
     const card = document.createElement("div");
     card.className = "trip-map-photo-card";
     const head = document.createElement("div");
@@ -2399,7 +2296,7 @@ function mountTripEditor(doc){
 
   function bindTripMarkerPreview(marker, spot, markerNumber){
     if (!(spot.photos || []).some(name => assets.has(name)) && !(spot.videos || []).some(v => assets.has(v.v))){
-      marker.bindTooltip(markerNumber + ". " + (spot.name || tripWord(model.purpose, "spot")), { direction:"top" });
+      marker.bindTooltip(markerNumber + ". " + (spot.name || tripWord("spot")), { direction:"top" });
       return;
     }
     let card = null;
@@ -2430,8 +2327,7 @@ function mountTripEditor(doc){
   }
 
   function renderMap(){
-    const purpose = tripPurpose(model.purpose);
-    mapTitle.textContent = tripWord(purpose, "mapPane") + (mapScope === "all" ? " · " + tripT("여행 전체") : "");
+    mapTitle.textContent = tripWord("mapPane") + (mapScope === "all" ? " · " + tripT("여행 전체") : "");
     const scopeIsAll = mapScope === "all";
     const scopeHint = scopeIsAll
       ? (tripIsEn() ? "Whole trip map · Click for this day" : "여행 전체 지도 · 누르면 이 날 지도")
@@ -2441,13 +2337,13 @@ function mountTripEditor(doc){
     scopeBtn.setAttribute("aria-pressed", String(scopeIsAll));
     scopeBtn.classList.toggle("is-on", mapScope === "all");
     routeBtn.classList.toggle("is-on", !!(model.map && model.map.route));
-    routeBtn.title = tripWord(purpose, "route");
+    routeBtn.title = tripWord("route");
     photosBtn.classList.toggle("is-on", mapPhotos);
     photosBtn.setAttribute("aria-pressed", String(mapPhotos));
-    photosBtn.title = tripWord(purpose, "mapPhotos");
+    photosBtn.title = tripWord("mapPhotos");
     photosBtn.setAttribute("aria-label", photosBtn.title);
     const list = spotsWithCoords();
-    mapNote.textContent = list.length ? "" : tripWord(purpose, "mapEmpty");
+    mapNote.textContent = list.length ? "" : tripWord("mapEmpty");
     mapNote.hidden = !!list.length;
     syncFreezeBtn();
     renderStill();
@@ -2518,18 +2414,17 @@ function mountTripEditor(doc){
       : !mapReady ? tripT("지도를 아직 열지 못했어요.")
       : !mapStage.clientHeight ? tripT("지도 칸이 접혀 있어요.")
       : !tilesDrawn ? tripT("배경 지도가 아직 오지 않았어요. 인터넷이 없으면 굳힐 수 없어요.")
-      : !spotsWithCoords().length ? tripWord(model.purpose, "mapEmpty")
-      : tripWord(model.purpose, "mapStill");
+      : !spotsWithCoords().length ? tripWord("mapEmpty")
+      : tripWord("mapStill");
     freezeBtn.setAttribute("aria-label", freezeBtn.title);
   }
   /* ----- 다녀온 지역 -----
      경계 자료(약 0.4MB)는 좌표가 생긴 뒤에만 한 번 읽는다. 없으면 이 칸만 조용히 감춘다. */
   let regionIndex = null, regionTried = false;
   async function renderRegions(){
-    const purpose = tripPurpose(model.purpose);
-    const word = tripWord(purpose, "choro");                 // 학습지 갈래에는 빈 낱말 = 감춤
+    const word = tripWord("choro");
     const anyCoord = (model.days || []).some(d => (d.spots || []).some(s => s.lat != null));
-    if (!word || !anyCoord || !tripIsDomestic(model)){ regionBox.hidden = true; return; }
+    if (!anyCoord || !tripIsDomestic(model)){ regionBox.hidden = true; return; }
     if (!regionIndex && !regionTried){
       regionTried = true;
       try {
@@ -2560,7 +2455,7 @@ function mountTripEditor(doc){
     stillBox.hidden = !url;
     if (!url){ stillImg.removeAttribute("src"); stillNote.textContent = ""; return; }
     stillImg.src = url;
-    stillRemoveBtn.textContent = tripWord(model.purpose, "mapRemove");
+    stillRemoveBtn.textContent = tripWord("mapRemove");
     stillRemoveBtn.title = stillRemoveBtn.textContent;
     stillRemoveBtn.setAttribute("aria-label", stillRemoveBtn.title);
     const stale = (holder.stillKey || "") !== stillSignature();
@@ -2642,7 +2537,7 @@ function mountTripEditor(doc){
   /* ----- 여정 띠 ----- */
   function renderRail(){
     railList.innerHTML = "";
-    railHead.textContent = tripWordf(model.purpose, "dayCount", { n:(model.days || []).length });
+    railHead.textContent = tripWordf("dayCount", { n:(model.days || []).length });
     for (const day of (model.days || [])){
       const chip = document.createElement("button");
       chip.type = "button";
@@ -2661,12 +2556,12 @@ function mountTripEditor(doc){
       const sub = document.createElement("span");
       sub.className = "trip-day-chip-sub";
       const spots = (day.spots || []).length;
-      sub.textContent = day.title || (spots ? tripWord(model.purpose, "spot") + " " + spots : tripWord(model.purpose, "dayEmpty"));
+      sub.textContent = day.title || (spots ? tripWord("spot") + " " + spots : tripWord("dayEmpty"));
       chip.append(head, sub);
       chip.addEventListener("click", () => goTo(day.id));
       railList.append(chip);
     }
-    addDayBtn.textContent = tripWord(model.purpose, "dayAdd");
+    addDayBtn.textContent = tripWord("dayAdd");
   }
 
   function goTo(id){
@@ -2680,25 +2575,22 @@ function mountTripEditor(doc){
 
   /* ----- 장소 목록 ----- */
 
-  /* 고르개에는 이 갈래의 것만 담되, 지금 값이 목록에 없으면 맨 아래에 그 값을 덧붙인다.
-     갈래를 바꿨다고 값이 사라지면 무손실 규칙이 깨진다(설계 부록 B). */
-  function fillKindSelect(select, purpose, value){
+  /* 지금 값이 목록에 없으면(옛 파일·손으로 고친 파일) 맨 아래에 글자 그대로 덧붙인다 — 버리지 않는다. */
+  function fillKindSelect(select, value){
     select.innerHTML = "";
     const blank = document.createElement("option");
     blank.value = ""; blank.textContent = "—";
     select.append(blank);
-    const shown = tripSpotKinds(purpose);
-    for (const kind of shown){
+    for (const kind of TRIP_SPOT_KINDS){
       const option = document.createElement("option");
       option.value = kind[0];
-      option.textContent = tripSpotKindName(purpose, kind[0]);
+      option.textContent = tripSpotKindName(kind[0]);
       select.append(option);
     }
-    if (value && !shown.some(k => k[0] === value)){
+    if (value && !tripSpotKindInfo(value)){
       const option = document.createElement("option");
       option.value = value;
-      // 다른 갈래에서 고른 값이면 그 이름을, 아예 모르는 글자면 글자 그대로 보여 준다.
-      option.textContent = tripSpotKindName(purpose, value) || value;
+      option.textContent = value;
       option.className = "trip-kind-foreign";
       select.append(option);
     }
@@ -2730,16 +2622,13 @@ function mountTripEditor(doc){
 
   function renderSpots(){
     const day = dayOf(current);
-    const purpose = tripPurpose(model.purpose);
-    spotsTitle.textContent = tripWord(purpose, "spotList");
-    addSpotBtn.textContent = tripWord(purpose, "spotAdd");
+    spotsTitle.textContent = tripWord("spotList");
+    addSpotBtn.textContent = tripWord("spotAdd");
     addSpotBtn.disabled = !day;
     spotList.innerHTML = "";
     const spots = day ? day.spots : [];
-    spotsEmpty.textContent = tripWord(purpose, "spotEmpty");
+    spotsEmpty.textContent = tripWord("spotEmpty");
     spotsEmpty.hidden = !!spots.length;
-    const showCost = tripHasWord(purpose, "cost");
-    const showFields = tripHasWord(purpose, "fields");
 
     for (const spot of spots){
       const row = document.createElement("div");
@@ -2751,17 +2640,17 @@ function mountTripEditor(doc){
       const at = document.createElement("input");
       at.type = "text"; at.className = "trip-spot-at"; at.maxLength = 5;
       at.value = spot.at || ""; at.placeholder = "09:30";
-      at.title = tripWord(purpose, "spotAt");
+      at.title = tripWord("spotAt");
       const icon = document.createElement("span");
       icon.className = "trip-spot-icon";
       icon.innerHTML = spot.kind ? diaryArtSvg(tripSpotKindIcon(spot.kind), "trip-spot-art") : "";
       const kindSelect = document.createElement("select");
       kindSelect.className = "trip-select trip-spot-kind";
-      kindSelect.title = tripWord(purpose, "spotKindLabel");
-      fillKindSelect(kindSelect, purpose, spot.kind);
+      kindSelect.title = tripWord("spotKindLabel");
+      fillKindSelect(kindSelect, spot.kind);
       const name = document.createElement("input");
       name.type = "text"; name.className = "trip-spot-name"; name.maxLength = 120;
-      name.value = spot.name || ""; name.placeholder = tripWord(purpose, "spotNameHint");
+      name.value = spot.name || ""; name.placeholder = tripWord("spotNameHint");
       const pickBtn = diaryButton("", spot.lat == null ? "지도에서 자리 찍기" : "지도에서 자리 다시 찍기",
         "diary-btn trip-spot-pick" + (spot.lat == null ? "" : " is-on"), "location");
       const removeBtn = diaryButton("", "이 줄 빼기", "diary-btn trip-spot-remove", "close");
@@ -2796,7 +2685,7 @@ function mountTripEditor(doc){
       address.value = spot.address || ""; address.placeholder = "주소";
       const note = document.createElement("input");
       note.type = "text"; note.className = "trip-spot-note"; note.maxLength = 2000;
-      note.value = spot.note || ""; note.placeholder = tripWord(purpose, "spotNote");
+      note.value = spot.note || ""; note.placeholder = tripWord("spotNote");
       line2.append(address, note);
       row.append(line1, line2);
 
@@ -2873,55 +2762,26 @@ function mountTripEditor(doc){
         row.append(strip);
       }
 
-      if (showCost){
-        const line3 = document.createElement("div");
-        line3.className = "trip-spot-line";
-        const cost = document.createElement("input");
-        cost.type = "text"; cost.className = "trip-spot-cost"; cost.maxLength = 12; cost.inputMode = "numeric";
-        cost.value = spot.cost ? String(spot.cost.amount) : "";
-        cost.placeholder = tripWord(purpose, "cost");
-        cost.title = tripWord(purpose, "cost");
-        const unit = document.createElement("span");
-        unit.className = "trip-spot-cost-unit";
-        unit.textContent = (spot.cost && spot.cost.currency) || model.budget.currency;
-        unit.title = tripT("이 여행의 화폐 — 아래에서 바꿔요");
-        cost.addEventListener("input", () => {
-          // Number("") 는 0 이다 — 빈 칸을 0원으로 적으면 안 된다.
-          const text = cost.value.replace(/[^0-9.]/g, "");
-          spot.cost = text ? tripNormalizeCost({ amount:Number(text), currency:unit.textContent }) : null;
-          renderBudget();
-          touch();
-        });
-        line3.append(cost, unit);
-        row.append(line3);
-      }
-      if (showFields){
-        const box = document.createElement("div");
-        box.className = "trip-spot-fields";
-        const head = document.createElement("span");
-        head.className = "trip-spot-fields-head";
-        head.textContent = tripWord(purpose, "fields");
-        const addField = document.createElement("button");
-        addField.type = "button"; addField.className = "diary-btn trip-add-field"; addField.textContent = "＋";
-        addField.addEventListener("click", () => {
-          if (history) history.flush();
-          spot.fields = [...(spot.fields || []), { k:"", v:"" }];
-          renderSpots(); touch(true);
-        });
-        box.append(head, addField);
-        for (const [at2, field] of (spot.fields || []).entries()){
-          const k = document.createElement("input");
-          k.type = "text"; k.className = "trip-field-k"; k.maxLength = 40;
-          k.value = field.k; k.placeholder = "항목";
-          const v = document.createElement("input");
-          v.type = "text"; v.className = "trip-field-v"; v.maxLength = 300;
-          v.value = field.v; v.placeholder = "내용";
-          k.addEventListener("input", () => { spot.fields[at2].k = k.value; touch(); });
-          v.addEventListener("input", () => { spot.fields[at2].v = v.value; touch(); });
-          box.append(k, v);
-        }
-        row.append(box);
-      }
+      const line3 = document.createElement("div");
+      line3.className = "trip-spot-line";
+      const cost = document.createElement("input");
+      cost.type = "text"; cost.className = "trip-spot-cost"; cost.maxLength = 12; cost.inputMode = "numeric";
+      cost.value = spot.cost ? String(spot.cost.amount) : "";
+      cost.placeholder = tripWord("cost");
+      cost.title = tripWord("cost");
+      const unit = document.createElement("span");
+      unit.className = "trip-spot-cost-unit";
+      unit.textContent = (spot.cost && spot.cost.currency) || model.budget.currency;
+      unit.title = tripT("이 여행의 화폐 — 아래에서 바꿔요");
+      cost.addEventListener("input", () => {
+        // Number("") 는 0 이다 — 빈 칸을 0원으로 적으면 안 된다.
+        const text = cost.value.replace(/[^0-9.]/g, "");
+        spot.cost = text ? tripNormalizeCost({ amount:Number(text), currency:unit.textContent }) : null;
+        renderBudget();
+        touch();
+      });
+      line3.append(cost, unit);
+      row.append(line3);
 
       at.addEventListener("change", () => {
         spot.at = tripNormalizeTime(at.value);
@@ -2977,15 +2837,13 @@ function mountTripEditor(doc){
     return currency === "KRW" ? text + "원" : text + " " + currency;
   };
   function renderBudget(){
-    const purpose = tripPurpose(model.purpose);
-    if (!tripHasWord(purpose, "cost")){ budgetBox.hidden = true; return; }
     const day = dayOf(current);
     const here = sumCost(day ? [day] : []);
     const all = sumCost(model.days || []);
     budgetBox.hidden = !all.size;
     if (!all.size) return;
     const parts = [];
-    for (const [cur, amount] of here) parts.push(tripWordf(purpose, "costTotal", { sum:moneyText(amount, cur) }));
+    for (const [cur, amount] of here) parts.push(tripWordf("costTotal", { sum:moneyText(amount, cur) }));
     const total = [...all].map(([cur, amount]) => moneyText(amount, cur)).join(" + ");
     parts.push(tripTf("모두 {sum}", { sum:total }));
     // 여행 화폐가 원이 아니고 환율을 적어 두었으면 원화로도 보여 준다.
@@ -3021,52 +2879,9 @@ function mountTripEditor(doc){
       setStatus(tripT("한 날에 넣을 수 있는 수를 넘었어요.")); return;
     }
     day.spots.push({ id:tripSpotId(), at:"", name:"", address:"", note:"", kind:"",
-      lat:null, lng:null, color:"", cost:null, photos:[], fields:[] });
+      lat:null, lng:null, color:"", cost:null, photos:[] });
     renderSpots(); renderRail(); touch(true);
     const last = spotList.querySelector(".trip-spot:last-child .trip-spot-name");
-    if (last) last.focus();
-  });
-
-  /* ----- 질문 칸(학습지) ----- */
-  function renderPrompts(){
-    const purpose = tripPurpose(model.purpose);
-    const show = tripHasWord(purpose, "prompts");
-    promptsBox.hidden = !show;
-    if (!show) return;
-    const day = dayOf(current);
-    promptsTitle.textContent = tripWord(purpose, "prompts");
-    addPromptBtn.disabled = !day;
-    promptList.innerHTML = "";
-    for (const [at, prompt] of ((day && day.prompts) || []).entries()){
-      const row = document.createElement("div");
-      row.className = "trip-prompt";
-      const q = document.createElement("input");
-      q.type = "text"; q.className = "trip-prompt-q"; q.maxLength = 300;
-      q.value = prompt.q; q.placeholder = tripWord(purpose, "prompts");
-      const a = document.createElement("input");
-      a.type = "text"; a.className = "trip-prompt-a"; a.maxLength = 2000;
-      a.value = prompt.a; a.placeholder = tripWord(purpose, "promptAnswer");
-      const remove = diaryButton("", "이 줄 빼기", "diary-btn trip-prompt-remove", "close");
-      q.addEventListener("input", () => { day.prompts[at].q = q.value; touch(); });
-      a.addEventListener("input", () => { day.prompts[at].a = a.value; touch(); });
-      remove.addEventListener("click", () => {
-        if (history) history.flush();
-        day.prompts.splice(at, 1);
-        renderPrompts(); touch(true);
-      });
-      row.append(q, a, remove);
-      promptList.append(row);
-    }
-  }
-  addPromptBtn.addEventListener("click", () => {
-    const day = dayOf(current);
-    if (!day) return;
-    if (history) history.flush();
-    if (!Array.isArray(day.prompts)) day.prompts = [];
-    if (day.prompts.length >= TRIP_MAX_PROMPTS){ setStatus(tripT("질문을 더 넣을 수 없어요.")); return; }
-    day.prompts.push({ q:"", a:"" });
-    renderPrompts(); touch(true);
-    const last = promptList.querySelector(".trip-prompt:last-child .trip-prompt-q");
     if (last) last.focus();
   });
 
@@ -3074,7 +2889,7 @@ function mountTripEditor(doc){
     const day = dayOf(current);
     deleteBtn.disabled = !day;
     dayTitle.value = day ? (day.title || "") : "";
-    dayTitle.placeholder = tripWord(model.purpose, "dayTitleHint");
+    dayTitle.placeholder = tripWord("dayTitleHint");
     dayTitle.disabled = !day;
     dayDate.value = day ? (day.date || "") : "";
     dayDateDisplay.textContent = day ? (day.date || (tripIsEn() ? "Choose date" : "날짜 선택")) : "";
@@ -3086,7 +2901,6 @@ function mountTripEditor(doc){
     renderStickers();
     layout();
     syncDrawBar();
-    renderPrompts();
     renderSpots();
     renderMap();
     syncWeather();
@@ -3160,32 +2974,21 @@ function mountTripEditor(doc){
   });
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });
 
-  /* ----- 갈래 바꾸기 — 말과 기본값만 바뀌고 자료는 그대로다(설계 3장) ----- */
-  function applyPurposeLabels(){
-    const p = tripPurpose(model.purpose);
-    root.dataset.purpose = p;
-    brandTitle.textContent = tripWord(p, "docName");
-    brandSub.textContent = p === "survey" ? "Fieldwork Report"
-      : p === "field" ? "Field Trip Report" : "Travel Diary";
-    titleInput.placeholder = tripWord(p, "titleHint");
+  /* ----- 고정 낱말 — 처음 한 번, 되돌리기 뒤에도 다시 그린다 ----- */
+  function applyLabels(){
+    brandTitle.textContent = tripWord("docName");
+    brandSub.textContent = "Travel Diary";
+    titleInput.placeholder = tripWord("titleHint");
     titleInput.setAttribute("aria-label", titleInput.placeholder);
-    purposeSelect.title = tripWord(p, "purposeLabel");
-    for (const option of purposeSelect.options) option.textContent = tripWord(option.value, "docName");
-    deleteBtn.title = tripWord(p, "dayDelete");
+    deleteBtn.title = tripWord("dayDelete");
     deleteBtn.setAttribute("aria-label", deleteBtn.title);
-    addDayBtn.textContent = tripWord(p, "dayAdd");
+    addDayBtn.textContent = tripWord("dayAdd");
     renderRail();
     renderPage();
   }
-  purposeSelect.addEventListener("change", () => {
-    if (history) history.flush();
-    model.purpose = tripPurpose(purposeSelect.value);
-    applyPurposeLabels();
-    touch(true);
-  });
 
   /* ----- 되돌리기 ----- */
-  const snapshot = () => JSON.stringify({ title:model.title, purpose:model.purpose, style:model.style, days:model.days,
+  const snapshot = () => JSON.stringify({ title:model.title, style:model.style, days:model.days,
     mapStill:(model.map && model.map.still) || "", mapStillKey:(model.map && model.map.stillKey) || "" });
   history = MNEditHistory.create({
     limit:80,
@@ -3196,14 +2999,12 @@ function mountTripEditor(doc){
     apply:(state) => {
       let parsed; try { parsed = JSON.parse(state); } catch(_){ return; }
       model.title = parsed.title;
-      model.purpose = tripPurpose(parsed.purpose);
       model.style = parsed.style;
       model.days = parsed.days;
       model.map = { ...model.map, still:parsed.mapStill || "", stillKey:parsed.mapStillKey || "" };
       if (!dayOf(current)) current = model.days.length ? model.days[0].id : "";
       titleInput.value = model.title || "";
-      purposeSelect.value = model.purpose;
-      applyPurposeLabels();
+      applyLabels();
       refreshDirty();
       scheduleRecovery();
     },
@@ -3211,7 +3012,6 @@ function mountTripEditor(doc){
   });
   /* ----- 인쇄 ----- */
   function buildPrintPage(day, index, first){
-    const purpose = tripPurpose(model.purpose);
     const W = TRIP_PRINT_WIDTH;
     const waits = [];
     const page = document.createElement("section");
@@ -3219,7 +3019,7 @@ function mountTripEditor(doc){
     if (first){
       const top = document.createElement("div");
       top.className = "trip-print-title";
-      top.textContent = model.title || tripWord(purpose, "docName");
+      top.textContent = model.title || tripWord("docName");
       page.append(top);
       const rows = tripPrintHeader(model);
       if (rows.length){
@@ -3237,7 +3037,7 @@ function mountTripEditor(doc){
     // header 태그는 쓰지 않는다 — 전역 header{color:#fff} 를 물려받아 흰 종이에 흰 글자가 된다.
     const dayHead = document.createElement("div");
     dayHead.className = "trip-print-day";
-    dayHead.textContent = [tripWordf(purpose, "dayNth", { n:index + 1 }), day.date, day.title]
+    dayHead.textContent = [tripWordf("dayNth", { n:index + 1 }), day.date, day.title]
       .filter(Boolean).join(" · ");
     page.append(dayHead);
 
@@ -3247,38 +3047,22 @@ function mountTripEditor(doc){
     page.append(built.paperEl);
     waits.push(...built.waits);
 
-    if ((day.prompts || []).length && tripHasWord(purpose, "prompts")){
-      const box = document.createElement("div");
-      box.className = "trip-print-prompts";
-      for (const prompt of day.prompts){
-        const row = document.createElement("div");
-        row.className = "trip-print-prompt";
-        const q = document.createElement("div"); q.className = "trip-print-q"; q.textContent = prompt.q;
-        const a = document.createElement("div"); a.className = "trip-print-a";
-        a.textContent = prompt.a || "";           // 비어 있으면 답 쓸 자리로 남는다
-        row.append(q, a);
-        box.append(row);
-      }
-      page.append(box);
-    }
-
     if ((day.spots || []).length){
       const table = document.createElement("table");
       table.className = "trip-print-spots";
       const head = document.createElement("tr");
-      for (const label of [tripWord(purpose, "spotAt"), tripWord(purpose, "spot"),
-        tripWord(purpose, "spotNote"), tripHasWord(purpose, "cost") ? tripWord(purpose, "cost") : ""]){
-        if (!label) continue;
+      for (const label of [tripWord("spotAt"), tripWord("spot"),
+        tripWord("spotNote"), tripWord("cost")]){
         const th = document.createElement("th"); th.textContent = label; head.append(th);
       }
       table.append(head);
       for (const spot of day.spots){
         const row = document.createElement("tr");
         const cells = [spot.at || "",
-          [spot.name, spot.kind ? "(" + tripSpotKindName(purpose, spot.kind) + ")" : "", spot.address]
+          [spot.name, spot.kind ? "(" + tripSpotKindName(spot.kind) + ")" : "", spot.address]
             .filter(Boolean).join(" "),
-          [spot.note, ...(spot.fields || []).map(f => f.k + ": " + f.v)].filter(Boolean).join(" / ")];
-        if (tripHasWord(purpose, "cost")) cells.push(spot.cost ? moneyText(spot.cost.amount, spot.cost.currency) : "");
+          spot.note || ""];
+        cells.push(spot.cost ? moneyText(spot.cost.amount, spot.cost.currency) : "");
         for (const text of cells){
           const td = document.createElement("td"); td.textContent = text; row.append(td);
         }
@@ -3303,7 +3087,7 @@ function mountTripEditor(doc){
     if (stillUrl){
       const img = document.createElement("img");
       img.className = "trip-print-map";
-      img.alt = tripWord(purpose, "mapPane");
+      img.alt = tripWord("mapPane");
       img.src = stillUrl;
       if (img.decode) waits.push(img.decode().catch(() => {}));
       page.append(img);
@@ -3334,7 +3118,7 @@ function mountTripEditor(doc){
       page.className = "trip-print-page";
       const img = document.createElement("img");
       img.className = "trip-print-map";
-      img.alt = tripWord(model.purpose, "mapPane");
+      img.alt = tripWord("mapPane");
       img.src = allStill;
       if (img.decode) waits.push(img.decode().catch(() => {}));
       page.append(img);
@@ -3347,7 +3131,7 @@ function mountTripEditor(doc){
       foot.className = "trip-print-sources";
       if (sources.user){
         const mine = document.createElement("div");
-        mine.textContent = tripWord(model.purpose, "source") || "자료 출처";
+        mine.textContent = tripT("자료 출처");
         mine.append(document.createElement("br"));
         mine.append(sources.user);
         foot.append(mine);
@@ -3383,8 +3167,8 @@ function mountTripEditor(doc){
     const day = dayOf(current);
     const r = printBtn.getBoundingClientRect();
     MNContextMenu.open(r.left, r.bottom + 4, [
-      { label:tripWord(model.purpose, "printDay"), disabled:!day, action:() => printDays(day ? [day] : []) },
-      { label:tripWord(model.purpose, "printAll"), disabled:!(model.days || []).length,
+      { label:tripWord("printDay"), disabled:!day, action:() => printDays(day ? [day] : []) },
+      { label:tripWord("printAll"), disabled:!(model.days || []).length,
         action:() => printDays(model.days || []) }
     ], { autoFocus:true });
   });
@@ -3395,10 +3179,10 @@ function mountTripEditor(doc){
     await handleFiles([new File([text], name, { type:mime })], { isScratch:true });
     return true;
   }
-  const exportBase = () => (String(model.title || "").trim() || tripWord(model.purpose, "fileBase")).slice(0, 60);
+  const exportBase = () => (String(model.title || "").trim() || tripWord("fileBase")).slice(0, 60);
   async function exportTimeline(){
     const rows = tripSpotRows(model);
-    if (!rows.length){ setStatus(tripWord(model.purpose, "spotEmpty")); return; }
+    if (!rows.length){ setStatus(tripWord("spotEmpty")); return; }
     exportBtn.disabled = true;
     setStatus(tripT("사진을 일정에 넣는 중이에요…"));
     try {
@@ -3416,7 +3200,7 @@ function mountTripEditor(doc){
   }
   async function exportMap(){
     const out = tripToMapDoc(model);
-    if (!out.sent){ setStatus(tripWord(model.purpose, "mapEmpty")); return; }
+    if (!out.sent){ setStatus(tripWord("mapEmpty")); return; }
     await openAsDoc(out.text, exportBase() + ".map", "application/json");
     setStatus(out.skipped
       ? tripTf("{n}곳을 지도로 보냈어요 · {s}곳은 좌표가 없어 빠졌어요", { n:out.sent, s:out.skipped })
@@ -3425,8 +3209,8 @@ function mountTripEditor(doc){
   exportBtn.addEventListener("click", () => {
     const r = exportBtn.getBoundingClientRect();
     MNContextMenu.open(r.left, r.bottom + 4, [
-      { label:tripWord(model.purpose, "exportTimeline"), action:exportTimeline },
-      { label:tripWord(model.purpose, "exportMap"), action:exportMap }
+      { label:tripWord("exportTimeline"), action:exportTimeline },
+      { label:tripWord("exportMap"), action:exportMap }
     ], { autoFocus:true });
   });
 
@@ -3467,13 +3251,13 @@ function mountTripEditor(doc){
       pictureItems.length ? { label:tripIsEn() ? "Picture area" : "그림 칸", children:pictureItems } : null,
       { separator:true },
       { label:tripIsEn() ? "Print" : "인쇄", children:[
-        { label:tripWord(model.purpose, "printDay"), disabled:!day, action:() => printDays(day ? [day] : []) },
-        { label:tripWord(model.purpose, "printAll"), disabled:!(model.days || []).length,
+        { label:tripWord("printDay"), disabled:!day, action:() => printDays(day ? [day] : []) },
+        { label:tripWord("printAll"), disabled:!(model.days || []).length,
           action:() => printDays(model.days || []) }
       ] },
       { label:tripIsEn() ? "Export" : "내보내기", children:[
-        { label:tripWord(model.purpose, "exportTimeline"), disabled:exportBtn.disabled, action:exportTimeline },
-        { label:tripWord(model.purpose, "exportMap"), disabled:exportBtn.disabled, action:exportMap }
+        { label:tripWord("exportTimeline"), disabled:exportBtn.disabled, action:exportTimeline },
+        { label:tripWord("exportMap"), disabled:exportBtn.disabled, action:exportMap }
       ] },
       { label:tripIsEn() ? "Save" : "저장", title:"Ctrl+S", action:() => saveBtn.click() }
     ];
@@ -3495,13 +3279,13 @@ function mountTripEditor(doc){
     MNContextMenu.open(event.clientX, event.clientY, [
       { label:tripIsEn() ? "This day / whole trip" : "이 날 / 여행 전체", active:mapScope === "all",
         action:() => scopeBtn.click() },
-      { label:tripWord(model.purpose, "route"), active:!!(model.map && model.map.route),
+      { label:tripWord("route"), active:!!(model.map && model.map.route),
         action:() => routeBtn.click() },
-      { label:tripWord(model.purpose, "mapPhotos"), active:mapPhotos,
+      { label:tripWord("mapPhotos"), active:mapPhotos,
         action:() => photosBtn.click() },
-      { label:tripWord(model.purpose, "mapStill"), disabled:freezeBtn.disabled,
+      { label:tripWord("mapStill"), disabled:freezeBtn.disabled,
         action:() => freezeBtn.click() },
-      { label:tripWord(model.purpose, "mapRemove"), disabled:!(holder && holder.still),
+      { label:tripWord("mapRemove"), disabled:!(holder && holder.still),
         action:() => stillRemoveBtn.click() },
       { separator:true },
       { label:tripIsEn() ? "Travel journal tools" : "여행일지 편집 도구",
@@ -3543,7 +3327,7 @@ function mountTripEditor(doc){
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
   });
 
-  applyPurposeLabels();
+  applyLabels();
   showMap();
   history.reset();
   updateHistoryButtons();
@@ -3552,13 +3336,13 @@ function mountTripEditor(doc){
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
-    TRIP_FORMAT, TRIP_VERSION, TRIP_JSON_NAME, TRIP_PURPOSES, TRIP_MAX_DAYS, TRIP_MAX_SPOTS,
+    TRIP_FORMAT, TRIP_VERSION, TRIP_JSON_NAME, TRIP_MAX_DAYS, TRIP_MAX_SPOTS,
     TRIP_WORDS, TRIP_WORDS_EN, TRIP_SPOT_KINDS, TRIP_SPOT_KIND_IDS,
-    tripPurpose, tripPurposeAt, tripWord, tripWordf, tripHasWord,
-    tripSpotKinds, tripSpotKindInfo, tripSpotKindName, tripSpotKindIcon, tripSpotKindColor,
+    tripWord, tripWordf,
+    tripSpotKindInfo, tripSpotKindName, tripSpotKindIcon, tripSpotKindColor,
     tripIsDateKey, tripNormalizeTime, tripSortSpotsByTime, tripNormalizeSpot, tripNormalizeDay, tripDayIsEmpty,
     tripMissingPhotoDates, tripPlaceDayByDate, tripDateTakenBy, tripNextDayDate,
-    tripNormalizePairs, tripNormalizePrompts, tripNormalizeCost, tripNormalizeMap, tripNormalizeBudget,
+    tripNormalizePairs, tripNormalizeCost, tripNormalizeMap, tripNormalizeBudget,
     tripEmpty, tripNormalize, tripCleanDays, tripCleanSpot, tripModelJson, tripContentKey,
     TRIP_VIDEO_MAX_BYTES, TRIP_VIDEO_TOTAL_MAX_BYTES, TRIP_VIDEO_MAX_SEC, TRIP_MAX_VIDEOS,
     tripNormalizeVideo, tripAssetMime, tripVideoBytes, tripIsVideoFile, tripIsAnyVideoFile,

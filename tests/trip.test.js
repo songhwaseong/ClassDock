@@ -19,62 +19,53 @@ const documentTypes = require("../src/js/document-types.js");
 const read = rel => fs.readFileSync(path.join(__dirname, "..", rel), "utf8");
 const jpg = seed => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, seed, seed + 1, seed + 2, seed + 3]);
 
-/* ---------- 갈래 라벨 표 ---------- */
+/* ---------- 라벨 표 ---------- */
 
-test("라벨 표는 한국어·영어가 같은 키를 갖고, 줄마다 세 갈래가 다 있다", () => {
+test("라벨 표는 한국어·영어가 같은 키를 갖고, 값은 글자 하나다", () => {
   const ko = Object.keys(trip.TRIP_WORDS).sort();
   const en = Object.keys(trip.TRIP_WORDS_EN).sort();
-  assert.deepEqual(en, ko, "영어 표에 빠진 낱말이 있으면 첫 갈래 말이 새어 나온다");
+  assert.deepEqual(en, ko, "영어 표에 빠진 낱말이 있으면 한국어가 새어 나온다");
   for (const id of ko) {
-    assert.equal(trip.TRIP_WORDS[id].length, 3, id + " 한국어");
-    assert.equal(trip.TRIP_WORDS_EN[id].length, 3, id + " 영어");
+    assert.equal(typeof trip.TRIP_WORDS[id], "string", id + " 한국어");
+    assert.ok(trip.TRIP_WORDS[id], id + " 한국어가 비었다");
+    assert.equal(typeof trip.TRIP_WORDS_EN[id], "string", id + " 영어");
   }
+  assert.equal(trip.tripWord("cost"), "쓴 돈");
+  assert.equal(trip.tripWord("no-such-word"), "");
 });
 
-test("빈 문자열은 '그 갈래에서 감춤'이다", () => {
-  assert.equal(trip.tripWord("trip", "cost"), "쓴 돈");
-  assert.equal(trip.tripWord("field", "cost"), "");
-  assert.equal(trip.tripHasWord("field", "cost"), false);
-  assert.equal(trip.tripHasWord("field", "prompts"), true);
-  assert.equal(trip.tripHasWord("survey", "fields"), true);
-  assert.equal(trip.tripHasWord("trip", "fields"), false);
+test("틀({n})은 자리가 말마다 달라 낱말 교체로는 안 된다", () => {
+  assert.equal(trip.tripWordf("dayNth", { n:3 }), "3째 날");
+  assert.equal(trip.tripWordf("dayCount", { n:2 }), "2일");
 });
 
-test("틀({n})은 갈래마다 자리가 달라 낱말 교체로는 안 된다", () => {
-  assert.equal(trip.tripWordf("trip", "dayNth", { n:3 }), "3째 날");
-  assert.equal(trip.tripWordf("field", "dayNth", { n:3 }), "활동 3");
-  assert.equal(trip.tripWordf("survey", "dayNth", { n:3 }), "3차 조사");
-  assert.equal(trip.tripWordf("trip", "dayCount", { n:2 }), "2일");
-  assert.equal(trip.tripWordf("survey", "dayCount", { n:2 }), "조사 2차례");
-});
-
-test("모르는 갈래는 첫 갈래로 읽는다", () => {
-  assert.equal(trip.tripPurpose("wat"), "trip");
-  assert.equal(trip.tripPurpose(null), "trip");
-  assert.equal(trip.tripPurpose("survey"), "survey");
+test("체험학습·답사 갈래는 없다 — 옛 파일의 purpose·질문·조사 항목은 읽을 때 버린다", () => {
+  assert.equal(trip.TRIP_PURPOSES, undefined);
+  assert.equal(trip.tripPurpose, undefined);
+  const model = trip.tripNormalize({
+    format:trip.TRIP_FORMAT, version:3, purpose:"survey",
+    days:[{ id:"dy-1", title:"1차 조사", prompts:[{ q:"무엇을?", a:"바다" }],
+      spots:[{ name:"성산", fields:[{ k:"높이", v:"180m" }] }] }]
+  });
+  assert.equal("purpose" in model, false);
+  assert.equal("prompts" in model.days[0], false);
+  assert.equal("fields" in model.days[0].spots[0], false);
+  const json = JSON.parse(trip.tripModelJson(model));
+  assert.equal("purpose" in json, false);
+  assert.equal("prompts" in json.days[0], false);
 });
 
 /* ---------- 장소의 종류 ---------- */
 
-test("장소 종류는 갈래마다 일곱이고 합집합은 열셋이다", () => {
-  assert.equal(trip.TRIP_SPOT_KINDS.length, 13);
-  for (const purpose of trip.TRIP_PURPOSES) {
-    assert.equal(trip.tripSpotKinds(purpose).length, 7, purpose + " 갈래의 고르개");
-  }
+test("장소 종류는 일곱이다", () => {
+  assert.equal(trip.TRIP_SPOT_KINDS.length, 7);
+  assert.equal(trip.tripSpotKindName("stay"), "잠자리");
 });
 
 test("종류 아이콘은 모두 일기장 내장 그림에 이미 있다(새로 그릴 SVG 가 없다)", () => {
   for (const [id, icon] of trip.TRIP_SPOT_KINDS) {
     assert.ok(diary.DIARY_ART_IDS.includes(icon), id + " 의 아이콘 " + icon + " 이 DIARY_ART 에 없다");
   }
-});
-
-test("다른 갈래에서 고른 종류도 버리지 않고 이름을 찾아 준다", () => {
-  // 답사 고르개에는 '잠자리'가 없지만, 값이 들어 있으면 그대로 보여 줘야 한다.
-  assert.equal(trip.tripSpotKinds("survey").some(k => k[0] === "stay"), false);
-  assert.equal(trip.tripSpotKindName("survey", "stay"), "잠자리");
-  const day = trip.tripNormalizeDay({ spots:[{ name:"숙소", kind:"stay" }] });
-  assert.equal(day.spots[0].kind, "stay");
 });
 
 test("아예 모르는 종류 글자도 남긴다", () => {
@@ -93,17 +84,17 @@ test("빈 날은 저장하지 않는다", () => {
   assert.equal(model.days[0].title, "첫날");
 });
 
-test("날짜는 실제 있는 날만, 없어도 된다(학습지·답사는 날짜 없이 쓴다)", () => {
+test("날짜는 실제 있는 날만, 없어도 된다", () => {
   const ok = trip.tripNormalizeDay({ date:"2026-07-20", title:"a" });
   const bad = trip.tripNormalizeDay({ date:"2026-02-30", title:"a" });
-  const none = trip.tripNormalizeDay({ title:"활동 1" });
+  const none = trip.tripNormalizeDay({ title:"둘째 날" });
   assert.equal(ok.date, "2026-07-20");
   assert.equal(bad.date, "");
   assert.equal(none.date, "");
 });
 
 test("새 여행일지 지도는 한국 전국에서 시작하고 저장된 유효 좌표는 유지한다", () => {
-  const fresh = trip.tripEmpty("새 여행", "trip");
+  const fresh = trip.tripEmpty("새 여행");
   assert.deepEqual(fresh.map.center, [36.5, 127.9]);
   assert.equal(fresh.map.zoom, 7);
   assert.deepEqual(trip.tripNormalizeMap({ center:null }).center, [36.5, 127.9]);
@@ -151,7 +142,7 @@ test("가리키는 사진이 ZIP 에 없으면 버린다", () => {
 
 test("이전 문서의 장소 사진 투명도 값은 ZIP 왕복 뒤에도 보존된다", async () => {
   const a = "assets/aaaa.jpg", b = "assets/bbbb.jpg";
-  const model = trip.tripEmpty("사진 여행", "trip");
+  const model = trip.tripEmpty("사진 여행");
   model.days = [trip.tripNormalizeDay({ title:"첫날", spots:[{
     name:"사진 두 장", photos:[a, b], photoOpacity:{ [a]:0.35, [b]:1, "assets/ghost.jpg":0.2 }
   }] }, () => true)];
@@ -168,7 +159,7 @@ test("이전 문서의 장소 사진 투명도 값은 ZIP 왕복 뒤에도 보�
 });
 
 test("자동 날씨의 날짜·관측 지점은 저장 뒤에도 유지되고 잘못된 출처는 버린다", () => {
-  const model = trip.tripEmpty("제주 여행", "trip");
+  const model = trip.tripEmpty("제주 여행");
   const day = trip.tripNormalizeDay({
     date:"2026-09-09", weather:"sunny", weatherSource:"2026-09-09|189",
     spots:[{ name:"서귀포", lat:33.25, lng:126.57 }]
@@ -194,38 +185,15 @@ test("모르는 판은 거절한다", () => {
 /* ---------- 저장 열쇠와 무손실 ---------- */
 
 test("저장 열쇠는 시각을 빼서 저장 뒤 되돌리기가 다시 '깨끗'이 된다", () => {
-  const a = trip.tripEmpty("제주", "trip");
+  const a = trip.tripEmpty("제주");
   const b = { ...a, updatedAt:a.updatedAt + 60000 };
   assert.equal(trip.tripContentKey(a), trip.tripContentKey(b));
-});
-
-test("갈래를 바꿔도 자료는 한 글자도 안 바뀐다(무손실)", () => {
-  const model = trip.tripNormalize({
-    format:trip.TRIP_FORMAT, version:1, purpose:"trip",
-    days:[{ id:"dy-1", title:"첫날", text:"성산에 갔다", spots:[
-      { id:"sp-1", name:"성산일출봉", kind:"sight", cost:{ amount:5000, currency:"KRW" },
-        fields:[{ k:"지형", v:"현무암" }] }
-    ], prompts:[{ q:"무엇을 보았나요?", a:"바다" }] }]
-  });
-  const before = JSON.parse(trip.tripContentKey(model));
-  const after = JSON.parse(trip.tripContentKey({ ...model, purpose:"survey" }));
-  assert.equal(after.purpose, "survey");
-  delete before.purpose; delete after.purpose;
-  assert.deepEqual(after, before, "갈래 말고는 아무것도 달라지면 안 된다");
-});
-
-test("여행에만 있는 경비도 학습지 갈래에서 그대로 남는다", () => {
-  const model = trip.tripNormalize({
-    format:trip.TRIP_FORMAT, version:1, purpose:"field",
-    days:[{ id:"dy-1", title:"a", spots:[{ id:"sp-1", name:"매점", cost:{ amount:1500, currency:"KRW" } }] }]
-  });
-  assert.deepEqual(model.days[0].spots[0].cost, { amount:1500, currency:"KRW" });
 });
 
 /* ---------- 사진 목록과 ZIP ---------- */
 
 test("굳힌 지도 그림도 참조 목록에 든다(빠뜨리면 다음 저장에서 사라진다)", () => {
-  const model = trip.tripEmpty("제주", "trip");
+  const model = trip.tripEmpty("제주");
   model.map = { ...model.map, still:"assets/mapmap.jpg", stillKey:"k" };
   model.days = [trip.tripNormalizeDay({
     id:"dy-1", title:"a", still:"assets/dayday.jpg",
@@ -241,11 +209,11 @@ test("굳힌 지도 그림도 참조 목록에 든다(빠뜨리면 다음 저장
 });
 
 test("ZIP 으로 묶었다 풀면 그대로이고, 안 쓰는 사진은 빠진다", async () => {
-  const model = trip.tripEmpty("제주 3박 4일", "survey");
+  const model = trip.tripEmpty("제주 3박 4일");
   model.days = [trip.tripNormalizeDay({
     id:"dy-1", date:"2026-07-20", title:"첫째 날", text:"바람이 셌다",
     spots:[{ id:"sp-1", name:"성산일출봉", address:"제주 서귀포시", lat:33.458, lng:126.942,
-      kind:"observe", at:"09:30", photos:["assets/keepme.jpg"], fields:[{ k:"지형", v:"현무암" }] }]
+      kind:"sight", at:"09:30", photos:["assets/keepme.jpg"] }]
   }, () => true)];
   const assets = new Map([
     ["assets/keepme.jpg", { bytes:jpg(1) }],
@@ -254,12 +222,10 @@ test("ZIP 으로 묶었다 풀면 그대로이고, 안 쓰는 사진은 빠진�
   const bytes = trip.tripPack(model, assets, 1770000000000);
   const back = await trip.tripUnpack(bytes);
   assert.equal(back.model.title, "제주 3박 4일");
-  assert.equal(back.model.purpose, "survey");
   assert.equal(back.model.days.length, 1);
   const spot = back.model.days[0].spots[0];
   assert.equal(spot.name, "성산일출봉");
   assert.equal(spot.at, "09:30");
-  assert.deepEqual(spot.fields, [{ k:"지형", v:"현무암" }]);
   assert.deepEqual([...back.assets.keys()], ["assets/keepme.jpg"], "모델이 안 가리키는 사진은 안 담긴다");
   assert.equal(trip.tripContentKey(back.model), trip.tripContentKey(model), "왕복해도 저장 열쇠가 같다");
 });
@@ -300,7 +266,7 @@ test("영상은 영상 MIME 으로 틀고, 판은 3 이라 옛 앱(판 2)은 영
 });
 
 test("영상과 첫 장면 그림도 ZIP 에 담겨 왕복하고, 뺀 영상은 다음 저장에서 빠진다", async () => {
-  const model = trip.tripEmpty("제주", "trip");
+  const model = trip.tripEmpty("제주");
   model.days = [trip.tripNormalizeDay({ id:"dy-1", title:"첫째 날", spots:[
     { id:"sp-1", name:"성산", videos:[{ v:"assets/clip1.mp4", p:"assets/post1.jpg", d:8.5 }] }
   ] }, () => true)];
@@ -342,14 +308,13 @@ test("국내·해외는 한 곳에서 정하고, 좌표가 없으면 국내로 �
 
 /* ---------- 새 문서 ---------- */
 
-test("새 문서 이름은 갈래를 따르고, 같은 이름이면 번호가 붙는다", () => {
-  assert.equal(trip.tripScratchFileName("trip", 1), "여행일지.trip");
-  assert.equal(trip.tripScratchFileName("field", 1), "체험학습.trip");
-  assert.equal(trip.tripScratchFileName("survey", 2), "답사 2.trip");
+test("새 문서 이름은 여행일지이고, 같은 이름이면 번호가 붙는다", () => {
+  assert.equal(trip.tripScratchFileName(1), "여행일지.trip");
+  assert.equal(trip.tripScratchFileName(2), "여행일지 2.trip");
 });
 
 test("새 문서 뼈대는 동기로 만들어진다(폴더에서 만들 때 필요하다)", () => {
-  const bytes = trip.tripStarterBytes("체험학습.trip", "field");
+  const bytes = trip.tripStarterBytes("여행일지.trip");
   assert.ok(bytes instanceof Uint8Array && bytes.length > 0);
   assert.equal(String.fromCharCode(bytes[0], bytes[1]), "PK");
 });
@@ -570,7 +535,7 @@ test("일정 내보내기는 장소마다 첫 사용 가능한 사진을 문서�
     ["assets/one.jpg", { bytes:jpg(1) }],
     ["assets/two.jpg", { bytes:jpg(2) }]
   ]);
-  const model = { title:"제주", purpose:"trip", days:[{ date:"2026-07-20", spots:[
+  const model = { title:"제주", days:[{ date:"2026-07-20", spots:[
     { name:"첫 장소", at:"09:00", lat:33.458, lng:126.942, photos:["assets/one.jpg"] },
     { name:"둘째 장소", at:"10:00", photos:["assets/missing.jpg", "assets/two.jpg"] },
     { name:"셋째 장소", at:"11:00", photos:[] }
@@ -598,7 +563,7 @@ test("사진 없이 영상만 있는 장소는 영상의 첫 장면 그림을 �
   const convert = vm.runInContext("tripToTimelineDoc", context);
   const seen = [];
   const assets = new Map([["assets/poster.jpg", { bytes:jpg(4) }], ["assets/clip.mp4", { bytes:jpg(5) }]]);
-  const model = { title:"제주", purpose:"trip", days:[{ date:"2026-07-20", spots:[
+  const model = { title:"제주", days:[{ date:"2026-07-20", spots:[
     { name:"폭포", at:"09:00", videos:[{ v:"assets/clip.mp4", p:"assets/poster.jpg", d:5 }] }
   ] }] };
   const out = await convert(model, assets, async file => {
@@ -635,9 +600,8 @@ test("영상 줄이기 창구는 런처 한 곳이고, 토큰이 필요하며, �
 
 test("설계 문서가 말하는 개수와 실제가 같다", () => {
   const doc = read("docs/여행일지-설계.md");
-  assert.match(doc, /합집합\*\* \| \*\*13\*\*/, "부록 B 의 합집합 수");
-  assert.equal(trip.TRIP_SPOT_KINDS.length, 13);
-  assert.equal(trip.TRIP_PURPOSES.length, 3);
+  assert.match(doc, /장소 종류 \*\*7\*\*가지/, "부록 B 의 종류 수");
+  assert.equal(trip.TRIP_SPOT_KINDS.length, 7);
 });
 
 test("날짜를 고친 날만 날짜 차례 자리로 옮기고, 날짜 없는 날은 제자리에 둔다", () => {
@@ -654,21 +618,17 @@ test("날짜를 고친 날만 날짜 차례 자리로 옮기고, 날짜 없는 �
   assert.deepEqual(ids(trip.tripPlaceDayByDate([a, b, same], same)), ["a", "s", "b"], "같은 날짜는 그 날 뒤로");
 });
 
-test("여행 갈래에서만 이미 다른 날이 가진 날짜를 알려 준다", () => {
+test("이미 다른 날이 가진 날짜를 알려 준다", () => {
   const a = { id:"a", date:"2026-09-09" }, b = { id:"b", date:"" };
-  assert.equal(trip.tripDateTakenBy({ purpose:"trip", days:[a, b] }, b, "2026-09-09"), a);
-  assert.equal(trip.tripDateTakenBy({ purpose:"trip", days:[a, b] }, a, "2026-09-09"), null, "자기 날짜는 괜찮다");
-  assert.equal(trip.tripDateTakenBy({ purpose:"trip", days:[a, b] }, b, "2026-09-10"), null);
-  assert.equal(trip.tripDateTakenBy({ purpose:"field", days:[a, b] }, b, "2026-09-09"), null, "활동은 하루에 여럿");
-  assert.equal(trip.tripDateTakenBy({ purpose:"survey", days:[a, b] }, b, "2026-09-09"), null, "조사 차례도 하루에 여럿");
+  assert.equal(trip.tripDateTakenBy({ days:[a, b] }, b, "2026-09-09"), a);
+  assert.equal(trip.tripDateTakenBy({ days:[a, b] }, a, "2026-09-09"), null, "자기 날짜는 괜찮다");
+  assert.equal(trip.tripDateTakenBy({ days:[a, b] }, b, "2026-09-10"), null);
 });
 
-test("'＋ 날' 은 여행 갈래에서 가장 늦은 날짜의 다음 날을 채운다", () => {
+test("'＋ 날' 은 가장 늦은 날짜의 다음 날을 채운다", () => {
   const days = [{ date:"2026-09-10" }, { date:"" }, { date:"2026-09-07" }];
-  assert.equal(trip.tripNextDayDate({ purpose:"trip", days }), "2026-09-11");
-  assert.equal(trip.tripNextDayDate({ purpose:"trip", days:[{ date:"2026-12-31" }] }), "2027-01-01", "해 넘김");
-  assert.equal(trip.tripNextDayDate({ purpose:"trip", days:[{ date:"2028-02-28" }] }), "2028-02-29", "윤년");
-  assert.equal(trip.tripNextDayDate({ purpose:"trip", days:[{ date:"" }] }), "", "날짜가 없으면 비워 둔다");
-  assert.equal(trip.tripNextDayDate({ purpose:"field", days }), "", "활동은 비워 둔다");
-  assert.equal(trip.tripNextDayDate({ purpose:"survey", days }), "", "조사 차례도 비워 둔다");
+  assert.equal(trip.tripNextDayDate({ days }), "2026-09-11");
+  assert.equal(trip.tripNextDayDate({ days:[{ date:"2026-12-31" }] }), "2027-01-01", "해 넘김");
+  assert.equal(trip.tripNextDayDate({ days:[{ date:"2028-02-28" }] }), "2028-02-29", "윤년");
+  assert.equal(trip.tripNextDayDate({ days:[{ date:"" }] }), "", "날짜가 없으면 비워 둔다");
 });
