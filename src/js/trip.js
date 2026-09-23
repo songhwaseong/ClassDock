@@ -216,6 +216,22 @@ function tripMapPhotoPinIcon(hex, number, thumbUrl){
   });
 }
 
+/* '뭐했지?' 단추 그림 — 사진 두 장 + 파란 시계 배지(사진을 찍은 때 차례로 떠올린다).
+   곁의 날씨 그림처럼 색을 직접 칠한 벡터라 테마·크기와 상관없이 선명하다. id 가 없어 여러 번 찍어도 겹치지 않는다. */
+const TRIP_RECALL_ART = '<svg class="trip-recall-art" viewBox="0 0 48 48" aria-hidden="true" focusable="false">'
+  + '<g transform="rotate(12 30 18)"><rect x="17" y="5" width="25" height="24" rx="3" fill="#fff" stroke="#cbd6e6" stroke-width="1.2"/>'
+  + '<rect x="20" y="8" width="19" height="15" rx="1.5" fill="#63b391"/><path d="M20 19l6-5 5 4 3-2 5 4v3H20z" fill="#3f8f6c"/></g>'
+  + '<rect x="4" y="11" width="31" height="30" rx="3.5" fill="#fff" stroke="#cbd6e6" stroke-width="1.2"/>'
+  + '<rect x="7.5" y="14.5" width="24" height="19" rx="1.5" fill="#9ad7f7"/>'
+  + '<path d="M18 26c2.5-3.2 5-4.6 7.5-4.6s4 1.4 6 3.4V26z" fill="#4f9a78"/>'
+  + '<rect x="7.5" y="26" width="24" height="4.5" fill="#3a9ad6"/>'
+  + '<path d="M7.5 30.5h24v1.5a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 32z" fill="#f3d9a2"/>'
+  + '<circle cx="12.5" cy="19" r="2.3" fill="#ffd257"/>'
+  + '<path d="M18.5 20.5a2.2 2.2 0 0 1 4.2-.6 1.8 1.8 0 1 1 .3 3.6h-4.4a1.5 1.5 0 0 1-.1-3z" fill="#fff"/>'
+  + '<circle cx="34" cy="34" r="13.6" fill="#fff"/><circle cx="34" cy="34" r="11" fill="#2f6be0"/>'
+  + '<path d="M34 27.4v7l4.6 2.8" fill="none" stroke="#fff" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round"/>'
+  + '</svg>';
+
 /* ---------- 모델 ---------- */
 
 function tripSpotId(){ return "sp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8); }
@@ -1490,8 +1506,12 @@ function mountTripEditor(doc){
   const weatherText = document.createElement("span");
   weatherText.className = "trip-weather-text";
   weatherDisplay.append(weatherMark, weatherText);
+  // 뭐했지? — 날씨 곁에 둔다. 그 날을 떠올리는 단서(날씨·사진·장소)를 한자리에서 여는 단추다.
+  const recallTip = tripIsEn() ? "What did I do? — look through this day's photos, large" : "뭐 했지? — 그날 사진을 크게 넘겨 보며 떠올리기";
+  const recallBtn = diaryButton("", recallTip, "diary-btn trip-recall-btn");
+  recallBtn.innerHTML = TRIP_RECALL_ART;   // 글 없이 그림만 — 뜻은 툴팁(recallTip)이 알려 준다
   const deleteBtn = diaryButton("", "이 날 지우기", "diary-btn trip-day-delete", "delete");
-  pageHead.append(dayDateField, dayTitle, weatherDisplay, deleteBtn);
+  pageHead.append(dayDateField, dayTitle, weatherDisplay, recallBtn, deleteBtn);
 
   const els = tripBuildPaperEls(main);
 
@@ -1947,6 +1967,280 @@ function mountTripEditor(doc){
     const files = [...(exifInput.files || [])]; exifInput.value = "";
     if (files.length) await makeSpotsFromPhotos(files);
   });
+
+  /* ----- 뭐했지? — 그날 사진을 크게 넘겨 보며 떠올리기 -----
+     단추가 날 머리(날씨 곁)에 있으니 그 날 사진만 본다. 창 안 큰 칸에 한 장씩, 아래 필름 띠로 고르고,
+     사진 밑에 그 장소의 시각·이름·메모를 붙인다. 파일에 아무것도 더 담지 않는다.
+     찍은 시각은 사진에서 읽지 않는다 — 넣을 때 다시 구워 EXIF 가 없다. 장소의 '들른 시각'이 곧 차례다.
+     떠오른 것은 '메모 쓰기'로 곧장 그 장소 메모 칸에 적게 한다(창을 닫고 커서를 둔다). */
+  let recall = null;
+  function buildRecall(){
+    const modal = document.createElement("div");
+    modal.className = "modal trip-recall-modal";
+    modal.hidden = true;
+    const card = document.createElement("div");
+    card.className = "modal-card trip-recall-card";
+    card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+    const head = document.createElement("div"); head.className = "trip-recall-head";
+    const titles = document.createElement("div"); titles.className = "trip-recall-titles";
+    const title = document.createElement("h3"); title.className = "trip-recall-title";
+    const sub = document.createElement("div"); sub.className = "trip-recall-sub";
+    titles.append(title, sub);
+    const count = document.createElement("span"); count.className = "trip-recall-count";
+    const closeBtn = document.createElement("button"); closeBtn.type = "button"; closeBtn.className = "trip-recall-x"; closeBtn.textContent = "×";
+    head.append(titles, count, closeBtn);
+    const stage = document.createElement("div"); stage.className = "trip-recall-stage";
+    const view = document.createElement("div"); view.className = "trip-recall-view";
+    const prev = document.createElement("button"); prev.type = "button"; prev.className = "trip-recall-nav prev"; prev.textContent = "‹";
+    const next = document.createElement("button"); next.type = "button"; next.className = "trip-recall-nav next"; next.textContent = "›";
+    stage.append(view, prev, next);
+    const info = document.createElement("div"); info.className = "trip-recall-info";
+    const strip = document.createElement("div"); strip.className = "trip-recall-strip";
+    const empty = document.createElement("p"); empty.className = "trip-recall-empty";
+    card.append(head, stage, info, strip, empty);
+    modal.append(card);
+    document.body.append(modal);
+    const r = { modal, card, title, sub, count, closeBtn, stage, view, prev, next, info, strip, empty,
+      items:[], index:0, dayId:"", lastFocus:null };
+    // 크게 보기·영상 창이 위에 떠 있으면 그 창이 키를 먹게 둔다(같은 Esc 로 둘 다 닫히면 안 된다).
+    r.onKey = (e) => {
+      if (modal.hidden) return;
+      if (document.querySelector(".modal.plot-zoom:not([hidden]), .modal.trip-video-modal:not([hidden])")) return;
+      if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); closeRecall(); return; }
+      if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.metaKey && !e.altKey){
+        e.preventDefault(); e.stopPropagation();
+        showRecallItem(r.index + (e.key === "ArrowLeft" ? -1 : 1));
+      }
+    };
+    closeBtn.addEventListener("click", () => closeRecall());
+    prev.addEventListener("click", () => showRecallItem(r.index - 1));
+    next.addEventListener("click", () => showRecallItem(r.index + 1));
+    modal.addEventListener("mousedown", (e) => { if (e.target === modal) closeRecall(); });
+    return r;
+  }
+  /* 그 날 사진·영상을 한 줄로 — 장소 사진·영상(시각 차례) → 종이에 붙인 사진. */
+  function recallItemsOf(day){
+    const items = [];
+    for (const spot of (day.spots || [])){
+      for (const asset of (spot.photos || [])){
+        const src = assetUrl(asset);
+        if (src) items.push({ type:"photo", src, spot });
+      }
+      for (const video of (spot.videos || [])){
+        if (assets.has(video.v)) items.push({ type:"video", src:assetUrl(video.v), poster:video.p ? assetUrl(video.p) : "", spot });
+      }
+    }
+    for (const s of (day.stickers || [])){
+      if (typeof diaryStickerKind === "function" && diaryStickerKind(s) === "photo" && assetUrl(s.asset))
+        items.push({ type:"photo", src:assetUrl(s.asset), spot:null });
+    }
+    return items;
+  }
+  function openRecall(){
+    const day = dayOf(current);
+    if (!day){ setStatus(tripT("아직 쓴 날이 없어요.")); return; }
+    if (history) history.flush();
+    if (!recall) recall = buildRecall();
+    if (recall.modal.hidden){
+      recall.lastFocus = document.activeElement;
+      window.addEventListener("keydown", recall.onKey, true);
+    }
+    recall.dayId = day.id;
+    recall.items = recallItemsOf(day);
+    recall.modal.hidden = false;
+    renderRecall();
+    try { recall.closeBtn.focus(); } catch(_){}
+  }
+  function stopRecallVideo(){
+    const video = recall && recall.view.querySelector("video");
+    if (!video) return;
+    video.pause(); video.removeAttribute("src");
+    try { video.load(); } catch(_){}
+  }
+  function closeRecall(keepFocus){
+    if (!recall || recall.modal.hidden) return;
+    recall.modal.hidden = true;
+    stopRecallVideo();
+    recall.view.innerHTML = ""; recall.strip.innerHTML = ""; recall.info.innerHTML = "";
+    recall.items = [];
+    window.removeEventListener("keydown", recall.onKey, true);
+    const back = recall.lastFocus; recall.lastFocus = null;
+    if (!keepFocus && back && typeof back.focus === "function" && back.isConnected){ try { back.focus(); } catch(_){} }
+  }
+  function recallItemLabel(item){
+    const en = tripIsEn();
+    if (!item.spot) return en ? "Photo on the page" : "종이에 붙인 사진";
+    return item.spot.name || (en ? "Unnamed place" : "이름 없는 곳");
+  }
+  function renderRecall(){
+    const en = tripIsEn();
+    const r = recall;
+    const day = dayOf(r.dayId);
+    if (!day){ closeRecall(); return; }
+    r.card.setAttribute("aria-label", en ? "What did I do?" : "그날 뭐 했지?");
+    r.closeBtn.title = en ? "Close (Esc)" : "닫기 (Esc)"; r.closeBtn.setAttribute("aria-label", r.closeBtn.title);
+    r.prev.title = en ? "Previous photo (←)" : "앞 사진 (←)"; r.prev.setAttribute("aria-label", r.prev.title);
+    r.next.title = en ? "Next photo (→)" : "다음 사진 (→)"; r.next.setAttribute("aria-label", r.next.title);
+    r.title.textContent = (en ? "What did I do? · " : "그날 뭐 했지? · ") + tripDayLabel(model, day);
+    r.sub.innerHTML = "";
+    const weather = day.weather && typeof diaryWeatherInfo === "function" ? diaryWeatherInfo(day.weather) : null;
+    if (weather){
+      const wx = document.createElement("span");
+      wx.className = "trip-recall-weather";
+      wx.innerHTML = typeof diaryWeatherSvg === "function" ? diaryWeatherSvg(weather[0]) : "";
+      wx.append(document.createTextNode(en ? weather[3] : weather[2]));
+      r.sub.append(wx);
+    }
+    if (day.title){
+      const t = document.createElement("span");
+      t.className = "trip-recall-daytitle";
+      t.textContent = day.title;
+      r.sub.append(t);
+    }
+    r.sub.hidden = !r.sub.childNodes.length;
+
+    const has = r.items.length > 0;
+    r.stage.hidden = r.info.hidden = r.strip.hidden = r.count.hidden = !has;
+    r.empty.hidden = has;
+    r.empty.textContent = en
+      ? "No photos on this day yet. Use Photo info to add photos — they line up by the time they were taken."
+      : "이 날엔 아직 사진이 없어요. '사진정보'로 사진을 넣으면 찍은 시각대로 모여요.";
+    r.strip.innerHTML = "";
+    r.strip.hidden = r.items.length < 2;   // 한 장뿐이면 띠가 군더더기다
+    r.items.forEach((item, i) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "trip-recall-thumb" + (item.type === "video" ? " is-video" : "");
+      const src = item.type === "video" ? item.poster : item.src;
+      if (src){
+        const img = document.createElement("img");
+        img.src = src; img.alt = ""; img.loading = "lazy";
+        button.append(img);
+      }
+      if (item.type === "video"){
+        const badge = document.createElement("span");
+        badge.className = "trip-recall-play";
+        if (typeof window.uiIcon === "function") badge.innerHTML = window.uiIcon("play");
+        button.append(badge);
+      }
+      if (item.spot && item.spot.at){
+        const at = document.createElement("span");
+        at.className = "trip-recall-thumb-at";
+        at.textContent = item.spot.at;
+        button.append(at);
+      }
+      button.title = recallItemLabel(item);
+      button.setAttribute("aria-label", button.title);
+      button.addEventListener("click", () => showRecallItem(i));
+      r.strip.append(button);
+    });
+    if (has) showRecallItem(0);
+  }
+  function showRecallItem(i){
+    const r = recall;
+    if (!r || !r.items.length) return;
+    const en = tripIsEn();
+    const n = r.items.length;
+    r.index = (i + n) % n;
+    const item = r.items[r.index];
+    const label = recallItemLabel(item);
+    r.count.textContent = (r.index + 1) + " / " + n;
+    r.prev.hidden = r.next.hidden = n < 2;
+
+    stopRecallVideo();
+    r.view.innerHTML = "";
+    if (item.type === "video"){
+      const video = document.createElement("video");
+      video.className = "trip-recall-media";
+      video.controls = true; video.playsInline = true; video.preload = "metadata";
+      if (item.poster) video.poster = item.poster;
+      video.src = item.src;
+      r.view.append(video);
+    } else {
+      const img = document.createElement("img");
+      img.className = "trip-recall-media";
+      img.src = item.src; img.alt = label;
+      img.title = en ? "Click to view full screen" : "누르면 화면 가득 크게 봐요";
+      // 더 크게(확대·저장)는 앱 공용 그림 창에 맡긴다 — 그 날 사진을 모두 넘겨 준다.
+      img.addEventListener("click", () => {
+        if (typeof window.openImageLightbox !== "function") return;
+        const photos = r.items.filter(it => it.type === "photo");
+        window.openImageLightbox(photos.map((it, k) => ({
+          src:it.src, alt:recallItemLabel(it) + (photos.length > 1 ? " (" + (k + 1) + "/" + photos.length + ")" : "")
+        })), Math.max(0, photos.indexOf(item)));
+      });
+      r.view.append(img);
+    }
+    [...r.strip.children].forEach((thumb, k) => {
+      thumb.classList.toggle("is-current", k === r.index);
+      if (k === r.index) thumb.setAttribute("aria-current", "true"); else thumb.removeAttribute("aria-current");
+    });
+    // 띠만 옆으로 굴린다 — scrollIntoView 는 편집기까지 굴린다.
+    const cur = r.strip.children[r.index];
+    if (cur && !r.strip.hidden){
+      const left = cur.offsetLeft - (r.strip.clientWidth - cur.offsetWidth) / 2;
+      r.strip.scrollLeft = Math.max(0, left);
+    }
+
+    // 사진 밑 설명 — 그 장소의 시각·종류·이름·주소·메모와 '메모 쓰기'.
+    r.info.innerHTML = "";
+    const spot = item.spot;
+    if (spot && spot.at){
+      const when = document.createElement("span");
+      when.className = "trip-recall-at";
+      when.textContent = spot.at;
+      r.info.append(when);
+    }
+    if (spot && spot.kind && tripSpotKindIcon(spot.kind)){
+      const icon = document.createElement("span");
+      icon.className = "trip-recall-icon";
+      icon.innerHTML = diaryArtSvg(tripSpotKindIcon(spot.kind), "trip-spot-art");
+      icon.title = tripSpotKindName(spot.kind);
+      r.info.append(icon);
+    }
+    const text = document.createElement("div");
+    text.className = "trip-recall-text";
+    const name = document.createElement("strong");
+    name.className = "trip-recall-name";
+    name.textContent = label;
+    text.append(name);
+    if (spot && spot.address){
+      const addr = document.createElement("span");
+      addr.className = "trip-recall-addr";
+      addr.textContent = spot.address;
+      text.append(addr);
+    }
+    if (spot){
+      const note = document.createElement("span");
+      note.className = "trip-recall-note" + (spot.note ? "" : " is-empty");
+      note.textContent = spot.note || (en ? "No note yet — what happened here?" : "아직 메모가 없어요 — 여기서 뭐 했더라?");
+      text.append(note);
+    }
+    r.info.append(text);
+    if (spot){
+      const write = document.createElement("button");
+      write.type = "button";
+      write.className = "diary-btn trip-recall-write";
+      write.textContent = spot.note ? (en ? "Edit note" : "메모 고치기") : (en ? "Write note" : "메모 쓰기");
+      write.addEventListener("click", () => writeSpotNote(r.dayId, spot.id));
+      r.info.append(write);
+    }
+  }
+  // 떠오른 것을 곧바로 적게 — 창을 닫고 그 장소 메모 칸에 커서를 둔다.
+  function writeSpotNote(dayId, spotId){
+    closeRecall(true);
+    if (current !== dayId) goTo(dayId);
+    const row = [...spotList.querySelectorAll(".trip-spot")].find(item => item.dataset.id === spotId);
+    if (!row) return;
+    scrollTextTo(row);
+    flashRows([row]);
+    const note = row.querySelector(".trip-spot-note");
+    if (note){
+      note.focus({ preventScroll:true });
+      try { note.setSelectionRange(note.value.length, note.value.length); } catch(_){}
+    }
+  }
+  recallBtn.addEventListener("click", openRecall);
 
   photoBtn.addEventListener("click", () => photoInput.click());
   photoInput.addEventListener("change", async () => {
@@ -2602,16 +2896,22 @@ function mountTripEditor(doc){
   function showFreshSpots(ids){
     const rows = [...spotList.querySelectorAll(".trip-spot")].filter(row => ids.has(row.dataset.id));
     if (!rows.length) return;
+    scrollTextTo(spotsBox);
+    flashRows(rows);
+  }
+  function scrollTextTo(target){
     // 부드럽게 굴리지 않는다: 장소 사진이 뜨며 종이 엔진이 다시 재면(layout) scrollTop 을 되써 넣는데,
     // 그 순간 굴러가던 스크롤이 멈춰 목록까지 못 간다. 곧장 옮겨 두면 되써 넣는 값도 그 자리다.
     // scrollIntoView 는 바깥 칸까지 모두 굴려 편집기 전체가 위로 밀린다 — 글 칸(스크롤 칸)만 굴린다.
-    let scroller = spotsBox.parentElement;
+    let scroller = target.parentElement;
     while (scroller && scroller !== root && scroller.scrollHeight <= scroller.clientHeight + 1) scroller = scroller.parentElement;
-    if (!scroller || scroller === root) { spotsBox.scrollIntoView({ block:"nearest" }); }
+    if (!scroller || scroller === root) { target.scrollIntoView({ block:"nearest" }); }
     else {
-      const top = scroller.scrollTop + spotsBox.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
+      const top = scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 8;
       scroller.scrollTop = Math.max(0, top);
     }
+  }
+  function flashRows(rows){
     for (const row of rows){
       row.classList.remove("is-fresh");
       void row.offsetWidth;
@@ -3246,6 +3546,7 @@ function mountTripEditor(doc){
       { separator:true },
       { label:tripIsEn() ? "Add photo" : "사진 추가", action:() => photoBtn.click() },
       { label:tripIsEn() ? "Create places from photo info" : "사진정보로 장소 만들기", action:() => exifBtn.click() },
+      { label:tripIsEn() ? "What did I do? (this day's photos)" : "뭐 했지? (그날 사진 크게 보기)", action:openRecall },
       { label:tripIsEn() ? "Pictures and text boxes" : "그림·글상자 붙이기", action:() => stickerBtn.click() },
       { label:tripIsEn() ? "Paper style and settings" : "종이 꾸미기·설정", action:() => styleBtn.click() },
       pictureItems.length ? { label:tripIsEn() ? "Picture area" : "그림 칸", children:pictureItems } : null,
@@ -3321,6 +3622,7 @@ function mountTripEditor(doc){
     if (typeof paperApi.destroyPaper === "function") paperApi.destroyPaper();
     if (leafletMap){ leafletMap.remove(); leafletMap = null; }
     if (_tripVideoPlayer) _tripVideoPlayer.close();   // 아래에서 영상 주소를 거두기 전에 닫는다
+    if (recall){ closeRecall(true); recall.modal.remove(); recall = null; }
     if (history) history.cancel();
     for (const url of urls.values()) URL.revokeObjectURL(url);
     urls.clear();

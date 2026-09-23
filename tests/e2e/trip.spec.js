@@ -991,3 +991,72 @@ test("'＋ 날' 을 누르면 마지막 날의 다음 날짜가 미리 들어 �
   await expect(page.locator(".trip-day-date-display")).toHaveText("2026-10-01");
   await expect.poll(async () => (await modelOf(page)).days.map(day => day.date)).toEqual(["2026-09-30", "2026-10-01"]);
 });
+
+test("뭐했지? — 그날 사진을 창 안에 크게 넘겨 보고 곧장 메모를 쓴다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  const png = async (color) => Buffer.from(await page.evaluate((fill) => {
+    const c = document.createElement("canvas"); c.width = 40; c.height = 30;
+    const g = c.getContext("2d"); g.fillStyle = fill; g.fillRect(0, 0, 40, 30);
+    return c.toDataURL("image/png").split(",")[1];
+  }, color), "base64");
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-spot").click();
+  await page.locator(".trip-spot .trip-spot-name").fill("성산일출봉");
+  await page.locator(".trip-spot .trip-spot-at").fill("07:10");
+  await page.locator(".trip-spot .trip-spot-at").press("Tab");
+  // 장소 사진은 모델에 곧바로 단다(사진정보 흐름은 따로 시험한다). 종이에 붙인 사진은 단추로 넣는다.
+  await page.setInputFiles(".trip-photo-btn + input[type=file]", [{ name:"a.png", mimeType:"image/png", buffer:await png("#3a8") }]);
+  await expect.poll(async () => (await modelOf(page)).days[0].stickers.length).toBe(1);
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    const day = doc.trip.days[0];
+    day.spots[0].photos = [day.stickers[0].asset];
+  });
+
+  // 빈 날에서는 사진이 없다고만 알린다
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-recall-btn").click();
+  const modal = page.locator(".trip-recall-modal");
+  await expect(modal.locator(".trip-recall-empty")).toBeVisible();
+  await expect(modal.locator(".trip-recall-stage")).toBeHidden();
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+
+  // 첫째 날: 장소 사진(07:10) → 종이 사진 차례로 크게 본다
+  await page.locator(".trip-day-chip").first().click();
+  await page.locator(".trip-recall-btn").click();
+  await expect(modal).toBeVisible();
+  await expect(modal.locator(".trip-recall-title")).toContainText("1째 날");
+  await expect(modal.locator(".trip-recall-count")).toHaveText("1 / 2");
+  await expect(modal.locator(".trip-recall-view img.trip-recall-media")).toBeVisible();
+  await expect(modal.locator(".trip-recall-thumb")).toHaveCount(2);
+  await expect(modal.locator(".trip-recall-thumb.is-current .trip-recall-thumb-at")).toHaveText("07:10");
+  await expect(modal.locator(".trip-recall-info .trip-recall-at")).toHaveText("07:10");
+  await expect(modal.locator(".trip-recall-name")).toHaveText("성산일출봉");
+  await page.keyboard.press("ArrowRight");
+  await expect(modal.locator(".trip-recall-count")).toHaveText("2 / 2");
+  await expect(modal.locator(".trip-recall-name")).toHaveText("종이에 붙인 사진");
+  await expect(modal.locator(".trip-recall-write")).toHaveCount(0);
+  await modal.locator(".trip-recall-thumb").first().click();
+  await expect(modal.locator(".trip-recall-count")).toHaveText("1 / 2");
+
+  // 큰 사진을 누르면 화면 가득 — Esc 는 위 창만 닫는다
+  await modal.locator(".trip-recall-view img").click();
+  await expect(page.locator(".modal.plot-zoom")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".modal.plot-zoom")).toBeHidden();
+  await expect(modal).toBeVisible();
+
+  // 메모 쓰기 → 창이 닫히고 그 장소 메모 칸에 커서가 간다
+  await modal.locator(".trip-recall-write").click();
+  await expect(modal).toBeHidden();
+  await expect(page.locator(".trip-spot .trip-spot-note")).toBeFocused();
+  await page.keyboard.type("해 뜨는 걸 봤다");
+  expect((await modelOf(page)).days[0].spots[0].note).toBe("해 뜨는 걸 봤다");
+
+  await page.locator(".trip-recall-btn").click();
+  await expect(modal.locator(".trip-recall-note")).toHaveText("해 뜨는 걸 봤다");
+  await page.keyboard.press("Escape");
+  await expect(modal).toBeHidden();
+});

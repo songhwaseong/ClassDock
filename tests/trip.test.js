@@ -476,7 +476,7 @@ test("여행일지 상단 편집 도구는 공용 아이콘과 짧은 이름을 
     assert.match(source, new RegExp('diaryButton\\("",[^\\n]*"[^"]*' + className + '[^"]*"[^\\n]*"' + icon + '"\\)'));
   }
   for (const label of ["되돌리기", "다시하기", "사진추가", "사진정보", "꾸미기", "편집/설정", "인쇄", "내보내기", "저장"]){
-    assert.match(source, new RegExp('toolLabel\\([^\\n]*"' + label.replace("/", "\\/") + '"'));
+    assert.match(source, new RegExp('toolLabel\\([^\\n]*"' + label.replace(/[/?]/g, "\\$&") + '"'));
   }
   assert.match(source, /className = "trip-brand"/);
   assert.match(source, /className = "trip-map-guide"/);
@@ -484,6 +484,11 @@ test("여행일지 상단 편집 도구는 공용 아이콘과 짧은 이름을 
   assert.match(icons, /\bsun:\s*['"]/);
   assert.match(icons, /,export:\s*['"]/);
   assert.match(css, /\.trip-page-head\.diary-page-head\{[^}]*flex-direction:row/);
+  // 뭐했지? 는 도구막대가 아니라 날씨 곁(날 머리)에 있다
+  assert.match(source, /pageHead\.append\(dayDateField, dayTitle, weatherDisplay, recallBtn, deleteBtn\)/);
+  // 그림은 사진+시계 배지 벡터를 직접 그린다(공용 아이콘이 아니다)
+  assert.match(source, /recallBtn\.innerHTML = TRIP_RECALL_ART/);
+  assert.match(css, /\.trip-recall-btn \.trip-recall-art\{/);
 });
 
 test("날짜 입력은 브라우저의 빈 요일 괄호 대신 날짜 글자만 따로 표시한다", () => {
