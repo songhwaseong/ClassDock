@@ -17,11 +17,139 @@ function googleSearchUrl(raw){
   const text = googleSearchTextFrom(raw);
   return text ? "https://www.google.com/search?q=" + encodeURIComponent(text) : "";
 }
+const GOOGLE_SEARCH_WINDOW_NAME = "ClassDockGoogleSearch";
+const GOOGLE_SEARCH_WINDOW_FEATURES = "popup=yes,width=1100,height=800,resizable=yes,scrollbars=yes";
+let _googleSearchWindow = null;
+/* 앱 안 검색 창에 넣을 주소. google.com/search 는 X-Frame-Options: SAMEORIGIN 이라 다른 화면 안에
+   안 보이는데, igu=1 을 붙이면 그 머리글이 빠진다(구글이 공개한 방법은 아니라 언제든 막힐 수 있다 —
+   그래서 창 머리에 늘 '브라우저로 보기'를 둔다). */
+function googleSearchEmbedUrl(raw){
+  const text = googleSearchTextFrom(raw);
+  return text ? "https://www.google.com/search?igu=1&q=" + encodeURIComponent(text) : "";
+}
+/* 떠 있는 검색 창의 iframe 권한. allow-top-navigation 을 일부러 빼 결과 페이지가
+   top.location 으로 ClassDock 화면을 통째로 넘기지 못하게 한다(작업 중인 문서를 잃는다).
+   새 창으로 여는 링크(가운데 클릭 등)는 보통 브라우저 탭으로 나가게 둔다. */
+const GOOGLE_SEARCH_FRAME_SANDBOX = "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
+let _googleSearchPanel = null;
+// 보기 전체화면(#content)에서는 body 에 붙은 창이 안 보이므로 그 칸 안에 단다.
+function googleSearchPanelHost(){
+  const fs = document.fullscreenElement;
+  return fs && fs !== document.documentElement ? fs : document.body;
+}
+function googleSearchPanelText(text){
+  return (typeof window.t === "function") ? window.t(text) : text;
+}
+function ensureGoogleSearchPanel(){
+  if (_googleSearchPanel && _googleSearchPanel.root.isConnected) return _googleSearchPanel;
+  const make = (tag, className, text) => {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text != null) el.textContent = googleSearchPanelText(text);
+    return el;
+  };
+  const root = make("section", "google-search-panel");
+  root.hidden = true;
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-label", googleSearchPanelText("Google 검색"));
+  const head = make("header", "google-search-head");
+  const title = make("strong", "google-search-title", "Google 검색");
+  const home = make("button", "google-search-btn", "↺ 검색 결과로");
+  home.title = googleSearchPanelText("눌러 들어간 페이지에서 처음 검색 결과로 돌아가요");
+  const browser = make("button", "google-search-btn google-search-browser", "브라우저로 보기");
+  browser.title = googleSearchPanelText("결과가 안 보이거나 페이지가 비면, 같은 검색을 브라우저 창에서 열어요");
+  const close = make("button", "google-search-close", "×");
+  close.title = googleSearchPanelText("Google 검색 창 닫기");
+  close.setAttribute("aria-label", close.title);
+  [home, browser, close].forEach(button => { button.type = "button"; });
+  head.append(title, home, browser, close);
+  const frame = make("iframe", "google-search-frame");
+  frame.setAttribute("sandbox", GOOGLE_SEARCH_FRAME_SANDBOX);
+  frame.setAttribute("referrerpolicy", "no-referrer");
+  frame.title = googleSearchPanelText("Google 검색 결과");
+  const note = make("p", "google-search-note", "결과가 안 보이거나 눌러 들어간 페이지가 비어 있으면 '브라우저로 보기'를 눌러 주세요.");
+  root.append(head, frame, note);
+  googleSearchPanelHost().appendChild(root);
+  const float = typeof window.makeFloatingPanel === "function"
+    ? window.makeFloatingPanel(root, head, { storageKey:"classdock-google-search:rect:v1", min:{ w:360, h:300 }, host:googleSearchPanelHost })
+    : null;
+  const panel = { root, head, title, frame, float, query:"" };
+  /* iframe 위로 포인터가 지나가면 이벤트가 그 안으로 들어가 창 끌기·크기 조절이 끊긴다.
+     바깥 문서에서 누르기 시작했으면(iframe 안 클릭은 여기 오지 않는다) 손을 뗄 때까지 iframe 을 투명하게 둔다. */
+  const release = () => { frame.style.pointerEvents = ""; };
+  document.addEventListener("pointerdown", () => { if (!root.hidden) frame.style.pointerEvents = "none"; }, true);
+  document.addEventListener("pointerup", release, true);
+  document.addEventListener("pointercancel", release, true);
+  document.addEventListener("fullscreenchange", () => {
+    if (root.hidden) return;
+    const host = googleSearchPanelHost();
+    if (root.parentNode !== host) host.appendChild(root);
+    if (float) requestAnimationFrame(() => float.clampOnOpen());
+  });
+  home.addEventListener("click", () => { if (panel.query) frame.src = googleSearchEmbedUrl(panel.query); });
+  browser.addEventListener("click", () => { if (panel.query) openGoogleSearchWindow(panel.query); });
+  close.addEventListener("click", closeGoogleSearchPanel);
+  root.addEventListener("keydown", event => {
+    if (event.key === "Escape"){ event.preventDefault(); closeGoogleSearchPanel(); }
+  });
+  _googleSearchPanel = panel;
+  return panel;
+}
+function closeGoogleSearchPanel(){
+  const panel = _googleSearchPanel;
+  if (!panel || panel.root.hidden) return;
+  panel.root.hidden = true;
+  panel.frame.src = "about:blank";   // 닫은 창에서 영상 소리 등이 계속 나지 않게
+}
+function openGoogleSearchPanel(raw){
+  const text = googleSearchTextFrom(raw);
+  const url = googleSearchEmbedUrl(text);
+  if (!url || typeof document === "undefined" || !document.body) return false;
+  // 인터넷이 끊겼으면 빈 창을 띄우는 대신 브라우저 쪽(오류 화면이라도 다시 시도 가능)으로 보낸다.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+  const panel = ensureGoogleSearchPanel();
+  panel.query = text;
+  panel.title.textContent = googleSearchPanelText("Google 검색") + " — " + text;
+  panel.title.title = text;
+  const host = googleSearchPanelHost();
+  if (panel.root.parentNode !== host) host.appendChild(panel.root);
+  panel.frame.src = url;
+  panel.root.hidden = false;
+  if (panel.float) panel.float.clampOnOpen();
+  return true;
+}
+/* 우클릭 'Google에서 검색' — 앱 안 떠 있는 창(B)에 먼저 보이고, 안 되면 브라우저 창(A)으로. */
 function openGoogleSearch(raw){
+  if (!googleSearchUrl(raw)) return false;
+  let shown = false;
+  try { shown = openGoogleSearchPanel(raw); } catch(_){ shown = false; }
+  return shown || openGoogleSearchWindow(raw);
+}
+function openGoogleSearchWindow(raw){
   const url = googleSearchUrl(raw);
   if (!url) return false;
-  // 직접 누른 메뉴 동작에서 <a target=_blank> 를 실행하므로 팝업 차단에 덜 걸린다.
-  // opener 를 끊어 검색 결과가 원래 ClassDock 창을 건드리지 못하게 한다.
+  /* 지도 로드뷰(mapOpenKakaoRoadview)처럼 검색마다 새 탭을 쌓지 않는다. 이미 연 검색 창은
+     새 검색어로 갈아 끼우고 앞으로 가져온다. opener 를 끊어 검색 결과가 ClassDock 창을 건드리지 못하게 한다. */
+  if (_googleSearchWindow){
+    try {
+      if (!_googleSearchWindow.closed){
+        _googleSearchWindow.location = url;
+        _googleSearchWindow.focus();
+        return true;
+      }
+    } catch(_){ /* 창에 닿을 수 없으면 아래에서 새로 연다. */ }
+    _googleSearchWindow = null;
+  }
+  const opened = typeof window.open === "function"
+    ? window.open(url, GOOGLE_SEARCH_WINDOW_NAME, GOOGLE_SEARCH_WINDOW_FEATURES)
+    : null;
+  if (opened){
+    try { opened.opener = null; } catch(_){}
+    try { opened.focus(); } catch(_){}
+    _googleSearchWindow = opened;
+    return true;
+  }
+  // 팝업이 막혔으면 예전처럼 <a target=_blank> 로 새 탭에 연다.
   const link = document.createElement("a");
   link.href = url;
   link.target = "_blank";

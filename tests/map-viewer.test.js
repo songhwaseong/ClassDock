@@ -6,13 +6,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-function loadMapViewer(windowOverrides){
-  const context = {
+function loadMapViewer(windowOverrides, contextOverrides){
+  const context = Object.assign({
     console, Blob, URL, Map, Set, Date, Math, JSON,
     setTimeout, clearTimeout,
     MNKoreaCoords:require("../src/js/korea-coords.js"),   // 앱에서도 map-viewer.js 앞에 실린다
     document:{}, window:Object.assign({}, windowOverrides || {}), location:{ protocol:"file:" }, navigator:{ onLine:true }
-  };
+  }, contextOverrides || {});
   context.globalThis = context;
   vm.createContext(context);
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
@@ -33,6 +33,7 @@ function loadMapViewer(windowOverrides){
       , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
       , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, mapKakaoPlaceSlides, MAP_SPOT_MIN_ZOOM
+      , openMapKakaoPlacePanel, mapOpenKakaoPlaceWindow, MAP_WEB_FRAME_SANDBOX
       , mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally
       , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, MAP_SEARCH_QUERY_MAX, mapSearchTextFrom, mapSearchQueryFrom, mapSearchMenuItem, showMapCoordinate
       , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
@@ -655,25 +656,134 @@ test("카카오 상세 창은 Local API의 장소 주소만 iframe으로 연다"
   ]);
 
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  const modal = /function openMapKakaoPlaceModal\(([^]*?)\n\}/.exec(source);
-  assert.ok(modal);
-  assert.match(modal[1], /frame\.src = activeUrl/);
-  assert.match(modal[1], /frame\.src = "about:blank"/);
-  assert.match(modal[1], /window\.open\(activeUrl, "_blank", "noopener,noreferrer"\)/);
-  assert.match(modal[1], /position\.textContent = \(placeIndex \+ 1\) \+ " \/ " \+ places\.length/);
-  assert.match(modal[1], /const wrapped = \(\(Math\.trunc\(Number\(nextIndex\) \|\| 0\) % places\.length\) \+ places\.length\) % places\.length/);
-  assert.doesNotMatch(modal[1], /prevBtn\.disabled|nextBtn\.disabled/);
-  assert.doesNotMatch(modal[1], /placeIndex > 0|placeIndex < places\.length - 1/);
+  const panel = /function mapPlacePanel\(([^]*?)\n\}/.exec(source);
+  assert.ok(panel);
+  assert.match(panel[1], /frame\.src = panel\.activeUrl/);
+  assert.match(panel[1], /mapOpenKakaoPlaceWindow\(panel\.activeUrl\)/);
+  assert.match(panel[1], /position\.textContent = \(panel\.placeIndex \+ 1\) \+ " \/ " \+ places\.length/);
+  assert.match(panel[1], /const wrapped = \(\(Math\.trunc\(Number\(nextIndex\) \|\| 0\) % places\.length\) \+ places\.length\) % places\.length/);
+  assert.doesNotMatch(panel[1], /prevBtn\.disabled|nextBtn\.disabled/);
+  assert.match(source, /frame\.src = "about:blank"/);
   assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(spot\.placeUrl\)/);
-  assert.match(source, /openMapKakaoPlaceModal\(\[\{ name:spot\.title \|\| name, placeUrl:spot\.placeUrl \}\], 0\)/);
+  assert.match(source, /openMapKakaoPlacePanel\(\[\{ name:spot\.title \|\| name, placeUrl:spot\.placeUrl \}\], 0\)/);
   assert.match(source, /detailBtn\.hidden = !mapKakaoPlaceUrl\(marker\.placeUrl\)/);
   assert.match(source, /item\.source === "nearby" && item\.batch === marker\.batch/);
-  assert.match(source, /openMapKakaoPlaceModal\(peers\.map/);
+  assert.match(source, /openMapKakaoPlacePanel\(peers\.map/);
+  assert.doesNotMatch(source, /openMapKakaoPlaceModal/);
 
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
-  assert.match(css, /\.modal-card\.map-place-card\{[^}]*height:min\(calc\(88vh \/ var\(--ui-zoom, 1\)\),900px\)/);
-  assert.match(css, /\.map-place-frame\{[^}]*width:100%;height:100%;border:0/);
+  assert.match(css, /\.map-web-panel\{[^}]*position:fixed/);
+  assert.match(css, /\.map-web-frame\{[^}]*width:100%;height:100%;border:0/);
   assert.match(css, /\.map-place-nav-btn\{/);
+  assert.doesNotMatch(css, /\.modal-card\.map-place-card/);
+});
+
+/* 떠 있는 웹 창 시험용 가짜 DOM — 만든 요소를 모두 모아 두고 클릭 처리기를 부를 수 있게 한다. */
+function fakeWebPanelDom(){
+  const created = [];
+  const make = tag => {
+    const el = {
+      tagName:tag, hidden:false, isConnected:true, style:{}, attrs:{}, children:[], listeners:{}, parentNode:null,
+      classList:{ add(){}, remove(){} },
+      setAttribute(k, v){ this.attrs[k] = v; }, append(...kids){ this.children.push(...kids); },
+      appendChild(kid){ kid.parentNode = this; this.children.push(kid); return kid; },
+      addEventListener(type, fn){ (this.listeners[type] ||= []).push(fn); }, focus(){}
+    };
+    created.push(el);
+    return el;
+  };
+  const body = make("body");
+  const document = { body, fullscreenElement:null, documentElement:{}, createElement:make, addEventListener(){} };
+  const hasClass = (el, cls) => typeof el.className === "string" && el.className.split(/\s+/).includes(cls);
+  const find = cls => created.find(el => hasClass(el, cls));
+  const all = cls => created.filter(el => hasClass(el, cls));
+  return { document, created, find, all };
+}
+
+test("로드뷰는 지도 옆 떠 있는 창에 먼저 보이고 '브라우저로 보기'는 전용 창 하나를 쓴다", () => {
+  const dom = fakeWebPanelDom();
+  const opens = [];
+  const popup = { closed:false, opener:{}, focus(){} };
+  const navigator = { onLine:true };
+  const api = loadMapViewer({ open:(url, name) => { opens.push({ url, name }); return popup; } },
+    { document:dom.document, navigator, makeFloatingPanel:() => ({ clampOnOpen(){} }), requestAnimationFrame:fn => fn() });
+
+  assert.equal(api.mapOpenKakaoRoadview(37.5, 127.1), true);
+  assert.equal(opens.length, 0, "브라우저 창은 아직 열지 않는다");
+  const panel = dom.find("map-roadview-panel");
+  const frame = dom.find("map-web-frame");
+  assert.equal(panel.hidden, false);
+  assert.equal(panel.parentNode, dom.document.body);
+  assert.equal(frame.src, "https://map.kakao.com/link/roadview/37.500000,127.100000");
+  // 카카오 페이지가 ClassDock 화면을 통째로 넘기지 못하게 top 이동 권한은 주지 않는다.
+  assert.equal(frame.attrs.sandbox, api.MAP_WEB_FRAME_SANDBOX);
+  assert.doesNotMatch(api.MAP_WEB_FRAME_SANDBOX, /allow-top-navigation/);
+
+  // 다른 자리를 짚으면 창을 새로 만들지 않고 로드뷰만 갈아 끼운다.
+  assert.equal(api.mapOpenKakaoRoadview(37.6, 127.2), true);
+  assert.equal(dom.all("map-roadview-panel").length, 1);
+  assert.equal(frame.src, "https://map.kakao.com/link/roadview/37.600000,127.200000");
+
+  dom.find("map-web-btn").listeners.click[0]();
+  assert.equal(opens.length, 1);
+  assert.equal(opens[0].url, "https://map.kakao.com/link/roadview/37.600000,127.200000");
+  assert.equal(opens[0].name, "ClassDockRoadview");
+
+  dom.find("map-web-close").listeners.click[0]();
+  assert.equal(panel.hidden, true);
+  assert.equal(frame.src, "about:blank");
+
+  // 인터넷이 끊겼으면 곧장 브라우저 창(이미 연 창 다시 쓰기)으로.
+  navigator.onLine = false;
+  assert.equal(api.mapOpenKakaoRoadview(37.7, 127.3), true);
+  assert.equal(panel.hidden, true);
+  assert.equal(popup.location, "https://map.kakao.com/link/roadview/37.700000,127.300000");
+});
+
+test("카카오 상세는 모달 대신 떠 있는 창에서 넘겨 보고 '브라우저로 보기'는 창 하나를 다시 쓴다", () => {
+  const dom = fakeWebPanelDom();
+  const opens = [];
+  const popup = { closed:false, opener:{}, focus(){} };
+  const api = loadMapViewer({ open:(url, name, features) => { opens.push({ url, name, features }); return popup; } },
+    { document:dom.document, makeFloatingPanel:() => ({ clampOnOpen(){} }), requestAnimationFrame:fn => fn() });
+  const places = [
+    { name:"학교", placeUrl:"https://place.map.kakao.com/26338954" },
+    { name:"병원", placeUrl:"https://place.map.kakao.com/17866469" }
+  ];
+  assert.equal(api.openMapKakaoPlacePanel(places, 1), true);
+  const panel = dom.find("map-place-panel");
+  const frame = dom.find("map-web-frame");
+  const position = dom.find("map-place-position");
+  assert.equal(panel.hidden, false);
+  assert.equal(frame.src, "https://place.map.kakao.com/17866469");
+  assert.equal(position.textContent, "2 / 2");
+
+  dom.find("map-place-next").listeners.click[0]();          // 끝에서 처음으로 돈다
+  assert.equal(frame.src, "https://place.map.kakao.com/26338954");
+  assert.equal(position.textContent, "1 / 2");
+
+  // ←/→ 는 창 안에 포커스가 있을 때만(창 root 의 keydown) 먹는다.
+  const key = k => ({ key:k, altKey:false, ctrlKey:false, metaKey:false, shiftKey:false, preventDefault(){}, stopPropagation(){} });
+  panel.listeners.keydown.forEach(fn => fn(key("ArrowLeft")));
+  assert.equal(frame.src, "https://place.map.kakao.com/17866469");
+
+  dom.find("map-web-btn").listeners.click[0]();
+  dom.find("map-web-btn").listeners.click[0]();
+  assert.equal(opens.length, 1, "두 번 눌러도 창 하나를 다시 쓴다");
+  assert.equal(opens[0].name, "ClassDockKakaoPlace");
+  assert.match(opens[0].features, /popup=yes/);
+  assert.equal(popup.opener, null);
+
+  panel.listeners.keydown.forEach(fn => fn(key("Escape")));
+  assert.equal(panel.hidden, true);
+  assert.equal(frame.src, "about:blank");
+
+  // 다시 열면 같은 창을 쓰고 고른 장소부터 보인다.
+  assert.equal(api.openMapKakaoPlacePanel([places[0]], 0), true);
+  assert.equal(dom.all("map-place-panel").length, 1);
+  assert.equal(panel.hidden, false);
+  assert.equal(frame.src, "https://place.map.kakao.com/26338954");
+  assert.equal(dom.find("map-place-nav").hidden, true, "한 곳이면 넘김 버튼을 숨긴다");
 });
 
 test("카카오 REST 키는 브라우저 설정에 남기지 않고 로컬 런처가 보호한다", () => {

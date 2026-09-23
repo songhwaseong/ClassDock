@@ -144,11 +144,99 @@ test("선택한 글자는 안전한 Google 검색 주소로 새 창에 열고 �
   assert.equal(item.disabled, false);
   assert.equal(api.selectionSearchMenuItems("뉴턴", exam).length, 0);
 
+  // 팝업이 막히면(window.open → null) 예전처럼 새 탭 링크로 연다.
   item.action();
   assert.equal(clicked, 1);
   assert.equal(link.href, "https://www.google.com/search?q=" + encodeURIComponent("뉴턴의 운동 법칙"));
   assert.equal(link.target, "_blank");
   assert.equal(link.rel, "noopener noreferrer");
+});
+
+test("Google 검색은 로드뷰처럼 이름 붙은 창 하나를 다시 쓴다", () => {
+  const source = read("python-editor.js");
+  const start = source.indexOf('const GOOGLE_SEARCH_MENU_LABEL');
+  const end = source.indexOf('function selectionContextInsideExam', start);
+  assert.ok(start >= 0 && end > start);
+
+  const opens = [];
+  const popup = { closed:false, opener:{}, focused:0, focus(){ this.focused++; } };
+  const context = {
+    encodeURIComponent,
+    document: { createElement: () => { throw new Error("팝업이 열리면 링크를 만들지 않는다"); } },
+    window: { open: (url, name, features) => { opens.push({ url, name, features }); return popup; } }
+  };
+  vm.runInNewContext(source.slice(start, end) + `
+    ;globalThis.__google = { openGoogleSearch: openGoogleSearchWindow, GOOGLE_SEARCH_WINDOW_NAME };`, context);
+  const api = context.__google;
+
+  assert.equal(api.openGoogleSearch("뉴턴"), true);
+  assert.equal(opens.length, 1);
+  assert.equal(opens[0].name, api.GOOGLE_SEARCH_WINDOW_NAME);
+  assert.match(opens[0].features, /popup=yes/);
+  assert.equal(popup.opener, null);
+
+  // 두 번째 검색은 새로 열지 않고 같은 창의 주소만 바꾼다.
+  assert.equal(api.openGoogleSearch("갈릴레이"), true);
+  assert.equal(opens.length, 1);
+  assert.equal(popup.location, "https://www.google.com/search?q=" + encodeURIComponent("갈릴레이"));
+  assert.equal(popup.focused, 2);
+
+  // 창을 닫았으면 다시 연다.
+  popup.closed = true;
+  assert.equal(api.openGoogleSearch("케플러"), true);
+  assert.equal(opens.length, 2);
+});
+
+test("Google 검색은 앱 안 떠 있는 창에 먼저 보이고 '브라우저로 보기'로 같은 검색을 창에 연다", () => {
+  const source = read("python-editor.js");
+  const start = source.indexOf('const GOOGLE_SEARCH_MENU_LABEL');
+  const end = source.indexOf('function selectionContextInsideExam', start);
+  const fakeEl = tag => {
+    const el = { tagName: tag, hidden: false, isConnected: true, style: {}, attrs: {}, children: [], listeners: {},
+      setAttribute(k, v){ this.attrs[k] = v; }, append(...kids){ this.children.push(...kids); },
+      addEventListener(type, fn){ (this.listeners[type] ||= []).push(fn); } };
+    return el;
+  };
+  const created = [];
+  const opens = [];
+  const context = {
+    encodeURIComponent,
+    navigator: { onLine: true },
+    document: {
+      body: { appendChild(){} },
+      createElement: tag => { const el = fakeEl(tag); created.push(el); return el; },
+      addEventListener(){}
+    },
+    window: { open: (url, name) => { opens.push({ url, name }); return { focus(){} }; } }
+  };
+  vm.runInNewContext(source.slice(start, end) + `
+    ;globalThis.__google = { openGoogleSearch, closeGoogleSearchPanel, GOOGLE_SEARCH_FRAME_SANDBOX };`, context);
+  const api = context.__google;
+
+  assert.equal(api.openGoogleSearch("뉴턴의 운동 법칙"), true);
+  assert.equal(opens.length, 0);                          // 브라우저 창은 아직 안 연다
+  const frame = created.find(el => el.tagName === "iframe");
+  const root = created.find(el => el.tagName === "section");
+  assert.equal(frame.src, "https://www.google.com/search?igu=1&q=" + encodeURIComponent("뉴턴의 운동 법칙"));
+  assert.equal(root.hidden, false);
+  // 결과 페이지가 ClassDock 화면을 통째로 넘기지 못하게 top 이동 권한은 주지 않는다.
+  assert.equal(frame.attrs.sandbox, api.GOOGLE_SEARCH_FRAME_SANDBOX);
+  assert.doesNotMatch(api.GOOGLE_SEARCH_FRAME_SANDBOX, /allow-top-navigation/);
+
+  const browser = created.find(el => el.className && el.className.includes("google-search-browser"));
+  browser.listeners.click[0]();
+  assert.equal(opens.length, 1);
+  assert.equal(opens[0].url, "https://www.google.com/search?q=" + encodeURIComponent("뉴턴의 운동 법칙"));
+
+  api.closeGoogleSearchPanel();
+  assert.equal(root.hidden, true);
+  assert.equal(frame.src, "about:blank");
+
+  // 인터넷이 끊겼으면 빈 창 대신 곧장 브라우저 창으로 보낸다.
+  context.navigator.onLine = false;
+  assert.equal(api.openGoogleSearch("갈릴레이"), true);
+  assert.equal(root.hidden, true);
+  assert.equal(opens.length, 1);                          // 이미 연 창을 다시 쓴다(location 만 바뀜)
 });
 
 test("이미지 편집은 공통 미저장 상태를 사용한다", () => {

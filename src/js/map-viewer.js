@@ -1069,7 +1069,130 @@ function mapKakaoRoadviewUrl(lat, lng){
 const MAP_ROADVIEW_WINDOW_NAME = "ClassDockRoadview";
 const MAP_ROADVIEW_WINDOW_FEATURES = "popup=yes,width=1100,height=760,resizable=yes,scrollbars=yes";
 let _mapRoadviewWindow = null;
+
+/* ===== 지도 옆 떠 있는 웹 창(로드뷰·카카오 장소 상세 공용) =====
+   카카오 페이지를 iframe 전체로 그대로 보여 주고, 제목줄을 끌어 옮기거나 가장자리로 크기를 바꾼다
+   (위치·크기 저장). 창이 떠 있어도 지도는 그대로 만질 수 있다. 잘 안 보이면 머리의 '브라우저로 보기'.
+   iframe 권한에서 allow-top-navigation 을 일부러 빼 카카오 페이지가 top.location 으로 ClassDock 화면을
+   통째로 넘기지 못하게 한다(작업 중인 문서를 잃는다). 새 창 링크는 보통 브라우저 탭으로 나간다. */
+const MAP_WEB_FRAME_SANDBOX = "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox";
+function mapWebPanelHost(){
+  // 보기 전체화면(#content)에서는 body 에 붙은 창이 안 보이므로 그 칸 안에 단다.
+  const fs = document.fullscreenElement;
+  return fs && fs !== document.documentElement ? fs : document.body;
+}
+function mapWebPanelUsable(){
+  if (typeof document === "undefined" || !document.body || typeof document.createElement !== "function") return false;
+  // 인터넷이 끊겼으면 빈 창을 띄우는 대신 브라우저 쪽으로 보낸다(오류 화면이라도 다시 시도할 수 있다).
+  return !(typeof navigator !== "undefined" && navigator.onLine === false);
+}
+function mapCreateWebPanel(opts){
+  const make = (tag, className, text) => {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text != null) el.textContent = mapT(text);
+    return el;
+  };
+  const root = make("section", "map-web-panel " + (opts.className || ""));
+  root.hidden = true;
+  root.tabIndex = -1;
+  root.setAttribute("role", "dialog");
+  root.setAttribute("aria-label", mapT(opts.label));
+  const head = make("header", "map-web-head");
+  const title = make("strong", "map-web-title", opts.label);
+  const browser = make("button", "map-web-btn", "브라우저로 보기");
+  browser.type = "button";
+  browser.title = mapT(opts.browserTitle);
+  const close = make("button", "map-web-close", "×");
+  close.type = "button";
+  close.title = mapT(opts.label + " 창 닫기");
+  close.setAttribute("aria-label", close.title);
+  head.append(title, ...(opts.headItems || []), browser, close);
+  const frameWrap = make("div", "map-web-frame-wrap");
+  const loading = make("p", "map-web-loading", opts.loadingText);
+  const frame = make("iframe", "map-web-frame");
+  frame.setAttribute("sandbox", MAP_WEB_FRAME_SANDBOX);
+  frame.referrerPolicy = "strict-origin-when-cross-origin";
+  frame.title = mapT(opts.label);
+  frameWrap.append(loading, frame);
+  const note = make("p", "map-web-note", opts.note);
+  root.append(head, frameWrap, note);
+  mapWebPanelHost().appendChild(root);
+  const float = typeof makeFloatingPanel === "function"
+    ? makeFloatingPanel(root, head, { storageKey:opts.storageKey, min:opts.min, host:mapWebPanelHost })
+    : null;
+  const panel = { root, head, title, frame, frameWrap, loading, float };
+  const rehost = () => {
+    const host = mapWebPanelHost();
+    if (root.parentNode !== host) host.appendChild(root);
+  };
+  panel.show = (url) => {
+    rehost();
+    loading.hidden = false;
+    frame.src = url;
+    root.hidden = false;
+    if (float) float.clampOnOpen();
+  };
+  panel.close = () => {
+    if (root.hidden) return;
+    root.hidden = true;
+    frame.src = "about:blank";   // 닫은 창에서 로드뷰·영상이 계속 돌지 않게
+  };
+  /* iframe 위로 포인터가 지나가면 이벤트가 그 안으로 들어가 창 끌기·크기 조절이 끊긴다.
+     바깥 문서에서 누르기 시작했으면(iframe 안 클릭은 여기 오지 않는다) 손을 뗄 때까지 iframe 을 투명하게 둔다. */
+  const release = () => { frame.style.pointerEvents = ""; };
+  document.addEventListener("pointerdown", () => { if (!root.hidden) frame.style.pointerEvents = "none"; }, true);
+  document.addEventListener("pointerup", release, true);
+  document.addEventListener("pointercancel", release, true);
+  document.addEventListener("fullscreenchange", () => {
+    if (root.hidden) return;
+    rehost();
+    if (float) requestAnimationFrame(() => float.clampOnOpen());
+  });
+  frame.addEventListener("load", () => { loading.hidden = true; });
+  browser.addEventListener("click", () => { if (typeof opts.onBrowser === "function") opts.onBrowser(); });
+  close.addEventListener("click", () => panel.close());
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); panel.close(); }
+  });
+  mapTranslate(root);
+  return panel;
+}
+
+let _mapRoadviewPanel = null;
+function mapRoadviewPanel(){
+  if (_mapRoadviewPanel && _mapRoadviewPanel.root.isConnected) return _mapRoadviewPanel;
+  const panel = mapCreateWebPanel({
+    className:"map-roadview-panel",
+    label:"로드뷰",
+    storageKey:"classdock-map-roadview:rect:v1",
+    min:{ w:420, h:320 },
+    loadingText:"카카오맵 로드뷰를 불러오는 중…",
+    note:"로드뷰가 안 보이거나 화면이 비어 있으면 '브라우저로 보기'를 눌러 주세요.",
+    browserTitle:"같은 자리 로드뷰를 브라우저 창에서 열어요",
+    onBrowser:() => { if (panel.at) mapOpenKakaoRoadviewWindow(panel.at.lat, panel.at.lng); }
+  });
+  _mapRoadviewPanel = panel;
+  return panel;
+}
+/* 로드뷰 — 지도 옆 떠 있는 창에 먼저 보이고, 안 되면(오프라인 등) 브라우저 창으로.
+   지도에서 다른 자리를 짚으면 떠 있는 창의 로드뷰만 갈아 끼운다. */
 function mapOpenKakaoRoadview(lat, lng){
+  const url = mapKakaoRoadviewUrl(lat, lng);
+  if (!url) return false;
+  let shown = false;
+  try {
+    if (mapWebPanelUsable()){
+      const panel = mapRoadviewPanel();
+      panel.at = { lat:Number(lat), lng:Number(lng) };
+      panel.title.textContent = "🚶 " + mapT("로드뷰") + " — " + panel.at.lat.toFixed(5) + ", " + panel.at.lng.toFixed(5);
+      panel.show(url);
+      shown = true;
+    }
+  } catch(_){ shown = false; }
+  return shown || mapOpenKakaoRoadviewWindow(lat, lng);
+}
+function mapOpenKakaoRoadviewWindow(lat, lng){
   const url = mapKakaoRoadviewUrl(lat, lng);
   if (!url) return false;
   /* 좌표마다 새 탭을 쌓지 않는다. 이미 연 로드뷰 창은 교사가 지도를 짚을 때마다 그 좌표로
@@ -1867,25 +1990,38 @@ function mapKakaoPlaceSlides(rawPlaces){
 
 /* 카카오 장소 상세 페이지는 카카오 안내에 따라 화면 일부를 덮거나 잘라 내지 않고 iframe 전체로
    보여 준다. ClassDock 쪽 머리말은 iframe 바깥이라 카카오 페이지 내용과 겹치지 않는다.
+   모달이 아니라 지도 옆 떠 있는 창이라, 열어 둔 채 지도를 옮기고 다른 핀을 누를 수 있다.
    주변 시설은 한 검색 묶음이 많게는 100곳이므로 iframe 을 장소마다 만들지 않고 하나만 갈아 끼운다. */
-function openMapKakaoPlaceModal(rawPlaces, startIndex){
-  const places = mapKakaoPlaceSlides(rawPlaces);
-  if (!places.length){
-    if (typeof toast === "function") toast(mapT("카카오맵 상세 주소를 열 수 없어요."), 3000, { type:"error" });
+const MAP_PLACE_WINDOW_NAME = "ClassDockKakaoPlace";
+const MAP_PLACE_WINDOW_FEATURES = "popup=yes,width=1100,height=860,resizable=yes,scrollbars=yes";
+let _mapPlaceWindow = null;
+/* '브라우저로 보기' — 로드뷰 창처럼 누를 때마다 새 탭을 쌓지 않고 창 하나를 다시 쓴다. */
+function mapOpenKakaoPlaceWindow(rawUrl){
+  const url = mapKakaoPlaceUrl(rawUrl);
+  if (!url) return false;
+  if (_mapPlaceWindow){
+    try {
+      if (!_mapPlaceWindow.closed){
+        _mapPlaceWindow.location = url;
+        _mapPlaceWindow.focus();
+        return true;
+      }
+    } catch(_){ /* 창에 닿을 수 없으면 아래에서 새로 연다. */ }
+    _mapPlaceWindow = null;
+  }
+  const opened = window.open(url, MAP_PLACE_WINDOW_NAME, MAP_PLACE_WINDOW_FEATURES);
+  if (!opened){
+    if (typeof toast === "function") toast(mapT("새 창을 열지 못했어요. 브라우저의 팝업 허용 설정을 확인해 주세요."), 3800);
     return false;
   }
-  let placeIndex = Math.max(0, Math.min(places.length - 1, Math.floor(Number(startIndex) || 0)));
-  const modal = document.createElement("div");
-  modal.className = "modal map-place-modal";
-  const card = document.createElement("div");
-  card.className = "modal-card map-place-card";
-  card.setAttribute("role", "dialog");
-  card.setAttribute("aria-modal", "true");
-  card.setAttribute("aria-label", "카카오맵 상세 보기");
-
-  const head = document.createElement("div");
-  head.className = "map-place-head";
-  const title = document.createElement("h3");
+  try { opened.opener = null; } catch(_){}
+  try { opened.focus(); } catch(_){}
+  _mapPlaceWindow = opened;
+  return true;
+}
+let _mapPlacePanel = null;
+function mapPlacePanel(){
+  if (_mapPlacePanel && _mapPlacePanel.root.isConnected) return _mapPlacePanel;
   const nav = document.createElement("div");
   nav.className = "map-place-nav";
   const prevBtn = document.createElement("button");
@@ -1897,84 +2033,73 @@ function openMapKakaoPlaceModal(rawPlaces, startIndex){
   nextBtn.type = "button"; nextBtn.className = "map-place-nav-btn map-place-next";
   nextBtn.textContent = "›"; nextBtn.setAttribute("aria-label", "다음 주변 시설");
   nav.append(prevBtn, position, nextBtn);
-  nav.hidden = places.length < 2;
-  const external = document.createElement("button");
-  external.type = "button"; external.className = "btn map-place-external";
-  external.textContent = "새 창에서 열기";
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button"; closeBtn.className = "map-place-close";
-  closeBtn.textContent = "×"; closeBtn.setAttribute("aria-label", "닫기");
-  head.append(title, nav, external, closeBtn);
-
-  const frameWrap = document.createElement("div");
-  frameWrap.className = "map-place-frame-wrap";
-  const loading = document.createElement("p");
-  loading.className = "map-place-loading";
-  loading.textContent = "카카오맵 상세 페이지를 불러오는 중…";
-  const frame = document.createElement("iframe");
-  frame.className = "map-place-frame";
-  frame.referrerPolicy = "strict-origin-when-cross-origin";
-  frameWrap.append(loading, frame);
-  card.append(head, frameWrap);
-  modal.appendChild(card);
-  document.body.appendChild(modal);
-  mapTranslate(modal);
-
-  let closed = false;
-  let activeUrl = "";
-  const showPlace = (nextIndex, direction) => {
+  const panel = mapCreateWebPanel({
+    className:"map-place-panel",
+    label:"카카오맵 상세 보기",
+    storageKey:"classdock-map-place:rect:v1",
+    min:{ w:360, h:320 },
+    headItems:[nav],
+    loadingText:"카카오맵 상세 페이지를 불러오는 중…",
+    note:"내용이 안 보이거나 눌러 들어간 화면이 비어 있으면 '브라우저로 보기'를 눌러 주세요.",
+    browserTitle:"이 장소의 카카오맵 상세 페이지를 브라우저 창에서 열어요",
+    onBrowser:() => { if (panel.activeUrl) mapOpenKakaoPlaceWindow(panel.activeUrl); }
+  });
+  const { frame, frameWrap, loading, title } = panel;
+  panel.nav = nav;
+  panel.places = [];
+  panel.placeIndex = 0;
+  panel.activeUrl = "";
+  panel.showPlace = (nextIndex, direction) => {
+    const places = panel.places;
+    if (!places.length) return;
     // 끝에서 다시 처음으로 이어지는 순환 목록. 뒤로 갈 때의 음수 나머지도 양수로 바로잡는다.
     const wrapped = ((Math.trunc(Number(nextIndex) || 0) % places.length) + places.length) % places.length;
-    if (wrapped === placeIndex && activeUrl) return;
-    placeIndex = wrapped;
-    const place = places[placeIndex];
-    activeUrl = place.url;
+    if (wrapped === panel.placeIndex && panel.activeUrl && !panel.root.hidden) return;
+    panel.placeIndex = wrapped;
+    const place = places[panel.placeIndex];
+    panel.activeUrl = place.url;
     title.textContent = place.name || mapT("카카오맵 상세 보기");
-    position.textContent = (placeIndex + 1) + " / " + places.length;
-    loading.hidden = false;
+    title.title = title.textContent;
+    position.textContent = (panel.placeIndex + 1) + " / " + places.length;
     frame.title = (place.name || mapT("장소")) + " " + mapT("카카오맵 상세 페이지");
-    frame.src = activeUrl;
     if (direction){
       frameWrap.classList.remove("is-slide-prev", "is-slide-next");
       void frameWrap.offsetWidth;
       frameWrap.classList.add(direction < 0 ? "is-slide-prev" : "is-slide-next");
     }
+    if (panel.root.hidden) panel.show(panel.activeUrl);
+    else { loading.hidden = false; frame.src = panel.activeUrl; }
   };
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    window.removeEventListener("keydown", onKey, true);
-    frame.src = "about:blank";
-    modal.remove();
-  };
-  const onKey = (e) => {
-    if (e.key === "Escape"){
-      e.preventDefault(); e.stopImmediatePropagation();
-      close();
-    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowLeft"){
-      e.preventDefault(); e.stopImmediatePropagation();
-      showPlace(placeIndex - 1, -1);
-    } else if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "ArrowRight"){
-      e.preventDefault(); e.stopImmediatePropagation();
-      showPlace(placeIndex + 1, 1);
-    }
-  };
-  window.addEventListener("keydown", onKey, true);
-  modal.addEventListener("mousedown", (e) => { if (e.target === modal) close(); });
-  closeBtn.addEventListener("click", close);
-  frame.addEventListener("load", () => { loading.hidden = true; });
+  const baseClose = panel.close;
+  panel.close = () => { baseClose(); panel.activeUrl = ""; };
+  // 창 안(머리 버튼 등)에 포커스가 있을 때만 ←/→ 로 넘긴다 — 모달이 아니라 지도·입력칸 키를 뺏지 않는다.
+  panel.root.addEventListener("keydown", (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || panel.places.length < 2) return;
+    if (e.key === "ArrowLeft"){ e.preventDefault(); panel.showPlace(panel.placeIndex - 1, -1); }
+    else if (e.key === "ArrowRight"){ e.preventDefault(); panel.showPlace(panel.placeIndex + 1, 1); }
+  });
   frameWrap.addEventListener("animationend", () => {
     frameWrap.classList.remove("is-slide-prev", "is-slide-next");
   });
-  prevBtn.addEventListener("click", () => showPlace(placeIndex - 1, -1));
-  nextBtn.addEventListener("click", () => showPlace(placeIndex + 1, 1));
-  external.addEventListener("click", () => {
-    const opened = window.open(activeUrl, "_blank", "noopener,noreferrer");
-    if (opened){ try { opened.opener = null; } catch(_){} }
-    else if (typeof toast === "function") toast(mapT("새 창을 열지 못했어요. 브라우저의 팝업 허용 설정을 확인해 주세요."), 3800);
-  });
-  showPlace(placeIndex, 0);
-  closeBtn.focus({ preventScroll:true });
+  prevBtn.addEventListener("click", () => panel.showPlace(panel.placeIndex - 1, -1));
+  nextBtn.addEventListener("click", () => panel.showPlace(panel.placeIndex + 1, 1));
+  _mapPlacePanel = panel;
+  return panel;
+}
+function openMapKakaoPlacePanel(rawPlaces, startIndex){
+  const places = mapKakaoPlaceSlides(rawPlaces);
+  if (!places.length){
+    if (typeof toast === "function") toast(mapT("카카오맵 상세 주소를 열 수 없어요."), 3000, { type:"error" });
+    return false;
+  }
+  const index = Math.max(0, Math.min(places.length - 1, Math.floor(Number(startIndex) || 0)));
+  if (!mapWebPanelUsable()) return mapOpenKakaoPlaceWindow(places[index].url);
+  const panel = mapPlacePanel();
+  panel.places = places;
+  panel.activeUrl = "";
+  panel.nav.hidden = places.length < 2;
+  panel.showPlace(index, 0);
+  try { panel.root.focus({ preventScroll:true }); } catch(_){}
   return true;
 }
 /* 갈래·키워드 검색의 같은 응답에서 말풍선에 쓸 값까지 읽는다. mapKakaoCategoryPlaces 는 표시로
@@ -6320,7 +6445,7 @@ async function mountMapEditor(doc){
           && mapKakaoPlaceUrl(item.placeUrl))
         : [marker];
       const startIndex = Math.max(0, peers.findIndex(item => item.id === marker.id));
-      openMapKakaoPlaceModal(peers.map(item => ({
+      openMapKakaoPlacePanel(peers.map(item => ({
         id:item.id, name:item.label, placeUrl:item.placeUrl
       })), startIndex);
     });
@@ -8165,7 +8290,7 @@ async function mountMapEditor(doc){
     detailBtn.hidden = !mapKakaoPlaceUrl(spot.placeUrl);
     detailBtn.addEventListener("click", () => {
       map.closePopup();
-      openMapKakaoPlaceModal([{ name:spot.title || name, placeUrl:spot.placeUrl }], 0);
+      openMapKakaoPlacePanel([{ name:spot.title || name, placeUrl:spot.placeUrl }], 0);
     });
     const roadviewBtn = document.createElement("button");
     roadviewBtn.type = "button"; roadviewBtn.className = "map-spot-btn map-spot-roadview";

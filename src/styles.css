@@ -1334,43 +1334,52 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-spot-btn:hover{background:var(--panel-hover);border-color:var(--accent)}
   .map-spot-btn[hidden]{display:none}
   .map-spot-detail{flex:1 1 100%;font-weight:700;color:var(--accent)}
-  /* 카카오 장소 상세 — 카카오 페이지 위를 덮지 않고 iframe 전체를 큰 모달에 그대로 보여 준다. */
-  .modal-card.map-place-card{width:min(1120px,calc(96vw / var(--ui-zoom, 1)));height:min(calc(88vh / var(--ui-zoom, 1)),900px);max-height:calc(calc(100vh / var(--ui-zoom, 1)) - 12px);
-    padding:0;overflow:hidden;display:flex;flex-direction:column}
-  .map-place-head{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;
-    border-bottom:1px solid var(--border);background:var(--panel)}
-  .map-place-head h3{flex:1;min-width:0;margin:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* 지도 옆 떠 있는 웹 창(로드뷰·카카오 장소 상세, map-viewer.js mapCreateWebPanel).
+     카카오 페이지 위를 덮거나 잘라 내지 않고 iframe 전체를 그대로 보여 준다. 확인창(.modal 200)보다 아래. */
+  .map-web-panel{position:fixed;right:18px;top:64px;z-index:190;display:flex;flex-direction:column;
+    width:min(900px,calc(calc(100vw / var(--ui-zoom, 1)) - 24px));height:min(640px,calc(calc(100vh / var(--ui-zoom, 1)) - 82px));
+    box-sizing:border-box;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--panel);
+    color:var(--ink);box-shadow:0 18px 46px rgba(15,23,42,.3)}
+  .map-web-panel[hidden]{display:none}
+  .map-web-panel:focus{outline:none}
+  .map-web-panel.map-place-panel{right:36px;top:84px;width:min(760px,calc(calc(100vw / var(--ui-zoom, 1)) - 24px));
+    height:min(820px,calc(calc(100vh / var(--ui-zoom, 1)) - 102px))}
+  .map-web-head{flex:none;display:flex;align-items:center;gap:6px;padding:7px 8px 7px 12px;border-bottom:1px solid var(--border);
+    background:var(--panel);cursor:move;user-select:none;touch-action:none}
+  .map-web-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+  .map-web-btn{flex:none;padding:4px 9px;border:1px solid rgba(37,99,235,.45);border-radius:7px;background:var(--panel-2);
+    color:#2563eb;font-size:12px;font-weight:600;white-space:nowrap}
+  .map-web-btn:hover{background:var(--panel-hover)}
+  .map-web-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0 0 2px;
+    border:0;border-radius:7px;background:transparent;color:var(--muted);font:20px/1 system-ui}
+  .map-web-close:hover{background:var(--panel-hover);color:var(--ink)}
+  .map-web-frame-wrap{position:relative;flex:1 1 auto;min-height:0;background:#fff}
+  .map-web-frame{display:block;width:100%;height:100%;border:0;background:#fff}
+  .map-web-loading{position:absolute;inset:0;z-index:1;display:grid;place-items:center;margin:0;
+    background:var(--panel);color:var(--muted);font-size:13px;pointer-events:none}
+  .map-web-loading[hidden]{display:none}
+  .map-web-note{flex:none;margin:0;padding:5px 12px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px}
   .map-place-nav{flex:none;display:flex;align-items:center;gap:5px}
   .map-place-nav[hidden]{display:none}
-  .map-place-nav-btn{width:32px;height:32px;padding:0;border:1px solid var(--border);border-radius:8px;
-    background:var(--field);color:var(--ink);font:700 22px/1 system-ui,sans-serif;cursor:pointer}
+  .map-place-nav-btn{width:30px;height:30px;padding:0;border:1px solid var(--border);border-radius:8px;
+    background:var(--field);color:var(--ink);font:700 20px/1 system-ui,sans-serif;cursor:pointer}
   .map-place-nav-btn:hover:not(:disabled){background:var(--panel-hover);border-color:var(--accent)}
   .map-place-nav-btn:disabled{opacity:.38;cursor:default}
   .map-place-position{min-width:48px;text-align:center;color:var(--muted);font-size:12px;
     font-variant-numeric:tabular-nums;white-space:nowrap}
-  .map-place-external{padding:6px 10px;font-size:12px}
-  .map-place-close{flex:none;width:32px;height:32px;border:1px solid var(--border);border-radius:8px;
-    background:var(--field);color:var(--ink);font:700 20px/1 system-ui,sans-serif;cursor:pointer}
-  .map-place-close:hover{background:var(--panel-hover);border-color:var(--accent)}
-  .map-place-frame-wrap{position:relative;flex:1 1 auto;min-height:0;background:#fff}
-  .map-place-frame{display:block;width:100%;height:100%;border:0;background:#fff}
-  .map-place-loading{position:absolute;inset:0;z-index:1;display:grid;place-items:center;margin:0;
-    background:var(--panel);color:var(--muted);font-size:13px;pointer-events:none}
-  .map-place-loading[hidden]{display:none}
-  .map-place-frame-wrap.is-slide-next{animation:map-place-slide-next .16s ease-out}
-  .map-place-frame-wrap.is-slide-prev{animation:map-place-slide-prev .16s ease-out}
+  .map-web-frame-wrap.is-slide-next{animation:map-place-slide-next .16s ease-out}
+  .map-web-frame-wrap.is-slide-prev{animation:map-place-slide-prev .16s ease-out}
   @keyframes map-place-slide-next{from{opacity:.55;transform:translateX(14px)}to{opacity:1;transform:none}}
   @keyframes map-place-slide-prev{from{opacity:.55;transform:translateX(-14px)}to{opacity:1;transform:none}}
   @media(prefers-reduced-motion:reduce){
-    .map-place-frame-wrap.is-slide-next,.map-place-frame-wrap.is-slide-prev{animation:none}
+    .map-web-frame-wrap.is-slide-next,.map-web-frame-wrap.is-slide-prev{animation:none}
   }
   @media(max-width:600px),(max-height:520px){
-    .modal-card.map-place-card{width:100%;height:100%;max-height:none;border-radius:12px}
-    .map-place-external{display:none}
-    .map-place-head{gap:5px;padding:8px}
-    .map-place-head h3{font-size:13.5px}
+    .map-web-panel,.map-web-panel.map-place-panel{right:8px;top:8px;width:calc(calc(100vw / var(--ui-zoom, 1)) - 16px);
+      height:calc(calc(100vh / var(--ui-zoom, 1)) - 16px)}
+    .map-web-head{gap:4px;padding:6px;cursor:default}
+    .map-web-note{display:none}
     .map-place-nav{gap:3px}
-    .map-place-nav-btn{width:30px;height:30px}
     .map-place-position{min-width:42px;font-size:11.5px}
   }
   /* 주변 시설 찾기 창 */
@@ -2935,6 +2944,28 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   @media(max-width:600px){
     .spellcheck-panel{right:8px;bottom:8px;width:calc(calc(100vw / var(--ui-zoom, 1)) - 16px);max-height:calc(calc(100vh / var(--ui-zoom, 1)) - 16px)}
     .spellcheck-nav .spellcheck-reset{margin-left:0}
+  }
+  /* 우클릭 'Google에서 검색' 떠 있는 창(python-editor.js openGoogleSearchPanel). 확인창(.modal 200)보다 아래. */
+  .google-search-panel{position:fixed;right:18px;top:64px;z-index:190;display:flex;flex-direction:column;
+    width:min(560px,calc(calc(100vw / var(--ui-zoom, 1)) - 24px));height:min(760px,calc(calc(100vh / var(--ui-zoom, 1)) - 82px));
+    box-sizing:border-box;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--panel);
+    color:var(--ink);box-shadow:0 18px 46px rgba(15,23,42,.3)}
+  .google-search-panel[hidden]{display:none}
+  .google-search-head{display:flex;align-items:center;gap:6px;padding:7px 8px 7px 12px;border-bottom:1px solid var(--border);
+    cursor:move;user-select:none;touch-action:none}
+  .google-search-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+  .google-search-btn{flex:none;padding:4px 9px;border:1px solid var(--border);border-radius:7px;background:var(--panel-2);
+    color:var(--ink);font-size:12px;white-space:nowrap}
+  .google-search-btn:hover{background:var(--panel-hover)}
+  .google-search-browser{border-color:rgba(37,99,235,.45);color:#2563eb;font-weight:600}
+  .google-search-close{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0 0 2px;
+    border:0;border-radius:7px;background:transparent;color:var(--muted);font:20px/1 system-ui}
+  .google-search-close:hover{background:var(--panel-hover);color:var(--ink)}
+  .google-search-frame{flex:1;min-height:0;width:100%;border:0;background:#fff}
+  .google-search-note{margin:0;padding:5px 12px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px}
+  @media (max-width:600px),(max-height:520px){
+    .google-search-panel{right:8px;top:8px;width:calc(calc(100vw / var(--ui-zoom, 1)) - 16px);height:calc(calc(100vh / var(--ui-zoom, 1)) - 16px)}
+    .google-search-head{cursor:default}
   }
   /* 비 UTF-8 원본 저장 안내: 오른쪽 버튼들 뒤에 은은하게 */
   .text-edit-encnote{font-size:12px;color:var(--muted);white-space:nowrap;padding-left:6px;
