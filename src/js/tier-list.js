@@ -264,10 +264,15 @@ function tierButton(label, title, className, icon){
   if (title){ button.title = title; button.setAttribute("aria-label", title); }
   return button;
 }
+// 전체화면(#content)에서는 body 에 붙인 창·끌기 그림이 보이지 않으므로 그 칸 안에 붙인다.
+function tierLayerHost(){ return document.fullscreenElement || document.body; }
 function tierModal(titleText, body){
   const modal = document.createElement("div"); modal.className = "tier-modal"; const card = document.createElement("div"); card.className = "tier-modal-card movable-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
-  const head = document.createElement("header"), h = document.createElement("h2"), close = tierButton("", "닫기", "tier-modal-x", "close"); h.textContent = titleText; head.append(h, close); card.append(head, body); modal.appendChild(card); document.body.appendChild(modal);
-  const dispose = () => modal.remove(); close.onclick = dispose; modal.addEventListener("pointerdown", event => { if (event.target === modal) dispose(); }); modal.addEventListener("keydown", event => { if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); dispose(); } }); return { modal, dispose };
+  const head = document.createElement("header"), h = document.createElement("h2"), close = tierButton("", "닫기", "tier-modal-x", "close"); h.textContent = titleText; head.append(h, close); card.append(head, body); modal.appendChild(card); tierLayerHost().appendChild(modal);
+  // Esc 는 초점이 창 밖(방금 두 번 누른 카드 등)에 있어도 이 창을 닫는다 — 그래야 전체화면이 대신 풀리지 않는다.
+  const onKey = event => { const confirmOpen = document.getElementById("confirmModal"); if (confirmOpen && !confirmOpen.hidden) return;   // 위에 뜬 확인창이 먼저
+    if (event.key === "Escape" && modal.isConnected){ event.preventDefault(); event.stopPropagation(); dispose(); } };
+  const dispose = () => { window.removeEventListener("keydown", onKey, true); modal.remove(); }; close.onclick = dispose; modal.addEventListener("pointerdown", event => { if (event.target === modal) dispose(); }); window.addEventListener("keydown", onKey, true); return { modal, dispose };
 }
 
 function mountTierEditor(doc){
@@ -507,7 +512,7 @@ function mountTierEditor(doc){
     if (!state.started){
       if (Math.abs(event.clientY - state.y) < 4) return;
       state.started = true; const r = state.rowEl.getBoundingClientRect(); state.dy = state.y - r.top; state.left = r.left;
-      state.ghost = state.rowEl.cloneNode(true); state.ghost.classList.add("tier-row-ghost"); state.ghost.style.width = r.width + "px"; document.body.appendChild(state.ghost);
+      state.ghost = state.rowEl.cloneNode(true); state.ghost.classList.add("tier-row-ghost"); state.ghost.style.width = r.width + "px"; tierLayerHost().appendChild(state.ghost);
       state.rowEl.classList.add("is-dragging"); state.mark = document.createElement("div"); state.mark.className = "tier-row-mark"; root.classList.add("is-row-dragging");
     }
     event.preventDefault();
@@ -528,7 +533,7 @@ function mountTierEditor(doc){
     if (!drag.started){
       if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
       drag.started = true; const r = drag.el.getBoundingClientRect(); drag.dx = drag.x - r.left; drag.dy = drag.y - r.top;
-      drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("tier-ghost"); drag.ghost.style.width = r.width + "px"; drag.ghost.style.height = r.height + "px"; document.body.appendChild(drag.ghost);
+      drag.ghost = drag.el.cloneNode(true); drag.ghost.classList.add("tier-ghost"); drag.ghost.style.width = r.width + "px"; drag.ghost.style.height = r.height + "px"; tierLayerHost().appendChild(drag.ghost);
       drag.el.classList.add("is-dragging"); drag.mark = document.createElement("div"); drag.mark.className = "tier-drop-mark"; root.classList.add("is-dragging");
     }
     event.preventDefault();
@@ -635,7 +640,7 @@ function mountTierEditor(doc){
     }
     if (event.key === "Delete" || event.key === "Backspace"){ event.preventDefault(); deleteItem(item.id); return; }
     if (event.key === "Enter"){ event.preventDefault(); openItemDialog(item.id); return; }
-    if (event.key === "Escape"){ selectedId = ""; render(); }
+    if (event.key === "Escape"){ event.preventDefault(); selectedId = ""; render(); }
   };
   window.addEventListener("keydown", keydown);
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];

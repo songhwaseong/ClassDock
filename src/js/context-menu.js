@@ -17,6 +17,8 @@
  *   · 터치·펜에는 pointerenter 가 오지 않으므로 부모는 click 으로도 열린다.
  */
 const MNContextMenu = (() => {
+  // 전체화면에서는 그 칸 바깥(body)에 붙인 층이 보이지 않는다.
+  const layerHost = () => document.fullscreenElement || document.body;
   const SUB_CLOSE_MS = 220;      // 옆 항목으로 지나갈 때 서브메뉴가 깜빡이지 않게 두는 유예
   const MARGIN = 6;
 
@@ -103,7 +105,7 @@ const MNContextMenu = (() => {
           closeFrom(depth + 1);
           const sub = renderLayer(children, depth + 1, base);
           sub.__parentButton = button;
-          document.body.appendChild(sub);
+          layerHost().appendChild(sub);
           layers.push(sub);
           button.classList.add("is-open");
           placeSub(sub, button);
@@ -138,7 +140,7 @@ const MNContextMenu = (() => {
     close();
     const base = String(options.base || "text-context");
     const menu = renderLayer(items, 0, base);
-    document.body.appendChild(menu);
+    layerHost().appendChild(menu);
     layers.push(menu);
     const rect = menu.getBoundingClientRect();
     menu.style.left = Math.max(MARGIN, Math.min(window.innerWidth - rect.width - MARGIN, Number(x) || 0)) + "px";

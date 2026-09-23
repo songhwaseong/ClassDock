@@ -1971,7 +1971,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     .split-drop-half,.split-drop-half span{transition:none}
   }
   #content:fullscreen{background:var(--viewer)}
-  body.viewer-fullscreen header,body.viewer-fullscreen #tabBar,body.viewer-fullscreen #saveTargetBar,body.viewer-fullscreen #sidebar,body.viewer-fullscreen #sidebarBackdrop,body.viewer-fullscreen #sbResizer,body.viewer-fullscreen #scratchpad,body.viewer-fullscreen #imageMemo{display:none!important}
+  body.viewer-fullscreen>header,body.viewer-fullscreen #tabBar,body.viewer-fullscreen #saveTargetBar,body.viewer-fullscreen #sidebar,body.viewer-fullscreen #sidebarBackdrop,body.viewer-fullscreen #sbResizer,body.viewer-fullscreen #scratchpad,body.viewer-fullscreen #imageMemo{display:none!important}
   body.viewer-fullscreen main{position:fixed;inset:0;z-index:100;background:var(--viewer)}
   body.viewer-fullscreen #content{flex:1;background:var(--viewer)}
   .fs-controls{position:fixed;top:14px;right:14px;z-index:110;display:none;align-items:center;gap:6px;

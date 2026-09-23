@@ -138,3 +138,39 @@ test("줄을 지워 보유 카드로 내려온 사진을 다시 올리면 겹쳐
   await expect(page.locator("#toast")).toContainText("이미 있는 사진");
   await expect(page.locator(".tier-pool .tier-item img")).toHaveCount(2);
 });
+
+test("전체화면에서도 끌기 그림·창·알림이 전체화면 칸 안에 뜬다", async ({ page }) => {
+  await openTier(page);
+  // 진짜 전체화면은 사용자 클릭이 있어야 하므로 임시 단추를 눌러 들어간다.
+  await page.evaluate(() => { const b = document.createElement("button"); b.id = "fsProbe"; b.textContent = "fs"; b.style.cssText = "position:fixed;left:0;top:0;z-index:99999"; b.onclick = () => enterViewerFullscreen(); document.body.appendChild(b); });
+  await page.click("#fsProbe");
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement && document.fullscreenElement.id)).toBe("content");
+  await expect.poll(() => page.evaluate(() => document.getElementById("toast").parentElement.id)).toBe("content");
+
+  // 끄는 동안 따라다니는 카드 그림
+  const card = await page.locator('.tier-item[data-item-id="c0"]').boundingBox();
+  await page.mouse.move(card.x + card.width / 2, card.y + card.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(card.x + 80, card.y - 120, { steps:8 });
+  await expect(page.locator("#content .tier-ghost")).toHaveCount(1);
+  await page.mouse.up();
+
+  await page.locator('.tier-item[data-item-id="c0"]').dblclick();
+  await expect(page.locator("#content .tier-modal")).toBeVisible();
+  await page.locator(".tier-modal .tf-cancel").click();
+
+  // Esc 로 창을 닫으면 창만 닫히고 전체화면은 남는다. 아무것도 안 열려 있을 때의 Esc 는 전체화면을 나간다.
+  await page.locator('.tier-item[data-item-id="c0"]').dblclick();
+  await expect(page.locator(".tier-modal")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".tier-modal")).toHaveCount(0);
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => document.fullscreenElement && document.fullscreenElement.id)).toBe("content");
+  // 카드가 골라져 있으면 첫 Esc 는 고르기만 풀고, 다음 Esc 가 전체화면을 나간다.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
+  await expect.poll(() => page.evaluate(() => document.getElementById("toast").parentElement.tagName)).toBe("BODY");
+});

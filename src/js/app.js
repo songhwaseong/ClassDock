@@ -414,17 +414,20 @@ function wire(){
       }
     }, { passive: true });
   });
+  keepViewerFullscreenAcrossPickers();
   document.addEventListener("fullscreenchange", () => {
+    syncFullscreenLayers();
+    if (!document.fullscreenElement && typeof unlockViewerEscape === "function") unlockViewerEscape();
     syncFullscreenButtons();
     scheduleViewerLayoutRefresh();
     if (isViewerFullscreen()) showFullscreenControls();
     else hideFullscreenControlsNow();
   });
+  /* 창·메뉴·선택 풀기처럼 Esc 를 쓴 곳이 있으면(preventDefault) 전체화면은 그대로 둔다.
+     뒤에 붙은 창 리스너까지 다 돈 다음에 보려고 한 박자 미룬다. */
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && document.body.classList.contains("viewer-fullscreen")) {
-      e.preventDefault();
-      exitViewerFullscreen();
-    }
+    if (e.key !== "Escape" || e.repeat || !isViewerFullscreen()) return;
+    setTimeout(() => { if (!e.defaultPrevented && isViewerFullscreen()) exitViewerFullscreen(); }, 0);
   });
   // 화면 확대/축소 (PDF)
   byId("zoomIn").onclick  = () => setPdfZoom(((state && state.zoom) || 1) * 1.25);

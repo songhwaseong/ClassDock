@@ -220,7 +220,7 @@ async function enterViewerFullscreen(){
   const content = byId("content");
   if (!content) return;
   try {
-    if (content.requestFullscreen) await content.requestFullscreen();
+    if (content.requestFullscreen){ await content.requestFullscreen(); lockViewerEscape(); }
     else setViewerFullscreenFallback(true);
   } catch(e){
     setViewerFullscreenFallback(true);
@@ -229,7 +229,17 @@ async function enterViewerFullscreen(){
   scheduleViewerLayoutRefresh();
   showFullscreenControls();
 }
+/* 전체화면에서 Esc 는 원래 크롬이 가로채 곧장 전체화면을 푼다 — 창·메뉴를 Esc 로 닫아도 함께 풀렸다.
+   키보드 잠금으로 Esc 를 앱이 받게 하고(길게 누르면 크롬이 여전히 풀어 준다), 앱은
+   Esc 를 아무도 쓰지 않았을 때만 전체화면을 나간다(app.js). */
+function lockViewerEscape(){
+  try { if (navigator.keyboard && navigator.keyboard.lock) navigator.keyboard.lock(["Escape"]).catch(() => {}); } catch(_){}
+}
+function unlockViewerEscape(){
+  try { if (navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock(); } catch(_){}
+}
 async function exitViewerFullscreen(){
+  unlockViewerEscape();
   if (document.fullscreenElement && document.exitFullscreen) {
     try { await document.exitFullscreen(); } catch(e){}
   }
@@ -240,6 +250,52 @@ async function exitViewerFullscreen(){
 function toggleViewerFullscreen(){
   if (isViewerFullscreen()) exitViewerFullscreen();
   else enterViewerFullscreen();
+}
+/* 실제 전체화면은 #content 만 보여 준다. body 에 붙은 공용 확인창·알림(토스트)은
+   그동안 전체화면 칸 안으로 옮겼다가, 풀리면 제자리로 돌려놓는다. */
+const FULLSCREEN_SHARED_LAYERS = ["confirmModal", "textModal", "toast"];
+const fullscreenLayerHomes = new Map();
+function syncFullscreenLayers(){
+  const fs = document.fullscreenElement;
+  const host = fs && fs !== document.documentElement ? fs : null;
+  FULLSCREEN_SHARED_LAYERS.forEach(id => {
+    const el = byId(id); if (!el) return;
+    if (host){
+      if (el.parentNode === host) return;
+      if (!fullscreenLayerHomes.has(id)){ const mark = document.createComment(id); el.parentNode.insertBefore(mark, el); fullscreenLayerHomes.set(id, mark); }
+      host.appendChild(el);
+    } else {
+      const mark = fullscreenLayerHomes.get(id); if (!mark) return;
+      fullscreenLayerHomes.delete(id);
+      if (mark.parentNode){ mark.parentNode.insertBefore(el, mark); mark.remove(); }
+    }
+  });
+}
+/* 크롬은 파일(·색) 고르기 창을 열 때 보안상 전체화면을 스스로 푼다 — 막을 방법이 없다.
+   그래서 고르기 창이 닫히면 다시 전체화면으로 들어간다. 그때는 사용자 클릭이 아니라
+   진짜 전체화면이 거절되기 쉬운데, enterViewerFullscreen 이 창 안 전체화면으로 대신한다. */
+function keepViewerFullscreenAcrossPickers(){
+  document.addEventListener("click", event => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || (input.type !== "file" && input.type !== "color")) return;
+    const content = byId("content");
+    if (!content || document.fullscreenElement !== content || !content.contains(input)) return;
+    // 고르기 창 때문에 풀린 때만 되돌린다(색 고르기처럼 안 풀리면 아무것도 걸어 두지 않는다).
+    const dropped = () => {
+      clearTimeout(giveUp);
+      if (document.fullscreenElement) return;
+      let done = false;
+      const back = () => {
+        if (done) return; done = true;
+        input.removeEventListener("change", back); input.removeEventListener("cancel", back); window.removeEventListener("focus", later);
+        if (!isViewerFullscreen()) enterViewerFullscreen();
+      };
+      const later = () => setTimeout(back, 250);   // change 가 focus 보다 늦게 오는 경우를 기다린다
+      input.addEventListener("change", back); input.addEventListener("cancel", back); window.addEventListener("focus", later);
+    };
+    document.addEventListener("fullscreenchange", dropped, { once: true });
+    const giveUp = setTimeout(() => document.removeEventListener("fullscreenchange", dropped), 1500);
+  }, true);
 }
 function syncFullscreenButtons(){
   const on = isViewerFullscreen();
