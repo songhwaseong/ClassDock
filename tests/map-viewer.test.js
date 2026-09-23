@@ -671,7 +671,7 @@ test("카카오 상세 창은 Local API의 장소 주소만 iframe으로 연다"
   assert.match(source, /openMapKakaoPlaceModal\(peers\.map/);
 
   const css = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
-  assert.match(css, /\.modal-card\.map-place-card\{[^}]*height:min\(88vh,900px\)/);
+  assert.match(css, /\.modal-card\.map-place-card\{[^}]*height:min\(calc\(88vh \/ var\(--ui-zoom, 1\)\),900px\)/);
   assert.match(css, /\.map-place-frame\{[^}]*width:100%;height:100%;border:0/);
   assert.match(css, /\.map-place-nav-btn\{/);
 });
@@ -924,7 +924,7 @@ test("우클릭 메뉴의 도구 항목은 도구막대 단추를 그대로 비�
   assert.match(source, /contextMirror\(undoBtn, "↶ 되돌리기 \(Ctrl\+Z\)"\)/);
   assert.match(source, /contextMirror\(redoBtn, "↷ 다시 실행 \(Ctrl\+Shift\+Z\)"\)/);
   // 항목이 늘었으므로 작은 화면에서도 메뉴가 화면 밖으로 흘러넘치지 않아야 한다.
-  assert.match(styles, /\.map-context-menu\{[\s\S]*?max-height:calc\(100vh - 16px\);overflow-y:auto/);
+  assert.match(styles, /\.map-context-menu\{[\s\S]*?max-height:calc\(calc\(100vh \/ var\(--ui-zoom, 1\)\) - 16px\);overflow-y:auto/);
   assert.match(styles, /\.map-context-menu button\.is-on::after\{content:"✓"/);
 });
 

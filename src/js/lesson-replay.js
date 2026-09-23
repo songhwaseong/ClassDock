@@ -414,7 +414,7 @@ function mountReplayPlayer(doc, host, opts){
   const resize = () => {
     const r = stage.getBoundingClientRect();
     CW = Math.max(1, Math.round(r.width)); CH = Math.max(1, Math.round(r.height));
-    dpr = window.devicePixelRatio || 1;
+    dpr = screenPixelRatio(stage);             // 화면 픽셀과 1:1 — 큰 화면·고배율·UI 크기에서도 선명하게
     canvas.width = Math.round(CW * dpr); canvas.height = Math.round(CH * dpr);
     canvas.style.width = CW + "px"; canvas.style.height = CH + "px";
     draw();
@@ -452,11 +452,12 @@ function mountReplayPlayer(doc, host, opts){
 
   let ro = null;
   if (typeof ResizeObserver !== "undefined"){ ro = new ResizeObserver(() => resize()); ro.observe(stage); }
+  const offScreenRatio = onScreenPixelRatioChange(resize);
   requestAnimationFrame(resize);
   setPlayIcon(); syncUI();
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { playing = false; if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); document.removeEventListener("keydown", onKey); });
+  doc.cleanupFns.push(() => { playing = false; if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); offScreenRatio(); document.removeEventListener("keydown", onKey); });
 
   return { redraw: draw };
 }

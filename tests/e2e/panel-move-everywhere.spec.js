@@ -90,6 +90,10 @@ test("지도 반경 칸은 지도 안에서 옮겨지고 지도 밖으로는 나
   await page.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2, { button: "right" });
   await page.getByText("여기서 반경 보기").last().click();
   await expect(panel).toBeVisible();
+  // 처음 뜬 칸은 왼쪽 위 확대·축소 단추와 겹치지 않는다(예전에는 지도가 낮으면 단추가 제목줄을 덮었다).
+  const zoomBox = await page.locator(".map-stage .leaflet-control-zoom").last().boundingBox();
+  const opened = await panel.boundingBox();
+  expect(opened.x).toBeGreaterThanOrEqual(zoomBox.x + zoomBox.width);
   const head = panel.locator(".map-radius-head strong");
   // 칸이 지도 높이를 거의 다 쓰므로(위아래 여유가 적다) 옆으로 옮겨 본다
   await expectMovedBy(page, panel, head, 200, 0);

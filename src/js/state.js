@@ -869,13 +869,161 @@ function syncShortcutHints(root=document){
   });
 }
 function currentUiScale(){ const scale = Number(appSettings.uiScale); return [1,1.12,1.25].includes(scale) ? scale : 1; }
+/* ===== 'UI 크기' 좌표 맞추기 =====
+   UI 크기는 body 에 CSS zoom 을 걸어 키운다. 크롬 128부터(표준 zoom) 마우스 좌표(clientX)·요소 상자
+   (getBoundingClientRect)·창 크기(innerWidth)는 확대된 '보이는' px 로 오는데, style.left/top/width 는
+   확대 전 px 로 읽힌다. 둘을 섞어 쓰는 곳(우클릭 메뉴·팝업·끌기·캔버스 좌표…)이 앱 전체에 수백 곳이라
+   UI 크기를 키우면 전부 zoom 배만큼 밀렸다. 읽는 쪽을 한 곳에서 확대 전 px 로 돌려 앱 전체가 한 좌표계를
+   쓰게 한다 — 예전 크롬이 주던 값과 같다. zoom 이 1(기본값)이면 원래 값을 그대로 돌려준다.
+   SVG 의 getScreenCTM 도 같은 좌표로 맞추고, 좌표를 받는 elementFromPoint 는 거꾸로 zoom 을 곱해 넘긴다. 합성 MouseEvent 는 앱에서 만들지 않는다. */
+let uiCoordZoom = 1;
+(function installUiZoomCoordinates(){
+  if (typeof Element === "undefined" || !("currentCSSZoom" in Element.prototype)) return;   // 옛 크롬은 이미 확대 전 px 로 준다
+  const unzoomRect = (r) => new DOMRect(r.x / uiCoordZoom, r.y / uiCoordZoom, r.width / uiCoordZoom, r.height / uiCoordZoom);
+  const wrapMethod = (proto, name, wrap) => { const orig = proto && proto[name]; if (typeof orig === "function") proto[name] = wrap(orig); };
+  const wrapGetter = (target, name) => {
+    const d = target && Object.getOwnPropertyDescriptor(target, name);
+    if (!d || typeof d.get !== "function" || !d.configurable) return;
+    Object.defineProperty(target, name, { ...d, get(){ const v = d.get.call(this); return uiCoordZoom === 1 ? v : v / uiCoordZoom; } });
+  };
+  for (const proto of [Element.prototype, typeof Range !== "undefined" ? Range.prototype : null]){
+    wrapMethod(proto, "getBoundingClientRect", (orig) => function(){ const r = orig.call(this); return uiCoordZoom === 1 ? r : unzoomRect(r); });
+    wrapMethod(proto, "getClientRects", (orig) => function(){ const list = orig.call(this); return uiCoordZoom === 1 ? list : Array.from(list, unzoomRect); });
+  }
+  if (typeof MouseEvent !== "undefined") ["clientX", "clientY", "pageX", "pageY", "x", "y", "offsetX", "offsetY"].forEach(n => wrapGetter(MouseEvent.prototype, n));
+  if (typeof Touch !== "undefined") ["clientX", "clientY", "pageX", "pageY"].forEach(n => wrapGetter(Touch.prototype, n));
+  ["innerWidth", "innerHeight"].forEach(n => wrapGetter(window, n));
+  if (typeof SVGGraphicsElement !== "undefined" && typeof DOMMatrix !== "undefined"){
+    wrapMethod(SVGGraphicsElement.prototype, "getScreenCTM", (orig) => function(){
+      const m = orig.call(this); return !m || uiCoordZoom === 1 ? m : new DOMMatrix().scale(1 / uiCoordZoom).multiply(m);
+    });
+  }
+  wrapMethod(Document.prototype, "elementFromPoint", (orig) => function(x, y){ return orig.call(this, x * uiCoordZoom, y * uiCoordZoom); });
+  wrapMethod(Document.prototype, "elementsFromPoint", (orig) => function(x, y){ return orig.call(this, x * uiCoordZoom, y * uiCoordZoom); });
+})();
+/* 미디어 쿼리도 같은 문제다 — (max-width:900px) 는 확대 전 창 폭을 본다. UI 크기 1.25 면 1280 창의 실제 배치 폭은
+   1024 인데 좁은 화면 규칙이 걸리지 않아 도구막대가 넘친다. CSS 는 미디어 쿼리에 변수를 못 쓰므로, 읽어 들인
+   스타일시트에서 폭·높이 조건의 길이에 zoom 을 곱해 다시 건다(원문은 기억해 두고 배율이 바뀔 때마다 원문에서 셈).
+   JS 의 matchMedia 도 같은 규칙으로 바꿔 묻는다. 해상도(dppx)·prefers-* 같은 조건은 건드리지 않는다. */
+let uiMediaZoom = 1;
+const uiMediaOriginals = new WeakMap();
+const uiMediaSubscriptions = new Set();
+// matchMedia의 조건 문자열은 생성 뒤 바뀌지 않는다. 오래 구독하는 화면은 이 도구로
+// 네이티브 쿼리를 교체하고, 창 크기와 UI 크기 변경을 같은 콜백으로 받는다.
+function watchUiMediaQuery(query, onChange){
+  let media = window.matchMedia(query), zoom = uiMediaZoom, disposed = false;
+  const changed = () => onChange(media);
+  media.addEventListener("change", changed);
+  const refresh = () => {
+    if (disposed || zoom === uiMediaZoom) return;
+    const wasMatching = media.matches;
+    media.removeEventListener("change", changed);
+    media = window.matchMedia(query);
+    zoom = uiMediaZoom;
+    media.addEventListener("change", changed);
+    if (wasMatching !== media.matches) changed();
+  };
+  uiMediaSubscriptions.add(refresh);
+  return {
+    get matches(){ return media.matches; },
+    dispose(){
+      disposed = true;
+      media.removeEventListener("change", changed);
+      uiMediaSubscriptions.delete(refresh);
+    }
+  };
+}
+function refreshUiMediaSubscriptions(){
+  for (const refresh of [...uiMediaSubscriptions]){
+    try { refresh(); } catch (e){ console.warn("UI media query", e); }
+  }
+}
+function scaleUiMediaText(text, zoom){
+  if (zoom === 1 || !/width|height/.test(text)) return text;
+  return text.replace(/(\d*\.?\d+)(px|em|rem)\b/g, (m, n, unit) => (Math.round(Number(n) * zoom * 100) / 100) + unit);
+}
+function applyUiZoomToMediaRules(){
+  if (typeof document === "undefined" || !document.styleSheets) return;
+  const walk = (rules) => {
+    for (const rule of Array.from(rules)){
+      if (typeof CSSMediaRule !== "undefined" && rule instanceof CSSMediaRule){
+        if (!uiMediaOriginals.has(rule)){ const text = rule.media.mediaText; uiMediaOriginals.set(rule, /width|height/.test(text) ? text : null); }
+        const original = uiMediaOriginals.get(rule);
+        if (original){ const next = scaleUiMediaText(original, uiMediaZoom); if (rule.media.mediaText !== next) rule.media.mediaText = next; }
+      }
+      let inner = null;
+      try { inner = rule.cssRules; } catch(_){}
+      if (inner && inner.length) walk(inner);
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets)){
+    let rules = null;
+    try { rules = sheet.cssRules; } catch(_){ continue; }   // 다른 출처(글꼴 등) 시트는 읽을 수 없다
+    if (rules) walk(rules);
+  }
+}
+(function installUiZoomMediaQueries(){
+  if (typeof window.matchMedia === "function"){
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = (query) => original(scaleUiMediaText(String(query), uiMediaZoom));
+  }
+  // 나중에 붙는 스타일(늦게 불러오는 부품 CSS 등)도 같은 배율로 맞춘다.
+  if (typeof MutationObserver === "function" && document.head){
+    new MutationObserver((muts) => {
+      if (uiMediaZoom === 1) return;
+      for (const m of muts) for (const node of m.addedNodes){
+        if (node.nodeName === "STYLE") applyUiZoomToMediaRules();
+        else if (node.nodeName === "LINK") node.addEventListener("load", applyUiZoomToMediaRules, { once:true });
+      }
+    }).observe(document.head, { childList:true });
+  }
+})();
 function applyUiScale(){
   const scale = currentUiScale();
+  uiMediaZoom = scale;
+  applyUiZoomToMediaRules();
   document.documentElement.dataset.uiScale = String(scale);
   document.body.style.zoom = String(scale);
-  document.body.style.width = (100 / scale) + "%";
+  // CSS 의 vw·vh 는 zoom 한 body 안에서 한 번 더 커진다(100vw 가 창보다 넓어짐) — styles.css 가 이 값으로 나눈다.
+  document.documentElement.style.setProperty("--ui-zoom", String(scale));
+  if (typeof Element !== "undefined" && "currentCSSZoom" in Element.prototype) uiCoordZoom = scale;
+  // 표준 zoom(크롬 128+)에서는 퍼센트 폭이 이미 zoom 을 따른다 — 예전처럼 100/zoom % 로 줄이면 화면 오른쪽 20% 가 빈다.
+  // 높이는 vh 가 zoom 만큼 커지므로 그대로 100/zoom vh 로 둔다.
+  document.body.style.width = "currentCSSZoom" in Element.prototype ? "" : (100 / scale) + "%";
   document.body.style.height = (100 / scale) + "vh";
+  refreshUiMediaSubscriptions();
+  notifyScreenPixelRatioChange();
 }
+/* ===== 화면 픽셀 배율 =====
+   캔버스를 CSS 크기만큼만 그리면 큰 화면·고배율 화면에서 흐리다. 브라우저 배율(devicePixelRatio —
+   Windows 배율·Ctrl+ 확대)에 앱 'UI 크기'(body 의 CSS zoom)까지 곱해야 실제 화면 픽셀과 1:1 이 된다.
+   devicePixelRatio 에는 CSS zoom 이 들어 있지 않다. currentCSSZoom 이 없는 옛 브라우저는 1 로 둔다. */
+function cssZoomOf(el){
+  const z = el ? Number(el.currentCSSZoom) : NaN;
+  return Number.isFinite(z) && z > 0 ? z : 1;
+}
+function screenPixelRatio(el){ return (window.devicePixelRatio || 1) * cssZoomOf(el || document.body); }
+// 창을 다른 모니터로 옮기거나 Ctrl+/- · UI 크기를 바꾸면 배율이 바뀐다 — 이미 그린 캔버스는 다시 그려야 선명하다.
+// 문서가 닫힐 때 돌려받은 해제 함수를 불러 준다. 연달아 바뀌어도 한 프레임에 한 번만 알린다.
+const screenPixelRatioListeners = new Set();
+let screenPixelRatioFrame = 0;
+function onScreenPixelRatioChange(fn){ screenPixelRatioListeners.add(fn); return () => screenPixelRatioListeners.delete(fn); }
+function notifyScreenPixelRatioChange(){
+  if (screenPixelRatioFrame || !screenPixelRatioListeners.size) return;
+  screenPixelRatioFrame = requestAnimationFrame(() => {
+    screenPixelRatioFrame = 0;
+    for (const fn of [...screenPixelRatioListeners]){ try { fn(); } catch (e){ console.warn("screen pixel ratio", e); } }
+  });
+}
+(function watchDevicePixelRatio(){
+  if (typeof window.matchMedia !== "function") return;
+  const arm = () => {
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    const onChange = () => { mq.removeEventListener("change", onChange); arm(); notifyScreenPixelRatioChange(); };
+    mq.addEventListener("change", onChange);
+  };
+  arm();
+})();
 applyUiScale();
 applyToolVisibility();
 applyCodeColors();

@@ -2266,7 +2266,7 @@ function mountDiaryPaper(els, paperEnv){
     if (drawLayer.hidden) return;
     const bw = drawLayer.clientWidth, bh = drawLayer.clientHeight;
     if (!bw || !bh) return;
-    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    const dpr = Math.max(1, Math.min(3, screenPixelRatio(drawLayer)));
     const cw = Math.round(bw * dpr), ch = Math.round(bh * dpr);
     if (drawCanvas.width !== cw || drawCanvas.height !== ch){ drawCanvas.width = cw; drawCanvas.height = ch; }
     const ctx = drawCanvas.getContext("2d");

@@ -467,16 +467,23 @@ function hideScreensaver(){
 function startScreensaverAnimation(ov){
   const c = document.createElement("canvas"); c.className = "ss-canvas"; ov.insertBefore(c, ov.firstChild);
   const ctx = c.getContext("2d");
-  const size = () => { c.width = ov.clientWidth || window.innerWidth; c.height = ov.clientHeight || window.innerHeight; };
+  // 좌표·글자 크기는 CSS px(W×H)로 셈하고, 캔버스 픽셀은 화면 배율만큼 늘려 큰 TV·고배율 화면에서도 선명하게 그린다.
+  let W = 0, H = 0, ratio = 1;
+  const cssW = () => ov.clientWidth || window.innerWidth, cssH = () => ov.clientHeight || window.innerHeight;
+  const size = () => {
+    W = cssW(); H = cssH(); ratio = screenPixelRatio(ov);
+    c.width = Math.round(W * ratio); c.height = Math.round(H * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  };
   size();
   const particles = [];
   const N = 70;
-  for (let i = 0; i < N; i++) particles.push({ x: Math.random() * c.width, y: Math.random() * c.height, r: 1 + Math.random() * 2.4, vx: (Math.random() - 0.5) * 0.28, vy: (Math.random() - 0.5) * 0.28, a: 0.15 + Math.random() * 0.5 });
+  for (let i = 0; i < N; i++) particles.push({ x: Math.random() * W, y: Math.random() * H, r: 1 + Math.random() * 2.4, vx: (Math.random() - 0.5) * 0.28, vy: (Math.random() - 0.5) * 0.28, a: 0.15 + Math.random() * 0.5 });
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   const draw = () => {
     if (!ssActive){ return; }
-    if (c.width !== (ov.clientWidth || window.innerWidth) || c.height !== (ov.clientHeight || window.innerHeight)) size();
-    const W = c.width, H = c.height, m = Math.min(W, H);
+    if (W !== cssW() || H !== cssH() || ratio !== screenPixelRatio(ov)) size();
+    const m = Math.min(W, H);
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#ffffff";
     for (const p of particles){

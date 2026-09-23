@@ -1897,7 +1897,7 @@ const MNDbClient = (() => {
     /* SQL 편집기와 결과의 배치. 사용자가 고른 방향은 유지하되, 좁은 화면에서는 아래 배치로
        잠시 바꿔 두 영역이 지나치게 좁아지지 않게 한다. 화면이 다시 넓어지면 저장한 방향으로 돌아간다. */
     let resultLayout = readResultLayout();
-    const compactQueryLayout = window.matchMedia("(max-width:900px)");
+    const compactQueryLayout = watchUiMediaQuery("(max-width:900px)", () => applyResultLayout());
     const sideLayoutActive = () => resultLayout === "side" && !compactQueryLayout.matches;
     const applyResultLayout = () => {
       const side = sideLayoutActive();
@@ -1918,8 +1918,6 @@ const MNDbClient = (() => {
       storeResultLayout(resultLayout);
       applyResultLayout();
     });
-    const onCompactQueryLayout = () => applyResultLayout();
-    compactQueryLayout.addEventListener("change", onCompactQueryLayout);
     applyResultLayout();
 
     /* 스키마 패널 접기 ------------------------------------------------------ */
@@ -6197,7 +6195,7 @@ const MNDbClient = (() => {
     doc.cleanupFns.push(closeTableContextMenu);
     doc.cleanupFns.push(() => { if (closeErdModal) closeErdModal(); });
     doc.cleanupFns.push(() => {
-      compactQueryLayout.removeEventListener("change", onCompactQueryLayout);
+      compactQueryLayout.dispose();
       resultThemeObserver.disconnect();
       if (typeof unregisterEditorFont === "function"){
         sqlTabs.forEach(tab => { if (tab.editor) unregisterEditorFont(tab.editor.host); });

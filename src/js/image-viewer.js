@@ -266,7 +266,7 @@ function renderFolderPdfGallery(doc, host){
       page = await pdf.getPage(1);
       const base = page.getViewport({ scale:1 });
       const cssScale = Math.min(220 / Math.max(1, base.width), 150 / Math.max(1, base.height), 0.32);
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(screenPixelRatio(job.frame), 3);   // 4K 대형 화면(200% 넘는 배율)까지 또렷하게
       const viewport = page.getViewport({ scale:cssScale * dpr });
       const canvas = job.canvas;
       canvas.width = Math.max(1, Math.round(viewport.width));
@@ -1208,7 +1208,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
       ctx.restore();
     }
     if (state.zoom === null){
-      canvas.style.width = ""; canvas.style.maxWidth = "100%"; canvas.style.maxHeight = "calc(100vh - 190px)";
+      canvas.style.width = ""; canvas.style.maxWidth = "100%"; canvas.style.maxHeight = "calc(100vh / var(--ui-zoom, 1) - 190px)";
     } else {
       canvas.style.maxWidth = "none"; canvas.style.maxHeight = "none"; canvas.style.width = (out.width * state.zoom) + "px";
     }

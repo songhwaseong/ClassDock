@@ -833,7 +833,7 @@ function nbCreateInkSurface(ownerDoc, ctrl){
     const rect = ctrl.cellEl.getBoundingClientRect();
     width = Math.max(1, Math.round(rect.width));
     height = Math.max(1, Math.round(rect.height));
-    dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
+    dpr = screenPixelRatio(canvas);             // 화면 픽셀과 1:1 — 큰 화면·고배율·UI 크기에서도 선명하게
     canvas.width = Math.max(1, Math.round(width * dpr));
     canvas.height = Math.max(1, Math.round(height * dpr));
     canvas.style.width = width + "px";
@@ -905,6 +905,7 @@ function nbCreateInkSurface(ownerDoc, ctrl){
     observer = new ResizeObserver(resize);
     observer.observe(ctrl.cellEl);
   }
+  const offScreenRatio = onScreenPixelRatioChange(resize);
   const api = {
     overlay,
     canvas,
@@ -917,6 +918,7 @@ function nbCreateInkSurface(ownerDoc, ctrl){
     },
     cleanup(){
       if (observer) observer.disconnect();
+      offScreenRatio();
       overlay.remove();
     }
   };

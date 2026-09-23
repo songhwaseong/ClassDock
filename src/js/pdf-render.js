@@ -134,7 +134,7 @@ function createPagePlaceholder(page, doc, pageNum){
 // 화면 밖(프리페치) 페이지는 확대 배율을 따라가지 않고 기본 배율에서 멈춘다. floor·maxSide 는
 // 보이든 안 보이든 같은 값이라, 기본 줌에서는 미리 그려둔 캔버스를 그대로 재사용한다(재렌더 없음).
 function targetRenderDpr(doc, p){
-  const screen = window.devicePixelRatio || 1;
+  const screen = screenPixelRatio(doc.el);          // 앱 'UI 크기'(CSS zoom)까지 넣은 실제 화면 배율
   const z = (doc.zoom || 1);
   const dr = doc.el.getBoundingClientRect(), pr = p.frame.getBoundingClientRect();
   const actuallyVisible = pr.bottom > dr.top && pr.top < dr.bottom && pr.right > dr.left && pr.left < dr.right;
@@ -192,6 +192,10 @@ function renderPageCanvas(doc, p){
   })();
   return p.rendering;
 }
+
+// 창을 고배율 모니터(큰 TV 등)로 옮기거나 UI 크기를 키우면 보이는 쪽을 새 배율로 다시 그린다.
+// renderPageCanvas 는 더 높은 해상도가 필요할 때만 다시 그리므로 배율이 내려갈 땐 아무 일도 없다.
+onScreenPixelRatioChange(() => docs.forEach(d => { if (d.kind === "pdf") refreshVisibleQuality(d); }));
 
 // 멀어진 페이지의 캔버스를 비워 메모리를 회수한다(오버레이·서명은 그대로 유지).
 // 그리는 중이었다면 취소하고 결과도 버린다. 예전에는 렌더 중이면 그냥 돌아갔는데(early return),

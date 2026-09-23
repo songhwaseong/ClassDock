@@ -1091,7 +1091,7 @@ test("SQL 편집기와 결과는 아래·오른쪽 배치에서 각각 크기를
   assert.match(source, /const RESULT_LAYOUT_KEY = "classdockDbResultLayoutV1"/);
   assert.match(source, /const EDITOR_WIDTH_KEY = "classdockDbEditorWidthV1"/);
   assert.match(source, /localStorage\.setItem\(RESULT_LAYOUT_KEY, layout === "side" \? "side" : "below"\)/);
-  assert.match(source, /compactQueryLayout = window\.matchMedia\("\(max-width:900px\)"\)/);
+  assert.match(source, /compactQueryLayout = watchUiMediaQuery\("\(max-width:900px\)"/);
   assert.match(css, /\.db-query-layout\.db-layout-below\{flex-direction:column\}/);
   assert.match(css, /\.db-query-layout\.db-layout-side\{flex-direction:row\}/);
   assert.match(css, /\.db-editor-pane\{flex:0 0 var\(--db-editor-height,180px\);flex-direction:column\}/);
@@ -2233,7 +2233,7 @@ test("계층 메뉴는 공용 모듈(MNContextMenu)이 그리고 겉모습은 �
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
   assert.match(css, /\.text-context-sub\{/);
   assert.match(css, /\.text-context-parent::after\{content:"▸"/);
-  assert.match(css, /\.text-context-menu\{[\s\S]{0,200}?max-height:calc\(100vh - 20px\);overflow-y:auto/);
+  assert.match(css, /\.text-context-menu\{[\s\S]{0,200}?max-height:calc\(calc\(100vh \/ var\(--ui-zoom, 1\)\) - 20px\);overflow-y:auto/);
 });
 
 test("줄 정리 열한 개는 1단에 늘어놓지 않고 한 층 접는다", () => {

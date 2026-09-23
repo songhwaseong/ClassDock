@@ -2793,7 +2793,7 @@ function _createPenSurface(targetEl, scrollSrc){
     const sbW = Math.max(0, scrollSrc.offsetWidth - scrollSrc.clientWidth);
     const sbH = Math.max(0, scrollSrc.offsetHeight - scrollSrc.clientHeight);
     vw = Math.max(1, Math.round(r.width) - sbW); vh = Math.max(1, Math.round(r.height) - sbH);
-    dpr = window.devicePixelRatio || 1;
+    dpr = screenPixelRatio(canvas);             // 화면 픽셀과 1:1 — 큰 화면·고배율·UI 크기에서도 선명하게
     canvas.width = Math.round(vw * dpr); canvas.height = Math.round(vh * dpr);
     canvas.style.width = vw + "px"; canvas.style.height = vh + "px";
     redraw();
@@ -2802,6 +2802,7 @@ function _createPenSurface(targetEl, scrollSrc){
   scrollSrc.addEventListener("scroll", onScroll);
   let ro = null;
   if (typeof ResizeObserver !== "undefined"){ ro = new ResizeObserver(resize); ro.observe(targetEl); }
+  const offScreenRatio = onScreenPixelRatioChange(resize);
   const getPos = (e) => {
     const r = canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top + scrollSrc.scrollTop };
@@ -2837,6 +2838,7 @@ function _createPenSurface(targetEl, scrollSrc){
     cleanup(){
       try { scrollSrc.removeEventListener("scroll", onScroll); } catch(_){}
       if (ro){ try { ro.disconnect(); } catch(_){} }
+      offScreenRatio();
       try { overlay.remove(); } catch(_){}
     }
   };

@@ -1439,7 +1439,7 @@ function renderWhiteboard(doc, host){
     // clampView 에 눌려 사라진다. 다시 보이면 ResizeObserver 가 제 크기로 한 번 더 불러 준다.
     if (!r.width || !r.height) return;
     W = Math.max(1, Math.round(r.width)); H = Math.max(1, Math.round(r.height));
-    dpr = window.devicePixelRatio || 1;
+    dpr = screenPixelRatio(stage);             // 화면 픽셀과 1:1 — 큰 화면·고배율에서도 선이 흐리지 않게
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
     clampView();
@@ -4609,7 +4609,7 @@ function renderWhiteboard(doc, host){
       limit = Math.min(limit, panel.clientHeight - used - others - 26);
     }
     const cssHeight = Math.max(76, Math.round(Math.min(cssWidth * group.h / group.w, limit)));
-    const ratio = window.devicePixelRatio || 1;
+    const ratio = screenPixelRatio(canvasEl);
     canvasEl.style.height = cssHeight + "px";
     canvasEl.width = Math.round(cssWidth * ratio); canvasEl.height = Math.round(cssHeight * ratio);
     const preview = canvasEl.getContext("2d");
@@ -5547,7 +5547,7 @@ function renderWhiteboard(doc, host){
   // 이름만 늘어놓으면 "원고지"와 "모눈종이"를 골라 보기 전에는 구분하기 어렵다 — 칩마다 실제
   // 그리기 코드로 축소판을 그려 둔다(같은 함수라 고른 결과와 미리보기가 어긋날 수 없다).
   const drawPatternChip = (canvasEl, id) => {
-    const box = 34, ratio = window.devicePixelRatio || 1;
+    const box = 34, ratio = screenPixelRatio(canvasEl);
     canvasEl.width = Math.round(box * ratio); canvasEl.height = Math.round(box * ratio);
     const c = canvasEl.getContext("2d");
     c.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -6184,12 +6184,14 @@ function renderWhiteboard(doc, host){
   // ----- 사이즈 추적 + 정리 -----
   let ro = null;
   if (typeof ResizeObserver !== "undefined"){ ro = new ResizeObserver(() => resize()); ro.observe(stage); }
+  // 모니터를 옮겨 배율만 바뀌면 크기가 그대로라 ResizeObserver 가 알려 주지 않는다.
+  const offScreenRatio = onScreenPixelRatioChange(() => resize());
   restoreBoardImages();
   restoreBoardBackgroundImage();
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); offScreenRatio(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){

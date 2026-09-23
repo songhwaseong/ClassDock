@@ -248,8 +248,10 @@ async function renderPdfThumbnails(doc){
       const page = await doc.pdfjsDoc.getPage(p.pageNum);
       const base = page.getViewport({ scale: 1 });
       const scale = Math.min(130 / base.width, 0.28);
-      const vp = page.getViewport({ scale });
+      // 보이는 크기는 그대로 두고 픽셀만 화면 배율만큼(최대 3배) 늘려 고배율 화면에서도 또렷하게.
+      const vp = page.getViewport({ scale: scale * Math.min(3, screenPixelRatio(doc.pageThumbList)) });
       const c = p.thumbCanvas; c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      c.style.width = Math.round(base.width * scale) + "px";
       await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
       p.thumbRendered = true;
       if (typeof page.cleanup === "function") page.cleanup();
