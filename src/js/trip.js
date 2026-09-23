@@ -1954,6 +1954,8 @@ function mountTripEditor(doc){
     }
     // renderPage 가 종이 스티커와 장소 사진을 모델에서 함께 다시 그린다. 어느 한쪽을 덮어쓰지 않는다.
     renderRail(); renderPage();
+    // 새 표식이 보던 화면 밖에 찍힐 수 있다 — 목록에 뜬 곳이 지도에서도 곧장 보이게 맞춘다.
+    if (made) fitMapToSpots();
     if (made) touch(true);
     showFreshSpots(freshSpots);
     const parts = [];
@@ -2305,7 +2307,8 @@ function mountTripEditor(doc){
     if (picked.length && spot){
       if (history) history.flush();
       spot.videos = [...(spot.videos || []), ...picked].slice(0, TRIP_MAX_VIDEOS);
-      renderSpots(); touch(true);
+      // 지도 표식의 미리보기 카드·사진 핀도 같은 자료를 읽는다 — 목록만 다시 그리면 지도가 낡는다.
+      renderSpots(); renderMap(); touch(true);
     }
     const added = spot ? picked.length : 0;
     const notes = [];
@@ -2685,6 +2688,10 @@ function mountTripEditor(doc){
       return;
     }
     renderMap();
+    fitMapToSpots();
+  }
+  function fitMapToSpots(){
+    if (!mapReady || !leafletMap) return;
     const list = spotsWithCoords();
     if (list.length > 1) leafletMap.fitBounds(list.map(s => [s.lat, s.lng]), { padding:[28, 28] });
     else if (list.length === 1) leafletMap.setView([list[0].lat, list[0].lng], Math.max(leafletMap.getZoom(), 13));
@@ -3014,7 +3021,7 @@ function mountTripEditor(doc){
             if (history) history.flush();
             spot.photos = (spot.photos || []).filter(name2 => name2 !== photo.asset);
             if (spot.photoOpacity) delete spot.photoOpacity[photo.asset];
-            renderSpots(); touch(true);
+            renderSpots(); renderMap(); touch(true);
             setStatus(tripT("사진을 뺐어요. Ctrl+Z 로 되돌릴 수 있어요."));
           });
           tile.append(view, removePhoto);
@@ -3053,7 +3060,7 @@ function mountTripEditor(doc){
           removeVideo.addEventListener("click", () => {
             if (history) history.flush();
             spot.videos = (spot.videos || []).filter(item => item.v !== video.v);
-            renderSpots(); touch(true);
+            renderSpots(); renderMap(); touch(true);
             setStatus(tripIsEn() ? "Video removed. Use Undo to bring it back." : "영상을 뺐어요. 되돌리기 단추로 되살릴 수 있어요.");
           });
           tile.append(view, removeVideo);
@@ -3094,9 +3101,11 @@ function mountTripEditor(doc){
       kindSelect.addEventListener("change", () => {
         spot.kind = kindSelect.value;
         icon.innerHTML = spot.kind ? diaryArtSvg(tripSpotKindIcon(spot.kind), "trip-spot-art") : "";
+        renderMap();
         touch(true);
       });
       name.addEventListener("input", () => { spot.name = name.value; renderRail(); touch(); });
+      name.addEventListener("change", () => renderMap());
       address.addEventListener("input", () => { spot.address = address.value; touch(); });
       note.addEventListener("input", () => { spot.note = note.value; touch(); });
       removeBtn.addEventListener("click", () => {
