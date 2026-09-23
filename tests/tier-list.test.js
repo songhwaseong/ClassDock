@@ -100,3 +100,36 @@ test("보유 카드 한꺼번에 지우기는 줄에 올린 카드를 건드리�
   assert.deepEqual(model.items.map(item => item.id).sort(), ["c0", "c3"]);
   assert.equal(model.items.find(item => item.id === "c0").tier, s);
 });
+
+test("월드컵은 둘 중 하나를 고르며 올라가고, 진 판 크기대로 순위를 묶는다", () => {
+  const ids = ["a", "b", "c", "d", "e", "f", "g", "h"], state = tier.tierCupStart(ids, () => 0.5);
+  assert.deepEqual(state.round.slice().sort(), ids);
+  let matches = 0;
+  for (let match = tier.tierCupMatch(state); match; match = tier.tierCupMatch(state)){
+    matches++; assert.equal(tier.tierCupPick(state, "zz"), false);             // 이 경기에 없는 카드는 못 고른다
+    assert.ok(tier.tierCupPick(state, match.includes("a") ? "a" : match[0]));
+  }
+  assert.equal(matches, 7); assert.equal(state.champion, "a");
+  const ranking = tier.tierCupRanking(state);
+  assert.deepEqual(ranking.map(group => [group.size, group.ids.length]), [[1, 1], [2, 1], [4, 2], [8, 4]]);
+  assert.deepEqual(ranking.map(group => tier.tierCupRankLabel(group.size)), ["우승", "준우승", "4강", "8강"]);
+  assert.equal(tier.tierCupRoundLabel(2), "결승"); assert.equal(tier.tierCupRoundLabel(16), "16강");
+});
+
+test("짝이 안 맞으면 부전승으로 올라가고, 카드가 한 장이면 바로 우승이다", () => {
+  const state = tier.tierCupStart(["a", "b", "c", "d", "e"], () => 0.99);
+  let matches = 0; for (let match = tier.tierCupMatch(state); match; match = tier.tierCupMatch(state)){ matches++; tier.tierCupPick(state, match[1]); }
+  assert.equal(matches, 4); assert.ok(state.champion);                            // 5장이면 경기는 늘 4번
+  assert.equal(tier.tierCupRanking(state).reduce((sum, group) => sum + group.ids.length, 0), 5);
+  const solo = tier.tierCupStart(["only"]); assert.equal(solo.champion, "only"); assert.equal(tier.tierCupMatch(solo), null);
+  assert.deepEqual(tier.tierCupSizes(20), [4, 8, 16, 20]); assert.deepEqual(tier.tierCupSizes(16), [4, 8, 16]); assert.deepEqual(tier.tierCupSizes(3), [3]);
+});
+
+test("월드컵 결과를 줄에 놓으면 우승은 첫 줄, 줄이 모자라면 나머지는 마지막 줄로 간다", () => {
+  const model = sample(); model.tiers = model.tiers.slice(0, 2);
+  const [s, a] = model.tiers.map(row => row.id);
+  const ranking = [{ size:1, ids:["c2"] }, { size:2, ids:["c0"] }, { size:4, ids:["c1", "c3"] }];
+  assert.equal(tier.tierCupPlace(model, ranking), 4);
+  assert.deepEqual(tier.tierItemsIn(model, s).map(item => item.id), ["c2"]);
+  assert.deepEqual(tier.tierItemsIn(model, a).map(item => item.id), ["c0", "c1", "c3"]);
+});

@@ -25,6 +25,7 @@ const TIER_ICON_PATHS = {
 const TIER_UI_PATHS = {
   trash:'<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 10.8v5.4M14 10.8v5.4"/>',
   eraser:'<path d="M7 20.5 3.2 16.7a2.2 2.2 0 0 1 0-3.1l9.4-9.4a2.2 2.2 0 0 1 3.1 0l4.6 4.6a2.2 2.2 0 0 1 0 3.1L12.4 20.5M20.5 20.5H7M5.6 11.2l7.7 7.7"/>',
+  trophy:'<path d="M7.5 4.5h9v5a4.5 4.5 0 0 1-9 0zM7.5 6.5H4.5v1.5a3 3 0 0 0 3 3M16.5 6.5h3v1.5a3 3 0 0 1-3 3M12 14v3.5M8.5 20.5h7l-.8-3h-5.4z"/>',
   grip:'<circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.5" fill="currentColor" stroke="none"/>'
 };
 function tierIconName(value){ return Object.prototype.hasOwnProperty.call(TIER_ICON_PATHS, value) ? value : ""; }
@@ -113,6 +114,45 @@ function tierShufflePool(model, random=Math.random){
   const pool = tierItemsIn(model, ""); for (let i = pool.length - 1; i > 0; i--){ const j = Math.floor(random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
   model.items = model.items.filter(item => item.tier).concat(pool);
 }
+/* ── 월드컵(토너먼트) ── 카드 둘 중 하나를 고르며 올라가 우승 하나를 뽑는다.
+   진행 상태는 화면에만 두고 파일엔 담지 않는다 — 끝나면 결과를 줄에 놓을지만 고른다.
+   짝이 안 맞는 판(홀수)은 그 판 맨 끝 카드가 부전승으로 올라간다(처음에 섞으니 누가 될지는 무작위). */
+function tierCupStart(ids, random=Math.random){
+  const round = Array.from(new Set(ids || [])).filter(Boolean);
+  for (let i = round.length - 1; i > 0; i--){ const j = Math.floor(random() * (i + 1)); [round[i], round[j]] = [round[j], round[i]]; }
+  return tierCupSettle({ round, winners:[], at:0, out:[], bye:"", champion:"" });
+}
+function tierCupSettle(state){
+  state.bye = "";
+  for (;;){
+    if (state.round.length <= 1 && !state.winners.length){ state.champion = state.round[0] || ""; return state; }
+    if (state.at === state.round.length - 1){ state.bye = state.round[state.at]; state.winners.push(state.bye); state.at++; }
+    if (state.at >= state.round.length){ state.round = state.winners; state.winners = []; state.at = 0; continue; }
+    return state;
+  }
+}
+function tierCupMatch(state){ return state && !state.champion && state.round.length > 1 ? [state.round[state.at], state.round[state.at + 1]] : null; }
+function tierCupPick(state, id){
+  const match = tierCupMatch(state); if (!match || !match.includes(id)) return false;
+  state.out.push({ id:match[0] === id ? match[1] : match[0], size:state.round.length }); state.winners.push(id); state.at += 2; tierCupSettle(state); return true;
+}
+function tierCupRoundLabel(size){ return size <= 2 ? "결승" : size + "강"; }
+function tierCupRankLabel(size){ return size <= 1 ? "우승" : size === 2 ? "준우승" : size + "강"; }
+/* 순위 묶음 — [{ size:1, ids:[우승] }, { size:2, ids:[준우승] }, { size:4, ids:[4강에서 진 카드들] }, …] */
+function tierCupRanking(state){
+  if (!state || !state.champion) return [];
+  const groups = [{ size:1, ids:[state.champion] }], bySize = new Map();
+  state.out.forEach(entry => { if (!bySize.has(entry.size)) bySize.set(entry.size, []); bySize.get(entry.size).push(entry.id); });
+  Array.from(bySize.keys()).sort((a, b) => a - b).forEach(size => groups.push({ size, ids:bySize.get(size) }));
+  return groups;
+}
+/* 결과를 줄에 놓기 — 우승은 첫 줄, 준우승은 둘째 줄 … 줄이 모자라면 나머지는 모두 마지막 줄. 각 줄 맨 끝에 순위 차례로 붙는다. */
+function tierCupPlace(model, ranking){
+  let moved = 0; if (!model.tiers.length) return 0;
+  (ranking || []).forEach((group, index) => { const row = model.tiers[Math.min(index, model.tiers.length - 1)]; group.ids.forEach(id => { if (tierMoveItem(model, id, row.id, "")) moved++; }); });
+  return moved;
+}
+function tierCupSizes(count){ const sizes = []; for (let n = 4; n < count; n *= 2) sizes.push(n); if (count >= 2) sizes.push(count); return sizes; }
 function tierSearchText(model){ return [model.title, ...(model.tiers || []).map(row => row.label), ...(model.items || []).flatMap(item => [item.text, item.name])].filter(Boolean).join("\n"); }
 function tierDefaultTitle(name){ return String(name || "").replace(/\.tier$/i, "") || "티어표"; }
 function tierScratchFileName(number){ return number > 1 ? "티어표 " + number + ".tier" : "티어표.tier"; }
@@ -285,10 +325,12 @@ function mountTierEditor(doc){
   brand.querySelector(".tier-heading").prepend(titleInput);
   const textBtn = tierButton("카드 추가", "글자만 있는 카드 넣기", "tier-btn", "plus");
   const photoBtn = tierButton("가져오기", "사진 카드 넣기 — 여러 장을 한꺼번에 고르거나, 이 화면에 끌어다 놓거나, Ctrl+V 로 붙여 넣을 수 있어요", "tier-btn", "image");
+  const cupBtn = tierButton("월드컵", "월드컵(토너먼트) — 카드 둘 중 더 좋은 쪽을 골라 올라가며 우승을 뽑고, 결과를 줄에 놓을 수 있어요", "tier-btn tier-cup-btn", "");
+  cupBtn.innerHTML = tierSvg("trophy") + "<span>월드컵</span>";
   const undoBtn = tierButton("", "실행 취소 (Ctrl+Z)", "tier-btn", "undo"), redoBtn = tierButton("", "다시 실행 (Ctrl+Y)", "tier-btn", "redo");
   const saveBtn = tierButton("저장하기", "티어표 저장 (Ctrl+S)", "tier-btn tier-primary run-save", "save");
   const moreBtn = tierButton("", "더 보기 — 줄 추가·칠판으로·그림으로 저장·줄 틀·카드 크기", "tier-btn", "more");
-  const actions = document.createElement("div"); actions.className = "tier-actions"; actions.append(textBtn, photoBtn, undoBtn, redoBtn, saveBtn, moreBtn);
+  const actions = document.createElement("div"); actions.className = "tier-actions"; actions.append(textBtn, photoBtn, cupBtn, undoBtn, redoBtn, saveBtn, moreBtn);
   const mascot = document.createElement("div"); mascot.className = "tier-mascot"; mascot.setAttribute("aria-hidden", "true");
   mascot.innerHTML = '<span class="tier-mascot-say">좋아하는 걸<br>정리해봐요!</span>' + TIER_MASCOT_SVG;
   const barInner = document.createElement("div"); barInner.className = "tier-bar-inner"; barInner.append(brand, actions, mascot); bar.appendChild(barInner);
@@ -607,6 +649,7 @@ function mountTierEditor(doc){
     if (typeof MNContextMenu === "undefined"){ exportPng(); return; }
     const rect = moreBtn.getBoundingClientRect(); moreBtn.classList.add("is-open");
     MNContextMenu.open(rect.right - 210, rect.bottom + 6, [
+      { label:"월드컵", title:"카드 둘 중 하나를 골라 올라가며 우승 뽑기", icon:"play", disabled:model.items.length < 2, action:openCupSetup },
       { label:"줄 추가", title:"맨 아래에 등급 줄 추가", icon:"plus", disabled:model.tiers.length >= TIER_MAX_TIERS, action:addRowAndEdit },
       { separator:true },
       { label:"칠판으로", title:"티어표를 그림으로 굳혀 새 화이트보드에 넣기", icon:"board", action:sendToBoard },
@@ -621,6 +664,128 @@ function mountTierEditor(doc){
         action:async () => { if (typeof confirmDialog === "function" && !await confirmDialog("줄에 올린 카드를 모두 보유 카드로 내릴까요?", "내리기", "취소")) return; tierResetAll(model); changed(); } }
     ], { base:"text-context", onClose:() => moreBtn.classList.remove("is-open") });
   };
+
+  /* ── 월드컵 ── 고를 카드·강 수를 정하는 창 → 둘 중 하나 고르기 → 순위와 '결과를 줄에 놓기'. */
+  let cupUi = null;
+  function openCupSetup(){
+    const pooled = tierItemsIn(model, "").map(item => item.id), all = model.items.map(item => item.id);
+    if (all.length < 2){ if (typeof toast === "function") toast("월드컵을 하려면 카드가 2장 넘게 있어야 해요.", 2600); return; }
+    const body = document.createElement("div"); body.className = "tier-form tier-cup-setup";
+    body.innerHTML = '<p class="wide tier-cup-lead">두 카드 중 더 좋은 쪽을 골라 가며 우승 카드 하나를 뽑아요. 다 끝나면 순위대로 줄에 놓을 수 있어요.</p>'
+      + '<div class="wide tier-cup-field"><span>어떤 카드로 할까요?</span><div class="tier-cup-choices tc-from"></div></div>'
+      + '<div class="wide tier-cup-field"><span>몇 강으로 할까요?</span><div class="tier-cup-choices tc-size"></div><small class="tier-cup-note"></small></div>'
+      + '<footer class="wide"><span></span><button type="button" class="tf-cancel">취소</button><button type="button" class="tf-save primary">시작하기</button></footer>';
+    const ui = tierModal("월드컵 준비", body), fromBox = body.querySelector(".tc-from"), sizeBox = body.querySelector(".tc-size"), note = body.querySelector(".tier-cup-note");
+    let from = pooled.length >= 2 && pooled.length < all.length ? "pool" : "all", size = 0;
+    const choice = (box, label, on, onPick, disabled) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", on ? "true" : "false"); b.disabled = !!disabled; b.onclick = onPick; box.appendChild(b); return b; };
+    const paint = () => {
+      const ids = from === "pool" ? pooled : all, sizes = tierCupSizes(ids.length); if (!sizes.includes(size)) size = ids.length;
+      fromBox.innerHTML = ""; sizeBox.innerHTML = "";
+      choice(fromBox, `보유 카드만 (${pooled.length}장)`, from === "pool", () => { from = "pool"; paint(); }, pooled.length < 2);
+      choice(fromBox, `모든 카드 (${all.length}장)`, from === "all", () => { from = "all"; paint(); });
+      sizes.forEach(n => choice(sizeBox, n === ids.length ? `전부 ${n}장` : n + "강", size === n, () => { size = n; paint(); }));
+      note.textContent = size < ids.length ? `${ids.length}장 중 ${size}장을 무작위로 뽑아요.` : (size & (size - 1)) ? "짝이 안 맞는 판에서는 한 장이 부전승으로 올라가요." : "";
+    };
+    paint();
+    body.querySelector(".tf-cancel").onclick = ui.dispose;
+    body.querySelector(".tf-save").onclick = () => {
+      const ids = (from === "pool" ? pooled : all).slice();
+      for (let i = ids.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+      ui.dispose(); openCup(ids.slice(0, size));
+    };
+    setTimeout(() => body.querySelector(".tf-save").focus(), 0);
+  }
+  function cupCard(item, className){
+    const el = document.createElement("button"); el.type = "button"; el.className = className + (item.image ? "" : " is-text"); el.dataset.itemId = item.id;
+    if (item.image){ const img = document.createElement("img"); img.src = item.image.dataUrl; img.alt = item.text || item.name || ""; img.draggable = false; el.appendChild(img); }
+    const cap = document.createElement("span"); cap.className = "tier-cup-cap"; cap.textContent = item.text || (item.image ? item.name : "") || ""; if (cap.textContent) el.appendChild(cap);
+    return el;
+  }
+  function openCup(ids){
+    if (cupUi) cupUi.close();
+    const itemOf = id => model.items.find(item => item.id === id);
+    let state = tierCupStart(ids), steps = [], busy = false;
+    const overlay = document.createElement("div"); overlay.className = "tier-modal tier-cup"; overlay.setAttribute("role", "dialog"); overlay.setAttribute("aria-modal", "true"); overlay.setAttribute("aria-label", "월드컵");
+    const panel = document.createElement("div"); panel.className = "tier-cup-panel"; overlay.appendChild(panel); tierLayerHost().appendChild(overlay);
+    let api = null;
+    const close = () => { window.removeEventListener("keydown", onKey, true); overlay.remove(); if (cupUi === api) cupUi = null; };
+    const quit = async () => {
+      if (steps.length && !state.champion && typeof confirmDialog === "function" && !await confirmDialog("월드컵을 그만할까요? 지금까지 고른 건 남지 않아요.", "그만하기", "계속하기")) return;
+      close();
+    };
+    const undo = () => { if (busy || !steps.length) return; state = JSON.parse(steps.pop()); paint(); };
+    const pick = id => {
+      if (busy || !tierCupMatch(state)) return; const snap = JSON.stringify(state); if (!tierCupPick(state, id)) return;
+      steps.push(snap); busy = true;
+      const chosen = panel.querySelector(`.tier-cup-pick[data-item-id="${CSS.escape(id)}"]`); if (chosen) chosen.classList.add("is-chosen");
+      panel.querySelectorAll(".tier-cup-pick").forEach(el => { if (el !== chosen) el.classList.add("is-dropped"); });
+      setTimeout(() => { busy = false; if (overlay.isConnected) paint(); }, 320);
+    };
+    const head = (title, sub) => {
+      const bar = document.createElement("div"); bar.className = "tier-cup-head";
+      const titles = document.createElement("div"); titles.className = "tier-cup-titles";
+      const h = document.createElement("h2"); h.innerHTML = tierSvg("trophy"); h.append(title); titles.appendChild(h);
+      if (sub){ const s = document.createElement("span"); s.className = "tier-cup-sub"; s.textContent = sub; titles.appendChild(s); }
+      const undoB = tierButton("", "방금 고른 것 되돌리기 (Backspace)", "tier-btn tier-cup-undo", "undo"); undoB.disabled = !steps.length; undoB.onclick = undo;
+      const closeB = tierButton("", "그만하기 (Esc)", "tier-btn tier-cup-close", "close"); closeB.onclick = quit;
+      bar.append(titles, undoB, closeB); return bar;
+    };
+    function paint(){
+      panel.innerHTML = ""; panel.classList.toggle("is-result", !!state.champion);
+      const match = tierCupMatch(state);
+      if (match){
+        const size = state.round.length, total = Math.floor(size / 2), no = Math.floor(state.at / 2) + 1;
+        panel.appendChild(head(`${model.title || "티어표"} 월드컵`, total > 1 ? `${tierCupRoundLabel(size)} · ${no} / ${total}` : tierCupRoundLabel(size)));
+        // 남은 경기 수 = 아직 남은 카드 수 - 1 (한 경기에 한 장씩 떨어지니까)
+        const progress = document.createElement("div"); progress.className = "tier-cup-progress"; const fill = document.createElement("span");
+        const played = state.out.length, total2 = ids.length - 1; fill.style.width = (total2 > 0 ? Math.round(played / total2 * 100) : 0) + "%"; progress.appendChild(fill); panel.appendChild(progress);
+        const arena = document.createElement("div"); arena.className = "tier-cup-arena";
+        const [a, b] = match.map(itemOf), vs = document.createElement("span"); vs.className = "tier-cup-vs"; vs.textContent = "VS";
+        const left = cupCard(a, "tier-cup-pick"), right = cupCard(b, "tier-cup-pick");
+        left.title = "이 카드 고르기 (← 키)"; right.title = "이 카드 고르기 (→ 키)"; left.onclick = () => pick(a.id); right.onclick = () => pick(b.id);
+        arena.append(left, vs, right); panel.appendChild(arena);
+        const hint = document.createElement("p"); hint.className = "tier-cup-hint";
+        const byeItem = state.bye && itemOf(state.bye);
+        hint.textContent = (byeItem ? `「${byeItem.text || byeItem.name || "카드"}」 카드는 짝이 없어 부전승으로 올라가요. · ` : "") + "더 좋은 카드를 누르세요 · ←/→ 키로도 골라요 · Backspace 되돌리기 · Esc 그만하기";
+        panel.appendChild(hint);
+        return;
+      }
+      const ranking = tierCupRanking(state), champ = itemOf(state.champion);
+      panel.appendChild(head("우승!", `${model.title || "티어표"} 월드컵 · ${ids.length}장`));
+      const win = document.createElement("div"); win.className = "tier-cup-winner"; if (champ){ const c = cupCard(champ, "tier-cup-champ"); c.tabIndex = -1; win.appendChild(c); } panel.appendChild(win);
+      const list = document.createElement("div"); list.className = "tier-cup-ranks";
+      ranking.slice(1).forEach(group => {
+        const line = document.createElement("div"); line.className = "tier-cup-rank"; const label = document.createElement("strong"); label.textContent = tierCupRankLabel(group.size);
+        const cards = document.createElement("div"); cards.className = "tier-cup-rank-cards"; group.ids.map(itemOf).filter(Boolean).forEach(item => { const c = cupCard(item, "tier-cup-mini"); c.tabIndex = -1; cards.appendChild(c); });
+        line.append(label, cards); list.appendChild(line);
+      });
+      panel.appendChild(list);
+      // 줄에 놓을 자리 미리 보기 — 줄이 모자라 여러 순위가 마지막 줄로 몰리면 "○강 이하"로 묶어 적는다.
+      const last = model.tiers.length - 1, parts = [];
+      ranking.forEach((group, index) => { if (index > last) return; const row = model.tiers[index]; parts.push((index === last && ranking.length - 1 > last ? tierCupRankLabel(group.size) + " 이하" : tierCupRankLabel(group.size)) + " → " + (row.label || "이름 없는 줄")); });
+      const plan = document.createElement("p"); plan.className = "tier-cup-plan"; plan.textContent = "줄에 놓으면: " + parts.join(" · "); panel.appendChild(plan);
+      const foot = document.createElement("div"); foot.className = "tier-cup-foot";
+      const again = tierButton("다시 하기", "같은 카드로 새로 섞어 다시 하기", "tier-btn tier-cup-again", "refresh"), done = tierButton("닫기", "결과를 줄에 놓지 않고 닫기", "tier-btn tier-cup-done", "close");
+      const place = tierButton("결과를 줄에 놓기", "순위대로 카드를 등급 줄에 옮겨요 — Ctrl+Z 로 되돌릴 수 있어요", "tier-btn tier-primary tier-cup-place", "check");
+      again.onclick = () => { state = tierCupStart(ids); steps = []; paint(); };
+      done.onclick = close;
+      place.onclick = () => { const moved = tierCupPlace(model, ranking), champion = state.champion; close(); selectedId = champion; changed(); if (typeof toast === "function") toast(`카드 ${moved}장을 순위대로 줄에 놓았어요. 되돌리려면 Ctrl+Z`, 3000); };
+      foot.append(again, done, place); panel.appendChild(foot);
+      setTimeout(() => { if (place.isConnected) place.focus(); }, 0);
+    }
+    const onKey = event => {
+      const confirmOpen = document.getElementById("confirmModal"); if (confirmOpen && !confirmOpen.hidden) return;   // 위에 뜬 확인창이 먼저
+      if (!overlay.isConnected) return;
+      const key = event.key;
+      if (key === "Escape"){ event.preventDefault(); event.stopPropagation(); quit(); return; }
+      const match = tierCupMatch(state);
+      if (match && (key === "ArrowLeft" || key === "ArrowRight")){ event.preventDefault(); event.stopPropagation(); pick(match[key === "ArrowLeft" ? 0 : 1]); return; }
+      if (key === "Backspace" || ((event.ctrlKey || event.metaKey) && String(key).toLowerCase() === "z")){ event.preventDefault(); event.stopPropagation(); undo(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    api = { close }; cupUi = api; paint();
+  }
+  cupBtn.onclick = openCupSetup;
 
   const keydown = event => {
     if (doc.el.hidden || !doc.el.isConnected || document.querySelector(".tier-modal")) return;
@@ -645,7 +810,7 @@ function mountTierEditor(doc){
   window.addEventListener("keydown", keydown);
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
-    clearTimeout(recoveryTimer); if (history) history.cancel(); if (drag && drag.ghost) drag.ghost.remove(); drag = null; if (rowDrag && rowDrag.ghost) rowDrag.ghost.remove(); rowDrag = null;
+    clearTimeout(recoveryTimer); if (history) history.cancel(); if (cupUi) cupUi.close(); if (drag && drag.ghost) drag.ghost.remove(); drag = null; if (rowDrag && rowDrag.ghost) rowDrag.ghost.remove(); rowDrag = null;
     window.removeEventListener("keydown", keydown); document.removeEventListener("paste", onPaste); if (gutterObserver) gutterObserver.disconnect();
     window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onCancel);
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; delete doc.tierSelectItem; delete doc.tierMarkSaved;
@@ -655,5 +820,6 @@ function mountTierEditor(doc){
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = { TIER_DOC_TYPE, TIER_DOC_VERSION, TIER_PRESETS, TIER_CARD_SIZES, tierDocEmpty, tierDocParse, tierDocSerialize, tierNormalizeItem,
-    tierItemsIn, tierMoveItem, tierClearRow, tierRemoveRow, tierResetAll, tierApplyPreset, tierShufflePool, tierRemovePoolItems, tierSearchText, tierDefaultTitle, tierScratchFileName, tierInkFor };
+    tierItemsIn, tierMoveItem, tierClearRow, tierRemoveRow, tierResetAll, tierApplyPreset, tierShufflePool, tierRemovePoolItems, tierSearchText, tierDefaultTitle,
+    tierCupStart, tierCupMatch, tierCupPick, tierCupRanking, tierCupPlace, tierCupSizes, tierCupRoundLabel, tierCupRankLabel, tierScratchFileName, tierInkFor };
 }

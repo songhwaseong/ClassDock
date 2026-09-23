@@ -7131,6 +7131,46 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .tier-form footer{display:flex;align-items:center;gap:8px}.tier-form footer span{flex:1}
   .tier-form-error{min-height:1em;margin:0;color:#dc2626;font-size:13px}.tier-form-error:empty{display:none}
   .tier-item-preview{display:flex;justify-content:center}.tier-item-preview[hidden]{display:none}.tier-item-preview img{max-width:180px;max-height:180px;border-radius:8px;object-fit:contain;background:#fff}
+  /* 티어표 월드컵 — 준비 창은 tier-form, 경기 화면은 화면 가득 두 카드를 나란히 */
+  .tier-cup-lead{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+  .tier-cup-field{display:grid;gap:7px}.tier-cup-field>span{font-size:13px;font-weight:750}
+  .tier-cup-choices{display:flex;flex-wrap:wrap;gap:6px}
+  .tier-form .tier-cup-choices button.is-on{background:color-mix(in srgb,var(--accent) 14%,var(--field));border-color:var(--accent);color:var(--ink);font-weight:750}
+  .tier-cup-note{min-height:1em;color:var(--muted);font-size:12px}.tier-cup-note:empty{display:none}
+  .tier-cup-panel{display:flex;flex-direction:column;gap:14px;width:min(1100px,96vw);max-height:94vh;overflow:auto;padding:18px 20px 20px;border:1px solid var(--border);border-radius:18px;background:var(--panel);color:var(--ink);box-shadow:0 24px 80px #0006}
+  .tier-cup-head{display:flex;align-items:center;gap:8px}
+  .tier-cup-titles{flex:1;min-width:0;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px}
+  .tier-cup-titles h2{display:flex;align-items:center;gap:7px;margin:0;font-size:19px;color:var(--ink);overflow-wrap:anywhere}
+  .tier-cup-titles h2 .ui-icon{flex:none;width:22px;height:22px;color:#e0a100}
+  .tier-cup-sub{color:var(--muted);font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+  .tier-cup-progress{height:6px;border-radius:99px;background:var(--field);overflow:hidden}
+  .tier-cup-progress span{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .3s}
+  .tier-cup-arena{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:stretch;gap:16px}
+  .tier-cup-pick{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:min(52vh,460px);padding:14px;border:2px solid var(--border);border-radius:16px;background:var(--field);color:var(--ink);font:inherit;cursor:pointer;transition:transform .18s,border-color .18s,box-shadow .18s,opacity .25s}
+  .tier-cup-pick:hover,.tier-cup-pick:focus-visible{border-color:var(--accent);box-shadow:0 10px 30px color-mix(in srgb,var(--accent) 28%,transparent);transform:translateY(-3px);outline:none}
+  .tier-cup-pick img{width:100%;height:min(42vh,380px);object-fit:contain;border-radius:10px}
+  .tier-cup-pick .tier-cup-cap{font-size:18px;font-weight:800;line-height:1.35;text-align:center;overflow-wrap:anywhere}
+  .tier-cup-pick.is-text .tier-cup-cap{font-size:clamp(22px,3.2vw,38px)}
+  .tier-cup-pick.is-chosen{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 35%,transparent);transform:scale(1.03)}
+  .tier-cup-pick.is-dropped{opacity:.25;transform:scale(.96)}
+  .tier-cup-vs{align-self:center;display:grid;place-items:center;width:58px;height:58px;border-radius:50%;background:linear-gradient(135deg,#ff6b6b,#8b80f9);color:#fff;font-size:19px;font-weight:900;letter-spacing:.02em;box-shadow:0 6px 18px #0003}
+  .tier-cup-hint{margin:0;color:var(--muted);font-size:12.5px;text-align:center}
+  .tier-cup-winner{display:flex;justify-content:center}
+  .tier-cup-champ{display:flex;flex-direction:column;align-items:center;gap:8px;width:min(340px,80vw);padding:14px;border:3px solid #f5c542;border-radius:18px;background:color-mix(in srgb,#f5c542 12%,var(--field));color:var(--ink);font:inherit;cursor:default;box-shadow:0 12px 40px color-mix(in srgb,#f5c542 35%,transparent)}
+  .tier-cup-champ img{width:100%;max-height:260px;object-fit:contain;border-radius:10px}
+  .tier-cup-champ .tier-cup-cap{font-size:20px;font-weight:850;text-align:center;overflow-wrap:anywhere}
+  .tier-cup-champ.is-text{min-height:140px;justify-content:center}.tier-cup-champ.is-text .tier-cup-cap{font-size:30px}
+  .tier-cup-ranks{display:grid;gap:8px}
+  .tier-cup-rank{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:10px}
+  .tier-cup-rank>strong{font-size:13px;text-align:right;color:var(--muted)}
+  .tier-cup-rank-cards{display:flex;flex-wrap:wrap;gap:6px}
+  .tier-cup-mini{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:72px;min-height:72px;padding:4px;border:1px solid var(--border);border-radius:9px;background:var(--field);color:var(--ink);font:inherit;cursor:default}
+  .tier-cup-mini img{width:100%;height:52px;object-fit:contain;border-radius:6px}
+  .tier-cup-mini .tier-cup-cap{max-width:100%;font-size:11px;line-height:1.25;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tier-cup-mini.is-text .tier-cup-cap{white-space:normal;font-size:12px;font-weight:700}
+  .tier-cup-plan{margin:0;color:var(--muted);font-size:12.5px;text-align:center}
+  .tier-cup-foot{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+  @media(max-width:700px){.tier-cup-arena{grid-template-columns:1fr;gap:8px}.tier-cup-pick{min-height:0}.tier-cup-pick img{height:26vh}.tier-cup-vs{justify-self:center;width:44px;height:44px;font-size:15px}}
   @media(max-width:1180px){.tier-mascot-say{display:none}.tier-bar-inner{padding-right:128px}.tier-hint{display:none}}
   @media(max-width:860px),(max-height:620px){.tier-mascot{display:none}.tier-bar-inner{padding-right:0}.tier-heading .tier-sub{display:none}}
   @media(max-width:800px){.tier-row{grid-template-columns:64px minmax(0,1fr) auto;gap:6px}.tier-row-tools{flex-direction:column;justify-content:center;padding:2px}.tier-row-btn{width:38px;height:38px}.tier-row-btn .ui-icon{width:22px;height:22px}.tier-actions .tier-btn span{display:none}.tier-actions .tier-btn{padding-inline:10px}.tier-label-ico{display:none}}

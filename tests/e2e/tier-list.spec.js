@@ -174,3 +174,31 @@ test("전체화면에서도 끌기 그림·창·알림이 전체화면 칸 안�
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
   await expect.poll(() => page.evaluate(() => document.getElementById("toast").parentElement.tagName)).toBe("BODY");
 });
+
+test("월드컵으로 둘 중 하나를 골라 우승을 뽑고, 결과를 줄에 놓고 되돌린다", async ({ page }) => {
+  await openTier(page);
+  await page.locator(".tier-bar .tier-cup-btn").click();
+  await expect(page.locator(".tier-cup-setup")).toBeVisible();
+  await page.locator(".tier-cup-setup .tf-save").click();
+  const cup = page.locator(".tier-cup");
+  await expect(cup.locator(".tier-cup-pick")).toHaveCount(2);
+  // 카드 3장 → 경기 2번(한 장은 부전승). 첫 경기는 누르기, 둘째는 → 키로.
+  await cup.locator(".tier-cup-pick").first().click();
+  await expect(cup.locator(".tier-cup-sub")).toHaveText("결승");
+  await page.keyboard.press("ArrowRight");
+  await expect(cup.locator(".tier-cup-champ")).toBeVisible();
+  const champion = await cup.locator(".tier-cup-champ").getAttribute("data-item-id");
+  // 결과 화면에서 Backspace 는 방금 고른 것을 되돌린다
+  await page.keyboard.press("Backspace");
+  await expect(cup.locator(".tier-cup-pick")).toHaveCount(2);
+  await page.keyboard.press("ArrowRight");
+  await expect(cup.locator(".tier-cup-champ")).toHaveAttribute("data-item-id", champion);
+  await cup.locator(".tier-cup-place").click();
+  await expect(cup).toHaveCount(0);
+  await expect.poll(() => ids(page, '.tier-items[data-tier="S"]')).toEqual([champion]);
+  await expect(page.locator('.tier-items[data-tier="A"] .tier-item')).toHaveCount(1);
+  await expect(page.locator('.tier-items[data-tier="B"] .tier-item')).toHaveCount(1);
+  await expect(page.locator(".tier-pool .tier-item")).toHaveCount(0);
+  await page.keyboard.press("Control+z");
+  await expect(page.locator(".tier-pool .tier-item")).toHaveCount(3);
+});
