@@ -14,7 +14,9 @@ const TRIP_FORMAT = "classdock-trip";
 // 2: 공용 종이에 줄 무늬 8종을 추가했다. 옛 앱이 새 무늬를 지우지 못하게 한다.
 // 3: 장소에 짧은 영상(videos)을 단다. 옛 앱은 영상 이름을 모르는 자산으로 버리고 그대로 저장하므로
 //    영상이 조용히 사라진다 — 판을 올려 옛 앱이 아예 열지 않게 한다.
-const TRIP_VERSION = 3;
+// 4: 종이 밖 바탕(backdrop, 일기장과 같은 모양). 옛 앱은 바탕을 버리고 바탕 그림도 ZIP 에서 뺀 채
+//    저장하므로 판을 올린다. 없음(none)이면 여행일지 고유의 하늘 바탕 그대로다.
+const TRIP_VERSION = 4;
 const TRIP_JSON_NAME = "trip.json";
 const TRIP_MAX_DAYS = 400;
 const TRIP_MAX_SPOTS = 60;            // 하루에 들를 곳
@@ -467,6 +469,7 @@ function tripEmpty(title){
     title:String(title || tripWord("docName")).slice(0, 200),
     createdAt:now, updatedAt:now,
     style:typeof diaryDefaultStyle === "function" ? diaryDefaultStyle() : null,
+    backdrop:typeof diaryDefaultBackdrop === "function" ? diaryDefaultBackdrop() : null,
     printPlain:false,
     header:[],
     map:tripNormalizeMap(null),
@@ -495,6 +498,7 @@ function tripNormalize(raw, hasAsset){
     createdAt:Number(raw.createdAt) || Date.now(),
     updatedAt:Number(raw.updatedAt) || Date.now(),
     style:typeof diaryNormalizeStyle === "function" ? diaryNormalizeStyle(raw.style, hasAsset) : null,
+    backdrop:typeof diaryNormalizeBackdrop === "function" ? diaryNormalizeBackdrop(raw.backdrop, hasAsset) : null,
     printPlain:!!raw.printPlain,
     header:tripNormalizePairs(raw.header, TRIP_MAX_HEADER),
     map:tripNormalizeMap(raw.map, hasAsset),
@@ -546,7 +550,7 @@ function tripModelJson(model){
   return JSON.stringify({
     format:TRIP_FORMAT, version:TRIP_VERSION,
     title:model.title || "", createdAt:model.createdAt || Date.now(), updatedAt:model.updatedAt || Date.now(),
-    style:model.style, printPlain:!!model.printPlain,
+    style:model.style, backdrop:model.backdrop || null, printPlain:!!model.printPlain,
     header:tripNormalizePairs(model.header, TRIP_MAX_HEADER),
     map:model.map, budget:model.budget, source:model.source || "",
     days:tripCleanDays(model)
@@ -559,7 +563,7 @@ function tripContentKey(model){
   const map = model.map && typeof model.map === "object" ? { ...model.map, center:undefined, zoom:undefined } : model.map;
   return JSON.stringify({
     title:model.title || "",
-    style:model.style, printPlain:!!model.printPlain,
+    style:model.style, backdrop:model.backdrop || null, printPlain:!!model.printPlain,
     header:tripNormalizePairs(model.header, TRIP_MAX_HEADER),
     map, budget:model.budget, source:model.source || "",
     days:tripCleanDays(model)
@@ -572,6 +576,7 @@ function tripReferencedAssets(model){
   const used = new Set();
   const add = name => { if (typeof name === "string" && (TRIP_ASSET_RE.test(name) || TRIP_VIDEO_RE.test(name))) used.add(name); };
   add(model.style && model.style.bg);
+  add(model.backdrop && model.backdrop.bg);
   add(model.map && model.map.still);
   for (const day of (model.days || [])){
     add(day.style && day.style.bg);
@@ -1360,6 +1365,8 @@ function mountTripEditor(doc){
   const styleBtn = diaryButton("", "종이 꾸미기", "diary-btn trip-style-btn", "sliders");
   const bgInput = document.createElement("input");
   bgInput.type = "file"; bgInput.accept = "image/*"; bgInput.hidden = true;
+  const backdropInput = document.createElement("input");
+  backdropInput.type = "file"; backdropInput.accept = "image/*"; backdropInput.hidden = true;
   const printBtn = diaryButton("", "인쇄 · PDF 로 저장", "diary-btn trip-print-btn", "print");
   const exportBtn = diaryButton("", "일정·지도로 내보내기", "diary-btn trip-export-btn", "export");
   const saveBtn = diaryButton("", "저장 (Ctrl+S)", "diary-btn diary-primary trip-save-btn", "save");
@@ -1382,8 +1389,22 @@ function mountTripEditor(doc){
   const actions = document.createElement("div");
   actions.className = "trip-bar-actions";
   actions.append(undoBtn, redoBtn, photoBtn, photoInput, exifBtn, exifInput,
-    stickerBtn, styleBtn, bgInput, printBtn, exportBtn, saveBtn);
+    stickerBtn, styleBtn, bgInput, backdropInput, printBtn, exportBtn, saveBtn);
   bar.append(brand, titleInput, status, actions);
+
+  /* 종이 밖 바탕 — 일기장과 같은 테마·그림을 여행일지 화면 전체(도구막대 뒤까지)에 깐다.
+     '없음'이면 data-backdrop 을 떼어 여행일지 고유의 하늘 바탕을 그대로 둔다. */
+  function applyBackdrop(){
+    const backdrop = model.backdrop || diaryDefaultBackdrop();
+    if (backdrop.theme === "none") delete root.dataset.backdrop;
+    else root.dataset.backdrop = backdrop.theme;
+    const url = backdrop.theme === "custom" ? assetUrl(backdrop.bg) : "";
+    root.style.backgroundImage = url ? `url("${url}")` : "";
+    root.style.backgroundSize = url ? (backdrop.fit === "tile" ? "320px auto" : backdrop.fit) : "";
+    root.style.backgroundRepeat = url ? (backdrop.fit === "tile" ? "repeat" : "no-repeat") : "";
+    root.style.backgroundPosition = url ? (backdrop.fit === "tile" ? "0 0" : "center") : "";
+    root.style.setProperty("--diary-backdrop-veil", String(backdrop.veil));
+  }
 
   /* ----- 본문: 여정 띠 + 종이 ----- */
   const body = document.createElement("div");
@@ -1695,6 +1716,12 @@ function mountTripEditor(doc){
     touch:(...a) => touch(...a),
     setStatus:(...a) => setStatus(...a),
     applyStyle:(...a) => applyStyle(...a),
+    applyBackdrop,
+    backdropInput,
+    backdropWords:{ title:["여행일지 바탕", "Journal background"],
+      note:["종이 밖 바탕은 날짜와 관계없이 이 여행일지 전체에 적용돼요. 인쇄에는 나오지 않아요.",
+        "This background covers the whole travel journal outside the paper. It does not print."],
+      busy:"여행일지 바탕 그림을 넣는 중…" },
     layout:(...a) => layout(...a),
     renderCalendar:() => renderRail(),
     addArtSticker:(...a) => addArtSticker(...a),
@@ -3297,7 +3324,7 @@ function mountTripEditor(doc){
   }
 
   /* ----- 되돌리기 ----- */
-  const snapshot = () => JSON.stringify({ title:model.title, style:model.style, days:model.days,
+  const snapshot = () => JSON.stringify({ title:model.title, style:model.style, backdrop:model.backdrop, days:model.days,
     mapStill:(model.map && model.map.still) || "", mapStillKey:(model.map && model.map.stillKey) || "" });
   history = MNEditHistory.create({
     limit:80,
@@ -3309,10 +3336,12 @@ function mountTripEditor(doc){
       let parsed; try { parsed = JSON.parse(state); } catch(_){ return; }
       model.title = parsed.title;
       model.style = parsed.style;
+      model.backdrop = parsed.backdrop || diaryDefaultBackdrop();
       model.days = parsed.days;
       model.map = { ...model.map, still:parsed.mapStill || "", stillKey:parsed.mapStillKey || "" };
       if (!dayOf(current)) current = model.days.length ? model.days[0].id : "";
       titleInput.value = model.title || "";
+      applyBackdrop();
       applyLabels();
       refreshDirty();
       scheduleRecovery();
@@ -3638,6 +3667,7 @@ function mountTripEditor(doc){
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
   });
 
+  applyBackdrop();
   applyLabels();
   showMap();
   history.reset();

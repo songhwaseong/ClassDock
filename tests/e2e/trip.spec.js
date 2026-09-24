@@ -164,6 +164,34 @@ test("꾸미기 창이 여행일지에서도 돈다 — 줄 무늬·글꼴을 �
   expect(model.style.font).toBe("gungseo");
 });
 
+test("여행일지 바탕도 일기장처럼 고르고, 되돌리기·저장 왕복이 된다", async ({ page }) => {
+  await boot(page);
+  const root = page.locator(".trip-root");
+  await expect(root).not.toHaveAttribute("data-backdrop", /.+/);
+  await page.locator(".trip-style-btn").click();
+  const panel = page.locator(".diary-style-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".diary-backdrop-grid")).toBeVisible();
+  await expect(panel.locator(".diary-style-row", { has:page.locator(".diary-backdrop-grid") }).locator(".diary-style-label")).toHaveText("여행일지 바탕");
+
+  await panel.locator('.diary-backdrop-chip[data-backdrop="night"]').click();
+  await expect(root).toHaveAttribute("data-backdrop", "night");
+  expect((await modelOf(page)).backdrop.theme).toBe("night");
+
+  await page.locator(".trip-undo-btn").click();
+  await expect(root).not.toHaveAttribute("data-backdrop", /.+/);
+  await page.locator(".trip-redo-btn").click();
+  await expect(root).toHaveAttribute("data-backdrop", "night");
+
+  const round = await page.evaluate(async () => {
+    const doc = docs.find(d => d.kind === "trip");
+    const back = await tripUnpack(tripPack(doc.trip, doc.tripAssets, Date.now()));
+    return { theme:back.model.backdrop.theme, version:back.model.version };
+  });
+  expect(round.theme).toBe("night");
+  expect(round.version).toBeGreaterThanOrEqual(4);
+});
+
 test("스티커 창이 여행일지에서도 돈다 — 내장 그림을 붙이면 종이에 그려진다", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();

@@ -3077,6 +3077,13 @@ function mountDiaryPaper(els, paperEnv){
 function mountDiaryPanels(panelEnv){
   const { model, assets, assetUrl, addAsset, entryOf, ensureEntry, touch, setStatus, applyStyle, applyBackdrop, layout, renderCalendar, bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers, stickerColorNow, stickerOpacityNow } = panelEnv;
   const supportsBackdrop = !!backdropInput && typeof applyBackdrop === "function";
+  // 여행일지도 같은 바탕 칸을 쓴다 — 이름·안내 문구만 바꿔 넘긴다([한국어, 영어]).
+  const backdropWords = {
+    title:["일기장 바탕", "Diary background"],
+    note:["종이 밖 바탕은 날짜와 관계없이 이 일기장 전체에 적용돼요. 인쇄에는 나오지 않아요.", "This background covers the diary outside the paper. It does not print."],
+    busy:"일기장 바탕 그림을 넣는 중…",
+    ...(panelEnv.backdropWords || {})
+  };
   /* ----- 꾸미기 창 ----- */
   const panel = document.createElement("div");
   panel.className = "diary-style-panel";
@@ -3101,7 +3108,7 @@ function mountDiaryPanels(panelEnv){
   scopeNote.className = "diary-style-note";
   panel.append(scopeRow, scopeNote);
   // 종이 밖 바탕은 날짜별 꾸미기와 별개다. 달력·목록·종이 주변에 한 번에 적용한다.
-  const backdropChips = section("일기장 바탕");
+  const backdropChips = section(backdropWords.title[0]);
   backdropChips.classList.add("diary-backdrop-grid");
   const backdropNames = {
     none:["없음", "None"], blossom:["봄빛", "Blossom"], linen:["크림 린넨", "Linen"], night:["밤하늘", "Night sky"],
@@ -3121,18 +3128,18 @@ function mountDiaryPanels(panelEnv){
   });
   const backdropImageControls = section("내 그림");
   const backdropThumb = document.createElement("span"); backdropThumb.className = "diary-bg-thumb diary-backdrop-thumb";
-  const backdropPick = diaryButton("바탕 그림 고르기", "일기장 바탕에 넣을 그림 고르기", "diary-btn");
-  const backdropClear = diaryButton("그림 빼기", "일기장 바탕 그림 빼기", "diary-btn");
+  const backdropPick = diaryButton("바탕 그림 고르기", backdropWords.title[0] + "에 넣을 그림 고르기", "diary-btn");
+  const backdropClear = diaryButton("그림 빼기", backdropWords.title[0] + " 그림 빼기", "diary-btn");
   backdropImageControls.append(backdropThumb, backdropPick, backdropClear);
   const backdropFitControls = section("바탕 그림 맞춤");
   const backdropFit = document.createElement("select"); backdropFit.className = "diary-select";
-  backdropFit.setAttribute("aria-label", "일기장 바탕 그림 맞춤");
+  backdropFit.setAttribute("aria-label", backdropWords.title[0] + " 그림 맞춤");
   DIARY_FITS.forEach(id => { const option = document.createElement("option"); option.value = id; backdropFit.append(option); });
   backdropFitControls.append(backdropFit);
   const backdropVeilControls = section("바탕 흐리게");
   const backdropVeil = document.createElement("input");
   backdropVeil.type = "range"; backdropVeil.min = "0"; backdropVeil.max = "90"; backdropVeil.step = "5";
-  backdropVeil.setAttribute("aria-label", "일기장 바탕을 흐리게 하는 정도");
+  backdropVeil.setAttribute("aria-label", backdropWords.title[0] + "을 흐리게 하는 정도");
   const backdropVeilValue = document.createElement("span"); backdropVeilValue.className = "diary-veil-value";
   backdropVeilControls.append(backdropVeil, backdropVeilValue);
   const backdropNote = document.createElement("div"); backdropNote.className = "diary-style-note";
@@ -3263,7 +3270,7 @@ function mountDiaryPanels(panelEnv){
       ? "이 날짜만 따로 꾸몄어요. 체크를 풀면 일기장 전체 꾸미기로 돌아가요."
       : "바꾸면 따로 꾸민 날을 뺀 일기장 전체에 적용돼요.");
     const backdrop = model.backdrop || diaryDefaultBackdrop();
-    backdropChips.parentElement.querySelector(".diary-style-label").textContent = diaryEn("일기장 바탕", "Diary background");
+    backdropChips.parentElement.querySelector(".diary-style-label").textContent = diaryEn(backdropWords.title[0], backdropWords.title[1]);
     backdropImageControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("내 그림", "My image");
     backdropFitControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("바탕 그림 맞춤", "Background fit");
     backdropVeilControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("바탕 흐리게", "Fade background");
@@ -3285,7 +3292,7 @@ function mountDiaryPanels(panelEnv){
     backdropVeil.disabled = backdrop.theme === "none";
     backdropVeilValue.textContent = Math.round(backdrop.veil * 100) + "%";
     backdropChips.style.setProperty("--diary-backdrop-veil", String(backdrop.veil));
-    backdropNote.textContent = diaryEn("종이 밖 바탕은 날짜와 관계없이 이 일기장 전체에 적용돼요. 인쇄에는 나오지 않아요.", "This background covers the diary outside the paper. It does not print.");
+    backdropNote.textContent = diaryEn(backdropWords.note[0], backdropWords.note[1]);
     lineButtons.forEach(b => { const on = b.dataset.lines === style.lines; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
     gapButtons.forEach(b => { const on = b.dataset.gap === style.gap; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
     fontButtons.forEach(b => { const on = b.dataset.font === style.font; b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", String(on)); });
@@ -3412,7 +3419,7 @@ function mountDiaryPanels(panelEnv){
       const file = backdropInput.files && backdropInput.files[0];
       backdropInput.value = "";
       if (!file) return;
-      setStatus(diaryT("일기장 바탕 그림을 넣는 중…"));
+      setStatus(diaryT(backdropWords.busy));
       const asset = await addAsset(file, DIARY_BG_MAX_DIM);
       if (!asset){ setStatus(diaryT("그림을 읽지 못했어요.")); return; }
       changeBackdrop({ theme:"custom", bg:asset.name }, true);
@@ -3705,7 +3712,10 @@ function mountDiaryEditor(doc){
   backdropInput.type = "file"; backdropInput.accept = "image/*"; backdropInput.hidden = true;
   const barIdentity = document.createElement("div");
   barIdentity.className = "diary-bar-identity";
-  barIdentity.append(sideToggleBtn, railToggleBtn, focusBtn, barViewSep, titleInput, status);
+  // 몰입 중에만 보이는 날짜 — 몰입 모드는 종이 위 날짜 머리까지 감추므로 지금 며칠인지는 여기서 본다.
+  const focusDate = document.createElement("span");
+  focusDate.className = "diary-focus-date";
+  barIdentity.append(sideToggleBtn, railToggleBtn, focusBtn, barViewSep, titleInput, focusDate, status);
   const barActions = document.createElement("div");
   barActions.className = "diary-bar-actions";
   barActions.append(undoBtn, redoBtn, photoBtn, stickerBtn, styleBtn, protectBtn, saveBtn);
@@ -3795,10 +3805,10 @@ function mountDiaryEditor(doc){
   main.className = "diary-main";
   const pageHead = document.createElement("div");
   pageHead.className = "diary-page-head";
-  const prevDay = diaryButton("", "전날", "diary-btn diary-day-nav", "arrowLeft");
+  const prevDay = diaryButton("", "전날 (Alt+PageUp)", "diary-btn diary-day-nav", "arrowLeft");
   const dateLabel = document.createElement("h2");
   dateLabel.className = "diary-date";
-  const nextDay = diaryButton("", "다음날", "diary-btn diary-day-nav", "arrow");
+  const nextDay = diaryButton("", "다음날 (Alt+PageDown)", "diary-btn diary-day-nav", "arrow");
   // 오늘 배지 — 달력 그림 · 가는 선 · "오늘". 날짜 글자와 따로 두어야 날짜 칸 글자가 날짜만 남는다.
   const todayBadge = document.createElement("span");
   todayBadge.className = "diary-today-badge";
@@ -3829,9 +3839,15 @@ function mountDiaryEditor(doc){
   weatherBtn.dataset.pick = "weather";
   const moodBtn = diaryButton("", "기분 고르기", "diary-btn diary-pick ui-keep-symbols");
   moodBtn.dataset.pick = "mood";
+  // 머리 접기 — 제목·태그 줄을 감추고 날짜 줄만 남긴다. 접힌 동안엔 요약(날씨·기분·★·제목)을 날짜 옆에 둔다.
+  const headSummary = document.createElement("button");
+  headSummary.type = "button";
+  headSummary.className = "diary-head-summary ui-keep-symbols";
+  headSummary.hidden = true;
+  const headToggleBtn = diaryButton("", "제목·태그 줄 접기", "diary-btn diary-head-toggle", "chevronUp");
   const dateRow = document.createElement("div");
   dateRow.className = "diary-date-row";
-  dateRow.append(prevDay, dateLabel, todayBadge, specialBadge, nextDay);
+  dateRow.append(prevDay, dateLabel, todayBadge, specialBadge, nextDay, headSummary, headToggleBtn);
   const titleRow = document.createElement("div");
   titleRow.className = "diary-title-row";
   titleRow.append(entryTitle, weatherBtn, moodBtn, favoriteBtn, templateBtn, deleteBtn);
@@ -4901,18 +4917,27 @@ function mountDiaryEditor(doc){
      접기 상태는 보는 사람 편의라 파일이 아니라 localStorage 에만 둔다(펜 색과 같은 자리).
      몰입 모드는 접기와 따로 둔다 — 나갈 때 사용자가 접어 둔 상태가 그대로 돌아와야 한다.
      종이 폭(max-width:780px)은 모드에 따라 바꾸지 않는다. 바꾸면 줄바꿈 자리가 흔들린다. */
-  let sideCollapsed = false, railCollapsed = false, focusMode = false;
+  let sideCollapsed = false, railCollapsed = false, headCollapsed = false, focusMode = false;
   try {
     const saved = JSON.parse(localStorage.getItem("mn.diaryPanels") || "null");
-    if (saved && typeof saved === "object"){ sideCollapsed = !!saved.side; railCollapsed = !!saved.rail; }
+    if (saved && typeof saved === "object"){ sideCollapsed = !!saved.side; railCollapsed = !!saved.rail; headCollapsed = !!saved.head; }
   } catch(_){}
   const rememberPanels = () => {
-    try { localStorage.setItem("mn.diaryPanels", JSON.stringify({ side:sideCollapsed, rail:railCollapsed })); } catch(_){}
+    try { localStorage.setItem("mn.diaryPanels", JSON.stringify({ side:sideCollapsed, rail:railCollapsed, head:headCollapsed })); } catch(_){}
   };
   function applyPanels(){
     root.classList.toggle("is-side-collapsed", sideCollapsed);
     root.classList.toggle("is-rail-collapsed", railCollapsed);
+    root.classList.toggle("is-head-collapsed", headCollapsed);
     root.classList.toggle("is-focus", focusMode);
+    // 머리 접기는 몰입 모드와 따로 논다(양옆 칸이 아니라 종이 위 머리라서) — 그래서 mark() 를 쓰지 않는다.
+    headToggleBtn.innerHTML = typeof window.uiIcon === "function" ? window.uiIcon(headCollapsed ? "chevronDown" : "chevronUp") : (headCollapsed ? "▾" : "▴");
+    headToggleBtn.title = diaryIsEn()
+      ? (headCollapsed ? "Show the title and tag rows" : "Fold the title and tag rows")
+      : (headCollapsed ? "제목·태그 줄 펼치기" : "제목·태그 줄 접기");
+    headToggleBtn.setAttribute("aria-label", headToggleBtn.title);
+    headToggleBtn.setAttribute("aria-expanded", String(!headCollapsed));
+    renderHeadSummary();
     const mark = (btn, hidden, showKo, hideKo, showEn, hideEn) => {
       btn.title = diaryIsEn() ? (hidden ? showEn : hideEn) : (hidden ? showKo : hideKo);
       btn.setAttribute("aria-label", btn.title);
@@ -4933,14 +4958,49 @@ function mountDiaryEditor(doc){
   function setFocusMode(on){
     if (focusMode === !!on) return;
     focusMode = !!on;
+    if (focusMode){ closePicker(); setTemplateOpen(false); }       // 몰입 중엔 날짜 머리가 사라지므로 거기 붙어 뜨는 창도 닫는다
     applyPanels();
     setStatus(focusMode
-      ? diaryT("몰입 모드 — Esc 를 누르면 돌아와요.")
+      ? diaryT("몰입 모드 — 날짜는 Alt+PageUp·PageDown, 나올 땐 Esc.")
       : diaryT("몰입 모드를 껐어요."));
   }
   sideToggleBtn.addEventListener("click", () => { sideCollapsed = !sideCollapsed; rememberPanels(); applyPanels(); });
   railToggleBtn.addEventListener("click", () => { railCollapsed = !railCollapsed; rememberPanels(); applyPanels(); });
   focusBtn.addEventListener("click", () => setFocusMode(!focusMode));
+  function setHeadCollapsed(on){
+    if (headCollapsed === !!on) return;
+    headCollapsed = !!on;
+    if (headCollapsed){ closePicker(); setTemplateOpen(false); }    // 접히는 줄의 단추에 붙어 뜨는 창은 먼저 닫는다
+    rememberPanels(); applyPanels();
+  }
+  function renderHeadSummary(){
+    headSummary.hidden = !headCollapsed;
+    if (!headCollapsed) return;
+    const entry = entryOf(current);
+    const weather = diaryWeatherInfo(entry && entry.weather), mood = diaryMoodInfo(entry && entry.mood);
+    const parts = [], words = [];
+    for (const [info, word] of [[weather, "날씨"], [mood, "기분"]]){
+      if (!info) continue;
+      const em = document.createElement("span"); em.className = "diary-pick-emoji"; diaryMarkFill(em, info);
+      parts.push(em); words.push(diaryT(word) + ": " + diaryName(info));
+    }
+    if (entry && entry.favorite){
+      const star = document.createElement("span"); star.className = "diary-head-summary-star"; star.textContent = "★";
+      parts.push(star); words.push(diaryIsEn() ? "Favorite" : "기억하고 싶은 날");
+    }
+    const title = entry && entry.title ? entry.title.trim() : "";
+    if (title){
+      const text = document.createElement("span"); text.className = "diary-head-summary-title"; text.textContent = title;
+      parts.push(text); words.push(title);
+    }
+    const tags = entry && entry.tags ? entry.tags : [];
+    if (tags.length) words.push(tags.map(tag => "#" + tag).join(" "));
+    headSummary.replaceChildren(...parts);
+    headSummary.title = (words.length ? words.join(" · ") + " — " : "") + (diaryIsEn() ? "click to show the title and tag rows" : "누르면 제목·태그 줄을 펼쳐요");
+    headSummary.setAttribute("aria-label", headSummary.title);
+  }
+  headToggleBtn.addEventListener("click", () => setHeadCollapsed(!headCollapsed));
+  headSummary.addEventListener("click", () => setHeadCollapsed(false));
 
   /* ----- 즐겨찾기 · 태그 · 글감 ----- */
   const templates = [
@@ -4970,6 +5030,7 @@ function mountDiaryEditor(doc){
     }));
     tagInput.hidden = tags.length >= DIARY_MAX_TAGS;
     tagInput.placeholder = diaryIsEn() ? "Add tag" : "태그 추가";
+    renderHeadSummary();
   }
   function addCurrentTag(){
     const raw = tagInput.value; tagInput.value = "";
@@ -5027,6 +5088,8 @@ function mountDiaryEditor(doc){
     dateLabel.classList.toggle("is-today", current === today);
     todayBadge.hidden = current !== today;
     todayBadge.querySelector(".diary-today-text").textContent = diaryT("오늘");
+    focusDate.textContent = diaryUiHeadDate(current) + (current === today ? " · " + diaryT("오늘") : "");
+    focusDate.title = diaryUiDateLabel(current) + " — " + (diaryIsEn() ? "Alt+PageUp / Alt+PageDown to change day" : "Alt+PageUp / Alt+PageDown 으로 날짜 옮기기");
     renderSpecialBadge();
     renderSchoolStrip();
     entryTitle.value = entry ? entry.title : "";
@@ -5056,6 +5119,7 @@ function mountDiaryEditor(doc){
     };
     paint(weatherBtn, weather, "날씨");
     paint(moodBtn, mood, "기분");
+    renderHeadSummary();
   }
   function setEntryField(field, value){
     if (history) history.flush();
@@ -5407,6 +5471,15 @@ function mountDiaryEditor(doc){
       && panel.hidden && artPanel.hidden && pickPop.hidden && templatePanel.hidden){
       e.preventDefault();
       setFocusMode(false);
+      return;
+    }
+    /* 날짜 넘기기 Alt+PageUp / Alt+PageDown — 글을 쓰다가도 넘길 수 있게 본문 칸에서도 받는다.
+       Alt+←/→ 는 앱 전체의 사이드바 숨기기·보이기(바꿀 수 있는 단축키)가 먼저 쓰므로 비켜 간다.
+       글상자 고쳐 쓰기 같은 다른 입력칸에서는 받지 않는다 — 날이 바뀌면 고치던 글이 사라진다. */
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === "PageUp" || e.key === "PageDown")
+      && (!inField || target === area) && (root.contains(target) || target === document.body)){
+      e.preventDefault();
+      goTo(diaryAddDays(current, e.key === "PageUp" ? -1 : 1));
       return;
     }
     if ((e.ctrlKey || e.metaKey) && !e.altKey){

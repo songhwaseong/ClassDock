@@ -10,7 +10,7 @@ const diary = require("../src/js/diary.js");
 for (const name of ["diaryCrc32", "diaryZipBuild", "diaryZipRead", "diaryNormalizeSticker", "diaryNormalizeStroke",
   "diaryNormalizeStyle", "diaryNormalizeTags", "diaryCleanSticker", "diaryDefaultStyle", "diaryWeatherInfo",
   "diaryMoodInfo", "diaryStickerKind", "diaryNormalizeAngle", "DIARY_ART_DEFAULT_COLOR", "DIARY_TEXT_DEFAULT_COLOR",
-  "DIARY_MAX_STROKES", "DIARY_MAX_STICKERS", "diaryAssetMime"]) {
+  "DIARY_MAX_STROKES", "DIARY_MAX_STICKERS", "diaryAssetMime", "diaryDefaultBackdrop", "diaryNormalizeBackdrop"]) {
   if (diary[name] !== undefined) globalThis[name] = diary[name];
 }
 const trip = require("../src/js/trip.js");
@@ -636,4 +636,32 @@ test("'＋ 날' 은 가장 늦은 날짜의 다음 날을 채운다", () => {
   assert.equal(trip.tripNextDayDate({ days:[{ date:"2026-12-31" }] }), "2027-01-01", "해 넘김");
   assert.equal(trip.tripNextDayDate({ days:[{ date:"2028-02-28" }] }), "2028-02-29", "윤년");
   assert.equal(trip.tripNextDayDate({ days:[{ date:"" }] }), "", "날짜가 없으면 비워 둔다");
+});
+
+test("여행일지 바탕은 일기장과 같은 모양으로 저장되고, 바탕 그림도 ZIP 에 담긴다(판 4)", async () => {
+  assert.ok(trip.TRIP_VERSION >= 4, "옛 앱이 바탕을 버리고 덮어쓰지 않게 판을 올린다");
+  const model = trip.tripEmpty("부산");
+  assert.equal(model.backdrop.theme, "none", "새 여행일지는 고유 하늘 바탕 그대로");
+  const cleanKey = trip.tripContentKey(model);
+  model.backdrop = diary.diaryNormalizeBackdrop({ theme:"custom", bg:"assets/backdrop01.jpg", fit:"tile", veil:0.3 },
+    name => name === "assets/backdrop01.jpg");
+  assert.notEqual(trip.tripContentKey(model), cleanKey, "바탕을 바꾸면 '저장 안 됨'");
+  assert.ok(trip.tripReferencedAssets(model).has("assets/backdrop01.jpg"));
+  const back = await trip.tripUnpack(trip.tripPack(model, new Map([["assets/backdrop01.jpg", { bytes:jpg(5) }]]), 1770000000000));
+  assert.deepEqual(back.model.backdrop, model.backdrop);
+  assert.equal(back.assets.has("assets/backdrop01.jpg"), true);
+  // 판 3 파일(바탕 없음)은 없음으로 연다
+  const old = trip.tripNormalize({ format:"classdock-trip", version:3, days:[] });
+  assert.equal(old.backdrop.theme, "none");
+  // 테마 바탕은 그림 파일이 없다
+  const themed = trip.tripNormalize({ format:"classdock-trip", version:4, backdrop:{ theme:"pastel-sky" }, days:[] });
+  assert.equal(themed.backdrop.theme, "pastel-sky");
+  assert.equal(trip.tripReferencedAssets(themed).size, 0);
+});
+
+test("여행일지 화면도 일기장 바탕 테마 CSS 를 모두 받는다", () => {
+  const css = read("src/styles.css");
+  for (const theme of ["blossom", "linen", "night", "custom", "paper-flowers", "pastel-sky", "wood-desk", "moonlit-sky", "leafy-bokeh"]){
+    assert.ok(css.includes(`.trip-root[data-backdrop="${theme}"]`), theme);
+  }
 });

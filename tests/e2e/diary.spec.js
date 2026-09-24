@@ -1148,7 +1148,7 @@ test("접기: 양옆 칸을 따로 접으면 종이가 제 폭을 찾고, 접은
 
   // 접은 상태는 보는 사람 편의라 localStorage 에만 — 파일이 더러워지지 않는다
   await expect(page.locator(".diary-status")).not.toContainText("저장 안 됨");
-  expect(await page.evaluate(() => localStorage.getItem("mn.diaryPanels"))).toBe('{"side":true,"rail":true}');
+  expect(await page.evaluate(() => localStorage.getItem("mn.diaryPanels"))).toBe('{"side":true,"rail":true,"head":false}');
 
   // 새로 연 일기장도 접힌 채로 시작한다(앞 탭도 DOM 에 남으므로 새로 붙은 쪽만 본다)
   await page.evaluate(() => window.newDiaryScratch && window.newDiaryScratch());
@@ -1186,22 +1186,86 @@ test("몰입 모드: 양옆을 감추고 Esc 로 나오며, 접어 둔 상태는
   await expect(page.locator(".diary-text")).toHaveValue("몰입해서 쓴 글");
 });
 
-test("몰입 모드는 종이를 위아래로 움직이지 않는다", async ({ page }) => {
+test("몰입 모드는 날짜 머리만 감추고, 종이는 그 높이만큼만 올라간다", async ({ page }) => {
   await boot(page);
   // 양옆을 이미 접어 둔 채로 들어가면 여백 차이가 유일하게 눈에 띄어 화면이 툭 내려간 것처럼 보인다.
   await page.locator(".diary-side-toggle").click();
   await page.locator(".diary-rail-toggle").click();
-  const head = page.locator(".diary-page-head");
-  const y = async () => Math.round((await stableBox(head)).y);
+  const head = page.locator(".diary-page-head"), paper = page.locator(".diary-paper");
+  const y = async () => Math.round((await stableBox(paper)).y);
   const before = await y();
+  const headBox = await stableBox(head);
+  const headSpace = Math.round((await stableBox(paper)).y - headBox.y);  // 머리 높이 + 아래 여백
+  await expect(page.locator(".diary-focus-date")).toBeHidden();
 
   await page.locator(".diary-focus-btn").click();
   await expect(page.locator(".diary-side")).toBeHidden();
-  expect(await y()).toBe(before);
+  await expect(head).toBeHidden();                                      // 몰입 = 종이만
+  await expect(page.locator(".diary-focus-date")).toBeVisible();        // 날짜는 도구막대에서 본다
+  await expect(page.locator(".diary-focus-date")).toContainText(await page.locator(".diary-date").textContent());
+  expect(Math.abs(await y() - (before - headSpace))).toBeLessThanOrEqual(1);
   await page.locator(".diary-focus-btn").click();
   await expect(page.locator(".diary-focus-btn")).toHaveAttribute("aria-pressed", "false");
   await expect(page.locator(".diary-side")).toBeHidden();               // 접어 둔 칸은 접힌 채로 돌아온다
+  await expect(head).toBeVisible();
+  await expect(page.locator(".diary-focus-date")).toBeHidden();
   expect(await y()).toBe(before);
+});
+
+test("Alt+PageUp/PageDown 으로 날짜를 넘기고, 몰입 중엔 도구막대 날짜가 따라간다", async ({ page }) => {
+  await boot(page);
+  const date = page.locator(".diary-date"), focusDate = page.locator(".diary-focus-date");
+  const start = await date.textContent();
+  await page.locator(".diary-text").click();
+  await page.keyboard.type("오늘 쓴 글");
+  await page.keyboard.press("Alt+PageUp");                              // 본문을 쓰다가도 넘어간다
+  await expect(date).not.toHaveText(start);
+  await expect(page.locator(".diary-text")).toHaveValue("");
+  const prev = await date.textContent();
+
+  await page.locator(".diary-focus-btn").click();
+  await expect(focusDate).toContainText(prev);
+  await page.locator(".diary-text").click();
+  await page.keyboard.press("Alt+PageDown");
+  await expect(focusDate).toContainText(start);
+  await expect(page.locator(".diary-text")).toHaveValue("오늘 쓴 글");
+
+  // 제목 칸 같은 다른 입력칸에서는 넘기지 않는다
+  await page.keyboard.press("Escape");
+  await page.locator(".diary-entry-title").click();
+  await page.keyboard.press("Alt+PageUp");
+  await expect(date).toHaveText(start);
+});
+
+test("머리 접기: 제목·태그 줄만 접고, 날짜 줄과 그 날의 요약은 남는다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-entry-title").fill("소풍 간 날");
+  await page.locator('.diary-pick[data-pick="weather"]').click();
+  await page.locator(".diary-pick-pop .diary-pick-option").first().click();
+
+  const toggle = page.locator(".diary-head-toggle"), summary = page.locator(".diary-head-summary");
+  await toggle.click();
+  await expect(page.locator(".diary-title-row")).toBeHidden();
+  await expect(page.locator(".diary-tag-row")).toBeHidden();
+  await expect(page.locator(".diary-date")).toBeVisible();
+  await expect(page.locator(".diary-day-nav").first()).toBeVisible();   // 접어도 날짜는 옮길 수 있다
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(summary).toContainText("소풍 간 날");
+  await expect(summary.locator(".diary-pick-emoji")).toHaveCount(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("mn.diaryPanels")).head)).toBe(true);
+
+  // 빈 날로 가면 요약도 비어 사라지고, 돌아오면 다시 보인다
+  await page.locator(".diary-day-nav").first().click();
+  await expect(summary).toBeHidden();
+  await page.locator(".diary-day-nav").last().click();
+  await expect(summary).toContainText("소풍 간 날");
+
+  // 요약을 누르면 펼쳐진다
+  await summary.click();
+  await expect(page.locator(".diary-title-row")).toBeVisible();
+  await expect(page.locator(".diary-entry-title")).toHaveValue("소풍 간 날");
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(summary).toBeHidden();
 });
 
 test("몰입 중 Esc 는 글상자 고치기·열린 창·고른 스티커를 먼저 처리한다", async ({ page }) => {
