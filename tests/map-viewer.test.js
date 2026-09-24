@@ -38,6 +38,7 @@ function loadMapViewer(windowOverrides, contextOverrides){
       , MAP_SEARCH_MENU_LABEL, MAP_SEARCH_TEXT_MAX, MAP_SEARCH_QUERY_MAX, mapSearchTextFrom, mapSearchQueryFrom, mapSearchMenuItem, showMapCoordinate
       , mapNiceScaleMeters, mapGridStep, mapGridValues, mapGridLabel, mapSourceLabel
       , MAP_GRID_STEPS, MAP_GRID_MAX_LINES, MAP_DOC_VERSION
+      , MAP_BIKE_OVERLAYS, MAP_BIKE_CHOICES, mapBikeChoiceOf, mapBikeLayerIds
       , mapNormalizePhoto, mapPhotoTotalChars, MAP_PHOTO_MAX_DATA_CHARS, MAP_PHOTO_TOTAL_MAX_CHARS
       , MAP_SEARCH_RESULT_MAX, MAP_LABEL_MIN_ZOOM, MAP_LABEL_MAX_MARKERS
       , MAP_ROUTE_TANGLE_MARKERS, MAP_ROUTE_COLOR
@@ -2007,6 +2008,49 @@ test("위경도 격자는 .map 에 저장되고 옛 파일은 꺼진 채로 열�
   assert.equal(again.version, api.MAP_DOC_VERSION);
 });
 
+/* 자전거 겹침 층도 격자와 같은 성격이라 켜 둔 사실만 .map 에 담는다. 옛 파일은 꺼진 채로 열리고,
+   내 지도 이미지 위에는 얹지 않는다(학교 배치도 위에 OSM 자전거길이 겹치면 뜻이 없다). */
+test("자전거 겹침 층은 .map 에 저장되고 옛 파일·내 지도 이미지에서는 꺼져 있다", () => {
+  const api = loadMapViewer();
+  const old = api.mapDocParse(JSON.stringify({
+    type:"classdock-map", version:13, title:"옛 지도", basemap:"osm", center:[37,127], zoom:10, markers:[]
+  }));
+  assert.equal(old.bikeLanes, false);
+  assert.equal(old.bikeRoutes, false);
+  assert.equal(api.mapBikeChoiceOf(old), "off");
+  assert.deepEqual([...api.mapBikeLayerIds(old)], []);
+
+  const model = api.mapDocEmpty("자전거 지도");
+  const before = api.mapDocContentKey(model);
+  model.bikeLanes = true;
+  assert.notEqual(api.mapDocContentKey(model), before, "자전거도로를 켜면 저장 안 됨(●) 이 켜진다");
+  model.bikeRoutes = true;
+  const again = api.mapDocParse(api.mapDocSerialize(model));
+  assert.equal(again.bikeLanes, true);
+  assert.equal(again.bikeRoutes, true);
+  assert.equal(again.version, api.MAP_DOC_VERSION);
+  assert.equal(api.mapBikeChoiceOf(again), "both");
+  // 긴 노선을 동네 도로 위에 얹는다.
+  assert.deepEqual([...api.mapBikeLayerIds(again)], ["lanes", "routes"]);
+  assert.deepEqual([...api.mapBikeLayerIds({ ...again, basemap:"custom" })], []);
+  // 고르는 칸의 네 가지는 두 층을 켜고 끄는 모든 조합과 하나씩 맞는다.
+  const combos = api.MAP_BIKE_CHOICES.map(choice => String(choice.lanes) + String(choice.routes));
+  assert.equal(new Set(combos).size, 4);
+});
+
+test("자전거 겹침 층 호스트도 두 런처의 타일 프록시 허용 목록 안에 있다", () => {
+  const api = loadMapViewer();
+  const launcher = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
+  const block = /static readonly string\[\] TileProxyHosts = \{([\s\S]*?)\};/.exec(launcher);
+  const allowed = [...block[1].matchAll(/"([^"]+)"/g)].map(m => m[1]);
+  for (const [id, spec] of Object.entries(api.MAP_BIKE_OVERLAYS)){
+    const host = new URL(spec.url.replace("{s}.", "a.")).host;
+    assert.ok(allowed.some(a => host === a || host.endsWith("." + a)), `${id} 의 호스트 ${host} 가 허용 목록에 없다`);
+  }
+  const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
+  for (const choice of api.MAP_BIKE_CHOICES) assert.ok(i18n.includes('"' + choice.label + '"'), choice.label);
+});
+
 /* 표시 이름은 마우스를 올려야 보였다. 늘 보이게 켤 수 있게 하되, 겹쳐서 못 읽는 축소에서는
    잠시 숨긴다(Leaflet 에 이름표 겹침 정리가 없다). 격자와 같은 성격이라 .map 에 함께 담는다. */
 test("표시 이름표는 .map 에 저장되고 옛 파일은 꺼진 채로 열린다", () => {
@@ -2074,7 +2118,7 @@ test("표시 잇는 선은 목록 순서를 따르고 감춘 묶음은 빼며 �
   // 끄는 동안에도 따라온다(놓는 순간에만 그리면 선이 툭 튄다). 다만 그때 touch 는 부르지 않는다.
   assert.match(source, /layer\.on\("drag", \(\) => \{\n\s*if \(!model\.route\) return;/);
   // 되돌리기 범위도 격자·이름표와 같다.
-  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive,[\s\S]*?mapNormalizeDriveOptions\(model\.driveOptions\), mapNormalizeRadius\(model\.radius\), mapNormalizeChoropleth\(model\.choropleth\)\]\)/);
+  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive,[\s\S]*?mapNormalizeDriveOptions\(model\.driveOptions\), mapNormalizeRadius\(model\.radius\), mapNormalizeChoropleth\(model\.choropleth\),\s*!!model\.bikeLanes, !!model\.bikeRoutes\]\)/);
   assert.match(source, /model\.route = saved\[7\] === true;/);
   // 되돌리기는 마커 레이어를 새로 만드므로, 감춘 묶음의 보기 상태와 선도 함께 다시 입힌다.
   assert.match(source, /drawGrid\(\);[\s\S]*?applyMarkerVisibility\(\);[\s\S]*?applyBasemap\(\);/);

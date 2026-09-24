@@ -36,15 +36,15 @@ test("도구 레지스트리는 전체 화면의 선택 도구를 담고 필수 
     && ids.includes("javaPractice") && ids.includes("javaFont"));
   assert.ok(ids.includes("wbPen") && ids.includes("wbBackground") && ids.includes("wbPng"));
   assert.ok(ids.includes("mapSearch") && ids.includes("mapRoute") && ids.includes("mapOffline") && ids.includes("mapJejuBus")
-    && ids.includes("mapGeoExport") && ids.includes("mapCluster") && ids.includes("mapFlight") && ids.includes("mapShip") && ids.includes("mapWeather"));
+    && ids.includes("mapGeoExport") && ids.includes("mapCluster") && ids.includes("mapFlight") && ids.includes("mapShip") && ids.includes("mapWeather") && ids.includes("mapBike"));
   assert.ok(ids.includes("musicNoteValue") && ids.includes("musicPlayback") && ids.includes("musicDrums")
     && ids.includes("musicParts") && ids.includes("musicXml"));
   assert.equal(new Set(ids).size, ids.length, "id 는 중복이 없어야 한다");
-  assert.equal(TOGGLEABLE_TOOLS.length, 184);
+  assert.equal(TOGGLEABLE_TOOLS.length, 185);
   assert.deepEqual(
     Object.fromEntries(["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]
       .map(target => [target, TOGGLEABLE_TOOLS.filter(tool => tool.target === target).length])),
-    { header:12, py:15, javascript:2, java:12, notebook:7, image:12, whiteboard:37, map:34, music:53 }
+    { header:12, py:15, javascript:2, java:12, notebook:7, image:12, whiteboard:37, map:35, music:53 }
   );
   for (const tool of TOGGLEABLE_TOOLS){
     assert.ok(tool.cls && typeof tool.cls === "string", tool.id + " 는 클래스명이 있어야 한다");

@@ -4446,6 +4446,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapSearch .map-toolvis-search,
   html.hide-tool-mapBasemap .map-toolvis-basemap,
   html.hide-tool-mapBasemap .map-basemap-tile,
+  html.hide-tool-mapBike .map-toolvis-bike,
   html.hide-tool-mapAdd .map-toolvis-add,
   html.hide-tool-mapAutoAddress .map-toolvis-auto-address,
   html.hide-tool-mapSpot .map-toolvis-spot,

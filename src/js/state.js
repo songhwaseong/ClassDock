@@ -280,6 +280,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   // 지도 — 제목·도구 보이기·되돌리기·저장은 항상 남긴다.
   { id:"mapSearch", label:"장소·좌표 검색", cls:"map-toolvis-search", target:"map" },
   { id:"mapBasemap", label:"배경지도 선택", cls:"map-toolvis-basemap", target:"map" },
+  { id:"mapBike", label:"자전거길 겹쳐 보기", cls:"map-toolvis-bike", target:"map" },
   { id:"mapAdd", label:"표시 추가", cls:"map-toolvis-add", target:"map" },
   { id:"mapAutoAddress", label:"주소 자동", cls:"map-toolvis-auto-address", target:"map" },
   { id:"mapSpot", label:"장소 정보", cls:"map-toolvis-spot", target:"map" },

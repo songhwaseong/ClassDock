@@ -4360,7 +4360,8 @@ class ClassDockLauncher
        다음 수업에서도 열려면 서버가 파일로 들고 있어야 한다. */
     static readonly string[] TileProxyHosts = {
         "tile.openstreetmap.org", "basemaps.cartocdn.com", "tile.opentopomap.org",
-        "server.arcgisonline.com", "tiles.stadiamaps.com", "tile.thunderforest.com"
+        "server.arcgisonline.com", "tiles.stadiamaps.com", "tile.thunderforest.com",
+        "tile-cyclosm.openstreetmap.fr", "tile.waymarkedtrails.org"
     };
     sealed class TileMemoryEntry
     {

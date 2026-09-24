@@ -15,7 +15,7 @@
  */
 
 const MAP_DOC_TYPE = "classdock-map";
-const MAP_DOC_VERSION = 13;
+const MAP_DOC_VERSION = 14;
 const MAP_BACKGROUND_MAX_DATA_CHARS = 8 * 1024 * 1024;
 /* 표시에 붙이는 사진(답사·관찰 기록). 지도 파일 안에 base64 로 들어가므로 배경 이미지보다 훨씬
    빡빡하게 잡는다 — 표시 하나에 한 장씩, 서른 장쯤 붙어도 파일이 열리는 크기여야 한다. */
@@ -56,6 +56,43 @@ const MAP_BASEMAPS = {
     attribution: "© Esri"
   }
 };
+
+/* 자전거 겹침 층 — 배경지도 위에 얹는 투명 타일이라 어느 배경과도 함께 쓴다. 두 층이 보는 것이
+   다르다: CyclOSM-lite 는 동네 자전거 전용도로·우선도로·보관대를, Waymarked Trails 는 국토종주처럼
+   이름이 붙은 긴 자전거 노선을 그린다. 둘 다 키 없는 공개 서버라 배경지도와 같은 규칙을 따른다 —
+   호스트는 런처 허용 목록(TileProxyHosts)에 있어야 하고, 실제로 본 타일만 캐시한다.
+   nativeZoom 은 서버가 실제로 그려 주는 가장 깊은 단계다(Waymarked 는 19 부터 404). 그보다 더
+   들어가면 마지막 단계 그림을 늘려 쓴다. */
+const MAP_BIKE_OVERLAYS = {
+  lanes: {
+    label: "자전거도로",
+    url: "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm-lite/{z}/{x}/{y}.png",
+    nativeZoom: 20,
+    attribution: "CyclOSM · © OpenStreetMap 기여자"
+  },
+  routes: {
+    label: "자전거 노선",
+    url: "https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png",
+    nativeZoom: 18,
+    attribution: "© Waymarked Trails (CC BY-SA)"
+  }
+};
+// 도구막대 한 칸에서 고르는 네 가지. 문서에는 층마다 켜 둔 사실(bikeLanes·bikeRoutes)만 담는다.
+const MAP_BIKE_CHOICES = [
+  { id:"off", label:"자전거길 끔", lanes:false, routes:false },
+  { id:"lanes", label:"자전거도로", lanes:true, routes:false },
+  { id:"routes", label:"자전거 노선", lanes:false, routes:true },
+  { id:"both", label:"도로+노선", lanes:true, routes:true }
+];
+function mapBikeChoiceOf(model){
+  const lanes = !!(model && model.bikeLanes), routes = !!(model && model.bikeRoutes);
+  return MAP_BIKE_CHOICES.find(choice => choice.lanes === lanes && choice.routes === routes).id;
+}
+// 켜진 층 id 목록(그리는 순서 — 긴 노선을 동네 도로 위에 얹는다). 내 지도 이미지 위에는 얹지 않는다.
+function mapBikeLayerIds(model){
+  if (!model || model.basemap === "custom") return [];
+  return [model.bikeLanes && "lanes", model.bikeRoutes && "routes"].filter(Boolean);
+}
 
 const MAP_MARKER_COLORS = [
   { id:"red",    label:"빨강", hex:"#e11d48" },
@@ -401,7 +438,11 @@ function mapDocEmpty(title){
     driveOptions: mapNormalizeDriveOptions(null),
     backgroundImage: null,
     // 색칠 지도(버전 13). 표에서 받은 값만 담고, 표시 개수로 칠할 때는 켜 둔 설정만 담는다.
-    choropleth: null
+    choropleth: null,
+    /* 자전거 겹침 층(버전 14). 격자처럼 문서에 딸린 성질이다 — "자전거길이 보이게 만들어 둔
+       지도"로 건네진다. 층 그림은 담지 않고 켜 둔 사실만 담는다. */
+    bikeLanes: false,
+    bikeRoutes: false
   };
 }
 function mapDocParse(text){
@@ -434,7 +475,10 @@ function mapDocParse(text){
     driveOptions: mapNormalizeDriveOptions(raw.driveOptions),
     backgroundImage,
     // 버전 12 이하에는 없던 값이다 — 없으면 칠하지 않은 지도로 연다.
-    choropleth: mapNormalizeChoropleth(raw.choropleth)
+    choropleth: mapNormalizeChoropleth(raw.choropleth),
+    // 버전 13 이하에는 없던 값이다 — 없으면 끈 것으로 본다.
+    bikeLanes: raw.bikeLanes === true,
+    bikeRoutes: raw.bikeRoutes === true
   };
 }
 function mapDocSerialize(model){
@@ -454,7 +498,9 @@ function mapDocSerialize(model){
     drive: !!model.drive,
     driveOptions: mapNormalizeDriveOptions(model.driveOptions),
     backgroundImage: model.backgroundImage || null,
-    choropleth: mapNormalizeChoropleth(model.choropleth)
+    choropleth: mapNormalizeChoropleth(model.choropleth),
+    bikeLanes: !!model.bikeLanes,
+    bikeRoutes: !!model.bikeRoutes
   }, null, 2) + "\n";
 }
 /* 저장 안 됨(●) 판정에는 보기 위치를 넣지 않는다. 지도를 조금 움직였다는 이유로 문서가
@@ -471,7 +517,8 @@ function mapDocContentKey(model){
     model.backgroundImage.dataUrl.slice(-80)
   ] : null;
   return JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], !!model.grid, background, !!model.labels, !!model.route, !!model.drive,
-    mapNormalizeDriveOptions(model.driveOptions), mapNormalizeRadius(model.radius), mapNormalizeChoropleth(model.choropleth)]);
+    mapNormalizeDriveOptions(model.driveOptions), mapNormalizeRadius(model.radius), mapNormalizeChoropleth(model.choropleth),
+    !!model.bikeLanes, !!model.bikeRoutes]);
 }
 
 const MAP_EARTH_RADIUS_M = 6371008.8;
@@ -2232,12 +2279,27 @@ function mapParseCoords(text){
    뒤(getTileUrl 반환값)에 감싸는 것이 요점이다. */
 function mapCreateTileLayer(basemapId, proxyBase, onProxyTrouble){
   const spec = MAP_BASEMAPS[basemapId] || MAP_BASEMAPS.osm;
-  const layer = L.tileLayer(spec.url, {
-    maxZoom: spec.maxZoom,
+  return mapWrapTileLayer(spec.url, { maxZoom: spec.maxZoom, attribution: spec.attribution }, proxyBase, onProxyTrouble);
+}
+/* 자전거 겹침 층. 최대 확대는 지금 배경지도에 맞춘다 — 층이 더 깊이 들어가면 Leaflet 이 지도의
+   최대 확대를 층 쪽으로 늘려, 배경이 사라진 빈 화면까지 확대된다. 겹침 층이 몇 장 실패하는 것은
+   흔한 일이라(서버가 잠시 느리거나 그 단계를 안 그린다) 프록시를 갈아타는 판단에는 끼우지 않는다. */
+function mapCreateBikeLayer(overlayId, maxZoom, proxyBase, pane){
+  const spec = MAP_BIKE_OVERLAYS[overlayId];
+  if (!spec) return null;
+  return mapWrapTileLayer(spec.url, {
+    maxZoom,
+    maxNativeZoom: Math.min(spec.nativeZoom, maxZoom),
     attribution: spec.attribution,
-    subdomains: spec.url.includes("{s}") ? ["a", "b", "c"] : "abc",
+    pane,
+    zIndex: overlayId === "routes" ? 2 : 1
+  }, proxyBase, null);
+}
+function mapWrapTileLayer(url, options, proxyBase, onProxyTrouble){
+  const layer = L.tileLayer(url, Object.assign({
+    subdomains: url.includes("{s}") ? ["a", "b", "c"] : "abc",
     crossOrigin: true
-  });
+  }, options));
   if (proxyBase){
     const direct = layer.getTileUrl.bind(layer);
     layer.getTileUrl = (coords) => proxyBase + encodeURIComponent(direct(coords));
@@ -2384,7 +2446,9 @@ function mapAttributionText(model){
   const title = String(model.title || "").trim();
   // 색칠 지도의 경계는 공공누리 제1유형(출처표시) 자료라 그림에도 출처가 따라가야 한다.
   const data = model && model.choropleth ? mapChoroData() : null;
-  return (title ? title + " · " : "") + spec.attribution + (data && data.attribution ? " · " + data.attribution : "");
+  // 자전거 층도 출처 표시 조건이 붙은 자료라 켜 둔 층의 출처를 함께 새긴다.
+  const bike = mapBikeLayerIds(model).map(id => " · " + MAP_BIKE_OVERLAYS[id].attribution).join("");
+  return (title ? title + " · " : "") + spec.attribution + bike + (data && data.attribution ? " · " + data.attribution : "");
 }
 /* 칠판에 열릴 이름. 같은 지도를 두 번 보내도 서로 다른 칠판이 되도록 번호를 붙인다 —
    이름이 겹치면 자동복원 칸(boardRecoveryKey)까지 함께 쓰게 돼 앞 판서를 덮어쓴다. */
@@ -5006,6 +5070,7 @@ const MAP_TOOL_ICONS = {
   eye: '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/>',
   cluster: '<circle cx="8" cy="9" r="4"/><circle cx="16" cy="9" r="4"/><circle cx="12" cy="16" r="4"/>',
   route: '<circle cx="5" cy="18" r="2"/><circle cx="12" cy="6.5" r="2"/><circle cx="19" cy="15" r="2"/><path d="m6.1 16.2 4.8-7.9M13.3 8.1l4.4 5.2" stroke-dasharray="2.2 2"/>',
+  bike: '<circle cx="6" cy="16" r="3.8"/><circle cx="18" cy="16" r="3.8"/><path d="m6 16 3.5-7.5h6.5L18 16M9.5 8.5 12 16h-6M12 16l4-7.5M8 6h3"/>',
   car: '<path d="M4 16.5V12l2.2-5h11.6L20 12v4.5z"/><path d="M4 12h16"/><circle cx="8" cy="17.5" r="1.8" fill="#000"/><circle cx="16" cy="17.5" r="1.8" fill="#000"/>',
   list: '<path d="M8 6h11M8 12h11M8 18h11"/><circle cx="4.5" cy="6" r="1" fill="#000"/><circle cx="4.5" cy="12" r="1" fill="#000"/><circle cx="4.5" cy="18" r="1" fill="#000"/>',
   present: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/><path d="m10 7.8 4.2 2.2-4.2 2.2z"/>',
@@ -5087,6 +5152,18 @@ async function mountMapEditor(doc){
     basemapSelect.appendChild(option);
   }
   basemapSelect.value = model.basemap;
+
+  // 자전거 겹침 층 — 배경지도처럼 고르는 칸이다(끔·도로·노선·둘 다). 타일 모양은 basemapTile 과 같다.
+  const bikeSelect = document.createElement("select");
+  bikeSelect.className = "map-select map-bike-select";
+  bikeSelect.title = "자전거도로(CyclOSM)·자전거 노선(Waymarked Trails)을 배경지도 위에 겹쳐 보여요";
+  bikeSelect.setAttribute("aria-label", "자전거길 겹쳐 보기");
+  for (const choice of MAP_BIKE_CHOICES){
+    const option = document.createElement("option");
+    option.value = choice.id; option.textContent = choice.label;
+    bikeSelect.appendChild(option);
+  }
+  bikeSelect.value = mapBikeChoiceOf(model);
 
   const addBtn = document.createElement("button");
   addBtn.type = "button";
@@ -5329,11 +5406,15 @@ async function mountMapEditor(doc){
   basemapTile.className = "map-tile-select map-basemap-tile";
   basemapTile.appendChild(basemapSelect);
   mapSetToolIcon(basemapTile, "globe");
+  const bikeTile = document.createElement("div");
+  bikeTile.className = "map-tile-select map-bike-tile map-toolvis-bike";
+  bikeTile.appendChild(bikeSelect);
+  mapSetToolIcon(bikeTile, "bike");
   const toolTiles = document.createElement("div");
   toolTiles.className = "map-tools-main";
   const toolChips = document.createElement("div");
   toolChips.className = "map-tools-extra";
-  toolTiles.append(basemapTile, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, clusterBtn, routeBtn, driveBtn, listBtn,
+  toolTiles.append(basemapTile, bikeTile, addBtn, addressBtn, spotBtn, lineBtn, areaBtn, gridBtn, labelsBtn, clusterBtn, routeBtn, driveBtn, listBtn,
     presentBtn, nearbyBtn, regionBtn, choroBtn, imageBtn, csvImportBtn, csvTemplateBtn, csvExportBtn, csvMemoBtn);
   toolChips.append(clearItemsBtn, geoExportBtn, boardBtn, memoBtn, pngBtn, printBtn, taskBtn, imageClearBtn);
   toolRow.append(toolTiles, toolChips);
@@ -5522,6 +5603,11 @@ async function mountMapEditor(doc){
   const routePane = map.createPane("mapRoutePane");
   routePane.style.zIndex = "380";
   routePane.style.pointerEvents = "none";
+  /* 자전거 겹침 층은 색칠 지도(300) 위·격자(350) 아래다 — 지역을 칠해 둬도 자전거길이 묻히지
+     않고, 눈금과 사람이 그린 것은 그 위에 남는다. 배경 타일 칸(200)에 두면 색칠에 덮인다. */
+  const bikePane = map.createPane("mapBikePane");
+  bikePane.style.zIndex = "320";
+  bikePane.style.pointerEvents = "none";
 
   /* ── 축척 막대 · 방위표 ──
      지도 칸에 직접 얹는다(컨트롤 칸이 아니라). 캡처는 컨트롤 칸만 감추므로 이 자리에 있어야
@@ -5791,12 +5877,34 @@ async function mountMapEditor(doc){
     tileWaiters.push(() => { clearTimeout(timer); resolve(); });
   });
 
+  /* 자전거 겹침 층은 배경을 바꿀 때마다 다시 만든다 — 최대 확대를 배경에 맞추고, 프록시에서
+     직접 주소로 갈아탔을 때 층도 함께 따라가야 하기 때문이다. 내 지도 이미지 위에는 얹지 않으므로
+     그때는 고르는 칸도 잠근다(골라 봐야 아무것도 안 보이면 고장으로 보인다). */
+  let bikeLayers = [];
+  const applyBikeLayers = () => {
+    for (const layer of bikeLayers) map.removeLayer(layer);
+    bikeLayers = [];
+    const custom = model.basemap === "custom";
+    bikeSelect.disabled = custom;
+    bikeTile.classList.toggle("is-unavailable", custom);
+    bikeTile.title = custom ? mapT("내 지도 이미지 위에는 자전거길을 겹치지 않아요") : "";
+    bikeSelect.value = mapBikeChoiceOf(model);
+    const maxZoom = custom ? 19 : (MAP_BASEMAPS[model.basemap] || MAP_BASEMAPS.osm).maxZoom;
+    for (const id of mapBikeLayerIds(model)){
+      const layer = mapCreateBikeLayer(id, maxZoom, usingProxy ? proxyBase : "", "mapBikePane");
+      if (!layer) continue;
+      layer.addTo(map);
+      bikeLayers.push(layer);
+    }
+  };
+
   const applyBasemap = () => {
     if (tiles) map.removeLayer(tiles);
     if (backgroundLayer) map.removeLayer(backgroundLayer);
     tiles = null;
     backgroundLayer = null;
     tilesSettled = false;
+    applyBikeLayers();
     if (model.basemap === "custom" && model.backgroundImage){
       backgroundLayer = L.imageOverlay(model.backgroundImage.dataUrl, model.backgroundImage.bounds, {
         opacity: 1,
@@ -7793,6 +7901,21 @@ async function mountMapEditor(doc){
     touch();
   });
 
+  bikeSelect.addEventListener("change", () => {
+    const choice = MAP_BIKE_CHOICES.find(item => item.id === bikeSelect.value) || MAP_BIKE_CHOICES[0];
+    model.bikeLanes = choice.lanes;
+    model.bikeRoutes = choice.routes;
+    applyBikeLayers();
+    /* 격자와 같은 까닭으로 안내는 토스트로 띄운다(상태 줄은 ● 자리다). 층은 공개 자료라 빠진
+       길이 있을 수 있다는 것도 함께 알린다 — 동네 길이 안 보이면 고장으로 여기기 쉽다. */
+    if (choice.id !== "off" && typeof toast === "function"){
+      toast(mapT(choice.routes && !choice.lanes
+        ? "국토종주처럼 이름이 붙은 자전거 노선을 겹쳤어요 — 동네 자전거도로까지 보려면 '도로+노선'을 고르세요."
+        : "자전거도로를 파란 선으로 겹쳤어요 — 공개 지도(OSM) 자료라 빠진 길이 있을 수 있어요."), 4200);
+    }
+    touch();
+  });
+
   const ensureCustomOption = () => {
     let option = basemapSelect.querySelector('option[value="custom"]');
     if (model.backgroundImage && !option){
@@ -8900,7 +9023,8 @@ async function mountMapEditor(doc){
       sizeOf: (snapshot) => snapshot.length,
       maxBytes: 24 * 1024 * 1024,
       capture: () => JSON.stringify([model.title || "", model.basemap, model.markers, model.shapes || [], imageVersion, !!model.grid, !!model.labels, !!model.route, !!model.drive,
-        mapNormalizeDriveOptions(model.driveOptions), mapNormalizeRadius(model.radius), mapNormalizeChoropleth(model.choropleth)]),
+        mapNormalizeDriveOptions(model.driveOptions), mapNormalizeRadius(model.radius), mapNormalizeChoropleth(model.choropleth),
+        !!model.bikeLanes, !!model.bikeRoutes]),
       apply: (snapshot) => {
         const saved = JSON.parse(snapshot);
         // 반쯤 찍던 선이나 열려 있던 말풍선, 발표 중인 화면은 되돌리기와 함께 정리한다.
@@ -8922,6 +9046,8 @@ async function mountMapEditor(doc){
         radiusDraft = null;
         model.radius = mapNormalizeRadius(saved[10]);
         model.choropleth = mapNormalizeChoropleth(saved[11]);
+        model.bikeLanes = saved[12] === true;      // applyBasemap 이 층과 고르는 칸을 다시 맞춘다
+        model.bikeRoutes = saved[13] === true;
         model.backgroundImage = imageVersions.get(imageVersion) || null;
         for (const layer of markerLayers.values()) map.removeLayer(layer);
         markerLayers.clear();

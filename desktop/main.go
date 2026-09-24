@@ -47,6 +47,7 @@ var content embed.FS
 var tileProxyHosts = []string{
 	"tile.openstreetmap.org", "basemaps.cartocdn.com", "tile.opentopomap.org",
 	"server.arcgisonline.com", "tiles.stadiamaps.com", "tile.thunderforest.com",
+	"tile-cyclosm.openstreetmap.fr", "tile.waymarkedtrails.org",
 }
 
 const (

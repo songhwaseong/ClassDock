@@ -2687,6 +2687,18 @@
     "지형(등고선)": "Terrain (contours)",
     "흑백(판서용)": "Grayscale (for drawing on)",
     "위성 사진": "Satellite",
+    "자전거길 끔": "Bike paths off",
+    "자전거도로": "Bike lanes",
+    "자전거 노선": "Bike routes",
+    "도로+노선": "Lanes + routes",
+    "자전거길 겹쳐 보기": "Bike path overlay",
+    "자전거도로(CyclOSM)·자전거 노선(Waymarked Trails)을 배경지도 위에 겹쳐 보여요":
+      "Overlays bike lanes (CyclOSM) and bike routes (Waymarked Trails) on the base map",
+    "내 지도 이미지 위에는 자전거길을 겹치지 않아요": "Bike paths are not overlaid on your own map image",
+    "국토종주처럼 이름이 붙은 자전거 노선을 겹쳤어요 — 동네 자전거도로까지 보려면 '도로+노선'을 고르세요.":
+      "Overlaid named long-distance bike routes — choose 'Lanes + routes' to see local bike lanes too.",
+    "자전거도로를 파란 선으로 겹쳤어요 — 공개 지도(OSM) 자료라 빠진 길이 있을 수 있어요.":
+      "Overlaid bike lanes as blue lines — they come from OpenStreetMap, so some paths may be missing.",
     "📍 표시 추가": "📍 Add a pin",
     "누른 뒤 지도를 클릭하면 그 자리에 표시가 생겨요": "Press this, then click the map to drop a pin there",
     "🖊️ 칠판으로": "🖊️ To whiteboard",

@@ -1019,5 +1019,9 @@ test("화이트보드는 새 도구를 교구·그래프·차트 접점에 배�
   // 합력은 원본 화살표에서 다시 계산하는 파생 항목 — 그리기·저장·지우기 접점이 모두 있어야 한다.
   assert.match(whiteboardSource, /if \(syncVectorSumItems\(\)\) dropped = true;/);
   assert.match(whiteboardSource, /const tipHit = arrowTipAt\(lastBoardPointer\);/);
-  assert.match(whiteboardSource, /if \(isVectorSumItem\(it\)\) continue;/);        // 합력은 클릭으로 고르지 않는다
+  // 합력은 클릭으로 고르지 않는다 — 테두리로 먼저 찾는 길과 빈 도형 속까지 넓혀 찾는 길 둘 다에서 빠진다.
+  const itemAt = /const itemAt = \(p\) => \{([\s\S]*?)\n  \};/.exec(whiteboardSource);
+  assert.ok(itemAt, "itemAt 을 찾지 못했다");
+  assert.match(itemAt[1], /if \(!isVectorSumItem\(it\) && hitTestBoardItem\(it, p, measureBoardText, tol, true\)\) return it;/);
+  assert.match(itemAt[1], /if \(isVectorSumItem\(it\) \|\| !hitTestBoardItem\(it, p, measureBoardText, tol\)\) continue;/);
 });

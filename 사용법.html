@@ -1163,7 +1163,11 @@ cd myOffice</code></pre>
       <li>일반 브라우저 창과 주소창 없는 <strong>앱 모드</strong>가 서로 다른 브라우저로 열리더라도, EXE가 검색 공급자 선택을 함께 보관해 카카오 설정을 자동으로 이어 줍니다.</li>
     </ul>
   </li>
-  <li><strong>배경지도</strong>는 네 가지입니다 — <strong>일반 지도</strong>(길·건물 이름이 가장 자세함), <strong>지형(등고선)</strong>(산과 높이), <strong>흑백(판서용)</strong>(색이 옅어 그 위에 그리기 좋음), <strong>위성 사진</strong>. 배경마다 확대할 수 있는 한계가 달라, 덜 자세한 배경으로 바꾸면 확대가 자동으로 한 단계 물러납니다</li>
+  <li><strong>배경지도</strong>는 네 가지입니다 — <strong>일반 지도</strong>(길·건물 이름이 가장 자세함), <strong>지형(등고선)</strong>(산과 높이), <strong>흑백(판서용)</strong>(색이 옅어 그 위에 그리기 좋음), <strong>위성 사진</strong>. 배경마다 확대할 수 있는 한계가 달라, 덜 자세한 배경으로 바꾸면 확대가 자동으로 한 단계 물러납니다
+    <ul>
+      <li>배경지도 옆 <strong>🚲 자전거길</strong> 칸에서 자전거길을 <strong>어느 배경 위에나 겹쳐</strong> 볼 수 있습니다 — <strong>자전거도로</strong>(동네 자전거 전용도로·자전거 우선도로·보관대, CyclOSM), <strong>자전거 노선</strong>(국토종주처럼 이름이 붙은 긴 자전거길, Waymarked Trails), <strong>도로+노선</strong>(둘 다), <strong>자전거길 끔</strong> 중에서 고릅니다. 공개 지도(OpenStreetMap) 자료라 동네에 따라 빠진 길이 있을 수 있습니다. 고른 상태는 지도 파일에 저장되고 되돌리기도 됩니다. <strong>내 지도 이미지</strong> 위에는 겹치지 않습니다</li>
+    </ul>
+  </li>
   <li><strong>🖼️ 내 지도</strong>로 학교 배치도·교실 평면도·박물관 안내도 같은 PNG/JPG/WebP 이미지를 고르면, 그 이미지가 <strong>현재 보고 있는 지도 범위에 맞춰져 오프라인 배경</strong>으로 들어갑니다. 원본은 20MB 이하만 받고 긴 변 2400px 안으로 정리해 <code>.map</code> 파일에 함께 담습니다. 배경지도 선택에서 일반 지도와 내 지도 이미지를 오갈 수 있고 <strong>이미지 지우기</strong>로 제거합니다</li>
   <li><strong>📍 표시 추가</strong>를 누른 뒤 지도를 클릭하면 그 자리에 핀이 생기고 편집 풍선이 열립니다. <strong>이름</strong>(예: 우리 학교)과 <strong>메모</strong>(수업 설명·관찰 기록)를 적고 <strong>색 여섯 가지</strong> 중에서 고릅니다. 잘못 눌렀으면 <kbd>Esc</kbd>로 추가를 취소합니다
     <ul>
@@ -1248,7 +1252,7 @@ cd myOffice</code></pre>
   </li>
   <li><strong>🧹 지우기</strong>는 한꺼번에 정리하는 길입니다. <strong>주변 시설로 넣은 것만</strong>(직접 찍은 표시는 그대로 두고 주변 시설이 넣은 표시·반경 원만) 또는 <strong>모두 지우기</strong> 중에서 고릅니다. 지운 뒤에는 되돌릴 수 없으니 확인 창에서 개수를 보고 고르세요</li>
   <li><strong>↶ 되돌리기 · ↷ 다시 실행</strong>(<kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>·<kbd>Ctrl</kbd>+<kbd>Y</kbd>)으로 표시 추가·이동·삭제, 거리선·면적, 이름·색·메모·사진 변경, 발표 순서 바꾸기, 자료 들이기, 주변 시설 넣기, 위경도 격자·이름 보이기·표시 잇기·길찾기 설정과 켜고 끄기, 🧹 지우기까지 한 단계씩 되돌립니다. 이름 칸이나 편집 풍선 안에서는 <strong>글자 되돌리기</strong>가 먼저이고, 지도를 움직이거나 확대한 것은 단계로 쌓이지 않습니다. 주소를 좌표로 바꾸는 일처럼 여러 줄이 몇 분에 걸쳐 들어오는 작업은 <strong>통째로 한 단계</strong>입니다. 되돌리기 기록은 문서를 닫으면 사라집니다</li>
-  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시(지역·사진·발표 순서 포함)·거리선·면적 영역·위경도 격자와 이름 보이기·표시 잇기·길찾기 켜짐과 상세 설정, 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다
+  <li><kbd>Ctrl</kbd>+<kbd>S</kbd>로 저장하면 <strong><code>.map</code> 파일 하나</strong>가 만들어집니다. 중심 좌표·확대 단계·표시(지역·사진·발표 순서 포함)·거리선·면적 영역·위경도 격자와 이름 보이기·표시 잇기·자전거길 겹쳐 보기·길찾기 켜짐과 상세 설정, 사용자 지도 이미지가 함께 들어갑니다. 이미지를 넣은 지도는 그만큼 파일이 커질 수 있습니다
     <ul>
       <li><strong>아직 저장하지 않았어도</strong> 편집 내용은 잠시 뒤 작업공간에 자동으로 담겨, 실수로 새로고침하거나 창을 닫아도 <strong>다음에 열 때 그 지도 탭이 그대로 돌아옵니다.</strong> 표시를 찍기 전의 빈 새 지도도 마찬가지입니다. 설정의 <strong>자동 저장·복원</strong>을 끄면 이 사본도 남기지 않습니다(그때는 새로고침 전에 확인창만 뜹니다)</li>
     </ul>
@@ -1308,7 +1312,7 @@ cd myOffice</code></pre>
 </blockquote>
 
 <blockquote>
-  <p>배경지도는 <strong>OpenStreetMap</strong>(일반·지형)·<strong>CARTO</strong>(흑백)·<strong>Esri</strong>(위성)에서 받아 옵니다. 장소 이름 검색은 기본적으로 <strong>Nominatim</strong>(OpenStreetMap)을 쓰며, 설정하면 <strong>카카오 로컬 REST API</strong>를 먼저 사용합니다. 만들어진 그림에 출처가 함께 적히는 것은 배경지도의 이용 조건입니다.</p>
+  <p>배경지도는 <strong>OpenStreetMap</strong>(일반·지형)·<strong>CARTO</strong>(흑백)·<strong>Esri</strong>(위성)에서, 자전거길은 <strong>CyclOSM</strong>·<strong>Waymarked Trails</strong>에서 받아 옵니다. 장소 이름 검색은 기본적으로 <strong>Nominatim</strong>(OpenStreetMap)을 쓰며, 설정하면 <strong>카카오 로컬 REST API</strong>를 먼저 사용합니다. 만들어진 그림에 출처가 함께 적히는 것은 배경지도의 이용 조건입니다.</p>
 </blockquote>
 
 <h4>🎨 색칠 지도 (지역별 값으로 색칠하기)</h4>
