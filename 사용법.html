@@ -741,6 +741,8 @@ cd myOffice</code></pre>
 <tbody>
 <tr><td><strong>선택 항목</strong> (누른 자리에 항목이 있을 때)</td><td>편집(텍스트·수식·그래프·차트·표·수 모형·과학 계산) · 복사 · 잘라내기 · 붙여넣기 · 복제 · 앞으로 / 뒤로 / 맨 앞으로 / 맨 뒤로 · <strong>배경으로</strong>(그림) · 좌우 반전 · 상하 반전 · <strong>측정 / 측정 떼기</strong> · <strong>합성 / 합성 떼기</strong>(화살표) · <strong>변환</strong> · 분리 · 삭제</td></tr>
 <tr><td><strong>맞춤·간격</strong> (여러 개를 골랐을 때)</td><td>묶기 · 왼쪽 / 가운데 / 오른쪽 / 위 / 중간 / 아래 맞춤 · 가로 간격 · 세로 간격</td></tr>
+<tr><td><strong>발표 단계</strong> (항목을 골랐을 때)</td><td>N단계로 · N단계와 함께 · 차례로 매기기(여러 개) · 한 칸 앞 / 한 칸 뒤 · 단계 빼기 — 아래 <strong>단계 발표</strong> 참고</td></tr>
+<tr><td><strong>단계 발표</strong> (빈 곳)</td><td>발표 시작 / 발표 끝내기 · 이전 단계 · 다음 단계 · 단계 모두 빼기</td></tr>
 <tr><td><strong>보드 작업</strong></td><td>붙여넣기(누른 자리에) · <strong>특수문자</strong> · 이미지 · 수학·과학 · <strong>그래프</strong> · <strong>차트</strong> · <strong>주기율표</strong> · 배경 · 축소 / 100% / 확대 · 집중 도구 · 전체 지우기</td></tr>
 <tr><td><strong>교구·정리</strong></td><td>자 · 각도기 · 컴퍼스 · 15° 맞추기 · 손그림 정리 · 교구 치우기 (켜 둔 것은 눌린 상태로 보입니다)</td></tr>
 <tr><td><strong>출력·공유</strong></td><td>PNG 저장 · PDF 저장 · 인쇄 · 메모로</td></tr>
@@ -759,6 +761,32 @@ cd myOffice</code></pre>
   <li><strong>측정</strong>은 잴 수 있는 도형에서만 뜨고, 이미 붙여 두었으면 <strong>측정 떼기</strong>로 바뀝니다. <strong>변환</strong>은 변환 창을 열어 고른 도형에 바로 적용합니다</li>
   <li><strong>교구·정리</strong> 묶음은 빈 곳을 눌렀을 때 뜹니다(도형을 고른 상태에서는 선택 항목 메뉴가 대신 뜹니다)</li>
 </ul>
+
+<h4>단계 발표 (하나씩 보여 주기)</h4>
+
+<p>문제를 먼저 설명하고 <strong>보기 ①을 보여 주고 설명 → 보기 ②를 보여 주고 설명</strong>하는 식으로, 미리 써 둔 항목을 정한 차례대로 하나씩 드러냅니다(파워포인트의 '나타내기'와 같습니다).</p>
+
+<ol>
+  <li><strong>차례 정하기</strong> — 항목을 우클릭하면 <strong>발표 단계</strong> 묶음이 뜹니다.
+    <ul>
+      <li><strong>N단계로</strong>: 다른 항목들보다 한 차례 뒤에 나타나게 합니다. 보기마다 차례로 눌러 가면 1, 2, 3… 이 붙습니다</li>
+      <li><strong>N단계와 함께</strong>: 가장 늦은 단계와 같은 때 나타납니다(보기와 그 설명 글을 한 번에)</li>
+      <li><strong>차례로 매기기</strong>: 여러 개를 고른 채 누르면 <strong>위 줄부터, 한 줄 안에서는 왼쪽부터</strong> 하나씩 이어지는 단계가 됩니다. ①②/③④ 두 줄로 놓은 보기도 한 번에 매겨집니다</li>
+      <li><strong>한 칸 앞 / 한 칸 뒤 / 단계 빼기</strong>: 차례를 당기거나 미루고, 빼면 처음부터 늘 보입니다</li>
+      <li><strong>단계 모두 빼기</strong>: 빈 곳 우클릭 → <strong>단계 발표</strong> 묶음에서 보드 전체의 단계를 한 번에 없앱니다(한 번 묻고, <kbd>Ctrl</kbd>+<kbd>Z</kbd> 한 번이면 돌아옵니다)</li>
+      <li>단계를 붙인 항목은 편집 중 왼쪽 위에 <strong>보라색 번호표</strong>가 붙습니다(내보내기·인쇄·발표 화면에는 나오지 않습니다). 단계가 없는 항목(문제 글 등)은 처음부터 늘 보입니다</li>
+      <li>보기와 설명을 묶어(<kbd>Ctrl</kbd>+<kbd>G</kbd>) 두면 그룹 하나가 한 단계로 함께 나타납니다. 묶으면 그룹이 가장 이른 단계를 맡고, 풀면 조각들이 그 단계를 물려받습니다. 붙여 둔 <strong>측정값·합력</strong>은 따라 붙은 도형과 함께 나타납니다</li>
+    </ul>
+  </li>
+  <li><strong>발표하기</strong> — 도구막대의 <strong>단계 발표</strong> 버튼(길어지는 세 줄 그림)이나 빈 곳 우클릭 → <strong>단계 발표 → 발표 시작</strong>을 누르면 단계 항목이 모두 숨고 첫 화면이 됩니다. 화면 아래 가운데 넘기기 막대의 <strong>‹ / ›</strong> 나 키보드로 넘깁니다
+    <ul>
+      <li><kbd>PageDown</kbd>·<kbd>→</kbd>·<kbd>↓</kbd> 다음 단계, <kbd>PageUp</kbd>·<kbd>←</kbd>·<kbd>↑</kbd> 이전 단계, <kbd>Home</kbd> 첫 화면, <kbd>End</kbd> 모두 보이기, <kbd>Esc</kbd> 끝내기. 발표용 리모컨(프레젠터)은 대개 <kbd>PageDown</kbd>/<kbd>PageUp</kbd>을 보내므로 그대로 쓸 수 있습니다</li>
+      <li>발표 중에도 판서할 수 있습니다. 새로 쓴 판서는 단계 없이 늘 보입니다. 아직 안 보인 항목은 클릭·선택 상자·<kbd>Ctrl</kbd>+<kbd>A</kbd>에 잡히지 않습니다</li>
+      <li>편집 도구막대를 숨긴 채(우클릭 → 편집 도구막대 숨기기) 발표해도 넘기기 막대는 남습니다. 스포트라이트·화면 가리개와 함께 써도 됩니다</li>
+    </ul>
+  </li>
+  <li><strong>발표 중 저장·녹화</strong> — PNG·PDF·인쇄·<strong>메모로</strong>는 <strong>화면 그대로</strong> 담습니다(편집 중이면 전체, 발표 중이면 지금까지 보인 단계까지). 메모로 보낼 때는 그림과 별도로 <strong>모든 항목과 단계 번호</strong>가 함께 저장되므로, 메모에서 <strong>✏️ 화이트보드로</strong> 다시 열면 단계가 그대로 살아 있어 다음 수업에 바로 다시 발표할 수 있습니다. <strong>수업 리플레이</strong> 녹화도 화면에 보인 순서대로 기록되어, 재생할 때 보기가 하나씩 나타납니다</li>
+</ol>
 
 <h3>수업 리플레이 (판서 되감아 보기)</h3>
 

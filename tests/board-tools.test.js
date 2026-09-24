@@ -1022,6 +1022,7 @@ test("화이트보드는 새 도구를 교구·그래프·차트 접점에 배�
   // 합력은 클릭으로 고르지 않는다 — 테두리로 먼저 찾는 길과 빈 도형 속까지 넓혀 찾는 길 둘 다에서 빠진다.
   const itemAt = /const itemAt = \(p\) => \{([\s\S]*?)\n  \};/.exec(whiteboardSource);
   assert.ok(itemAt, "itemAt 을 찾지 못했다");
-  assert.match(itemAt[1], /if \(!isVectorSumItem\(it\) && hitTestBoardItem\(it, p, measureBoardText, tol, true\)\) return it;/);
-  assert.match(itemAt[1], /if \(isVectorSumItem\(it\) \|\| !hitTestBoardItem\(it, p, measureBoardText, tol\)\) continue;/);
+  // (shown 은 단계 발표 중 아직 안 보인 항목을 거르는 판정 — whiteboard-steps.test.js)
+  assert.match(itemAt[1], /if \(!isVectorSumItem\(it\) && shown\(it\) && hitTestBoardItem\(it, p, measureBoardText, tol, true\)\) return it;/);
+  assert.match(itemAt[1], /if \(isVectorSumItem\(it\) \|\| !shown\(it\) \|\| !hitTestBoardItem\(it, p, measureBoardText, tol\)\) continue;/);
 });

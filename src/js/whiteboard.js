@@ -79,6 +79,46 @@ function whiteboardGraphUsesManualY(spec){
     && Number.isFinite(Number(spec.yMin)) && Number.isFinite(Number(spec.yMax)));
 }
 
+/* ----- 단계별로 보이기(발표 단계) -----
+   맨 위 항목(그룹 포함)에 step:1,2,3… 을 붙여 두면 발표 중에 그 차례가 되어야 나타난다.
+   step 이 없거나 0 이면 늘 보인다. 번호는 띄엄띄엄이어도 된다 — 발표는 실제로 쓰인 번호만 차례로 밟는다.
+   발표 중인지·몇 단계까지 보였는지는 보기 상태라 파일·메모·되돌리기에는 들어가지 않는다. */
+const WB_STEP_MAX = 99;
+function whiteboardItemStep(item){
+  const step = Math.floor(Number(item && item.step));
+  return Number.isFinite(step) && step >= 1 ? Math.min(WB_STEP_MAX, step) : 0;
+}
+// 항목은 늘 사본으로 바꿔 끼운다(이전 되돌리기 단계 보호). 같은 값이면 원본을 그대로 돌려준다.
+function whiteboardWithStep(item, step){
+  if (!item) return item;
+  const next = Math.max(0, Math.min(WB_STEP_MAX, Math.floor(Number(step)) || 0));
+  if (whiteboardItemStep(item) === next && (next || item.step === undefined)) return item;
+  const copy = Object.assign({}, item);
+  if (next) copy.step = next; else delete copy.step;
+  return copy;
+}
+// 쓰인 단계 번호를 작은 것부터 한 번씩. stepOf 를 주면 측정값처럼 남을 따라가는 항목도 셈할 수 있다.
+function whiteboardStepValues(items, stepOf=whiteboardItemStep){
+  const seen = new Set();
+  for (const item of items || []){ const step = stepOf(item); if (step) seen.add(step); }
+  return [...seen].sort((a, b) => a - b);
+}
+/* 여러 개를 '차례로 매기기' 할 때의 읽는 순서: 위 줄부터, 한 줄 안에서는 왼쪽부터.
+   보기 ①②/③④ 처럼 두 줄로 놓은 것도 줄을 먼저 가른다 — 윗변만으로 줄 세우면 높이가 다른
+   보기끼리 순서가 뒤섞인다. 줄은 첫 항목 높이의 절반 안에 가운데가 들어오면 같은 줄로 본다. */
+function whiteboardReadingOrder(entries){
+  const list = (entries || []).filter((entry) => entry && entry.box)
+    .map((entry) => ({ entry, cx:entry.box.x + entry.box.w / 2, cy:entry.box.y + entry.box.h / 2, h:Math.max(1, entry.box.h) }))
+    .sort((a, b) => a.cy - b.cy || a.cx - b.cx);
+  const rows = [];
+  for (const it of list){
+    const row = rows[rows.length - 1];
+    if (row && Math.abs(it.cy - row.cy) <= row.h / 2) row.items.push(it);
+    else rows.push({ cy:it.cy, h:it.h, items:[it] });
+  }
+  return rows.flatMap((row) => row.items.sort((a, b) => a.cx - b.cx).map((it) => it.entry));
+}
+
 let _whiteboardInternalClipboard = null;
 function setWhiteboardInternalClipboard(value){
   const item = whiteboardClipboardItem(value);
@@ -964,7 +1004,8 @@ function renderWhiteboard(doc, host){
   const recordCommit = () => {
     syncMeasureItems();
     scheduleBoardRecovery();
-    if (doc.recorder && doc.recorder.active){ try { doc.recorder.capture(wb.items, wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage }); } catch(_){} }
+    captureRecording();
+    syncStepControls();
   };
   const HANDLE = 12;                                  // 크기조절 핸들 한 변 크기(클릭 판정에도 사용)
   // 8방향 핸들: hx/hy ∈ {0=왼/위, 0.5=가운데, 1=오른/아래}. 가운데(0.5,0.5) 제외.
@@ -1283,22 +1324,75 @@ function renderWhiteboard(doc, host){
   const vectorSumsFor = (target) => (target && target.mid
     ? wb.items.filter((item) => isVectorSumItem(item) && item.vectorSumOf.includes(target.mid)) : []);
 
+  /* ----- 단계별로 보이기(발표) — 상태와 보이는지 판정 -----
+     shown 은 '지금까지 몇 번째 단계까지 보였나'(0 = 단계 없는 항목만)이다. 탭을 다시 그려도 이어지게 문서에
+     붙이지만 스냅샷·메모·되돌리기에는 넣지 않는다(화면 배율과 같은 보기 상태). */
+  const stepView = doc.boardSteps || (doc.boardSteps = { active:false, shown:0 });
+  // 측정값·합력은 제 단계를 갖지 않고 따라 붙은 도형과 함께 나타난다 — 도형만 숨고 숫자가 떠 있으면 답이 새 나간다.
+  const followsOtherStep = (item) => isMeasureItem(item) || isVectorSumItem(item);
+  const stepOfItem = (item) => {
+    if (isMeasureItem(item)){ const target = measureTargetOf(item); return whiteboardItemStep(target || item); }
+    if (isVectorSumItem(item)){ const sources = vectorSumSources(item); return sources ? Math.max(...sources.map(whiteboardItemStep)) : 0; }
+    return whiteboardItemStep(item);
+  };
+  const stepValues = () => whiteboardStepValues(wb.items, stepOfItem);
+  // 되돌리기로 단계가 사라지는 등 개수가 줄면 여기서 한 번 맞춘다.
+  const stepLimit = () => {
+    const values = stepValues();
+    stepView.shown = Math.max(0, Math.min(stepView.shown, values.length));
+    return stepView.shown ? values[stepView.shown - 1] : 0;
+  };
+  // 판정 함수를 한 번 만들어 돌려쓴다 — 항목마다 단계 목록을 다시 세면 그릴 때마다 N² 이 된다.
+  const shownItemTest = () => {
+    if (!stepView.active) return () => true;
+    const limit = stepLimit();
+    return (item) => stepOfItem(item) <= limit;
+  };
+  const visibleItems = () => (stepView.active ? wb.items.filter(shownItemTest()) : wb.items);
+  // 녹화에는 지금 보이는 것만 남긴다 — 통째로 넘기면 재생 첫 화면에 아직 안 보인 보기·정답이 다 나온다.
+  const captureRecording = () => {
+    if (doc.recorder && doc.recorder.active){ try { doc.recorder.capture(visibleItems(), wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage }); } catch(_){} }
+  };
+  let syncStepControls = () => {};
+
   /* 합성에 쓰인 화살표는 끝점에 손잡이가 생겨 길이·방향을 끌어 바꿀 수 있다.
      (보통 화살표는 통째로 옮기기만 되므로, 합력을 붙인 화살표에만 이 손잡이를 보인다.) */
   const ARROW_TIP_GRAB = 13;
   const arrowTipAt = (p) => {
+    const shown = shownItemTest();
     for (let i = wb.items.length - 1; i >= 0; i--){
       const item = wb.items[i];
-      if (!item || item.type !== "arrow" || !item.mid || !vectorSumsFor(item).length) continue;
+      if (!item || item.type !== "arrow" || !item.mid || !shown(item) || !vectorSumsFor(item).length) continue;
       if (Math.hypot(p.x - item.x2, p.y - item.y2) <= ARROW_TIP_GRAB / view.scale) return item;
     }
     return null;
   };
   const drawVectorTipHandles = () => {
+    const shown = shownItemTest();
     for (const item of wb.items){
-      if (!item || item.type !== "arrow" || !item.mid || !vectorSumsFor(item).length) continue;
+      if (!item || item.type !== "arrow" || !item.mid || !shown(item) || !vectorSumsFor(item).length) continue;
       drawGearHandle(item.x2, item.y2, false);
     }
+  };
+  /* 편집 중에는 단계를 정한 항목 왼쪽 위에 보라색 번호표를 붙인다(선택 표시의 파랑과 가른다).
+     발표 중과 내보내기(PNG·PDF·인쇄·메모)에는 그리지 않는다 — gearHidden 이 내보내기 동안 켜진다. */
+  const drawStepBadges = () => {
+    if (stepView.active || gearHidden) return;
+    const r = 10 / view.scale;
+    ctx.save(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.setLineDash([]);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `700 ${11 / view.scale}px system-ui,"Malgun Gothic",sans-serif`;
+    for (const it of wb.items){
+      const step = !it || it === editingTextItem || followsOtherStep(it) ? 0 : whiteboardItemStep(it);
+      if (!step) continue;
+      const b = boundsOf(it); if (!b) continue;
+      const x = b.x - r * .3, y = b.y - r * .3;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#7c3aed"; ctx.fill();
+      ctx.lineWidth = 1.5 / view.scale; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+      ctx.fillStyle = "#ffffff"; ctx.fillText(String(step), x, y + .5 / view.scale);
+    }
+    ctx.restore();
   };
 
   const drawGear = () => {
@@ -1324,11 +1418,13 @@ function renderWhiteboard(doc, host){
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.clearRect(0, 0, W, H);
     ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.x, dpr * view.y);
+    const shown = shownItemTest();
     for (const it of wb.items){
-      if (it === editingTextItem) continue;
+      if (it === editingTextItem || !shown(it)) continue;
       // 측정 라벨은 그릴 때마다 대상 도형에서 값을 다시 재 끌고 있는 동안에도 숫자가 살아 움직인다.
       drawItem(isMeasureItem(it) ? (liveMeasureItem(it) || it) : isVectorSumItem(it) ? (liveVectorSumItem(it) || it) : it);
     }
+    drawStepBadges();
     const s = wb.selected;                            // 선택 표시(점선 테두리, 이미지는 8핸들). 내보낼 땐 잠시 해제하므로 안 박힘.
     const sb = s && boundsOf(s);
     if (s && sb){
@@ -1469,7 +1565,9 @@ function renderWhiteboard(doc, host){
   const ungroupSelected = () => {
     const selected = wb.selected;
     if (!selected || selected.type !== "group") return;
-    const idx = wb.items.indexOf(selected), children = ungroupBoardItem(selected, measureBoardText);
+    const idx = wb.items.indexOf(selected), groupStep = whiteboardItemStep(selected);
+    // 푼 조각은 그룹의 발표 단계를 그대로 물려받는다(그룹에 단계가 없으면 조각도 늘 보인다).
+    const children = ungroupBoardItem(selected, measureBoardText).map((child) => whiteboardWithStep(child, groupStep));
     if (idx < 0 || !children.length) return;
     wb.items.splice(idx, 1, ...children); wb.selected = null;
     // 푼 조각들은 고른 채로 둔다 — 풀자마자 한꺼번에 옮기거나 다시 묶을 수 있게.
@@ -1541,16 +1639,17 @@ function renderWhiteboard(doc, host){
   // 가장 작은(안쪽) 것을 고른다 — 그리는 순서와 상관없이 안쪽 상자를 누르면 안쪽 상자가 잡힌다.
   const itemAt = (p) => {
     const tol = 7 / view.scale;
+    const shown = shownItemTest();                     // 발표 중 아직 안 보인 항목은 잡히지 않는다
     // 합력은 원본 화살표에서 계산해 덮어 그리는 그림이라 고르지 않는다 — 그러지 않으면
     // 평행사변형 넓이만 한 상자가 그 안의 화살표를 전부 가려 잡을 수 없다(떼기는 화살표 쪽 메뉴에서).
     for (let i = wb.items.length - 1; i >= 0; i--){
       const it = wb.items[i];
-      if (!isVectorSumItem(it) && hitTestBoardItem(it, p, measureBoardText, tol, true)) return it;
+      if (!isVectorSumItem(it) && shown(it) && hitTestBoardItem(it, p, measureBoardText, tol, true)) return it;
     }
     let best = null, bestArea = Infinity;
     for (let i = wb.items.length - 1; i >= 0; i--){
       const it = wb.items[i];
-      if (isVectorSumItem(it) || !hitTestBoardItem(it, p, measureBoardText, tol)) continue;
+      if (isVectorSumItem(it) || !shown(it) || !hitTestBoardItem(it, p, measureBoardText, tol)) continue;
       const area = Math.abs(it.x2 - it.x1) * Math.abs(it.y2 - it.y1);
       if (area < bestArea){ best = it; bestArea = area; }   // 넓이가 같으면 위에 그린 것
     }
@@ -1769,7 +1868,9 @@ function renderWhiteboard(doc, host){
       const left = Math.min(box.x1, box.x2), right = Math.max(box.x1, box.x2);
       const top = Math.min(box.y1, box.y2), bottom = Math.max(box.y1, box.y2);
       // 상자 안에 통째로 들어온 항목만 고른다(걸치기만 한 큰 배경 그림까지 딸려 오지 않게).
+      const shown = shownItemTest();
       const inside = wb.items.filter((it) => {
+        if (!shown(it)) return false;
         const b = boundsOf(it);
         return b && b.x >= left && b.y >= top && b.x + b.w <= right && b.y + b.h <= bottom;
       });
@@ -1832,6 +1933,10 @@ function renderWhiteboard(doc, host){
     if (sel.length < 2) return false;
     const group = packSelection(sel);
     if (!group) return false;
+    // 발표 단계는 맨 위 항목만 본다 — 묶으면 그룹이 가장 이른 단계를 맡고 속 항목의 번호는 뗀다.
+    const groupStep = sel.map(whiteboardItemStep).filter(Boolean);
+    group.items = group.items.map((child) => whiteboardWithStep(child, 0));
+    if (groupStep.length) group.step = Math.min(...groupStep);
     // 사본은 JSON 으로 떠서 <img> 가 빠져 있다 — 이미 불러온 원본 그림을 같은 src 끼리 다시 붙여 바로 보이게 한다.
     const loaded = new Map();
     eachBoardImage(sel, (it) => { const src = it.src || (it.img && it.img.__boardSrc); if (src && it.img) loaded.set(src, it.img); });
@@ -1979,7 +2084,8 @@ function renderWhiteboard(doc, host){
   const presetMultiSelected = (width) => updateMultiSelected((it) => presetBoardItem(it, width));
   const selectAllItems = () => {
     if (wb.tool !== "select") setTool("select");
-    setSelection(wb.items.filter((it) => isSelectableBoardItem(it)));
+    const shown = shownItemTest();
+    setSelection(wb.items.filter((it) => isSelectableBoardItem(it) && shown(it)));
   };
   /* 맞춤·간격. 기준은 고른 것 전체를 감싸는 상자다(PowerPoint 의 '선택한 개체 맞춤'과 같다).
      글자 폭은 캔버스 글꼴로 잰 값이라 화면에 보이는 가장자리와 같다. */
@@ -3041,6 +3147,7 @@ function renderWhiteboard(doc, host){
       flipX:existing.flipX, flipY:existing.flipY
     });
     if (Number(existing.rotation)) next.rotation = existing.rotation;   // 돌려 둔 그래프·차트는 고쳐도 기운 채로
+    if (whiteboardItemStep(existing)) next.step = whiteboardItemStep(existing);   // 고쳐도 발표 차례는 그대로
     wb.items[index] = next; wb.selected = next; redraw(); history.commit(); recordCommit();
     return true;
   };
@@ -3222,6 +3329,7 @@ function renderWhiteboard(doc, host){
   doc.saveBoardPng = () => exportPng({ notify:true });
   // 메모창으로 보내기: 보이는 그림(PNG)과 편집용 벡터 스냅샷을 함께 넘겨,
   // 메모 이미지 블록의 "✏️ 화이트보드로"로 다시 편집할 수 있게 한다.
+  // 발표 단계: 그림은 화면 그대로(편집 중=전체, 발표 중=지금까지 보인 단계), 스냅샷은 늘 전체와 단계 번호를 담는다.
   const sendToMemo = () => {
     if (typeof window.addBoardToScratchpad !== "function"){
       if (typeof toast === "function") toast("메모창을 열 수 없어요.", 2200, { type:"error" });
@@ -3229,6 +3337,8 @@ function renderWhiteboard(doc, host){
     }
     if (!wb.items.length){ if (typeof toast === "function") toast("보드가 비어 있어요.", 2000); return; }
     const snapshot = boardSnapshot();                    // 선택 해제 전에 떠도 모델은 같다
+    const stepTotal = stepView.active ? stepValues().length : 0;
+    const partialSteps = stepTotal && stepLimit() < stepValues()[stepTotal - 1] ? stepView.shown : -1;
     withBoardExport(() => canvas.toBlob(async (blob) => {
       if (!blob){ if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2200, { type:"error" }); return; }
       try {
@@ -3238,6 +3348,9 @@ function renderWhiteboard(doc, host){
           blockId:doc.memoBlockId                        // 있으면 그 블록을 제자리에서 교체
         });
         if (result && result.blockId) doc.memoBlockId = result.blockId;
+        if (result && partialSteps >= 0 && typeof toast === "function"){
+          toast(`그림은 지금 보이는 ${partialSteps}/${stepTotal}단계까지예요. 메모에서 화이트보드로 다시 열면 모든 단계가 그대로 있어요.`, 3600);
+        }
       } catch(error){
         console.error(error);
         if (typeof toast === "function") toast("메모로 보내지 못했어요.", 2200, { type:"error" });
@@ -3321,6 +3434,10 @@ function renderWhiteboard(doc, host){
     chart: '<path d="M4 4v16h16"/><path d="M7.5 18v-5M12 18V8.5M16.5 18v-3"/>',
     measure: '<path d="M4 15.5h16"/><path d="M4 12.5v3M9 11v4.5M14 11v4.5M20 12.5v3"/><path d="M6 8.5h12M6 6.5v4M18 6.5v4"/>',
     transform: '<path d="M4 20V9l6-5v11z"/><path d="M20 20V9l-6-5v11z" stroke-dasharray="3 2.5"/><path d="M12 3.5v17"/>',
+    // 발표 단계: 길어지는 세 줄(차례로 나타남) + 재생 삼각형
+    steps: '<path d="M4 6h7M4 12h11M4 18h15"/><path d="m15.5 3.5 4.5 2.8-4.5 2.8z"/>',
+    stepPrev: '<path d="m14.5 6-6 6 6 6"/>',
+    stepNext: '<path d="m9.5 6 6 6-6 6"/>',
     vectorsum: '<path d="M4 20 14 10M14 10h-4.5M14 10v4.5"/><path d="M4 20 9 7M9 7 7 10.5M9 7l3 2" stroke-dasharray="3 2.5"/><path d="m14 10 5-6M19 4h-4.5M19 4v4.5"/>',
     /* 지도·환율 버튼은 이모지(🗺️·💱)로 두면 안 된다 — icons.js 가 앱 UI 의 색상 이모지를 걷어내는데
        대응하는 단색 SVG 가 없으면 글자만 사라져 빈 버튼이 된다. 그래서 여기에 직접 그려 둔다. */
@@ -3505,6 +3622,109 @@ function renderWhiteboard(doc, host){
   };
   const grp = () => { const g = document.createElement("span"); g.className = "wb-group"; return g; };
 
+  // ----- 단계별로 보이기(발표) — 차례 정하기와 넘기기 -----
+  // 단계를 붙일 대상: 여러 개 선택이면 그 전부, 아니면 고른 한 개. 측정값·합력은 도형을 따라가므로 뺀다.
+  const stepTargets = () => {
+    const many = liveMultiSel();
+    return (many.length ? many : wb.selected ? [wb.selected] : []).filter((it) => it && !followsOtherStep(it));
+  };
+  // 고른 것 말고 나머지에서 가장 늦은 단계 — '새 단계'는 그 다음, '함께'는 그 번호다.
+  const lastOtherStep = (targets) => {
+    const picked = new Set(targets);
+    return wb.items.reduce((max, it) => picked.has(it) || followsOtherStep(it) ? max : Math.max(max, whiteboardItemStep(it)), 0);
+  };
+  // [[항목, 단계]] 를 한 번에 바꿔 끼우고 되돌리기는 한 단계로 남긴다.
+  const applySteps = (pairs) => {
+    const replaced = new Map();
+    for (const [item, step] of pairs){
+      const next = whiteboardWithStep(item, step), idx = wb.items.indexOf(item);
+      if (next === item || idx < 0) continue;
+      wb.items[idx] = next; replaced.set(item, next);
+    }
+    if (!replaced.size) return false;
+    if (wb.selected && replaced.has(wb.selected)) wb.selected = replaced.get(wb.selected);
+    if (multiSel.length) multiSel = multiSel.map((it) => replaced.get(it) || it);
+    redraw(); history.commit(); recordCommit();
+    return true;
+  };
+  const stepToast = (text) => { if (typeof toast === "function") toast(text, 1800); };
+  const assignNewStep = () => {
+    const targets = stepTargets(); if (!targets.length) return;
+    const step = Math.min(WB_STEP_MAX, lastOtherStep(targets) + 1);
+    applySteps(targets.map((it) => [it, step]));
+    stepToast(`${step}단계로 정했어요. 발표할 때 ${step}번째로 나타나요.`);
+  };
+  const assignJoinStep = () => {
+    const targets = stepTargets(), step = lastOtherStep(targets);
+    if (!targets.length || !step) return;
+    applySteps(targets.map((it) => [it, step]));
+    stepToast(`${step}단계와 함께 나타나요.`);
+  };
+  const shiftSteps = (delta) => {
+    const targets = stepTargets(); if (!targets.length) return;
+    applySteps(targets.map((it) => {
+      const step = whiteboardItemStep(it);
+      return [it, step ? Math.max(1, Math.min(WB_STEP_MAX, step + delta)) : (delta > 0 ? 1 : 0)];
+    }));
+  };
+  const clearSteps = () => {
+    const targets = stepTargets();
+    if (applySteps(targets.map((it) => [it, 0]))) stepToast("단계를 뺐어요. 이제 처음부터 늘 보여요.");
+  };
+  // 여러 개를 읽는 순서(위 줄부터, 왼쪽부터)대로 하나씩 이어지는 단계로 — 보기 ①②③④ 를 한 번에.
+  const assignStepsInOrder = () => {
+    const targets = stepTargets(); if (targets.length < 2) return;
+    const ordered = whiteboardReadingOrder(targets.map((it) => ({ item:it, box:boundsOf(it) }))).map((entry) => entry.item);
+    const start = lastOtherStep(targets) + 1;
+    applySteps(ordered.map((it, i) => [it, Math.min(WB_STEP_MAX, start + i)]));
+    stepToast(`${ordered.length}개를 ${start}~${Math.min(WB_STEP_MAX, start + ordered.length - 1)}단계로 차례대로 정했어요.`);
+  };
+  // 보이는 단계가 바뀌면 숨은 항목에 걸린 선택은 푼다(보이지 않는 걸 옮기거나 지우지 않게).
+  const dropHiddenSelection = () => {
+    const shown = shownItemTest();
+    if (wb.selected && !shown(wb.selected)) wb.selected = null;
+    if (multiSel.length) multiSel = multiSel.filter(shown);
+  };
+  const setStepShown = (shown) => {
+    const total = stepValues().length, next = Math.max(0, Math.min(total, shown));
+    if (next === stepView.shown) return false;
+    stepView.shown = next; dropHiddenSelection();
+    redraw(); captureRecording(); syncStepControls();
+    return true;
+  };
+  const stepBy = (delta) => {
+    if (!stepView.active) return;
+    if (!setStepShown(stepView.shown + delta)) stepToast(delta > 0 ? "마지막 단계예요. Esc 로 발표를 끝낼 수 있어요." : "첫 화면이에요.");
+  };
+  const startSteps = () => {
+    if (!stepValues().length){
+      if (typeof toast === "function") toast("단계를 정한 항목이 없어요. 항목을 우클릭해 '발표 단계'에서 나타날 차례를 정하세요.", 3400);
+      return;
+    }
+    stepView.active = true; stepView.shown = 0; dropHiddenSelection();
+    redraw(); captureRecording(); syncStepControls();
+    if (typeof toast === "function") toast("단계 발표를 시작했어요. PageDown·→ 다음, PageUp·← 이전, Esc 끝내기.", 3000);
+  };
+  const stopSteps = () => {
+    if (!stepView.active) return;
+    stepView.active = false; stepView.shown = 0;
+    redraw(); captureRecording(); syncStepControls();
+    stepToast("단계 발표를 끝냈어요. 모든 항목이 다시 보여요.");
+  };
+  const toggleSteps = () => { if (stepView.active) stopSteps(); else startSteps(); };
+  // 보드 전체의 단계를 한 번에 뗀다. 수업 준비를 통째로 지우는 일이라 한 번 묻고, 되돌리기 한 번이면 돌아온다.
+  const clearAllSteps = () => {
+    const stepped = wb.items.filter((it) => it && !followsOtherStep(it) && whiteboardItemStep(it));
+    if (!stepped.length) return;
+    const run = () => {
+      if (stepView.active){ stepView.active = false; stepView.shown = 0; }   // 번호가 없어지면 발표할 것도 없다
+      if (applySteps(stepped.map((it) => [it, 0]))) stepToast(`${stepped.length}개 항목의 단계를 모두 뺐어요. Ctrl+Z 로 되돌릴 수 있어요.`);
+      else syncStepControls();
+    };
+    if (typeof confirmDialog === "function") confirmDialog(`단계가 붙은 ${stepped.length}개 항목의 단계를 모두 뺄까요?`, "모두 빼기", "취소").then((ok) => { if (ok) run(); });
+    else run();
+  };
+
   // ----- 집중 도구(스포트라이트·화면 가리개) -----
   const focusControls = document.createElement("div"); focusControls.className = "wb-focus-controls"; focusControls.hidden = true;
   const focusFrame = document.createElement("div"); focusFrame.className = "wb-focus-frame";
@@ -3636,6 +3856,53 @@ function renderWhiteboard(doc, host){
   const contextDistributeYBtn=contextAction("세로 간격","세로 간격 고르게 (세 개 이상)","wb-context-align",()=>distributeMultiSelected("y"));
   contextAlignActions.append(...contextAlignBtns,contextDistributeXBtn,contextDistributeYBtn); contextAlignSection.appendChild(contextAlignActions);
 
+  // 고른 항목이 발표 때 몇 번째로 나타날지 정한다(한 개·여러 개 모두).
+  const contextStepSection=makeContextSection("발표 단계","wb-context-step-section");
+  const contextStepInfo=document.createElement("div"); contextStepInfo.className="wb-context-target wb-context-step-info";
+  const contextStepActions=document.createElement("div"); contextStepActions.className="wb-context-actions wb-context-step-actions";
+  const contextStepNewBtn=contextAction("새 단계","다른 항목보다 한 차례 뒤에 나타나게","wb-context-step",assignNewStep);
+  const contextStepJoinBtn=contextAction("함께","가장 늦은 단계와 같은 때 나타나게","wb-context-step",assignJoinStep);
+  const contextStepEarlierBtn=contextAction("한 칸 앞","한 단계 더 일찍 나타나게","wb-context-step",()=>shiftSteps(-1));
+  const contextStepLaterBtn=contextAction("한 칸 뒤","한 단계 더 늦게 나타나게","wb-context-step",()=>shiftSteps(1));
+  const contextStepOrderBtn=contextAction("차례로 매기기","고른 항목을 위 줄부터·왼쪽부터 하나씩 이어지는 단계로","wb-context-step",assignStepsInOrder);
+  const contextStepClearBtn=contextAction("단계 빼기","단계를 없애 처음부터 늘 보이게","wb-context-step",clearSteps);
+  contextStepActions.append(contextStepNewBtn,contextStepJoinBtn,contextStepOrderBtn,contextStepEarlierBtn,contextStepLaterBtn,contextStepClearBtn);
+  contextStepSection.append(contextStepInfo,contextStepActions);
+  // 아무것도 안 고른 우클릭: 발표 시작·넘기기.
+  const contextShowSection=makeContextSection("단계 발표","wb-context-show-section");
+  const contextShowActions=document.createElement("div"); contextShowActions.className="wb-context-actions wb-context-show-actions";
+  const contextShowToggleBtn=contextAction("발표 시작","정한 단계대로 하나씩 보여 주기 시작","wb-context-show",toggleSteps);
+  const contextShowPrevBtn=contextAction("이전 단계","이전 단계로 (PageUp·←)","wb-context-show",()=>stepBy(-1));
+  const contextShowNextBtn=contextAction("다음 단계","다음 단계 보이기 (PageDown·→)","wb-context-show",()=>stepBy(1));
+  const contextShowClearBtn=contextAction("단계 모두 빼기","보드 전체 항목의 단계를 한 번에 빼기","wb-context-show wb-context-danger",clearAllSteps);
+  contextShowActions.append(contextShowToggleBtn,contextShowPrevBtn,contextShowNextBtn,contextShowClearBtn); contextShowSection.appendChild(contextShowActions);
+  const syncContextStepMenu=(keepMulti)=>{
+    const targets=stepTargets(), steps=targets.map(whiteboardItemStep);
+    contextStepSection.hidden=!targets.length;
+    if(targets.length){
+      const distinct=[...new Set(steps)].sort((a,b)=>a-b);
+      contextStepInfo.textContent=distinct.length>1?`여러 단계 (${distinct.map(step=>step||"없음").join("·")})`
+        :distinct[0]?`${distinct[0]}단계에 나타남`:"단계 없음 — 처음부터 보임";
+      const last=lastOtherStep(targets), next=Math.min(WB_STEP_MAX,last+1);
+      contextStepNewBtn.textContent=`${next}단계로`;
+      contextStepNewBtn.title=`${next}단계로 — 다른 항목들보다 한 차례 뒤에 나타나게`; contextStepNewBtn.setAttribute("aria-label",contextStepNewBtn.title);
+      contextStepJoinBtn.hidden=!last; contextStepJoinBtn.textContent=`${last}단계와 함께`;
+      contextStepJoinBtn.title=`${last}단계와 같은 때 나타나게`; contextStepJoinBtn.setAttribute("aria-label",contextStepJoinBtn.title);
+      contextStepOrderBtn.hidden=!keepMulti||targets.length<2;
+      contextStepEarlierBtn.disabled=!steps.some(step=>step>1); contextStepLaterBtn.disabled=steps.every(step=>step>=WB_STEP_MAX);
+      contextStepClearBtn.disabled=!steps.some(Boolean);
+    }
+    const total=stepValues().length;
+    contextShowToggleBtn.textContent=stepView.active?"발표 끝내기":"발표 시작";
+    contextShowToggleBtn.title=stepView.active?"단계 발표 끝내기 (Esc) — 모든 항목을 다시 보이기":"정한 단계대로 하나씩 보여 주기 시작";
+    contextShowToggleBtn.setAttribute("aria-label",contextShowToggleBtn.title);
+    contextShowToggleBtn.classList.toggle("active",stepView.active);
+    contextShowToggleBtn.disabled=!stepView.active&&!total;
+    contextShowPrevBtn.hidden=!stepView.active; contextShowNextBtn.hidden=!stepView.active;
+    contextShowClearBtn.disabled=!total;
+    contextShowPrevBtn.disabled=stepView.shown<=0; contextShowNextBtn.disabled=stepView.shown>=total;
+  };
+
   const contextBoardSection=makeContextSection("보드 작업","wb-context-board");
   const contextBoardActions=document.createElement("div"); contextBoardActions.className="wb-context-actions";
   const contextPasteBoardBtn=contextAction("붙여넣기","복사한 항목을 이 위치에 붙여넣기","",()=>pasteInternalClipboardAt(contextMenuBoardPoint));
@@ -3738,7 +4005,7 @@ function renderWhiteboard(doc, host){
   contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
   contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
   contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
-  focusContextMenu.append(focusContextSection,contextItemSection,contextAlignSection,contextBoardSection,contextGearSection,contextOutputSection,contextRecordSection,contextToolbarSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
+  focusContextMenu.append(focusContextSection,contextItemSection,contextAlignSection,contextStepSection,contextShowSection,contextBoardSection,contextGearSection,contextOutputSection,contextRecordSection,contextToolbarSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
 
   function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
   function onFocusContextMenu(e){
@@ -3820,6 +4087,8 @@ function renderWhiteboard(doc, host){
       contextAlignSection.hidden=false;
       contextDistributeXBtn.disabled=multiSel.length<3; contextDistributeYBtn.disabled=multiSel.length<3;
     }
+    syncContextStepMenu(keepMulti);
+    contextShowSection.hidden=!!selected||keepMulti;
     syncRecordButtons();
     for(const position in contextPositionBtns){
       const active=position===curPos; contextPositionBtns[position].classList.toggle("active",active); contextPositionBtns[position].setAttribute("aria-pressed",String(active));
@@ -6081,6 +6350,35 @@ function renderWhiteboard(doc, host){
   focusToolBtn.setAttribute("aria-controls",focusPanel.id); focusToolBtn.setAttribute("aria-expanded","false"); focusToolBtn.setAttribute("aria-pressed",String(focus.active));
   focusGroup.appendChild(focusToolBtn);
 
+  // ----- 단계 발표: 도구막대 단추 + 발표 중 화면 아래 넘기기 막대 -----
+  // 넘기기 막대는 stage 안에 두어 전체화면에서도 보이고, 도구막대를 숨긴 채 발표해도 조작할 수 있다.
+  const stepsGroup = grp(); stepsGroup.classList.add("wb-toolvis-steps");
+  const stepsToolBtn = mkIconBtn("steps", "단계 발표 — 정한 차례대로 하나씩 보여 줍니다 (항목 우클릭 → 발표 단계)", "wb-act wb-steps-toggle", toggleSteps);
+  stepsToolBtn.setAttribute("aria-pressed", "false");
+  stepsGroup.appendChild(stepsToolBtn);
+  const stepHud = document.createElement("div"); stepHud.className = "wb-step-hud"; stepHud.hidden = true;
+  stepHud.setAttribute("role", "toolbar"); stepHud.setAttribute("aria-label", "단계 발표");
+  const stepHudPrev = mkIconBtn("stepPrev", "이전 단계 (PageUp·←)", "wb-step-nav", () => stepBy(-1));
+  const stepHudCount = document.createElement("span"); stepHudCount.className = "wb-step-count"; stepHudCount.setAttribute("aria-live", "polite");
+  const stepHudNext = mkIconBtn("stepNext", "다음 단계 (PageDown·→)", "wb-step-nav", () => stepBy(1));
+  const stepHudEnd = mkBtn("끝내기", "단계 발표 끝내기 (Esc)", "wb-step-end", stopSteps);
+  // 막대를 눌러도 캔버스 그리기·선택이 시작되지 않게 한다.
+  stepHud.addEventListener("pointerdown", (e) => e.stopPropagation());
+  stepHud.append(stepHudPrev, stepHudCount, stepHudNext, stepHudEnd); stage.appendChild(stepHud);
+  syncStepControls = () => {
+    const total = stepValues().length;
+    if (stepView.active) stepLimit();                 // 되돌리기 등으로 단계가 줄었으면 먼저 맞춘다
+    stepHud.hidden = !stepView.active;
+    stepHudCount.textContent = `${stepView.shown} / ${total}`;
+    stepHudCount.title = stepView.shown ? `${total}단계 중 ${stepView.shown}단계까지 보이는 중` : "아직 단계 항목이 하나도 안 보이는 첫 화면";
+    stepHudPrev.disabled = stepView.shown <= 0; stepHudNext.disabled = stepView.shown >= total;
+    stepsToolBtn.classList.toggle("active", stepView.active);
+    stepsToolBtn.setAttribute("aria-pressed", String(stepView.active));
+    const title = stepView.active ? `단계 발표 끝내기 (Esc) — 지금 ${stepView.shown}/${total}단계`
+      : total ? `단계 발표 — ${total}단계를 차례대로 하나씩 보여 줍니다` : "단계 발표 — 항목을 우클릭해 '발표 단계'에서 나타날 차례를 먼저 정하세요";
+    stepsToolBtn.title = title; stepsToolBtn.setAttribute("aria-label", title);
+  };
+
   // ----- 교구(자·각도기·컴퍼스)와 손그림 정리 -----
   const gearGroup = grp();
   const rulerBtn = mkIconBtn("ruler", "자 — 대고 그으면 곧게 그려지고 cm 눈금이 보입니다 (길이 2~40cm 조절)", "wb-act wb-gear wb-toolvis-ruler", () => {
@@ -6205,13 +6503,13 @@ function renderWhiteboard(doc, host){
   function toggleRecord(){
     if (typeof LessonRecorder !== "function"){ if (typeof toast === "function") toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
     if (doc.recorder && doc.recorder.active){
-      const lesson = doc.recorder.stop(wb.items, wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
+      const lesson = doc.recorder.stop(visibleItems(), wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
       doc.recorder = null;
       syncRecordButtons();
       if (lesson && lesson.keyframes.length > 1 && typeof finishLessonRecording === "function") finishLessonRecording(lesson, doc.name);
       else if (typeof toast === "function") toast("녹화된 판서가 없어요.", 2000);
     } else {
-      doc.recorder = LessonRecorder(wb.items, wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
+      doc.recorder = LessonRecorder(visibleItems(), wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
       syncRecordButtons();
       if (typeof toast === "function") toast("녹화를 시작했어요. 판서한 뒤 ■ 정지를 누르면 리플레이가 만들어져요.", 3000);
     }
@@ -6274,8 +6572,9 @@ function renderWhiteboard(doc, host){
   posGroup.appendChild(dragHandle);
   applyPos(curPos);
 
-  tools.append(posGroup, toolGroup, colorGroup, bgGroup, widthGroup, textSizeGroup, zoomGroup, focusGroup, gearGroup, imgGroup, actGroup, exportGroup, recGroup);
+  tools.append(posGroup, toolGroup, colorGroup, bgGroup, widthGroup, textSizeGroup, zoomGroup, focusGroup, stepsGroup, gearGroup, imgGroup, actGroup, exportGroup, recGroup);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function"){ window.MNI18N.translateTree(tools); window.MNI18N.translateTree(bgPanel); window.MNI18N.translateTree(focusPanel); }
+  syncStepControls();
   // 열면 선택·이동 도구가 기본 활성 + 현재 판서를 기준점으로. 펜 색은 배경에 묻히지 않는 쪽으로 시작한다
   // (칠판 배경으로 저장해 둔 보드를 다시 열었을 때 검정 펜으로 시작하면 그어도 아무것도 안 보인다).
   const startInk = (typeof boardInkForBackground === "function" && boardInkForBackground(wb.bg, "#111111")) || "#111111";
@@ -6334,6 +6633,14 @@ function renderWhiteboard(doc, host){
       e.preventDefault(); e.stopPropagation();
       const step = e.shiftKey ? 10 : 1;
       nudgeSelection(e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0, e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0);
+    } else if (stepView.active && !e.altKey && focusContextMenu.hidden && !(ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable))
+      && ["PageDown", "PageUp", "ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)){
+      // 단계 발표 넘기기. 발표용 리모컨(프레젠터)은 대개 PageDown/PageUp 을 보낸다.
+      // 화살표는 고른 항목이 없을 때만 여기로 온다 — 고른 게 있으면 위에서 항목 옮기기가 먼저다.
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === "Home") setStepShown(0);
+      else if (e.key === "End") setStepShown(stepValues().length);
+      else stepBy(/^(PageDown|ArrowRight|ArrowDown)$/.test(e.key) ? 1 : -1);
     } else if ((e.key === "Delete" || e.key === "Backspace") && liveMultiSel().length){   // 여러 개 한꺼번에 삭제
       e.preventDefault(); e.stopPropagation();
       deleteMultiSelected();
@@ -6346,6 +6653,9 @@ function renderWhiteboard(doc, host){
       e.preventDefault(); e.stopPropagation();
       gear.ruler = null; gear.protractor = null; gear.compass = null;
       syncGearButtons(); redraw();
+    } else if (e.key === "Escape" && stepView.active){                             // 단계 발표 끝내기
+      e.preventDefault(); e.stopPropagation();
+      stopSteps();
     }
   };
   const onKeyUp = (e) => {
@@ -6396,6 +6706,7 @@ if (typeof module !== "undefined" && module.exports){
     whiteboardEducationCatalog, whiteboardSpecialCharGroups, normalizeWhiteboardRecentSymbols, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
     whiteboardStencilSvg, whiteboardStencilGroup, whiteboardVectorGroupSvg, whiteboardFormulaSvg, whiteboardSvgDataUrl,
     whiteboardClampView, whiteboardZoomAt,
+    whiteboardItemStep, whiteboardWithStep, whiteboardStepValues, whiteboardReadingOrder,
     normalizeWhiteboardFocusState, whiteboardFocusGeometry, whiteboardFocusAllowsPoint, whiteboardFlashlightGeometry
   };
 }

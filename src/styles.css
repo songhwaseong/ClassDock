@@ -3052,6 +3052,20 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .wb-curtain-handle{width:46px;height:24px;border-radius:999px;background:#2563eb;color:#fff;border-color:#fff;font-size:18px;letter-spacing:2px}
   .wb-focus-toggle{font-size:18px;line-height:1}
   .wb-focus-toggle.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  /* 단계 발표 — 도구막대 단추와 발표 중 화면 아래 가운데의 넘기기 막대(스포트라이트 어둠 위에 뜬다) */
+  .wb-steps-toggle.active{background:#7c3aed;color:#fff;border-color:#7c3aed}
+  .wb-step-hud{position:absolute;z-index:12;left:50%;bottom:14px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:4px;
+    border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(15,23,42,.72);color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.28);
+    opacity:.55;transition:opacity .15s ease;user-select:none}
+  .wb-step-hud:hover,.wb-step-hud:focus-within{opacity:1}
+  .wb-step-hud[hidden]{display:none}
+  .wb-step-hud button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-width:30px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:inherit;font:inherit;font-size:12px;cursor:pointer}
+  .wb-step-hud button:hover:not(:disabled),.wb-step-hud button:focus-visible{background:rgba(255,255,255,.16);outline:none}
+  .wb-step-hud button:disabled{opacity:.35;cursor:default}
+  .wb-step-hud .wb-icon{width:18px;height:18px}
+  .wb-step-count{min-width:48px;text-align:center;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+  .wb-step-end{border-left:1px solid rgba(255,255,255,.2)!important;border-radius:0 999px 999px 0!important;padding-left:10px!important}
+  @media (prefers-reduced-motion:reduce){.wb-step-hud{transition:none}}
   .wb-focus-panel{position:absolute;z-index:11;right:12px;top:12px;width:min(330px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;
     display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 16px 38px rgba(15,23,42,.26)}
   .wb-focus-panel[hidden]{display:none}
@@ -3093,6 +3107,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .wb-focus-context-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
   .wb-context-output-actions{grid-template-columns:repeat(2,minmax(0,1fr))}
   .wb-context-record-actions{grid-template-columns:1fr}
+  .wb-context-step-info{font-weight:600;color:#7c3aed}
+  .wb-context-step-actions,.wb-context-show-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
   .wb-context-toolbar-actions{grid-template-columns:1fr}
   .wb-context-position-actions{grid-template-columns:repeat(4,minmax(0,1fr))}
   .wb-context-gear-actions{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -4421,6 +4437,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-wbTextSize .wb-toolvis-textsize,
   html.hide-tool-wbZoom .wb-toolvis-zoom,
   html.hide-tool-wbFocus .wb-toolvis-focus,
+  html.hide-tool-wbSteps .wb-toolvis-steps,
   html.hide-tool-wbRuler .wb-toolvis-ruler,
   html.hide-tool-wbProtractor .wb-toolvis-protractor,
   html.hide-tool-wbCompass .wb-toolvis-compass,

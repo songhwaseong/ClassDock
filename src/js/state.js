@@ -255,6 +255,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"wbTextSize", label:"글자 크기", cls:"wb-toolvis-textsize", target:"whiteboard" },
   { id:"wbZoom", label:"화면 확대·축소", cls:"wb-toolvis-zoom", target:"whiteboard" },
   { id:"wbFocus", label:"집중 도구", cls:"wb-toolvis-focus", target:"whiteboard" },
+  { id:"wbSteps", label:"단계 발표", cls:"wb-toolvis-steps", target:"whiteboard" },
   { id:"wbRuler", label:"자", cls:"wb-toolvis-ruler", target:"whiteboard" },
   { id:"wbProtractor", label:"각도기", cls:"wb-toolvis-protractor", target:"whiteboard" },
   { id:"wbCompass", label:"컴퍼스", cls:"wb-toolvis-compass", target:"whiteboard" },
