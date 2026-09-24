@@ -859,6 +859,12 @@ const MNBoardTools = (() => {
   function groupLocalPoint(group, point){
     const sourceW = Math.max(1, num(group.sourceW, num(group.w, 1)));
     const sourceH = Math.max(1, num(group.sourceH, num(group.h, 1)));
+    const rotation = num(group.rotation, 0);
+    if (rotation){                                      // 돌린 그룹은 상자 가운데를 축으로 기울기부터 푼다
+      const cx = num(group.x) + num(group.w, sourceW) / 2, cy = num(group.y) + num(group.h, sourceH) / 2;
+      const dx = num(point.x) - cx, dy = num(point.y) - cy, cos = Math.cos(-rotation), sin = Math.sin(-rotation);
+      point = { x:cx + dx * cos - dy * sin, y:cy + dx * sin + dy * cos };
+    }
     let x = (num(point.x) - num(group.x)) * sourceW / (num(group.w, sourceW) || sourceW);
     let y = (num(point.y) - num(group.y)) * sourceH / (num(group.h, sourceH) || sourceH);
     if (group.flipX) x = sourceW - x;
@@ -1932,6 +1938,14 @@ const MNBoardTools = (() => {
       const box = itemBoundsSafe(item, measureText);
       const center = map({ x:box.x + box.w / 2, y:box.y + box.h / 2 });
       const fontSize = Math.max(6, num(item.fontSize, 16) * factor);
+      const rotation = num(item.rotation, 0);
+      if (rotation){
+        // 손으로 돌려 둔 글은 기운 채로 자리만 옮긴다 — (x,y) 는 돌리기 축인 왼쪽 위라 가운데에서 되짚어 구한다.
+        const upright = itemBoundsSafe(Object.assign({}, item, { rotation:0 }), measureText);
+        const hw = upright.w * factor / 2, hh = upright.h * factor / 2;
+        const ox = hw * Math.cos(rotation) - hh * Math.sin(rotation), oy = hw * Math.sin(rotation) + hh * Math.cos(rotation);
+        return Object.assign({}, item, { x:center.x - ox, y:center.y - oy, fontSize, textBaseFontSize:fontSize });
+      }
       const width = box.w * factor, height = box.h * factor;
       return Object.assign({}, item, { x:center.x - width / 2, y:center.y - height / 2, fontSize, textBaseFontSize:fontSize });
     }
@@ -1957,6 +1971,7 @@ const MNBoardTools = (() => {
       });
       // 그래프·차트는 원본 입력을 들고 있는데, 변환한 사본은 더 이상 그 식의 그림이 아니다.
       // 손잡이 자리(sliders)도 같이 지운다 — 옮겨 놓은 그림의 슬라이더가 옛 자리로 잡히면 안 된다.
+      delete next.rotation;                             // 돌린 그룹은 풀 때 조각에 기울기가 들어갔다
       delete next.plotSpec; delete next.chartSpec; delete next.sliders; delete next.tableSpec; delete next.toolSpec; delete next.vectorSumOf;
       return next;
     }

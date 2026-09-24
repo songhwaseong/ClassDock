@@ -116,7 +116,9 @@ function lessonSerializeItems(items){
         it._lessonSrc = c.toDataURL("image/png");
       } catch(_){ it._lessonSrc = null; }
     }
-    return { type: "image", x: it.x, y: it.y, w: it.w, h: it.h, src: it._lessonSrc || null, flipX:!!it.flipX, flipY:!!it.flipY };
+    const out = { type: "image", x: it.x, y: it.y, w: it.w, h: it.h, src: it._lessonSrc || null, flipX:!!it.flipX, flipY:!!it.flipY };
+    if (Number(it.rotation)) out.rotation = Number(it.rotation);   // 돌린 그림만 — 안 돌린 그림은 예전과 같은 모양
+    return out;
   });
 }
 

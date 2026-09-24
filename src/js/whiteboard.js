@@ -468,7 +468,10 @@ function whiteboardVectorGroupSvg(group, color="#111111"){
       const tag = item.closed ? "polygon" : "polyline";
       return `<${tag} points="${points}" ${attrs(item,!!item.fill)}/>`;
     }
-    if (item.type === "text") return `<text x="${item.x}" y="${Number(item.y)+(Number(item.fontSize)||18)}" fill="${esc(item.color || c)}" stroke="none" font-family="system-ui,Malgun Gothic,sans-serif" font-size="${Number(item.fontSize)||18}">${esc(item.text)}</text>`;
+    if (item.type === "text"){
+      const transform = Number(item.rotation) ? ` transform="rotate(${Number(item.rotation)*180/Math.PI} ${item.x} ${item.y})"` : "";
+      return `<text x="${item.x}" y="${Number(item.y)+(Number(item.fontSize)||18)}" fill="${esc(item.color || c)}" stroke="none" font-family="system-ui,Malgun Gothic,sans-serif" font-size="${Number(item.fontSize)||18}"${transform}>${esc(item.text)}</text>`;
+    }
     return "";
   }).join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="190" viewBox="0 0 240 190"><defs><marker id="wb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10" fill="none" stroke="${c}" stroke-width="1.5"/></marker></defs>${body}</svg>`;
@@ -943,6 +946,7 @@ function renderWhiteboard(doc, host){
     hitTestItem: hitTestBoardItem,
     isSelectable: isSelectableBoardItem,
     translateItem: translateBoardItem,
+    rotateItem: rotateBoardItemAbout,
     ungroupItem: ungroupBoardItem
   } = MNBoardRenderer;
   const applyStroke = (it) => applyBoardStroke(ctx, it);
@@ -969,11 +973,72 @@ function renderWhiteboard(doc, host){
     { hx:0,   hy:0.5, cur:"ew-resize" },                                        { hx:1, hy:0.5, cur:"ew-resize" },
     { hx:0,   hy:1,   cur:"nesw-resize" }, { hx:0.5, hy:1,   cur:"ns-resize" }, { hx:1, hy:1,   cur:"nwse-resize" }
   ];
-  const handlePos = (it, h) => ({ x: it.x + it.w * h.hx, y: it.y + it.h * h.hy });
+  /* 핸들로 크기를 바꿀 수 있는 항목의 상자. 이미지·그룹은 x,y,w,h 를 그대로 쓰고,
+     사각형·원은 두 꼭짓점(x1,y1,x2,y2)을 상자로 편다. 돌린 타원은 돌리기 전 상자에 angle 을 붙여
+     손잡이도 같이 기울인다(boxToLocal/boxToWorld 로 오간다).
+     꺾은선(삼각형·다각형)은 점들을 감싼 상자 — 늘리면 점들을 상자 비율대로 옮긴다.
+     직선·화살표는 상자가 아니라 두 끝점 손잡이다(lineEndHandles). */
+  const resizeBoxOf = (it) => {
+    if (!it) return null;
+    if (it.type === "image" || it.type === "group") return { x:it.x, y:it.y, w:it.w, h:it.h, angle:Number(it.rotation) || 0 };
+    if (it.type === "rect" || it.type === "ellipse"){
+      const x = Math.min(it.x1, it.x2), y = Math.min(it.y1, it.y2);
+      const angle = it.type === "ellipse" ? Number(it.rotation) || 0 : 0;
+      return { x, y, w:Math.abs(it.x2 - it.x1), h:Math.abs(it.y2 - it.y1), angle };
+    }
+    if (it.type === "polyline" && Array.isArray(it.points) && it.points.length > 1) return boundsOf(it);
+    return null;
+  };
+  // box0 = 끌기 시작할 때의 상자(꺾은선은 거기서부터 비율을 잰다). 넓이가 0 인 쪽은 늘리지 않는다.
+  const applyResizeBox = (it, box, orig, box0) => {
+    if (it.type === "image" || it.type === "group"){ it.x = box.x; it.y = box.y; it.w = box.w; it.h = box.h; }
+    else if (it.type === "polyline"){
+      const sx = box0.w ? box.w / box0.w : 1, sy = box0.h ? box.h / box0.h : 1;
+      const ox = box0.w ? box.x : box0.x, oy = box0.h ? box.y : box0.y;
+      it.points = orig.points.map((p) => ({ x:ox + (p.x - box0.x) * sx, y:oy + (p.y - box0.y) * sy }));
+    }
+    else { it.x1 = box.x; it.y1 = box.y; it.x2 = box.x + box.w; it.y2 = box.y + box.h; }
+  };
+  const lineEndHandles = (it) => (it && (it.type === "line" || it.type === "arrow"))
+    ? [{ end:1, x:it.x1, y:it.y1, cur:"crosshair" }, { end:2, x:it.x2, y:it.y2, cur:"crosshair" }] : null;
+  /* 돌리기 손잡이: 고를 수 있는 항목은 모두(선·화살표·꺾은선·사각형·원·이미지·글·그룹) 선택 상자 위쪽 가운데에 동그라미 하나.
+     계산은 board-render.js 의 rotateItem 한 곳 — 원·이미지·그룹은 rotation 이 늘고, 글은 왼쪽 위 (x,y) 축으로,
+     기울어진 사각형은 닫힌 다각형이 된다(90° 배수면 사각형 그대로, '변환' 도구와 같은 규칙).
+     측정 라벨은 대상 도형을 따라 저절로 자리를 잡으므로 돌리지 않는다. */
+  // -π~π 로 접고 0 에 아주 가까우면 0 — 한 바퀴 돌려 제자리면 rotation 이 남지 않게(저장본도 예전과 같다).
+  const withRotation = (it, a) => {
+    const r = Math.round(Math.atan2(Math.sin(a), Math.cos(a)) * 1e6) / 1e6;
+    const out = Object.assign({}, it);
+    if (Math.abs(r) < 1e-6) delete out.rotation; else out.rotation = r;
+    return out;
+  };
+  const ROTATE_GAP = 28;                              // 상자 윗변에서 손잡이까지(화면 px)
+  const rotateHandleOf = (it) => {
+    const rotatable = it && !isMeasureItem(it) && (["line", "arrow", "rect", "ellipse", "image", "text", "group"].includes(it.type) || (it.type === "polyline" && Array.isArray(it.points) && it.points.length > 1));
+    const b = rotatable && boundsOf(it); if (!b) return null;
+    // 돌린 타원·그림·그룹은 기울인 상자 모서리가 경계 밖으로 나오니 그 위로 띄운다(모서리 손잡이와 겹치지 않게).
+    const box = it.type === "ellipse" || it.type === "image" || it.type === "group" ? resizeBoxOf(it) : null;
+    const top = box && box.angle ? Math.min(b.y, ...HANDLES.map((h) => boxToWorld(box, handlePos(box, h)).y)) : b.y;
+    return { rotate:true, cur:"grab", x:b.x + b.w / 2, y:top - ROTATE_GAP / view.scale, top };
+  };
+  const rotateBoardItem = (it, c, angle) => rotateBoardItemAbout(it, c, angle);
+  // 돌린 글의 바로 선 상자(돌리기 전 크기). 글 입력칸 크기와 선택 테두리에 쓴다.
+  const uprightTextBounds = (it) => boundsOf(Number(it.rotation) ? Object.assign({}, it, { rotation:0 }) : it);
+  // 돌린 상자 안팎 좌표 바꾸기 — 상자 가운데를 축으로 -angle / +angle 만큼 돌린다.
+  const turnAbout = (c, p, a) => ({ x:c.x + (p.x - c.x) * Math.cos(a) - (p.y - c.y) * Math.sin(a), y:c.y + (p.x - c.x) * Math.sin(a) + (p.y - c.y) * Math.cos(a) });
+  const boxCenter = (box) => ({ x:box.x + box.w / 2, y:box.y + box.h / 2 });
+  const boxToLocal = (box, p) => box.angle ? turnAbout(boxCenter(box), p, -box.angle) : p;
+  const boxToWorld = (box, p) => box.angle ? turnAbout(boxCenter(box), p, box.angle) : p;
+  const handlePos = (box, h) => ({ x: box.x + box.w * h.hx, y: box.y + box.h * h.hy });
   const handleAt = (it, p) => {
-    if (!it || (it.type !== "image" && it.type !== "group")) return null;
     const tolerance = HANDLE / view.scale;
-    for (const h of HANDLES){ const hp = handlePos(it, h); if (Math.abs(p.x - hp.x) <= tolerance && Math.abs(p.y - hp.y) <= tolerance) return h; }
+    const rh = rotateHandleOf(it);
+    if (rh && Math.hypot(p.x - rh.x, p.y - rh.y) <= tolerance) return rh;
+    const ends = lineEndHandles(it);
+    if (ends) return ends.find((h) => Math.abs(p.x - h.x) <= tolerance && Math.abs(p.y - h.y) <= tolerance) || null;
+    const box = resizeBoxOf(it); if (!box) return null;
+    const lp = boxToLocal(box, p);
+    for (const h of HANDLES){ const hp = handlePos(box, h); if (Math.abs(lp.x - hp.x) <= tolerance && Math.abs(lp.y - hp.y) <= tolerance) return h; }
     return null;
   };
   let editingTextItem = null, openFormulaEditor = null, openPlotEditor = null, openChartEditor = null, openTableEditor = null, openToolItemEditor = null, groupActionBtn = null, flipXBtn = null, flipYBtn = null;
@@ -1268,13 +1333,33 @@ function renderWhiteboard(doc, host){
     const sb = s && boundsOf(s);
     if (s && sb){
       ctx.save(); ctx.globalAlpha = 1; ctx.lineWidth = 1.5 / view.scale; ctx.strokeStyle = "#2563eb";
-      const resizable = s.type === "image" || s.type === "group";
-      const pad = resizable ? 0 : 4 / view.scale;
-      ctx.setLineDash([6 / view.scale, 4 / view.scale]); ctx.strokeRect(sb.x - pad, sb.y - pad, Math.max(1, sb.w) + pad * 2, Math.max(1, sb.h) + pad * 2); ctx.setLineDash([]);
-      if (resizable){
+      const box = resizeBoxOf(s);
+      // 손잡이가 있으면 그 상자(돌린 타원은 같이 기울인 상자)를, 없으면 조금 띄운 경계 상자를 그린다.
+      // 돌린 글은 바로 선 글 상자를 (x,y) 축으로 같이 기울여 그린다.
+      const tiltedText = s.type === "text" && Number(s.rotation) ? uprightTextBounds(s) : null;
+      const outline = tiltedText || sb;
+      const frame = box || { x:outline.x - 4 / view.scale, y:outline.y - 4 / view.scale, w:outline.w + 8 / view.scale, h:outline.h + 8 / view.scale };
+      ctx.save();
+      if (box && box.angle){ const c = boxCenter(box); ctx.translate(c.x, c.y); ctx.rotate(box.angle); ctx.translate(-c.x, -c.y); }
+      if (tiltedText){ ctx.translate(s.x, s.y); ctx.rotate(Number(s.rotation)); ctx.translate(-s.x, -s.y); }
+      ctx.setLineDash([6 / view.scale, 4 / view.scale]); ctx.strokeRect(frame.x, frame.y, Math.max(1, frame.w), Math.max(1, frame.h)); ctx.setLineDash([]);
+      if (box){
         ctx.fillStyle = "#fff";
         const handleSize = HANDLE / view.scale;
-        for (const h of HANDLES){ const hp = handlePos(s, h); ctx.fillRect(hp.x - handleSize / 2, hp.y - handleSize / 2, handleSize, handleSize); ctx.strokeRect(hp.x - handleSize / 2, hp.y - handleSize / 2, handleSize, handleSize); }
+        for (const h of HANDLES){ const hp = handlePos(box, h); ctx.fillRect(hp.x - handleSize / 2, hp.y - handleSize / 2, handleSize, handleSize); ctx.strokeRect(hp.x - handleSize / 2, hp.y - handleSize / 2, handleSize, handleSize); }
+      }
+      ctx.restore();
+      const ends = lineEndHandles(s);                 // 직선·화살표는 두 끝에 동그란 손잡이
+      if (ends){
+        ctx.fillStyle = "#fff";
+        for (const h of ends){ ctx.beginPath(); ctx.arc(h.x, h.y, HANDLE / 2 / view.scale, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+      }
+      const rh = rotateHandleOf(s);                   // 돌리기 손잡이 — 상자 윗변에서 줄기로 이어 둔다
+      if (rh){
+        ctx.beginPath(); ctx.moveTo(rh.x, rh.top); ctx.lineTo(rh.x, rh.y); ctx.stroke();
+        ctx.fillStyle = "#2563eb"; ctx.beginPath(); ctx.arc(rh.x, rh.y, HANDLE / 2 / view.scale, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5 / view.scale;
+        ctx.beginPath(); ctx.arc(rh.x, rh.y, HANDLE / 4 / view.scale, -Math.PI * .9, Math.PI * .5); ctx.stroke();
       }
       ctx.restore();
     }
@@ -1376,7 +1461,9 @@ function renderWhiteboard(doc, host){
     const selected = wb.selected;
     if (!whiteboardCanFlipItem(selected)) return;
     const idx = wb.items.indexOf(selected); if (idx < 0) return;
-    const flipped = Object.assign({}, selected, { [axis]:!selected[axis] });
+    let flipped = Object.assign({}, selected, { [axis]:!selected[axis] });
+    // 돌린 그림은 화면 기준으로 뒤집히도록 각도도 반대로 — 그림 자신의 축으로만 뒤집으면 엉뚱한 쪽으로 뒤집혀 보인다.
+    if ((flipped.type === "image" || flipped.type === "group") && Number(flipped.rotation)) flipped = withRotation(flipped, -Number(flipped.rotation));
     wb.items[idx] = flipped; wb.selected = flipped; redraw(); history.commit(); recordCommit();
   };
   const ungroupSelected = () => {
@@ -1449,15 +1536,25 @@ function renderWhiteboard(doc, host){
   // ----- 포인터 그리기 -----
   const pt = (e) => boardPointFromScreen(screenPoint(e));
   // 선택 도구: 이미지·도형·텍스트 중 위에 그려진 항목부터 히트테스트
+  // 속이 빈 사각형·원은 먼저 테두리로만 찾는다 — 나중에 그린 빈 상자가 그 안의 글·수식을 가려
+  // 잡을 수 없던 문제. 아무것도 안 맞으면 그때 빈 도형의 속까지 넓혀 찾되, 겹친 빈 상자는
+  // 가장 작은(안쪽) 것을 고른다 — 그리는 순서와 상관없이 안쪽 상자를 누르면 안쪽 상자가 잡힌다.
   const itemAt = (p) => {
+    const tol = 7 / view.scale;
+    // 합력은 원본 화살표에서 계산해 덮어 그리는 그림이라 고르지 않는다 — 그러지 않으면
+    // 평행사변형 넓이만 한 상자가 그 안의 화살표를 전부 가려 잡을 수 없다(떼기는 화살표 쪽 메뉴에서).
     for (let i = wb.items.length - 1; i >= 0; i--){
       const it = wb.items[i];
-      // 합력은 원본 화살표에서 계산해 덮어 그리는 그림이라 고르지 않는다 — 그러지 않으면
-      // 평행사변형 넓이만 한 상자가 그 안의 화살표를 전부 가려 잡을 수 없다(떼기는 화살표 쪽 메뉴에서).
-      if (isVectorSumItem(it)) continue;
-      if (hitTestBoardItem(it, p, measureBoardText, 7 / view.scale)) return it;
+      if (!isVectorSumItem(it) && hitTestBoardItem(it, p, measureBoardText, tol, true)) return it;
     }
-    return null;
+    let best = null, bestArea = Infinity;
+    for (let i = wb.items.length - 1; i >= 0; i--){
+      const it = wb.items[i];
+      if (isVectorSumItem(it) || !hitTestBoardItem(it, p, measureBoardText, tol)) continue;
+      const area = Math.abs(it.x2 - it.x1) * Math.abs(it.y2 - it.y1);
+      if (area < bestArea){ best = it; bestArea = area; }   // 넓이가 같으면 위에 그린 것
+    }
+    return best;
   };
   const setViewScale = (nextScale, clientX, clientY) => {
     if (backgroundViewLocked()){
@@ -1497,8 +1594,15 @@ function renderWhiteboard(doc, host){
   const beginSelDrag = (e, mode, handle) => {
     canvas.setPointerCapture(e.pointerId);
     const it = wb.selected; const start = pt(e);
-    const o = (it.type === "image" || it.type === "group") ? { left: it.x, top: it.y, right: it.x + it.w, bottom: it.y + it.h } : null;
+    const box0 = resizeBoxOf(it);
+    const o = box0 ? { left: box0.x, top: box0.y, right: box0.x + box0.w, bottom: box0.y + box0.h } : null;
+    // 도형은 작게 그린 것도 있으니 최소 크기를 낮춘다(이미지·그룹의 24×16 을 쓰면 잡는 순간 튄다).
+    const smallShape = box0 && (it.type === "rect" || it.type === "ellipse" || it.type === "polyline");
+    const minW = smallShape ? 4 : 24, minH = smallShape ? 4 : 16;
     const idx = wb.items.indexOf(it);
+    const b0 = handle && handle.rotate ? boundsOf(it) : null;
+    const rotCenter = b0 ? { x:b0.x + b0.w / 2, y:b0.y + b0.h / 2 } : null;
+    const rotStart = rotCenter ? Math.atan2(start.y - rotCenter.y, start.x - rotCenter.x) : 0;
     let live = it, cloned = false;
     const move = (ev) => {
       const q = pt(ev);
@@ -1507,11 +1611,40 @@ function renderWhiteboard(doc, host){
         wb.items[idx] = live; wb.selected = live; cloned = true;
       } else {                                          // 핸들이 잡은 변/모서리만 이동(반대편 고정), 가로·세로 독립
         // 이전 단계 스냅샷이 이 항목 객체를 함께 가리키므로, 제자리에서 고치지 않고 사본으로 바꿔 끼운다.
+        if (handle.rotate){                              // 돌리기: 처음 상자 가운데를 축으로, Shift 면 15°씩
+          let angle = Math.atan2(q.y - rotCenter.y, q.x - rotCenter.x) - rotStart;
+          if (ev.shiftKey || gear.snap) angle = Math.round(angle / (Math.PI / 12)) * (Math.PI / 12);
+          live = rotateBoardItem(it, rotCenter, angle); wb.items[idx] = live; wb.selected = live; cloned = true;
+          let deg = Math.round(angle * 180 / Math.PI) % 360; if (deg > 180) deg -= 360; if (deg <= -180) deg += 360;
+          showMeasure(`회전 ${deg}°`, screenPoint(ev));
+          canvas.style.cursor = "grabbing"; paint(); return;
+        }
         if (!cloned){ live = Object.assign({}, it); wb.items[idx] = live; wb.selected = live; cloned = true; }
-        if (handle.hx === 0){ const nx = Math.min(q.x, o.right - 24); live.x = nx; live.w = o.right - nx; }
-        else if (handle.hx === 1){ live.x = o.left; live.w = Math.max(24, q.x - o.left); }
-        if (handle.hy === 0){ const ny = Math.min(q.y, o.bottom - 16); live.y = ny; live.h = o.bottom - ny; }
-        else if (handle.hy === 1){ live.y = o.top; live.h = Math.max(16, q.y - o.top); }
+        if (handle.end){                                 // 직선·화살표 끝점: 반대쪽 끝을 고정, Shift·15° 단추·자 모서리는 그을 때처럼
+          const fixed = handle.end === 1 ? { x:it.x2, y:it.y2 } : { x:it.x1, y:it.y1 };
+          const tip = gearSnapEnd(fixed, q, ev);
+          if (Math.hypot(tip.x - fixed.x, tip.y - fixed.y) < 2) return;   // 두 끝이 겹쳐 선이 사라지지 않게
+          if (handle.end === 1){ live.x1 = tip.x; live.y1 = tip.y; } else { live.x2 = tip.x; live.y2 = tip.y; }
+          measureDrawing(handle.end === 1 ? Object.assign({}, live, { x1:live.x2, y1:live.y2, x2:live.x1, y2:live.y1 }) : live, screenPoint(ev));
+          redraw(); return;
+        }
+        const lq = boxToLocal(box0, q);                  // 돌린 타원이면 기울기를 풀어 상자 안 좌표로 잰다
+        const b = { x:o.left, y:o.top, w:o.right - o.left, h:o.bottom - o.top };
+        if (handle.hx === 0){ const nx = Math.min(lq.x, o.right - minW); b.x = nx; b.w = o.right - nx; }
+        else if (handle.hx === 1){ b.w = Math.max(minW, lq.x - o.left); }
+        if (handle.hy === 0){ const ny = Math.min(lq.y, o.bottom - minH); b.y = ny; b.h = o.bottom - ny; }
+        else if (handle.hy === 1){ b.h = Math.max(minH, lq.y - o.top); }
+        // Shift + 모서리 핸들 = 처음 비율 유지(정원·정사각형이 찌그러지지 않게). 반대편 모서리를 고정한다.
+        if (ev.shiftKey && handle.hx !== 0.5 && handle.hy !== 0.5 && box0.w > 0 && box0.h > 0){
+          const k = Math.max(b.w / box0.w, b.h / box0.h, minW / box0.w, minH / box0.h);
+          b.w = box0.w * k; b.h = box0.h * k;
+          b.x = handle.hx === 0 ? o.right - b.w : o.left;
+          b.y = handle.hy === 0 ? o.bottom - b.h : o.top;
+        }
+        if (box0.angle){                                 // 반대편이 제자리에 있도록 새 가운데를 다시 기울여 놓는다
+          const c = boxToWorld(box0, boxCenter(b)); b.x = c.x - b.w / 2; b.y = c.y - b.h / 2;
+        }
+        applyResizeBox(live, b, it, box0);
       }
       // 옮기기는 크기·종류가 그대로라 도구막대가 바뀔 일이 없다.
       // 크기조절은 다르다 — 수식·도형의 '크기 %' 입력이 끄는 동안 같이 움직여야 해서 전부 맞춘다.
@@ -1520,6 +1653,7 @@ function renderWhiteboard(doc, host){
     const up = () => {
       canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
       redraw(); if (cloned){ history.commit(); recordCommit(); }   // 드래그 한 번을 한 단계로
+      if (handle && (handle.end || handle.rotate)){ hideMeasure(); canvas.style.cursor = ""; }
     };
     canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
   };
@@ -1573,6 +1707,53 @@ function renderWhiteboard(doc, host){
     const up = () => {
       canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
       redraw(); if (moved){ history.commit(); recordCommit(); }   // 여러 개를 옮겨도 되돌리기 한 번
+    };
+    canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  };
+  /* 여러 개 돌리기: 고른 것 전체를 감싼 상자 가운데를 축으로 한꺼번에 돈다(Shift·15° 단추면 15°씩).
+     손잡이는 전체 테두리(paintMultiSelection 의 옅은 상자) 위쪽 가운데. 되돌리기 한 번에 전부 돌아온다. */
+  const multiSelectionBounds = () => {
+    let all = null;
+    for (const it of liveMultiSel()){
+      const b = boundsOf(it); if (!b) continue;
+      all = all ? { l:Math.min(all.l, b.x), t:Math.min(all.t, b.y), r:Math.max(all.r, b.x + b.w), b:Math.max(all.b, b.y + b.h) }
+        : { l:b.x, t:b.y, r:b.x + b.w, b:b.y + b.h };
+    }
+    return all;
+  };
+  const multiRotateHandle = () => {
+    const all = multiSelectionBounds(); if (!all) return null;
+    const top = all.t - 12 / view.scale;              // 옅은 전체 테두리의 윗변(pad*3)
+    return { x:(all.l + all.r) / 2, y:top - ROTATE_GAP / view.scale, top, center:{ x:(all.l + all.r) / 2, y:(all.t + all.b) / 2 } };
+  };
+  const multiRotateHandleAt = (p) => {
+    const rh = liveMultiSel().length ? multiRotateHandle() : null;
+    return !!(rh && Math.hypot(p.x - rh.x, p.y - rh.y) <= HANDLE / view.scale);
+  };
+  const beginMultiRotate = (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    const rh = multiRotateHandle(), c = rh.center, start = pt(e);
+    const originals = multiSel.slice(), indexes = originals.map((it) => wb.items.indexOf(it));
+    const rotStart = Math.atan2(start.y - c.y, start.x - c.x);
+    let turned = false;
+    const move = (ev) => {
+      const q = pt(ev);
+      let angle = Math.atan2(q.y - c.y, q.x - c.x) - rotStart;
+      if (ev.shiftKey || gear.snap) angle = Math.round(angle / (Math.PI / 12)) * (Math.PI / 12);
+      multiSel = originals.map((it, i) => {
+        const live = isMeasureItem(it) ? it : rotateBoardItem(it, c, angle);
+        wb.items[indexes[i]] = live;
+        return live;
+      });
+      turned = turned || angle !== 0;
+      let deg = Math.round(angle * 180 / Math.PI) % 360; if (deg > 180) deg -= 360; if (deg <= -180) deg += 360;
+      showMeasure(`회전 ${deg}°`, screenPoint(ev));
+      canvas.style.cursor = "grabbing"; paint();
+    };
+    const up = () => {
+      canvas.removeEventListener("pointermove", move); canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", up);
+      hideMeasure(); canvas.style.cursor = "";
+      redraw(); if (turned){ history.commit(); recordCommit(); }
     };
     canvas.addEventListener("pointermove", move); canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
   };
@@ -1890,6 +2071,14 @@ function renderWhiteboard(doc, host){
     if (all){                                         // 고른 것 전체를 감싸는 옅은 테두리 — 한 덩어리로 움직인다는 표시
       const outer = pad * 3;
       ctx.globalAlpha = .5; ctx.strokeRect(all.l - outer, all.t - outer, all.r - all.l + outer * 2, all.b - all.t + outer * 2); ctx.globalAlpha = 1;
+      const rh = multiRotateHandle();                 // 돌리기 손잡이 — 고른 것 전체를 함께 돌린다
+      if (rh){
+        ctx.beginPath(); ctx.moveTo(rh.x, rh.top); ctx.lineTo(rh.x, rh.y); ctx.stroke();
+        ctx.fillStyle = "#2563eb"; ctx.beginPath(); ctx.arc(rh.x, rh.y, HANDLE / 2 / view.scale, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.beginPath(); ctx.arc(rh.x, rh.y, HANDLE / 4 / view.scale, -Math.PI * .9, Math.PI * .5); ctx.stroke();
+        ctx.strokeStyle = "#2563eb";
+      }
     }
     if (marquee){
       const x = Math.min(marquee.x1, marquee.x2), y = Math.min(marquee.y1, marquee.y2);
@@ -2262,6 +2451,7 @@ function renderWhiteboard(doc, host){
         x:state.item.x, y:state.item.y, w:state.item.w, h:state.item.h, flipX:state.item.flipX, flipY:state.item.flipY
       });
       if (state.item.mid) next.mid = state.item.mid;
+      if (Number(state.item.rotation)) next.rotation = state.item.rotation;
       if (wb.selected === state.item) wb.selected = next;
       wb.items[index] = next; state.item = next; state.changed = true;
       redraw();
@@ -2339,6 +2529,7 @@ function renderWhiteboard(doc, host){
       // 여러 개를 고른 채 그중 하나를 잡으면 전부 같이 옮긴다. 다른 곳을 누르면 여러 개 선택은 풀린다.
       const multi = liveMultiSel();
       if (multi.length){
+        if (multiRotateHandleAt(pt(e))){ beginMultiRotate(e); return; }
         const hit = itemAt(pt(e));
         if (hit && multi.includes(hit)){ beginMultiDrag(e); return; }
         clearMultiSel(); redraw();
@@ -2411,6 +2602,7 @@ function renderWhiteboard(doc, host){
     if (arrowTipAt(p)){ canvas.style.cursor = "grab"; return; }
     if (wb.tool !== "select") return;
     if (focus.active && focus.mode === "spotlight" && !focus.controlsVisible){ canvas.style.cursor = "move"; return; }
+    if (multiRotateHandleAt(p)){ canvas.style.cursor = "grab"; return; }
     const h = wb.selected && handleAt(wb.selected, p);
     canvas.style.cursor = h ? h.cur : (itemAt(p) ? "move" : "grab");
   };
@@ -2452,13 +2644,13 @@ function renderWhiteboard(doc, host){
     ta.style.color = color; ta.style.fontSize = fs + "px"; ta.style.transformOrigin = "0 0";
     positionTextEditor = () => {
       ta.style.left = (view.x + p.x * view.scale) + "px"; ta.style.top = (view.y + p.y * view.scale) + "px";
-      ta.style.transform = `scale(${view.scale})`;
+      ta.style.transform = `scale(${view.scale})` + (existing && Number(existing.rotation) ? ` rotate(${Number(existing.rotation)}rad)` : "");
     };
     positionTextEditor();
     ta.placeholder = "텍스트 입력";
     if (existing){
       ta.value = String(existing.text || "");
-      const b = boundsOf(existing);
+      const b = uprightTextBounds(existing);
       if (b){ ta.style.width = Math.max(120, b.w + 16) + "px"; ta.style.height = Math.max(fs * 1.5, b.h + 8) + "px"; }
       editingTextItem = existing; wb.selected = null; redraw();
     }
@@ -2848,6 +3040,7 @@ function renderWhiteboard(doc, host){
       w:Math.round((Number(group.w) || 1) * scaleX), h:Math.round((Number(group.h) || 1) * scaleY),
       flipX:existing.flipX, flipY:existing.flipY
     });
+    if (Number(existing.rotation)) next.rotation = existing.rotation;   // 돌려 둔 그래프·차트는 고쳐도 기운 채로
     wb.items[index] = next; wb.selected = next; redraw(); history.commit(); recordCommit();
     return true;
   };

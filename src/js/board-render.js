@@ -171,7 +171,13 @@ function drawItem(ctx, it, bg, limit, inheritedFlipX=false, inheritedFlipY=false
   if (!it) return;
   if (it.type === "group"){
     const sw = Math.max(1, Number(it.sourceW) || Number(it.w) || 1), sh = Math.max(1, Number(it.sourceH) || Number(it.h) || 1);
-    ctx.save(); ctx.translate(Number(it.x) || 0, Number(it.y) || 0); ctx.scale((Number(it.w) || sw) / sw, (Number(it.h) || sh) / sh);
+    ctx.save();
+    const rotation = Number(it.rotation) || 0;          // 돌린 그룹은 상자 가운데를 축으로 통째로 돈다
+    if (rotation){
+      const cx = (Number(it.x) || 0) + (Number(it.w) || 0) / 2, cy = (Number(it.y) || 0) + (Number(it.h) || 0) / 2;
+      ctx.translate(cx, cy); ctx.rotate(rotation); ctx.translate(-cx, -cy);
+    }
+    ctx.translate(Number(it.x) || 0, Number(it.y) || 0); ctx.scale((Number(it.w) || sw) / sw, (Number(it.h) || sh) / sh);
     const flipX = !!it.flipX, flipY = !!it.flipY;
     if (flipX || flipY){
       ctx.translate(flipX ? sw : 0, flipY ? sh : 0);
@@ -212,23 +218,32 @@ function drawItem(ctx, it, bg, limit, inheritedFlipX=false, inheritedFlipY=false
     ctx.globalAlpha = 1; ctx.fillStyle = it.color; ctx.textBaseline = "top";
     ctx.font = it.fontSize + 'px system-ui,"Malgun Gothic",sans-serif';
     const lines = String(it.text || "").split("\n");
+    // 돌린 글(rotation, 라디안)은 왼쪽 위 (x,y) 를 축으로 돈다 — 글을 고치거나 크기를 바꿔도 첫 글자 자리가 그대로다.
+    const rotation = Number(it.rotation) || 0;
+    const tx = rotation ? 0 : it.x, ty = rotation ? 0 : it.y;
+    if (rotation){ ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(rotation); }
     if (inheritedFlipX || inheritedFlipY){
       const fs = Math.max(1, Number(it.fontSize) || 16);
       const widthOf = (line) => (typeof ctx.measureText === "function" ? ctx.measureText(line).width : String(line).length * fs * .6);
       const textW = Math.max(1, ...lines.map(widthOf)), textH = Math.max(fs, lines.length * fs * 1.25);
       ctx.save();
-      ctx.translate(inheritedFlipX ? 2 * it.x + textW : 0, inheritedFlipY ? 2 * it.y + textH : 0);
+      ctx.translate(inheritedFlipX ? 2 * tx + textW : 0, inheritedFlipY ? 2 * ty + textH : 0);
       ctx.scale(inheritedFlipX ? -1 : 1, inheritedFlipY ? -1 : 1);
-      lines.forEach((ln, i) => ctx.fillText(ln, it.x, it.y + i * fs * 1.25));
+      lines.forEach((ln, i) => ctx.fillText(ln, tx, ty + i * fs * 1.25));
       ctx.restore();
     } else {
-      lines.forEach((ln, i) => ctx.fillText(ln, it.x, it.y + i * it.fontSize * 1.25));
+      lines.forEach((ln, i) => ctx.fillText(ln, tx, ty + i * it.fontSize * 1.25));
     }
+    if (rotation) ctx.restore();
   } else if (it.type === "image"){
     ctx.globalAlpha = 1;
     if (it.img && it.img.complete){
-      if (it.flipX || it.flipY){
-        ctx.save(); ctx.translate(it.x + it.w / 2, it.y + it.h / 2); ctx.scale(it.flipX ? -1 : 1, it.flipY ? -1 : 1);
+      // 돌리기(rotation, 라디안)는 가운데를 축으로, 뒤집기는 돌린 뒤 그림 자신의 축으로.
+      const rotation = Number(it.rotation) || 0;
+      if (it.flipX || it.flipY || rotation){
+        ctx.save(); ctx.translate(it.x + it.w / 2, it.y + it.h / 2);
+        if (rotation) ctx.rotate(rotation);
+        ctx.scale(it.flipX ? -1 : 1, it.flipY ? -1 : 1);
         ctx.drawImage(it.img, -it.w / 2, -it.h / 2, it.w, it.h); ctx.restore();
       } else ctx.drawImage(it.img, it.x, it.y, it.w, it.h);
     }
@@ -258,6 +273,12 @@ function isSelectable(it){
 // 선택 표시와 히트테스트에 쓰는 항목 경계. 텍스트 폭은 화면과 같은 캔버스 글꼴로 외부에서 측정한다.
 function itemBounds(it, measureText){
   if (!isSelectable(it)) return null;
+  if ((it.type === "image" || it.type === "group") && Number(it.rotation)){
+    const cx = it.x + it.w / 2, cy = it.y + it.h / 2, a = Number(it.rotation);
+    const hw = (Math.abs(it.w * Math.cos(a)) + Math.abs(it.h * Math.sin(a))) / 2;
+    const hh = (Math.abs(it.w * Math.sin(a)) + Math.abs(it.h * Math.cos(a))) / 2;
+    return { x:cx - hw, y:cy - hh, w:hw * 2, h:hh * 2 };
+  }
   if (it.type === "image" || it.type === "group") return { x:it.x, y:it.y, w:it.w, h:it.h };
   if (it.type === "text"){
     const fs = Math.max(1, Number(it.fontSize) || 16);
@@ -265,7 +286,13 @@ function itemBounds(it, measureText){
     const widthOf = (typeof measureText === "function") ? measureText : (line) => String(line).length * fs * 0.6;
     let w = 1;
     for (const line of lines) w = Math.max(w, Number(widthOf(line, fs)) || 0);
-    return { x:it.x, y:it.y, w, h:Math.max(fs, lines.length * fs * 1.25) };
+    const h = Math.max(fs, lines.length * fs * 1.25), a = Number(it.rotation) || 0;
+    if (!a) return { x:it.x, y:it.y, w, h };
+    // 돌린 글: (x,y) 를 축으로 돌린 네 모서리를 감싼 상자
+    const cos = Math.cos(a), sin = Math.sin(a);
+    const xs = [0, w * cos, -h * sin, w * cos - h * sin], ys = [0, w * sin, h * cos, w * sin + h * cos];
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    return { x:it.x + x0, y:it.y + y0, w:Math.max(...xs) - x0, h:Math.max(...ys) - y0 };
   }
   if (it.type === "ellipse" && Number(it.rotation)){
     const cx=(it.x1+it.x2)/2, cy=(it.y1+it.y2)/2, rx=Math.abs(it.x2-it.x1)/2, ry=Math.abs(it.y2-it.y1)/2, a=Number(it.rotation);
@@ -291,9 +318,23 @@ function pointSegmentDistance(p, a, b){
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
-function hitTestItem(it, p, measureText, tolerance){
+/* edgeOnly 면 속이 빈(fill 없는) 사각형·원은 테두리 근처만 맞은 것으로 친다.
+   화이트보드는 먼저 이렇게 찾고, 아무것도 없을 때만 속까지 넓혀 찾는다 — 빈 상자가 그 안의 글·수식을 가리지 않게. */
+function hitTestItem(it, p, measureText, tolerance, edgeOnly){
   if (!isSelectable(it) || !p) return false;
   const tol = Math.max(4, Number(tolerance) || 0, (Number(it.width) || 0) / 2 + 3);
+  if (edgeOnly && !it.fill && (it.type === "rect" || it.type === "ellipse")){
+    if (!hitTestItem(it, p, measureText, tolerance)) return false;
+    if (it.type === "rect"){
+      const b = itemBounds(it, measureText);
+      return !(p.x > b.x + tol && p.x < b.x + b.w - tol && p.y > b.y + tol && p.y < b.y + b.h - tol);
+    }
+    const rx = Math.abs(it.x2 - it.x1) / 2 - tol, ry = Math.abs(it.y2 - it.y1) / 2 - tol;
+    if (rx <= 0 || ry <= 0) return true;
+    const cx = (it.x1 + it.x2) / 2, cy = (it.y1 + it.y2) / 2, a = -(Number(it.rotation) || 0);
+    const dx = p.x - cx, dy = p.y - cy, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+    return (lx * lx) / (rx * rx) + (ly * ly) / (ry * ry) > 1;
+  }
   if (it.type === "line" || it.type === "arrow"){
     return pointSegmentDistance(p, { x:it.x1, y:it.y1 }, { x:it.x2, y:it.y2 }) <= tol;
   }
@@ -306,6 +347,18 @@ function hitTestItem(it, p, measureText, tolerance){
     const cx=(it.x1+it.x2)/2, cy=(it.y1+it.y2)/2, rx=Math.max(Math.abs(it.x2-it.x1)/2,tol), ry=Math.max(Math.abs(it.y2-it.y1)/2,tol), a=-(Number(it.rotation)||0);
     const dx=p.x-cx, dy=p.y-cy, lx=dx*Math.cos(a)-dy*Math.sin(a), ly=dx*Math.sin(a)+dy*Math.cos(a);
     return (lx*lx)/(rx*rx)+(ly*ly)/(ry*ry)<=1;
+  }
+  if (it.type === "text" && Number(it.rotation)){
+    // 돌린 글은 (x,y) 축으로 기울기를 풀어 글 상자 안인지 본다.
+    const box = itemBounds(Object.assign({}, it, { rotation:0 }), measureText), a = -Number(it.rotation);
+    const dx = p.x - it.x, dy = p.y - it.y, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+    return lx >= -tol && lx <= box.w + tol && ly >= -tol && ly <= box.h + tol;
+  }
+  if ((it.type === "image" || it.type === "group") && Number(it.rotation)){
+    // 돌린 그림·그룹은 기울기를 풀어 자기 상자 안인지 본다(경계 상자로 재면 빈 모서리까지 잡힌다).
+    const cx = it.x + it.w / 2, cy = it.y + it.h / 2, a = -Number(it.rotation);
+    const dx = p.x - cx, dy = p.y - cy, lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+    return Math.abs(lx) <= Math.abs(it.w) / 2 + tol && Math.abs(ly) <= Math.abs(it.h) / 2 + tol;
   }
   const b = itemBounds(it, measureText); if (!b) return false;
   return p.x >= b.x - tol && p.x <= b.x + b.w + tol && p.y >= b.y - tol && p.y <= b.y + b.h + tol;
@@ -325,9 +378,58 @@ function translateItem(it, dx, dy){
   return moved;
 }
 
+/* 항목 하나를 점 c 를 축으로 angle(라디안)만큼 돌린다. 화이트보드의 돌리기 손잡이·돌린 그룹 풀기가 같이 쓴다.
+   - 선·꺾은선·펜 획은 점을 돌리고, 사각형은 기울면 닫힌 다각형이 된다(90° 배수면 사각형 그대로 — '변환' 도구와 같은 규칙).
+   - 원·그림·그룹은 가운데를 옮기고 rotation 을 더하며, 글은 돌리기 축인 왼쪽 위 (x,y) 를 옮기고 rotation 을 더한다.
+   rotation 은 -π~π 로 접고 0 이면 속성을 지워, 한 바퀴 돌려 제자리면 저장본도 예전과 같다. */
+function rotateItem(it, c, angle){
+  if (!it || !c || !Number(angle)) return it;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const round = (v) => Math.round(v * 1e4) / 1e4;
+  const turn = (x, y) => ({ x:round(c.x + (x - c.x) * cos - (y - c.y) * sin), y:round(c.y + (x - c.x) * sin + (y - c.y) * cos) });
+  const out = Object.assign({}, it);
+  const addRotation = () => {
+    const r = Math.round(Math.atan2(Math.sin((Number(it.rotation) || 0) + angle), Math.cos((Number(it.rotation) || 0) + angle)) * 1e6) / 1e6;
+    if (Math.abs(r) < 1e-6) delete out.rotation; else out.rotation = r;
+  };
+  if (it.type === "line" || it.type === "arrow"){
+    const a = turn(it.x1, it.y1), b = turn(it.x2, it.y2);
+    out.x1 = a.x; out.y1 = a.y; out.x2 = b.x; out.y2 = b.y;
+  } else if (Array.isArray(it.points)){
+    out.points = it.points.map((p) => turn(p.x, p.y));
+  } else if (it.type === "rect"){
+    const corners = [turn(it.x1, it.y1), turn(it.x2, it.y1), turn(it.x2, it.y2), turn(it.x1, it.y2)];
+    const axisAligned = (Math.abs(corners[0].y - corners[1].y) < .01 && Math.abs(corners[1].x - corners[2].x) < .01)
+      || (Math.abs(corners[0].x - corners[1].x) < .01 && Math.abs(corners[1].y - corners[2].y) < .01);
+    if (axisAligned){
+      const xs = corners.map((p) => p.x), ys = corners.map((p) => p.y);
+      out.x1 = Math.min(...xs); out.y1 = Math.min(...ys); out.x2 = Math.max(...xs); out.y2 = Math.max(...ys);
+    } else {
+      out.type = "polyline"; out.points = corners; out.closed = true;
+      delete out.x1; delete out.y1; delete out.x2; delete out.y2;
+    }
+  } else if (it.type === "ellipse"){
+    const m = turn((it.x1 + it.x2) / 2, (it.y1 + it.y2) / 2), rx = Math.abs(it.x2 - it.x1) / 2, ry = Math.abs(it.y2 - it.y1) / 2;
+    out.x1 = m.x - rx; out.y1 = m.y - ry; out.x2 = m.x + rx; out.y2 = m.y + ry; addRotation();
+  } else if (it.type === "image" || it.type === "group"){
+    const m = turn(it.x + it.w / 2, it.y + it.h / 2);
+    out.x = m.x - it.w / 2; out.y = m.y - it.h / 2; addRotation();
+  } else if (it.type === "text"){
+    const m = turn(it.x, it.y);
+    out.x = m.x; out.y = m.y; addRotation();
+  } else return it;
+  return out;
+}
+
 // 그룹을 현재 보드 좌표의 독립 항목들로 푼다. 기존 그룹 객체와 자식은 바꾸지 않는다.
 function ungroupItem(group, measureText){
   if (!group || group.type !== "group" || !Array.isArray(group.items)) return [];
+  if (Number(group.rotation)){
+    // 돌린 그룹: 돌리기 전 자리로 푼 다음 조각마다 그룹 가운데를 축으로 같은 만큼 돌린다.
+    const center = { x:(Number(group.x) || 0) + (Number(group.w) || 0) / 2, y:(Number(group.y) || 0) + (Number(group.h) || 0) / 2 };
+    const upright = Object.assign({}, group); delete upright.rotation;
+    return ungroupItem(upright, measureText).map((child) => rotateItem(child, center, Number(group.rotation)));
+  }
   const sw = Math.max(1, Number(group.sourceW) || Number(group.w) || 1), sh = Math.max(1, Number(group.sourceH) || Number(group.h) || 1);
   const sx = (Number(group.w) || sw) / sw, sy = (Number(group.h) || sh) / sh;
   const ox = Number(group.x) || 0, oy = Number(group.y) || 0, widthScale = (Math.abs(sx) + Math.abs(sy)) / 2;
@@ -336,7 +438,15 @@ function ungroupItem(group, measureText){
   const mapY = (y) => oy + (flipY ? sh - y : y) * sy;
   const scaleOne = (it) => {
     const out = Object.assign({}, it);
-    if (it.type === "text"){
+    if (it.type === "text" && Number(it.rotation)){
+      // 돌린 글: 글 가운데를 뒤집어 옮기고(글자는 뒤집지 않는다), 한쪽만 뒤집혔으면 기운 방향도 반대로.
+      const b = itemBounds(Object.assign({}, it, { rotation:0 }), measureText) || { w:0, h:0 };
+      const a = Number(it.rotation), turn = (r, x, y) => ({ x:x * Math.cos(r) - y * Math.sin(r), y:x * Math.sin(r) + y * Math.cos(r) });
+      const half = turn(a, b.w / 2, b.h / 2);
+      const a2 = flipX !== flipY ? -a : a, half2 = turn(a2, b.w / 2 * widthScale, b.h / 2 * widthScale);
+      out.x = mapX(it.x + half.x) - half2.x; out.y = mapY(it.y + half.y) - half2.y; out.rotation = a2;
+      out.fontSize = Math.max(1, (Number(it.fontSize) || 16) * widthScale);
+    } else if (it.type === "text"){
       const b = itemBounds(it, measureText) || { x:it.x, y:it.y, w:0, h:0 };
       out.x = ox + (flipX ? sw - b.x - b.w : it.x) * sx;
       out.y = oy + (flipY ? sh - b.y - b.h : it.y) * sy;
@@ -347,6 +457,7 @@ function ungroupItem(group, measureText){
       out.w = it.w * sx; out.h = it.h * sy;
       if (flipX) out.flipX = !out.flipX;
       if (flipY) out.flipY = !out.flipY;
+      if (flipX !== flipY && Number(out.rotation)) out.rotation = -Number(out.rotation);
     } else if (it.type === "polyline"){
       out.points = (it.points || []).map((p) => ({ x:mapX(p.x), y:mapY(p.y) }));
     } else {
@@ -361,5 +472,5 @@ function ungroupItem(group, measureText){
   return group.items.map(scaleOne);
 }
 
-return Object.freeze({ applyStroke, drawItem, drawItems, paintBackground, drawPattern, drawBackgroundImage, isSelectable, itemBounds, hitTestItem, translateItem, ungroupItem });
+return Object.freeze({ applyStroke, drawItem, drawItems, paintBackground, drawPattern, drawBackgroundImage, isSelectable, itemBounds, hitTestItem, translateItem, rotateItem, ungroupItem });
 })();
