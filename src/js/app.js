@@ -162,6 +162,7 @@ function wire(){
   if (byId("dzNewTrip")) byId("dzNewTrip").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTripScratch === "function") newTripScratch(); });
   if (byId("dzNewStudy")) byId("dzNewStudy").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newStudyScratch === "function") newStudyScratch(); });
   if (byId("dzNewTier")) byId("dzNewTier").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTierScratch === "function") newTierScratch(); });
+  if (byId("dzNewBracket")) byId("dzNewBracket").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newBracketScratch === "function") newBracketScratch(); });
   if (byId("dzNewExam")) byId("dzNewExam").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newExamPaper === "function") newExamPaper(); });
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
   if (byId("dzTaskBatch")) byId("dzTaskBatch").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openTaskBatchReview === "function") openTaskBatchReview(); });
@@ -216,8 +217,8 @@ function wire(){
     if ((imageMemo && !imageMemo.hidden) || (scratchpad && !scratchpad.hidden)) return true;
     // 일기장은 종이 위에 떨어뜨린 사진을 그 자리에 스티커로 붙인다 — 오버레이가 종이를 덮으면 안 된다.
     // 종이 밖이나 그림이 아닌 파일은 창의 drop 처리로 흘러가 평소처럼 새 탭으로 열린다.
-    // 티어표도 화면에 떨어뜨린 사진을 보유 카드로 받는다(오버레이가 덮으면 사진이 새 탭으로 열려 버린다).
-    return typeof state !== "undefined" && !!state && (state.kind === "diary" || state.kind === "trip" || state.kind === "tier");
+    // 티어표도 화면에 떨어뜨린 사진을 보유 카드로 받는다(오버레이가 덮으면 사진이 새 탭으로 열려 버린다). 대진표는 참가자로.
+    return typeof state !== "undefined" && !!state && (state.kind === "diary" || state.kind === "trip" || state.kind === "tier" || state.kind === "bracket");
   };
   window.addEventListener("dragenter", (e) => {
     if (!draggingFiles(e) || isInternalDragTransfer(e.dataTransfer, false)) return;
@@ -303,7 +304,7 @@ function wire(){
     // 화이트보드는 경고 없이 닫혀도 복원되도록, 디바운스를 건너뛰고 마지막 편집까지 즉시 저장한다.
     docs.forEach(d => {
       if (d.kind === "board" && typeof d.flushBoardRecovery === "function") d.flushBoardRecovery();
-      else if (["timeline", "concept", "study", "tier", "diary", "trip"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
+      else if (["timeline", "concept", "study", "tier", "diary", "trip", "bracket"].includes(d.kind) && typeof d.flushBackupRecovery === "function") d.flushBackupRecovery();
     });
     if (typeof persistTabStateNow === "function") persistTabStateNow();
     if (typeof persistUnsavedDocKeys === "function") persistUnsavedDocKeys();
@@ -519,6 +520,7 @@ function wire(){
   if (byId("sbNewTrip")) byId("sbNewTrip").onclick = () => { if (typeof newTripScratch === "function") newTripScratch(); };
   if (byId("sbNewStudy")) byId("sbNewStudy").onclick = () => { if (typeof newStudyScratch === "function") newStudyScratch(); };
   if (byId("sbNewTier")) byId("sbNewTier").onclick = () => { if (typeof newTierScratch === "function") newTierScratch(); };
+  if (byId("sbNewBracket")) byId("sbNewBracket").onclick = () => { if (typeof newBracketScratch === "function") newBracketScratch(); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };
   if (byId("sbNewExam")) byId("sbNewExam").onclick = () => { if (typeof newExamPaper === "function") newExamPaper(); };

@@ -1375,7 +1375,7 @@ function markDocumentDirty(doc, dirty=true){
    복원을 믿을 수 있는 종류만 — 저장할 때 markDocumentSavedSnapshot 을 거쳐 표식이 풀리는 편집기들. */
 // v2: v1 시절엔 여행일지가 탭을 열기만 해도(지도가 저절로 움직여) 저장 안 됨으로 적혀, 그 거짓 표식을 버린다.
 const UNSAVED_DOCS_KEY = "classdock-unsaved-docs:v2";
-const RESTORE_UNSAVED_KINDS = new Set(["trip", "diary", "timeline", "concept", "study", "tier", "map", "mnote", "music"]);
+const RESTORE_UNSAVED_KINDS = new Set(["trip", "diary", "timeline", "concept", "study", "tier", "bracket", "map", "mnote", "music"]);
 function persistUnsavedDocKeys(){
   if (typeof tabRestoreInProgress !== "undefined" && tabRestoreInProgress) return;   // 반쯤 연 목록으로 덮어쓰지 않게
   if (window.__tabActive === false) return;
@@ -1413,6 +1413,7 @@ function unsavedDocumentLabel(doc){
   if (doc.kind === "concept") return "개념 관계도";
   if (doc.kind === "study") return "암기 카드";
   if (doc.kind === "tier") return "티어표";
+  if (doc.kind === "bracket") return "대진표";
   if (doc.kind === "diary") return "일기장";
   if (doc.kind === "trip") return "여행일지";
   if (doc.kind === "dbconn") return "접속 설정";
@@ -1665,6 +1666,7 @@ function modeBadgeText(doc){
   if (doc.kind === "concept") return "개념 관계도 만들기";
   if (doc.kind === "study") return "암기·오답 복습";
   if (doc.kind === "tier") return "티어표 만들기";
+  if (doc.kind === "bracket") return "대진표 만들기";
   if (doc.kind === "diary") return "일기 쓰기";
   if (doc.kind === "trip") return "여행 기록";
   if (doc.kind === "replay") return "수업 리플레이";
@@ -2731,6 +2733,9 @@ function openSidebarGroupMenu(node, x, y){
   add("+Tier 새 티어표", () => {
     if (typeof newTierScratchInFolder === "function") newTierScratchInFolder(node.newPythonContext);
   });
+  add("+Brk 새 대진표", () => {
+    if (typeof newBracketScratchInFolder === "function") newBracketScratchInFolder(node.newPythonContext);
+  });
   add("+Dia 새 일기장", () => {
     if (typeof newDiaryScratchInFolder === "function") newDiaryScratchInFolder(node.newPythonContext);
   });
@@ -3081,6 +3086,13 @@ function isTierSearchable(doc){
 function tierCardsSearchText(doc){
   return isTierSearchable(doc) && typeof tierSearchText === "function" ? tierSearchText(doc.tierDoc) : null;
 }
+// .bracket 대진표 — 제목·참가자 이름만(사진 바이트는 빼고)
+function isBracketSearchable(doc){
+  return !!(doc && doc.bracketDoc && Array.isArray(doc.bracketDoc.entries));
+}
+function bracketEntriesSearchText(doc){
+  return isBracketSearchable(doc) && typeof bracketSearchText === "function" ? bracketSearchText(doc.bracketDoc) : null;
+}
 function isDiarySearchable(doc){
   return !!(doc && doc.diary && Array.isArray(doc.diary.entries));
 }
@@ -3143,6 +3155,7 @@ function hasLiveDocText(doc){
   if (isConceptSearchable(doc)) return true;             // 개념 카드·관계 모델
   if (isStudyCardsSearchable(doc)) return true;          // 암기 카드 모델
   if (isTierSearchable(doc)) return true;                // 티어표 카드 글
+  if (isBracketSearchable(doc)) return true;             // 대진표 참가자 이름
   if (isDiarySearchable(doc)) return true;               // 일기장 모델
   if (isTripSearchable(doc)) return true;                // 여행일지 모델
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function") return true;
@@ -3156,6 +3169,7 @@ function liveDocText(doc){
   if (isConceptSearchable(doc)) return conceptCardsSearchText(doc);
   if (isStudyCardsSearchable(doc)) return studyCardsSearchText(doc);
   if (isTierSearchable(doc)) return tierCardsSearchText(doc);
+  if (isBracketSearchable(doc)) return bracketEntriesSearchText(doc);
   if (isTripSearchable(doc)) return tripSearchText(doc);
   if (isDiarySearchable(doc)) return diarySearchText(doc);         // savedText 는 비교용 열쇠라 본문이 아니다
   if (doc.hasUnsavedEdits && doc.codeEditor && typeof doc.codeEditor.getValue === "function"){
@@ -3200,6 +3214,7 @@ function isTextSearchable(doc){
   if (isConceptSearchable(doc)) return true;           // .concept — 카드·연결 글자만
   if (isStudyCardsSearchable(doc)) return true;        // .study — 질문·정답·태그만
   if (isTierSearchable(doc)) return true;              // .tier — 줄 이름·카드 글만(사진 바이트는 빼고)
+  if (isBracketSearchable(doc)) return true;           // .bracket — 제목·참가자 이름만
   if (isDiarySearchable(doc)) return true;             // .diary — 날짜·제목·본문만(사진 바이트 제외)
   if (isTripSearchable(doc)) return true;              // .trip — 날·장소·본문만
   if (isOfficeSearchable(doc)) return true;            // docx·pptx·hwpx·(렌더된) hwp

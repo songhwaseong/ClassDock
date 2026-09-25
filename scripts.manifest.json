@@ -98,6 +98,7 @@
     "concept-doc.js",
     "study-doc.js",
     "tier-list.js",
+    "bracket.js",
     "remote-files.js",
     "remote-files-ui.js",
     "remote-terminal.js",
@@ -254,7 +255,8 @@
         "timeline.js",
         "concept-doc.js",
         "study-doc.js",
-        "tier-list.js"
+        "tier-list.js",
+        "bracket.js"
       ]
     },
     {
@@ -448,6 +450,13 @@
     ],
     "tier-list.js": [
       "timeline.js",
+      "documents.js",
+      "file-loaders.js",
+      "history.js",
+      "code-viewer.js"
+    ],
+    "bracket.js": [
+      "tier-list.js",
       "documents.js",
       "file-loaders.js",
       "history.js",
