@@ -7256,7 +7256,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .bracket-sizer{position:relative;flex:none;margin:auto;overflow:hidden}
   .bracket-stage{position:absolute;left:0;top:0;transform-origin:0 0}
   .bracket-stage-title{position:absolute;left:0;right:0;padding:0 24px;color:var(--br-title);font-size:30px;font-weight:900;letter-spacing:-.02em;line-height:44px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 12px #0000002e;pointer-events:none}
-  .bracket-round{position:absolute;transform:translate(-50%,-50%);padding:3px 11px;border-radius:999px;background:color-mix(in srgb,var(--br-card) 72%,transparent);color:var(--br-ink);font-size:12.5px;font-weight:800;white-space:nowrap;pointer-events:none;box-shadow:0 1px 4px #0000001f;transition:background .25s,color .25s,transform .25s}
+  .bracket-round{position:absolute;transform:translate(-50%,-50%);padding:3px 11px;border-radius:999px;background:color-mix(in srgb,var(--br-card) 72%,transparent);color:var(--br-ink);font-size:12.5px;font-weight:800;white-space:nowrap;box-shadow:0 1px 4px #0000001f;transition:background .25s,color .25s,transform .25s,box-shadow .25s}
+  button.bracket-round{margin:0;border:0;font:inherit;font-size:12.5px;font-weight:800;line-height:1.35;cursor:pointer}
+  button.bracket-round:hover:not(:disabled):not(.is-base),button.bracket-round:focus-visible{background:var(--br-win);color:#1b1b1b;outline:none;transform:translate(-50%,-50%) scale(1.12)}
+  button.bracket-round:disabled{opacity:.5;cursor:default}
+  button.bracket-round.is-base,.bracket-doc.is-replaying button.bracket-round{cursor:default}
+  .bracket-round.is-focus{background:var(--br-win);color:#1b1b1b;box-shadow:0 0 0 3px color-mix(in srgb,var(--br-win) 35%,transparent),0 2px 8px #0003}
   .bracket-round.is-current{background:var(--br-win);color:#1b1b1b;transform:translate(-50%,-50%) scale(1.15)}
   .bracket-lines{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}
   .bracket-edge{fill:none;stroke:var(--br-line);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
@@ -7322,6 +7327,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   @keyframes bracket-champ-pop{0%{transform:scale(1)}30%{transform:scale(1.1)}60%{transform:scale(.97)}100%{transform:scale(1)}}
   @keyframes bracket-crown-drop{0%{transform:translate(-50%,-70px) rotate(-20deg);opacity:0}60%{transform:translate(-50%,5px) rotate(6deg);opacity:1}100%{transform:translate(-50%,0) rotate(0)}}
   @media(prefers-reduced-motion:reduce){.bracket-card.is-champ.is-entry,.bracket-card.is-celebrating,.bracket-card.is-celebrating .bracket-crown{animation:none}}
+  /* 회전별로 크게 보기 — 빠지는 카드를 그리는 층(옛 판 복제)과 왼쪽 위 "전체 보기" 막대 */
+  .bracket-focus-fx{position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none}
+  .bracket-focus-bar{position:absolute;left:14px;top:12px;z-index:26;display:flex;align-items:center;gap:10px;padding:4px 14px 4px 4px;border:1px solid var(--border);border-radius:999px;background:color-mix(in srgb,var(--panel) 94%,transparent);box-shadow:0 4px 16px #0000002e;backdrop-filter:blur(4px)}
+  .bracket-focus-bar[hidden]{display:none}
+  .bracket-focus-bar .bracket-focus-back{min-height:32px;padding:3px 12px;border-radius:999px}
+  .bracket-focus-text{color:var(--ink);font-size:13px;font-weight:750}
   .bracket-confetti{position:absolute;inset:0;z-index:30;width:100%;height:100%;pointer-events:none}
   /* 화면 위에 뜨는 것들 — 확대, 안내, 다시 보기 막대, 빈 대진표 안내 */
   .bracket-zoom{position:absolute;right:14px;bottom:14px;z-index:25;display:flex;align-items:center;gap:2px;padding:4px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--panel) 92%,transparent);box-shadow:0 4px 16px #0000002e;backdrop-filter:blur(4px)}

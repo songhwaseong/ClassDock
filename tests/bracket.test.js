@@ -143,3 +143,52 @@ test("오른쪽 클릭 메뉴는 카드 일 아래로 머리말·⋯ 메뉴의 �
   // ⋯ 메뉴와 같은 조각을 쓴다 — 한쪽만 고쳐 어긋나지 않게
   ["sizeMenu()", "shuffleItem()", "clearResultsItem()", "removeAllItem()"].forEach(piece => assert.ok(tools.includes(piece), piece));
 });
+
+test("회전별로 크게 보기 — 그 회전 위만 작은 대진으로 배치하되 칸·선 번호는 원래 대진 번호다", () => {
+  const full = br.bracketFocusGeometry(32, 0, "split", "m", { title:true });
+  assert.equal(full.depth, 0); assert.equal(full.nodes.length, 63);
+  const focus = br.bracketFocusGeometry(32, 2, "split", "m", { title:true });    // 8강부터
+  assert.equal(focus.depth, 2); assert.equal(focus.size, 32); assert.equal(focus.R, 5);
+  assert.equal(focus.nodes.length, 15); assert.ok(focus.nodes.every(node => node.r >= 2));
+  assert.ok(focus.byKey.get("2-7") && focus.byKey.get("5-0") && !focus.byKey.get("1-0"));
+  assert.ok(focus.edges.every(edge => edge.r >= 2 && focus.byKey.get(edge.key)));
+  assert.deepEqual(focus.labels.map(label => label.text).filter((text, i, all) => all.indexOf(text) === i), ["8강", "4강", "결승"]);
+  assert.ok(focus.byKey.get("2-0").w > full.byKey.get("2-0").w);                 // 카드는 한 단계 크게
+  assert.equal(br.bracketFocusGeometry(8, 99, "up", "l").depth, 2);               // 결승(2명)까지만
+});
+
+test("다시 보기 자동 확대는 기본으로 켜져 있고 파일에 남는다", () => {
+  const model = sample(); assert.equal(model.replayFocus, true);
+  model.replayFocus = false;
+  assert.equal(br.bracketDocParse(br.bracketDocSerialize(model)).replayFocus, false);
+  assert.equal(br.bracketDocParse({ type:"classdock-bracket", entries:[] }).replayFocus, true);
+});
+
+test("메모 왕복 — 메모 그림 블록이 대진표 갈래를 기억하고, 보낼 때 그림과 스냅샷을 함께 넘긴다", () => {
+  const { scratchpadNormalizeBlock, scratchpadBoardKindLabel } = require("../src/js/scratchpad.js");
+  assert.equal(scratchpadBoardKindLabel("bracket"), "대진표");
+  assert.equal(scratchpadNormalizeBlock({ type:"image", assetId:"a", boardAssetId:"b", boardKind:"bracket" }).boardKind, "bracket");
+  const pad = read("src/js/scratchpad.js"), src = read("src/js/bracket.js");
+  assert.match(pad, /sourceKind === "bracket" \? await openBracketFromMemo\(openOptions\)/);
+  assert.match(pad, /window\.addBracketToScratchpad = async/);
+  assert.match(src, /window\.addBracketToScratchpad\(blob, JSON\.parse\(json\), \{[^}]*blockId:doc\.memoBlockId/);
+  assert.match(src, /doc\.memoBlockId = result\.blockId/);
+  assert.match(src, /doc\.memoBlockId = String\(opts\.memoBlockId \|\| ""\) \|\| null/);
+  assert.match(read("src/js/documents.js"), /d\.kind === "music" \|\| d\.kind === "bracket"/);
+});
+
+test("메모에서 다시 열기 — 스냅샷으로 .bracket 탭을 만들고, 같은 블록은 두 번 열지 않는다", async () => {
+  const vm = require("node:vm");
+  const opened = [];
+  const context = { console, Map, Set, Math, JSON, Date, File, Blob, Promise, docs:[], toast:() => {}, setActiveDoc:(id) => { context.active = id; },
+    handleFiles:async (files, opts) => { const text = await files[0].text(); const made = { id:"d" + opened.length, kind:"bracket", name:files[0].name, memoBlockId:opts.memoBlockId, bracketDoc:br.bracketDocParse(text) }; opened.push(made); context.docs.push(made); return made; } };
+  context.globalThis = context; vm.createContext(context);
+  vm.runInContext(read("src/js/bracket.js") + ";globalThis.__open = openBracketFromMemo;", context);
+  const model = sample(); const state = JSON.parse(br.bracketDocSerialize(model));
+  const [a, b] = await Promise.all([context.__open({ state, name:"반 대항전", memoBlockId:"image-1" }), context.__open({ state, name:"반 대항전", memoBlockId:"image-1" })]);
+  assert.equal(opened.length, 1); assert.equal(a, b);
+  assert.equal(a.name, "반 대항전.bracket"); assert.equal(a.memoBlockId, "image-1"); assert.equal(a.bracketDoc.entries.length, 4);
+  const again = await context.__open({ state, name:"반 대항전", memoBlockId:"image-1" });   // 이미 이어진 탭(내용 같음) → 그 탭으로
+  assert.equal(again, a); assert.equal(opened.length, 1); assert.equal(context.active, a.id); assert.equal(a.memoReusedTab, true);
+  assert.equal(await context.__open({ state:{ type:"x" }, memoBlockId:"image-2" }), null);   // 깨진 스냅샷은 탭을 만들지 않는다
+});

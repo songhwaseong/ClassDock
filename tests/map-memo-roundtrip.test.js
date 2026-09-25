@@ -280,7 +280,7 @@ test("이미 고리를 가진 문서와 고리가 없던 옛 상태는 건드리
 });
 
 test("메모 고리는 탭 상태에 함께 저장되고 복원 끝에 다시 이어진다", () => {
-  assert.match(documentsSource, /d\.memoBlockId && \(d\.kind === "map" \|\| d\.kind === "music"\)/);
+  assert.match(documentsSource, /d\.memoBlockId && \(d\.kind === "map" \|\| d\.kind === "music"( \|\| d\.kind === "bracket")?\)/);
   assert.match(documentsSource, /JSON\.stringify\(\{ tabs, active, study, memoLinks, boards, savedAt: Date\.now\(\) \}\)/);
   assert.match(workspaceSource, /restoreMemoLinks\(savedTabs\)/);
   // 블록이 바뀌는 순간(메모로 보내기)에도 탭 상태를 다시 적어야 그 고리가 남는다.

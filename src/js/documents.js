@@ -2836,7 +2836,7 @@ function persistTabStateNow(){
        작업공간이 되살리지만 이 고리가 없으면 다시 실행한 뒤 '메모로'가 그 블록을 바꾸지 않고
        새 블록을 만들어, 같은 지도가 메모에 두 벌로 남는다. */
     const memoLinks = docs
-      .filter(d => d && d.memoBlockId && (d.kind === "map" || d.kind === "music"))
+      .filter(d => d && d.memoBlockId && (d.kind === "map" || d.kind === "music" || d.kind === "bracket"))
       .map(d => ({ doc: docStableKey(d), block: String(d.memoBlockId) }))
       .filter(link => link.doc && link.block);
     // 화이트보드는 파일 바이트가 없으므로 탭을 다시 만들 최소 정보도 탭 상태에 함께 둔다.

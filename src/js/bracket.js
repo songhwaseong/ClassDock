@@ -47,7 +47,6 @@ const BRACKET_MOTION_LABELS = [["slow", "느리게"], ["normal", "보통"], ["fa
 const BRACKET_UI_PATHS = {
   layout:'<path d="M3 4.5h5v4H3zM3 15.5h5v4H3zM16 10h5v4h-5zM8 6.5h3v11H8M11 12h5"/>',
   palette:'<path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.9 1.4-1.9-.5-1.1.2-2.1 1.4-2.1H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1.2" fill="currentColor" stroke="none"/><circle cx="10.5" cy="7" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="7.5" r="1.2" fill="currentColor" stroke="none"/>',
-  screen:'<path d="M4 8.5V4h4.5M15.5 4H20v4.5M20 15.5V20h-4.5M8.5 20H4v-4.5"/>',
   users:'<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.3c1.7.6 2.7 2.2 3 4.7"/>',
   score:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 5v14M6.5 10.5l1.5-1v5M15.5 10h2.5v2h-2.5v2.5H18"/>',
   next:'<path d="M6 5.5l8.5 6.5L6 18.5zM18 5.5v13"/>',
@@ -93,7 +92,7 @@ function bracketNormalizeBackdrop(raw){
 function bracketDocEmpty(title, size){
   const n = bracketIsSize(size) ? size : 8;
   return { type:BRACKET_DOC_TYPE, version:BRACKET_DOC_VERSION, title:bracketText(title || "대진표", 160), layout:"split", lineStyle:"elbow", cardSize:"m",
-    theme:"classic", backdrop:bracketNormalizeBackdrop(null), showScores:true, scoreRule:"high", motion:"normal",
+    theme:"classic", backdrop:bracketNormalizeBackdrop(null), showScores:true, scoreRule:"high", motion:"normal", replayFocus:true,
     size:n, entries:[], slots:new Array(n).fill(""), results:{} };
 }
 function bracketDocParse(text){
@@ -114,6 +113,7 @@ function bracketDocParse(text){
   model.theme = bracketTheme(raw.theme).id; if (model.theme === "custom" && !model.backdrop.image) model.theme = "classic";
   model.showScores = raw.showScores !== false; model.scoreRule = raw.scoreRule === "low" ? "low" : "high";
   model.motion = Object.prototype.hasOwnProperty.call(BRACKET_MOTION, raw.motion) ? raw.motion : "normal";
+  model.replayFocus = raw.replayFocus !== false;
   model.entries = entries;
   // 자리: 아는 참가자만, 한 번씩만. 자리가 없는 참가자는 빈 칸에 씨드 차례로 앉힌다.
   const seated = new Set(), slots = Array.isArray(raw.slots) ? raw.slots : [];
@@ -277,6 +277,18 @@ function bracketEdgePath(child, parent, axis, style){
   const dir = parent.y >= child.y ? 1 : -1, y1 = n(child.y + dir * child.h / 2), y2 = n(parent.y - dir * parent.h / 2), x1 = n(child.x), x2 = n(parent.x), mid = n((y1 + y2) / 2);
   return style === "curve" ? `M${x1} ${y1}C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}` : `M${x1} ${y1}V${mid}H${x2}V${y2}`;
 }
+/* 회전별로 크게 보기 — depth 회전 위만 떼어 낸 작은 대진(size >> depth)으로 배치하고, 칸·선 번호는 원래 대진 번호로 되돌려 둔다.
+   그래서 경기 번호·결과·올라가기 애니메이션 코드는 전체 보기와 그대로 같이 쓴다. 카드는 한 단계 큰 크기로. */
+const BRACKET_FOCUS_CARD = { s:"m", m:"l", l:"l" };
+function bracketFocusGeometry(size, depth, layout, cardSize, opts = {}){
+  const R = bracketLog2(size), d = Math.max(0, Math.min(R - 1, Math.floor(Number(depth) || 0)));
+  if (!d) return { ...bracketGeometry(size, layout, cardSize, opts), depth:0 };
+  const geo = bracketGeometry(size >> d, layout, BRACKET_FOCUS_CARD[cardSize] || "l", opts);
+  const nodes = geo.nodes.map(node => ({ ...node, r:node.r + d, key:(node.r + d) + "-" + node.k }));
+  return { ...geo, size, R:geo.R + d, depth:d, nodes, byKey:new Map(nodes.map(node => [node.key, node])),
+    edges:geo.edges.map(edge => ({ ...edge, r:edge.r + d, key:(edge.r + d) + "-" + edge.k })),
+    labels:geo.labels.map(label => ({ ...label, r:label.r + d })) };
+}
 /* 모양·테마 고르기 창의 작은 그림 — 8강 나무를 선과 네모로만. */
 function bracketMiniSvg(layout, lineStyle){
   const geo = bracketGeometry(8, layout, "s", { bare:true, lineStyle });
@@ -310,6 +322,7 @@ async function loadBracketDoc(file, opts = {}){
   catch(_){ if (typeof toast === "function") toast("대진표(.bracket)를 읽지 못해 텍스트로 열었어요.", 3600); return typeof loadText === "function" ? loadText(file, opts) : null; }
   if (!model.title) model.title = bracketDefaultTitle(file.name);
   const doc = makeDoc("bracket", file.name, opts); doc.bracketDoc = model; doc.sourceFile = file; doc.savedText = bracketDocSerialize(model);
+  doc.memoBlockId = String(opts.memoBlockId || "") || null;   // 메모 그림 블록에서 되살린 대진표면 "메모로"가 그 블록을 바꾼다
   doc.contentSearchFocus = query => { const needle = String(query || "").trim().toLowerCase(), found = model.entries.find(entry => [entry.text, entry.name].join(" ").toLowerCase().includes(needle)); if (!found || typeof doc.bracketFocus !== "function") return false; return doc.bracketFocus(found.id); };
   doc.render = async () => { if (doc._bracketMounted) return; doc._bracketMounted = true; doc.el.innerHTML = ""; mountBracketEditor(doc); };
   if (typeof refreshChrome === "function") refreshChrome(); if (typeof activateIfIdle === "function") activateIfIdle(doc, opts); return doc;
@@ -326,6 +339,51 @@ async function saveBracketDoc(doc){
   if (!doc || !doc.bracketDoc) return false; const json = bracketDocSerialize(doc.bracketDoc), ok = typeof saveTextDoc === "function" ? await saveTextDoc(json, doc, doc.name) : false; if (!ok) return false;
   doc.savedText = json; if (typeof doc.bracketMarkSaved === "function") doc.bracketMarkSaved();
   if (typeof markDocumentSavedSnapshot === "function") await markDocumentSavedSnapshot(doc, new TextEncoder().encode(json), "application/json"); else if (typeof markDocumentDirty === "function") markDocumentDirty(doc, false); return true;
+}
+
+/* ── 메모 왕복 ── 메모 그림 블록에 대진표 그림(PNG)과 편집용 스냅샷(.bracket 과 같은 JSON)을 함께 담는다(지도·악보와 같은 규약).
+   메모의 "✏️ 대진표로"가 openBracketFromMemo 로 탭을 되살리고, 고친 뒤 다시 "메모로"를 누르면 doc.memoBlockId 덕에
+   새 블록이 아니라 그 블록이 제자리에서 바뀐다. */
+const _bracketMemoOpenTasks = new Map();
+function bracketMemoContentKey(model){ try { return bracketDocSerialize(model); } catch(_){ return ""; } }
+/* options.state — 메모 블록에 담긴 대진표 객체 · options.name — 탭 이름 · options.memoBlockId — 돌아갈 메모 블록 id */
+async function openBracketFromMemo(options = {}){
+  const blockId = String(options.memoBlockId || "");
+  const pending = blockId ? _bracketMemoOpenTasks.get(blockId) : null;
+  if (pending){ const pendingDoc = await pending; if (pendingDoc && typeof setActiveDoc === "function") setActiveDoc(pendingDoc.id); return pendingDoc; }
+  const opening = (async () => {
+    // 같은 블록을 두 탭으로 열면 둘 다 그 블록을 덮어써 나중 것이 앞의 편집을 지운다.
+    const opened = (typeof docs !== "undefined" ? docs : []).find(item => item && item.kind === "bracket" && blockId && item.memoBlockId === blockId);
+    let snapshot;
+    try { snapshot = bracketDocParse(options.state || {}); }
+    catch(error){
+      console.warn("메모의 대진표 스냅샷을 읽지 못했어요:", error);
+      if (opened){ if (typeof setActiveDoc === "function") setActiveDoc(opened.id); return opened; }
+      if (typeof toast === "function") toast("메모에 담긴 대진표 정보를 읽지 못했어요.", 2800, { type:"error" });
+      return null;
+    }
+    if (opened){
+      // 이미 이어진 탭이 있으면 그 탭으로 — 내용이 그림과 다르면(메모로 보낸 뒤 더 고침) 어느 쪽을 볼지 묻는다.
+      const same = !!opened.bracketDoc && bracketMemoContentKey(opened.bracketDoc) === bracketMemoContentKey(snapshot);
+      const openNew = !same && typeof confirmDialog === "function" && await confirmDialog("이미 열려 있는 '" + String(opened.name || "대진표") + "' 탭이 이 메모 그림과 이어져 있는데, 그 대진표는 그림과 내용이 달라요. 메모 그림의 대진표를 새 탭으로 열까요?", "메모 그림으로 열기", "열린 탭 보기");
+      if (!openNew){
+        if (typeof setActiveDoc === "function") setActiveDoc(opened.id);
+        if (typeof toast === "function") toast(same ? "이미 열려 있는 대진표 탭으로 갔어요." : "이미 열려 있는 대진표 탭으로 갔어요 — 이 탭의 대진표는 메모 그림과 내용이 다릅니다.", 3600);
+        opened.memoReusedTab = true;   // 메모창이 "대진표로 열었어요" 안내를 겹쳐 띄우지 않게
+        return opened;
+      }
+      opened.memoBlockId = null;       // 새로 열기를 골랐다 — 옛 탭의 고리를 끊어 한 블록을 두 탭이 덮어쓰지 않게
+      if (typeof persistTabState === "function") persistTabState();
+    }
+    if (typeof handleFiles !== "function") return null;
+    const base = bracketSafeName(String(options.name || "대진표").replace(/\.bracket$/i, "").trim() || "대진표");
+    const made = await handleFiles([new File([bracketDocSerialize(snapshot)], base + ".bracket", { type:"application/json" })], { isScratch:true, memoBlockId:blockId });
+    if (made) made.memoReusedTab = false;
+    return made;
+  })();
+  if (blockId) _bracketMemoOpenTasks.set(blockId, opening);
+  try { return await opening; }
+  finally { if (blockId && _bracketMemoOpenTasks.get(blockId) === opening) _bracketMemoOpenTasks.delete(blockId); }
 }
 
 /* ── 그림(PNG) ── 화면을 찍지 않고 같은 배치로 캔버스에 직접 그린다(스크롤·확대와 상관없이 전체가 나오게). */
@@ -459,17 +517,16 @@ function mountBracketEditor(doc){
   brand.innerHTML = '<span class="bracket-logo" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M6 9h10v10H6zM6 29h10v10H6zM32 19h10v10H32z" fill="#8b80f9" stroke="#2b2d6e" stroke-width="2.4" stroke-linejoin="round"/><path d="M16 14h6v20h-6M22 24h10" fill="none" stroke="#2b2d6e" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
   const titleInput = document.createElement("input"); titleInput.className = "bracket-title"; titleInput.value = model.title; titleInput.maxLength = 160; titleInput.placeholder = "대진표 제목 (예: 반 대항 피구 대회)"; titleInput.title = "눌러서 제목 바꾸기";
   brand.appendChild(titleInput);
-  const addBtn = bracketButton("글로 넣기", "참가자(사람·팀·물건 이름)를 한 줄에 하나씩 넣기", "tier-btn", bracketUiIcon("plus"));
-  const photoBtn = bracketButton("사진 넣기", "사진 참가자 넣기 — 여러 장을 한꺼번에 고르거나, 화면에 끌어다 놓거나, Ctrl+V 로 붙여 넣을 수 있어요", "tier-btn", bracketUiIcon("image"));
-  const layoutBtn = bracketButton("모양", "대진표 모양 고르기 — 양쪽에서 가운데로·한쪽으로·아래에서 위로 …", "tier-btn", bracketSvg("layout"));
-  const themeBtn = bracketButton("꾸미기", "배경 템플릿·선 모양·카드 크기", "tier-btn", bracketSvg("palette"));
-  const playBtn = bracketButton("다시 보기", "지금까지 정한 경기를 1회전부터 차례로 올라가는 모습으로 다시 보여 줘요", "tier-btn bracket-play-btn", bracketUiIcon("play"));
-  const showBtn = bracketButton("", "발표 — 화면 가득 보기 (한 번 더 누르면 돌아와요)", "tier-btn", bracketSvg("screen"));
+  const addBtn = bracketButton("", "글로 넣기 — 참가자(사람·팀·물건 이름)를 한 줄에 하나씩 넣기", "tier-btn", bracketUiIcon("text"));
+  const photoBtn = bracketButton("", "사진 넣기 — 여러 장을 한꺼번에 고르거나, 화면에 끌어다 놓거나, Ctrl+V 로 붙여 넣을 수 있어요", "tier-btn", bracketUiIcon("image"));
+  const layoutBtn = bracketButton("", "모양 — 양쪽에서 가운데로·한쪽으로·아래에서 위로 …", "tier-btn", bracketSvg("layout"));
+  const themeBtn = bracketButton("", "꾸미기 — 배경 템플릿·선 모양·카드 크기", "tier-btn", bracketSvg("palette"));
+  const playBtn = bracketButton("", "다시 보기 — 지금까지 정한 경기를 1회전부터 차례로 올라가는 모습으로 다시 보여 줘요", "tier-btn bracket-play-btn", bracketUiIcon("play"));
   const undoBtn = bracketButton("", "실행 취소 (Ctrl+Z)", "tier-btn", bracketUiIcon("undo")), redoBtn = bracketButton("", "다시 실행 (Ctrl+Y)", "tier-btn", bracketUiIcon("redo"));
   const saveBtn = bracketButton("저장하기", "대진표 저장 (Ctrl+S)", "tier-btn tier-primary run-save", bracketUiIcon("save"));
   const moreBtn = bracketButton("", "더 보기 — 대진 크기·새로 뽑기·점수·움직임·그림으로 저장", "tier-btn", bracketUiIcon("more"));
   const actions = document.createElement("div"); actions.className = "bracket-actions";
-  actions.append(addBtn, photoBtn, layoutBtn, themeBtn, playBtn, showBtn, undoBtn, redoBtn, saveBtn, moreBtn);
+  actions.append(addBtn, photoBtn, layoutBtn, themeBtn, playBtn, undoBtn, redoBtn, saveBtn, moreBtn);
   bar.append(brand, actions);
 
   const body = document.createElement("div"); body.className = "bracket-body";
@@ -497,12 +554,15 @@ function mountBracketEditor(doc){
   let hintClosed = false; try { hintClosed = localStorage.getItem(HINT_CLOSED_KEY) === "1"; } catch(_){}
   showHint(!hintClosed);
   const replayBar = document.createElement("div"); replayBar.className = "bracket-replay"; replayBar.hidden = true;
+  const focusBar = document.createElement("div"); focusBar.className = "bracket-focus-bar"; focusBar.hidden = true;
+  const focusBack = bracketButton("전체 보기", "전체 대진으로 돌아가기 (Esc)", "tier-btn bracket-focus-back", bracketUiIcon("zoomOut"));
+  const focusText = document.createElement("span"); focusText.className = "bracket-focus-text"; focusBar.append(focusBack, focusText);
   const empty = document.createElement("div"); empty.className = "bracket-empty"; empty.hidden = true;
   empty.innerHTML = '<strong>참가자를 넣어 대진표를 만들어 보세요.</strong><span>빈 칸을 눌러 한 명씩 넣어도 되고, 칸이 모자라면 대진이 저절로 커져요(최대 128).</span><div class="bracket-empty-actions"></div>';
   const emptyText = bracketButton("글로 넣기", "", "tier-btn tier-primary", bracketUiIcon("plus")), emptyPhoto = bracketButton("사진 넣기", "", "tier-btn", bracketUiIcon("image"));
   empty.querySelector(".bracket-empty-actions").append(emptyText, emptyPhoto);
   const confetti = document.createElement("canvas"); confetti.className = "bracket-confetti"; confetti.setAttribute("aria-hidden", "true");
-  body.append(backdrop, view, empty, replayBar, hint, zoomBox, confetti);
+  body.append(backdrop, view, empty, replayBar, focusBar, hint, zoomBox, confetti);
   const fileInput = document.createElement("input"); fileInput.type = "file"; fileInput.accept = "image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif"; fileInput.multiple = true; fileInput.hidden = true;
   root.append(bar, body, fileInput);
 
@@ -527,7 +587,7 @@ function mountBracketEditor(doc){
   const clearedNote = cleared => (cleared ? ` 참가자가 바뀌어 뒤 경기 결과 ${cleared}개를 지웠어요 — 되돌리려면 Ctrl+Z` : "");
 
   /* ── 그리기 ── 바뀔 때마다 판 전체를 다시 그린다(칸 255개·선 254개면 충분히 가볍다). */
-  let geo = null, resolved = null, entryById = new Map(), animToken = 0, traceId = "", zoom = 1, fitMode = true;
+  let geo = null, resolved = null, entryById = new Map(), animToken = 0, traceId = "", zoom = 1, fitMode = true, focusDepth = 0, focusFx = null;
   const motion = () => { const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches; return BRACKET_MOTION[reduce ? "off" : model.motion] || BRACKET_MOTION.normal; };
   function applyBackdrop(){
     root.dataset.brTheme = model.theme;
@@ -564,18 +624,28 @@ function mountBracketEditor(doc){
   }
   function render(results){
     animToken++;
+    if (focusFx){ focusFx.remove(); focusFx = null; }
     applyBackdrop();
     entryById = new Map(model.entries.map(entry => [entry.id, entry]));
-    geo = bracketGeometry(model.size, model.layout, model.cardSize, { title:true, lineStyle:model.lineStyle });
+    if (focusDepth > bracketLog2(model.size) - 1) focusDepth = 0;   // 대진이 작아졌으면 전체 보기로
+    geo = bracketFocusGeometry(model.size, focusDepth, model.layout, model.cardSize, { title:true, lineStyle:model.lineStyle });
     resolved = bracketResolve(model, results);
     stage.className = "bracket-stage axis-" + geo.axis; stage.style.width = geo.width + "px"; stage.style.height = geo.height + "px"; stage.style.setProperty("--br-font", geo.font + "px");
     stage.innerHTML = "";
     const title = document.createElement("div"); title.className = "bracket-stage-title"; title.textContent = model.title; title.style.top = (geo.titleY - 22) + "px"; stage.appendChild(title);
-    geo.labels.forEach(label => { const tag = document.createElement("span"); tag.className = "bracket-round"; tag.dataset.round = String(label.r); tag.textContent = label.text; tag.style.left = label.x + "px"; tag.style.top = label.y + "px"; stage.appendChild(tag); });
+    // 회전 이름표 = 누르면 그 회전부터 크게 보기. 올라온 참가자가 없는 회전은 못 누른다. 지금 크게 보는 회전을 다시 누르면 전체로.
+    geo.labels.forEach(label => {
+      const tag = document.createElement("button"); tag.type = "button"; tag.className = "bracket-round"; tag.dataset.round = String(label.r); tag.textContent = label.text; tag.style.left = label.x + "px"; tag.style.top = label.y + "px";
+      if (focusDepth && label.r === focusDepth){ tag.classList.add("is-focus"); tag.title = "눌러서 전체 대진으로 돌아가기 (Esc)"; }
+      else if (!label.r){ tag.classList.add("is-base"); tag.tabIndex = -1; tag.title = "첫 회전 — 지금 전체 대진을 보고 있어요"; }
+      else if (resolved.nodes[label.r].some(Boolean)) tag.title = `눌러서 ${label.text}부터 크게 보기 — 아래 회전은 숨겨요`;
+      else { tag.disabled = true; tag.title = `아직 ${label.text}에 올라온 참가자가 없어요`; }
+      stage.appendChild(tag);
+    });
     let base = "", wins = "";
     geo.edges.forEach(edge => {
       const id = resolved.nodes[edge.r][edge.k], up = resolved.nodes[edge.r + 1][edge.k >> 1];
-      base += `<path class="bracket-edge${id === null ? " is-void" : ""}" d="${edge.d}"/>`;
+      base += `<path class="bracket-edge${id === null ? " is-void" : ""}" data-edge="${edge.key}" d="${edge.d}"/>`;
       if (id && id === up){ const match = matchAt(edge.r, edge.k >> 1); wins += `<path class="bracket-edge-win${match && match.auto ? " is-pass" : ""}" data-edge="${edge.key}" data-entry="${id.replace(/"/g, "&quot;")}" d="${edge.d}"/>`; }
     });
     stage.insertAdjacentHTML("beforeend", `<svg class="bracket-lines" width="${geo.width}" height="${geo.height}" viewBox="0 0 ${geo.width} ${geo.height}" aria-hidden="true">${base}${wins}</svg>`);
@@ -583,11 +653,12 @@ function mountBracketEditor(doc){
     if (traceId) setTrace(traceId, true);
     empty.hidden = !!model.entries.length || !!replay;
     playBtn.disabled = !Object.keys(model.results).some(key => model.results[key].winner) && !replay;
+    focusBar.hidden = !focusDepth || !!replay; focusText.textContent = focusDepth ? `${bracketRoundLabel(model.size >> focusDepth)}부터 크게 보는 중` : "";
     applyZoom();
   }
 
   /* ── 확대·맞추기 ── 판은 transform 으로 줄이고, 겉 칸(sizer)이 줄인 크기만큼 자리를 차지해 스크롤이 맞게 한다. */
-  function fitScale(){ const w = view.clientWidth - 28, h = view.clientHeight - 28; if (!geo || w <= 0 || h <= 0) return 1; return Math.max(0.08, Math.min(1.6, w / geo.width, h / geo.height)); }
+  function fitScale(){ const w = view.clientWidth - 28, h = view.clientHeight - 28; if (!geo || w <= 0 || h <= 0) return 1; return Math.max(0.08, Math.min(focusDepth ? 2.4 : 1.6, w / geo.width, h / geo.height)); }
   function applyZoom(){
     if (!geo) return; if (fitMode) zoom = fitScale();
     stage.style.transform = `scale(${zoom})`; sizer.style.width = Math.ceil(geo.width * zoom) + "px"; sizer.style.height = Math.ceil(geo.height * zoom) + "px";
@@ -657,6 +728,47 @@ function mountBracketEditor(doc){
     confettiFrame = requestAnimationFrame(tick);
   }
 
+  /* ── 회전별로 크게 보기 ── 이름표(8강·4강…)를 누르면 그 회전부터 우승까지만 크게. 아래 회전 카드는 바깥쪽 아래로 빠지고,
+     남는 카드는 지금 자리·크기에서 새 자리로 커지며 옮겨 간다(FLIP). 좌표는 배치 계산값에서 바로 얻는다 — 화면을 재지 않는다. */
+  const currentResults = () => (replay ? replayResults(replay.step) : undefined);
+  const viewSpot = () => ({ ox:sizer.offsetLeft - view.scrollLeft, oy:sizer.offsetTop - view.scrollTop, zoom });
+  function setFocus(depth){
+    const next = Math.max(0, Math.min(bracketLog2(model.size) - 1, Math.floor(Number(depth) || 0)));
+    if (!geo || next === focusDepth) return Promise.resolve();
+    const dur = Math.round(motion().move * 1.15), prevGeo = geo, prevDepth = focusDepth, before = viewSpot(), oldStage = dur ? stage.cloneNode(true) : null;
+    focusDepth = next; fitMode = true; setTrace(""); render(currentResults()); view.scrollLeft = 0; view.scrollTop = 0;
+    return dur ? animateFocus(prevGeo, prevDepth, before, oldStage, dur) : Promise.resolve();
+  }
+  function animateFocus(prevGeo, prevDepth, before, oldStage, dur){
+    const token = animToken, after = viewSpot(), jobs = [];
+    const away = (g, node, dist) => { const c = g.byKey.get(g.R + "-0"), dx = node.x - c.x, dy = node.y - c.y, len = Math.hypot(dx, dy) || 1; return [dx / len * dist, dy / len * dist + 24]; };
+    if (focusDepth > prevDepth && oldStage){
+      // 빠지는 카드 — 옛 판을 복제해 남을 칸·선은 지우고, 나머지를 바깥쪽 아래로 흐려 보낸다(아래 회전부터 차례로)
+      oldStage.querySelectorAll(".bracket-stage-title,.bracket-round,.bracket-fly").forEach(el => el.remove());
+      oldStage.querySelectorAll("[data-node],[data-edge]").forEach(el => { if (Number((el.dataset.node || el.dataset.edge).split("-")[0]) >= focusDepth) el.remove(); });
+      const fx = document.createElement("div"); fx.className = "bracket-focus-fx"; oldStage.style.left = before.ox + "px"; oldStage.style.top = before.oy + "px"; fx.appendChild(oldStage); view.after(fx); focusFx = fx;
+      oldStage.querySelectorAll(".bracket-card[data-node]").forEach(el => {
+        const node = prevGeo.byKey.get(el.dataset.node); if (!node) return; const [dx, dy] = away(prevGeo, node, 70);
+        jobs.push(el.animate([{ transform:"none", opacity:1 }, { transform:`translate(${dx}px, ${dy}px) scale(.85)`, opacity:0 }], { duration:dur * 0.6, delay:(node.r - prevDepth) * 70, easing:"ease-in", fill:"forwards" }).finished);
+      });
+      const lines = oldStage.querySelector(".bracket-lines"); if (lines) jobs.push(lines.animate([{ opacity:1 }, { opacity:0 }], { duration:dur * 0.45, easing:"ease-out", fill:"forwards" }).finished);
+    }
+    stage.querySelectorAll(".bracket-card[data-node]").forEach(el => {
+      const node = geo.byKey.get(el.dataset.node), old = prevGeo.byKey.get(el.dataset.node); if (!node) return;
+      if (old){   // 남는 카드 — 옛 자리·크기에서 새 자리로 커지며(작아지며) 옮겨 간다
+        const tx = (before.ox + old.x * before.zoom - after.ox - node.x * after.zoom) / after.zoom, ty = (before.oy + old.y * before.zoom - after.oy - node.y * after.zoom) / after.zoom;
+        const s = (old.w * before.zoom) / (node.w * after.zoom), pop = focusDepth > prevDepth ? 1.06 : 1;
+        jobs.push(el.animate([{ transform:`translate(${tx}px, ${ty}px) scale(${s})` }, { transform:`translate(0px, 0px) scale(${pop})`, offset:0.8 }, { transform:"none" }], { duration:dur, easing:"cubic-bezier(.2,.8,.2,1)" }).finished);
+      } else {    // 새로 보이는 카드(전체 쪽으로 돌아갈 때의 아래 회전) — 바깥쪽 아래에서 들어온다
+        const [dx, dy] = away(geo, node, 70);
+        jobs.push(el.animate([{ transform:`translate(${dx}px, ${dy}px) scale(.85)`, opacity:0 }, { transform:"none", opacity:1 }], { duration:dur * 0.6, delay:dur * 0.4 + (prevDepth - 1 - node.r) * 60, easing:"ease-out", fill:"backwards" }).finished);
+      }
+    });
+    stage.querySelectorAll(".bracket-lines,.bracket-round,.bracket-stage-title").forEach(el => jobs.push(el.animate([{ opacity:0 }, { opacity:1 }], { duration:dur * 0.45, delay:dur * 0.6, easing:"ease-out", fill:"backwards" }).finished));
+    return Promise.all(jobs.map(job => job.catch(() => {}))).then(() => { if (focusFx && token === animToken){ focusFx.remove(); focusFx = null; } });
+  }
+  focusBack.onclick = () => setFocus(0);
+
   /* 이긴 길 따라 빛내기 — 카드에 올리면 그 참가자가 지나온 칸·선을 함께 밝힌다. */
   function setTrace(id, force){
     if (traceId === id && !force) return; traceId = id || "";
@@ -666,7 +778,9 @@ function mountBracketEditor(doc){
   stage.addEventListener("pointerover", event => { if (press || pan || replay) return; const card = event.target.closest(".bracket-card.is-entry"); setTrace(card ? card.dataset.entry : ""); });
   stage.addEventListener("pointerleave", () => setTrace(""));
   doc.bracketFocus = id => {
-    const el = stage.querySelector(`.bracket-card[data-entry="${CSS.escape(id)}"]`); if (!el) return false;
+    const find = () => stage.querySelector(`.bracket-card[data-entry="${CSS.escape(id)}"]`);
+    let el = find(); if (!el && focusDepth){ focusDepth = 0; render(currentResults()); el = find(); }   // 크게 보기에서 숨은 참가자면 전체로
+    if (!el) return false;
     setTrace(id); el.scrollIntoView({ block:"center", inline:"center", behavior:"smooth" }); return true;
   };
 
@@ -739,6 +853,8 @@ function mountBracketEditor(doc){
   const onUp = event => finish(event, false), onCancel = event => finish(event, true);
   window.addEventListener("pointermove", onMove, { passive:false }); window.addEventListener("pointerup", onUp); window.addEventListener("pointercancel", onCancel);
   view.addEventListener("click", event => {
+    const round = event.target.closest(".bracket-round");
+    if (round){ if (replay || round.disabled || round.classList.contains("is-base")) return; const r = Number(round.dataset.round); setFocus(r === focusDepth ? 0 : r); return; }
     const edit = event.target.closest(".bracket-card-edit"); if (!edit || replay) return;
     event.stopPropagation(); const card = edit.closest(".bracket-card"); if (card && card.dataset.entry) openEntryDialog(card.dataset.entry, -1);
   });
@@ -941,8 +1057,13 @@ function mountBracketEditor(doc){
   }
   function markRound(r){ stage.querySelectorAll(".bracket-round.is-current").forEach(el => el.classList.remove("is-current")); if (r != null) stage.querySelectorAll(`.bracket-round[data-round="${r}"]`).forEach(el => el.classList.add("is-current")); }
   async function playStep(run){
-    const key = replay.order[replay.step]; replay.step++; render(replayResults(replay.step)); paintReplayBar();
-    const [r, i] = key.split(":").map(Number); markRound(r); await animateAdvance(r, i);
+    const key = replay.order[replay.step], [r, i] = key.split(":").map(Number);
+    if (model.replayFocus && r !== focusDepth){   // 회전이 바뀌면 그 회전부터 크게 — 올라간 참가자들이 커지며 올라선다
+      await setFocus(r); if (!replay || replay.run !== run) return false;
+      await bracketSleep(Math.max(250, motion().pause)); if (!replay || replay.run !== run) return false;
+    }
+    replay.step++; render(replayResults(replay.step)); paintReplayBar();
+    markRound(r); await animateAdvance(r, i);
     return replay && replay.run === run;
   }
   async function replayLoop(run){
@@ -958,13 +1079,14 @@ function mountBracketEditor(doc){
     if (!order.length){ say("아직 정한 경기가 없어요 — 이긴 쪽 카드를 눌러 결과를 넣어 보세요.", 3000); return; }
     stopReplay(true);
     const run = ++replaySeq; replay = { order, step:0, paused:false, done:false, run, resume:null };
-    root.classList.add("is-replaying"); replayBar.hidden = false; setTrace(""); fitMode = true; render(replayResults(0)); paintReplayBar();
+    root.classList.add("is-replaying"); replayBar.hidden = false; setTrace(""); fitMode = true; focusDepth = 0; render(replayResults(0)); paintReplayBar();
     await bracketSleep(500 + motion().pause); replayLoop(run);
   }
   function togglePause(){ if (!replay || replay.done) return; replay.paused = !replay.paused; const resume = replay.resume; replay.resume = null; if (!replay.paused && resume) resume(); paintReplayBar(); }
   async function stepOnce(){ if (!replay || !replay.paused || replay.done || replay.busy) return; replay.busy = true; const run = replay.run; await playStep(run); if (replay && replay.run === run){ replay.busy = false; if (replay.step >= replay.order.length){ replay.done = true; markRound(null); } paintReplayBar(); } }
   function stopReplay(quiet){
     if (!replay) return; const resume = replay.resume; replay = null; if (resume) resume();
+    focusDepth = 0; fitMode = true;   // 다시 보기가 크게 봐 둔 회전은 닫으면 전체로
     root.classList.remove("is-replaying"); replayBar.hidden = true; replayBar.innerHTML = "";
     if (!quiet) render();
   }
@@ -974,7 +1096,8 @@ function mountBracketEditor(doc){
   photoBtn.onclick = () => fileInput.click(); emptyPhoto.onclick = () => fileInput.click();
   fileInput.onchange = async () => { const files = Array.from(fileInput.files || []); fileInput.value = ""; await addImageFiles(files); };
   layoutBtn.onclick = openLayoutDialog; themeBtn.onclick = openThemeDialog; playBtn.onclick = startReplay;
-  showBtn.onclick = () => { if (typeof toggleViewerFullscreen === "function"){ fitMode = true; toggleViewerFullscreen(); } };
+  // 전체 화면은 앱 머리말의 전체화면 단추가 맡는다 — 여기선 오른쪽 클릭 메뉴(보기 ▸ 발표)에서만 부른다.
+  const toggleFullscreen = () => { if (typeof toggleViewerFullscreen === "function"){ fitMode = true; toggleViewerFullscreen(); } };
   undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo();
   titleInput.oninput = () => { model.title = titleInput.value; const title = stage.querySelector(".bracket-stage-title"); if (title) title.textContent = model.title; history.commitSoon(500); touch(); };
   saveBtn.onclick = () => saveBracketDoc(doc);
@@ -995,6 +1118,33 @@ function mountBracketEditor(doc){
       say(placed ? "대진표를 칠판으로 옮겼어요 — 그 위에 바로 판서할 수 있어요." : "칠판에 대진표를 넣지 못했어요.", 3000);
     } catch(error){ console.warn("대진표 칠판 보내기 실패:", error); say("칠판에 대진표를 넣지 못했어요.", 3000, { type:"error" }); }
     finally { sendingToBoard = false; }
+  };
+  /* 메모로 — 사진이 많아 스냅샷이 무거우면(3MB 넘게) 함께 넣을지 그림만 넣을지 한 번 묻는다. */
+  let sendingToMemo = false;
+  const sendToMemo = async () => {
+    if (typeof window.addBracketToScratchpad !== "function"){ say("메모창을 열 수 없어요."); return; }
+    if (sendingToMemo) return; sendingToMemo = true;
+    try {
+      const json = bracketDocSerialize(model), bytes = new Blob([json]).size, title = String(model.title || "").trim() || "대진표";
+      let withData = true;
+      if (bytes > 3 * 1024 * 1024 && typeof confirmDialog === "function"){
+        withData = await confirmDialog(`사진이 많아 대진표 정보가 ${(bytes / 1048576).toFixed(1)}MB예요. 함께 넣으면 메모에서 다시 대진표로 열어 이어서 진행할 수 있지만 메모가 무거워져요.`, "함께 넣기", "그림만 넣기");
+      }
+      const blob = await (await fetch(await bracketRenderPng(model, { ratio:1.5 }))).blob();
+      if (!withData){
+        if (typeof window.addImagesToScratchpad === "function") await window.addImagesToScratchpad([new File([blob], bracketSafeName(title) + ".png", { type:"image/png" })], { name:title });
+        say("대진표 그림만 메모에 넣었어요.", 2600); return;
+      }
+      const result = await window.addBracketToScratchpad(blob, JSON.parse(json), { name:bracketSafeName(title) + ".png", boardName:title, blockId:doc.memoBlockId });
+      if (result && result.blockId){
+        doc.memoBlockId = result.blockId;
+        if (typeof persistTabState === "function") persistTabState();   // 다시 실행한 뒤에도 같은 블록으로 돌아가게
+        touch();                                                        // 잠시 덮여 있던 '저장 안 됨' 표시를 제자리로
+        say(result.snapshotDropped ? "대진표가 너무 커서 그림만 넣었어요 — 메모에서 다시 대진표로 열 수는 없어요."
+          : result.replaced ? "메모의 대진표 그림을 지금 모습으로 바꿨어요." : "대진표를 메모로 보냈어요 — 메모에서 '✏️ 대진표로'를 누르면 다시 열어 이어서 진행할 수 있어요.", 3600);
+      } else touch();                                                   // 메모창이 사유(용량·잠금 등)를 이미 알렸다
+    } catch(error){ console.warn("대진표 메모 보내기 실패:", error); say("메모로 보내지 못했어요.", 3000, { type:"error" }); }
+    finally { sendingToMemo = false; }
   };
   const hasResults = () => Object.keys(model.results).some(key => model.results[key].winner);
   const guardResults = async message => !hasResults() || typeof confirmDialog !== "function" || await confirmDialog(message, "계속", "취소");
@@ -1022,6 +1172,7 @@ function mountBracketEditor(doc){
   const scoreRuleMenu = () => ({ label:"점수로 이긴 쪽 정하기", icon:"list", children:pickItems([["high", "높은 점수가 이김"], ["low", "낮은 점수가 이김 (기록 경기)"]], "scoreRule") });
   const motionMenu = () => ({ label:"올라가는 움직임", icon:"play", children:pickItems(BRACKET_MOTION_LABELS, "motion") });
   const exportItems = () => [
+    { label:"메모로", title:"대진표 그림을 메모에 넣기 — 메모에서 '✏️ 대진표로'를 누르면 다시 열어 이어서 진행해요" + (doc.memoBlockId ? " (이어진 메모 블록을 지금 모습으로 바꿔요)" : ""), icon:"notebook", action:sendToMemo },
     { label:"칠판으로", title:"대진표를 그림으로 굳혀 새 화이트보드에 넣기", icon:"board", action:sendToBoard },
     { label:"그림(PNG)으로 저장", title:"대진표 전체를 그림 한 장으로 저장", icon:"image", action:exportPng }
   ];
@@ -1040,9 +1191,16 @@ function mountBracketEditor(doc){
     { separator:true },
     { label:"꾸미기 창 열기…", icon:"settings", action:openThemeDialog }
   ];
+  const roundFocusItems = () => {
+    const R = bracketLog2(model.size), res = bracketResolve(model, currentResults()), items = [{ label:"전체 대진", icon:"zoomOut", active:!focusDepth, action:() => setFocus(0) }];
+    for (let r = 1; r < R; r++) items.push({ label:bracketRoundLabel(model.size >> r) + "부터 우승까지", active:focusDepth === r, disabled:!res.nodes[r].some(Boolean), action:() => setFocus(r) });
+    return items;
+  };
   const viewItems = () => [
     { label:"다시 보기", title:"정한 경기를 1회전부터 올라가는 모습으로 다시 보기", icon:"play", disabled:!hasResults(), action:startReplay },
-    { label:"발표 (전체 화면)", title:"한 번 더 고르면 돌아와요", icon:"view", action:() => showBtn.click() },
+    { label:"발표 (전체 화면)", title:"한 번 더 고르면 돌아와요", icon:"view", action:toggleFullscreen },
+    { label:"회전별로 크게 보기", title:"그 회전부터 우승까지만 크게 — 회전 이름표를 눌러도 돼요", icon:"zoomIn", children:roundFocusItems() },
+    { label:"다시 보기에서 회전마다 크게", title:"다시 보기 때 회전이 바뀌면 그 회전부터 크게 보여 줘요", icon:"check", active:model.replayFocus, action:() => setModel("replayFocus", !model.replayFocus) },
     { separator:true },
     { label:"화면에 맞추기", icon:"move", active:fitMode, action:fitNow },
     { label:"실제 크기 (100%)", icon:"search", action:() => setZoom(1) },
@@ -1122,12 +1280,13 @@ function mountBracketEditor(doc){
     const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
     if (mod && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); return; }
     if (mod && key === "y"){ event.preventDefault(); history.redo(); return; }
+    if (event.key === "Escape" && focusDepth){ event.preventDefault(); setFocus(0); return; }
     if (event.key === "Escape" && traceId){ event.preventDefault(); setTrace(""); }
   };
   window.addEventListener("keydown", keydown);
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
-    clearTimeout(recoveryTimer); if (history) history.cancel(); stopReplay(true); cancelAnimationFrame(confettiFrame); animToken++;
+    clearTimeout(recoveryTimer); if (history) history.cancel(); stopReplay(true); if (focusFx) focusFx.remove(); cancelAnimationFrame(confettiFrame); animToken++;
     if (press && press.ghost) press.ghost.remove(); press = null; pan = null;
     window.removeEventListener("keydown", keydown); document.removeEventListener("paste", onPaste); if (viewObserver) viewObserver.disconnect();
     window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onCancel);
@@ -1139,5 +1298,5 @@ function mountBracketEditor(doc){
 if (typeof module !== "undefined" && module.exports){
   module.exports = { BRACKET_DOC_TYPE, BRACKET_DOC_VERSION, BRACKET_MAX_SIZE, BRACKET_LAYOUTS, BRACKET_THEMES, bracketDocEmpty, bracketDocParse, bracketDocSerialize, bracketNormalizeEntry,
     bracketSeedOrder, bracketSeat, bracketSizeFor, bracketResolve, bracketMatchIndex, bracketPrune, bracketSetResult, bracketWinnerByScore, bracketClearResults, bracketAddEntries,
-    bracketRemoveEntry, bracketResize, bracketSwapSlots, bracketShuffle, bracketDecidedOrder, bracketGeometry, bracketEdgePath, bracketRoundLabel, bracketSearchText, bracketScratchFileName };
+    bracketRemoveEntry, bracketResize, bracketSwapSlots, bracketShuffle, bracketDecidedOrder, bracketGeometry, bracketEdgePath, bracketFocusGeometry, bracketRoundLabel, bracketSearchText, bracketScratchFileName };
 }

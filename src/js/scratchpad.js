@@ -23,7 +23,7 @@ const SCRATCHPAD_IMAGE_SIZES = new Set(["small", "medium", "large", "full"]);
 const SCRATCHPAD_COLORS = new Set(["yellow", "sage", "lavender", "rose", "ivory"]);
 const SCRATCHPAD_CUSTOM_COLOR_RE = /^#[0-9a-f]{6}$/i;
 /* 그림 블록에 편집용 스냅샷을 함께 담아 두는 편집기들. 되열 때 어느 편집기로 갈지 가른다. */
-const SCRATCHPAD_BOARD_KINDS = new Set(["board", "music", "map"]);
+const SCRATCHPAD_BOARD_KINDS = new Set(["board", "music", "map", "bracket"]);
 /* 스냅샷(편집용 JSON)의 상한. 지도는 '내 지도' 배경 이미지를 data URI 로 품을 수 있어 홀로 커질 수
    있다. 넘으면 그림만 넣고 되열기를 포기한다 — 메모 전체를 못 쓰게 만드는 것보다 낫다. */
 const SCRATCHPAD_MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024;
@@ -31,6 +31,7 @@ const SCRATCHPAD_MAX_SNAPSHOT_BYTES = 25 * 1024 * 1024;
 function scratchpadBoardKindLabel(kind){
   if (kind === "music") return "악보";
   if (kind === "map") return "지도";
+  if (kind === "bracket") return "대진표";
   return "화이트보드";
 }
 
@@ -1392,6 +1393,7 @@ function wireScratchpad(){
     const boardBtn = block.boardAssetId ? makeButton("✏️ " + sourceLabel + "로", sourceLabel + "로 다시 열어 편집 — 고친 뒤 '메모로'를 누르면 이 블록이 바뀝니다", async () => {
       const canOpen = sourceKind === "music" ? typeof openMusicSheetFromMemo === "function"
         : sourceKind === "map" ? typeof openMapFromMemo === "function"
+        : sourceKind === "bracket" ? typeof openBracketFromMemo === "function"
         : typeof newWhiteboard === "function";
       if (!canOpen){ showStatus(sourceLabel + "를 열 수 없습니다.", false); return; }
       let state = null;
@@ -1406,6 +1408,7 @@ function wireScratchpad(){
       const openOptions = { state, name:block.boardName || sourceLabel, memoBlockId:block.id };
       const openedDoc = sourceKind === "music" ? await openMusicSheetFromMemo(openOptions)
         : sourceKind === "map" ? await openMapFromMemo(openOptions)
+        : sourceKind === "bracket" ? await openBracketFromMemo(openOptions)
         : newWhiteboard(openOptions);
       // 손상된 악보·지도 스냅샷처럼 편집 탭을 만들지 못한 경우에는 openMusicSheetFromMemo·
       // openMapFromMemo 가 이미 구체적인 오류를 알린다. 메모를 닫거나 성공 안내로 그 오류를 덮지 않는다.
@@ -2219,6 +2222,11 @@ function wireScratchpad(){
   window.addMapToScratchpad = async (pngBlob, mapData, options={}) => {
     setOpen(true, false);
     return addBoardBlock(pngBlob, mapData, { ...options, kind:"map" });
+  };
+  // 대진표 → 메모(대진표 전체 그림 + 편집용 대진표 스냅샷). 되열 때는 "✏️ 대진표로".
+  window.addBracketToScratchpad = async (pngBlob, bracketData, options={}) => {
+    setOpen(true, false);
+    return addBoardBlock(pngBlob, bracketData, { ...options, kind:"bracket" });
   };
   /* 표(2차원 배열) → 메모 표 블록. 지도 표시 목록처럼 바깥에서 만든 표를 파일을 거치지 않고
      넣는 길이다 — 메모 표에 달린 복사·CSV 저장·표 편집기·변환이 그대로 이어진다.
