@@ -129,7 +129,7 @@ test("대진표가 셸·불러오기·새로 만들기·검색·복원 목록에
   assert.match(read("src/js/command-palette.js"), /newBracketScratch/);
   const docs = read("src/js/documents.js");
   assert.match(docs, /RESTORE_UNSAVED_KINDS = new Set\(\[[^\]]*"bracket"/); assert.match(docs, /newBracketScratchInFolder/); assert.match(docs, /isBracketSearchable/);
-  assert.match(read("src/js/app.js"), /"diary", "trip", "bracket"\]\.includes\(d\.kind\)/);
+  assert.match(read("src/js/app.js"), /"diary", "trip", "bracket"(, "[a-z]+")*\]\.includes\(d\.kind\)/);
   assert.match(read("src/js/document-types.js"), /"tier","bracket"/);
   const css = read("src/styles.css");
   br.BRACKET_THEMES.forEach(theme => assert.match(css, new RegExp(`\\[data-br-theme="${theme.id}"\\]\\{--br-bg:`), theme.id));

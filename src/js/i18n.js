@@ -1557,6 +1557,9 @@
     "새 티어표(.tier)": "New tier list (.tier)",
     "새 대진표 (.bracket)": "New tournament bracket (.bracket)",
     "새 대진표(.bracket)": "New tournament bracket (.bracket)",
+    "새 복불복 뽑기 (.pick)": "New random picker (.pick)",
+    "새 복불복 뽑기(.pick)": "New random picker (.pick)",
+    "+Pick 새 복불복 뽑기": "+Pick New random picker",
     "새 일기장 (.diary)": "New diary (.diary)",
     "새 일기장(.diary)": "New diary (.diary)",
     /* 일기장(.diary) 편집기 — 짧은 이름(줄 무늬·날씨 등)은 diary.js 안에 영어를 함께 둔다 */

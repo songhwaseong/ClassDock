@@ -46,6 +46,7 @@
     C("newStudy","🧠","새 암기 카드 (.study)", () => callFn("newStudyScratch"), { kw:"study flashcard 암기 카드 단어장 오답 복습 빈칸" }),
     C("newTier","🏆","새 티어표 (.tier)", () => callFn("newTierScratch"), { kw:"tier list tierlist 티어 티어표 티어리스트 등급 순위 랭킹 S A B C D 분류" }),
     C("newBracket","🥇","새 대진표 (.bracket)", () => callFn("newBracketScratch"), { kw:"bracket tournament 대진표 토너먼트 대진 경기 대회 리그 월드컵 16강 8강 결승 우승 점수" }),
+    C("newPick","🎡","새 복불복 뽑기 (.pick)", () => callFn("newPickScratch"), { kw:"pick random roulette wheel lottery draw 복불복 뽑기 랜덤 룰렛 돌림판 추첨 제비뽑기 사다리 당첨 발표 순서 벌칙" }),
     C("mapToBoard","🖊️","지도를 칠판으로", clickBtn(".map-to-board"),
       { when:hasBtn(".map-to-board"), kw:"map board 지도 칠판 화이트보드 판서 필기 스냅샷 캡처" }),
     C("boardInsertMap","🗺️","칠판에 지도 넣기", clickBtn(".wb-map"),

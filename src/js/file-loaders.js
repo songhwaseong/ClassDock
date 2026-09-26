@@ -143,6 +143,7 @@ async function handleFiles(files, options={}){
       else if (ext === "study" && typeof loadStudyDoc === "function") made = await loadStudyDoc(file, opts);
       else if (ext === "tier" && typeof loadTierDoc === "function") made = await loadTierDoc(file, opts);
       else if (ext === "bracket" && typeof loadBracketDoc === "function") made = await loadBracketDoc(file, opts);
+      else if (ext === "pick" && typeof loadPickDoc === "function") made = await loadPickDoc(file, opts);
       else if (ext === "msheet" && typeof loadMusicSheet === "function") made = await loadMusicSheet(file, opts);
       else if ((ext === "musicxml" || ext === "mxl") && typeof loadMusicXml === "function") made = await loadMusicXml(file, opts);
       else if (ext === "lesson" && typeof loadLesson === "function") made = await loadLesson(file, opts);

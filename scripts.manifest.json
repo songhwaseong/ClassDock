@@ -99,6 +99,22 @@
     "study-doc.js",
     "tier-list.js",
     "bracket.js",
+    "pick.js",
+    "pick-roulette.js",
+    "pick-ladder.js",
+    "pick-card.js",
+    "pick-slot.js",
+    "pick-marble.js",
+    "pick-capsule.js",
+    "pick-dice.js",
+    "pick-lotto.js",
+    "pick-bomb.js",
+    "pick-scratch.js",
+    "pick-bottle.js",
+    "pick-dart.js",
+    "pick-treasure.js",
+    "pick-croc.js",
+    "pick-bingo.js",
     "remote-files.js",
     "remote-files-ui.js",
     "remote-terminal.js",
@@ -256,7 +272,23 @@
         "concept-doc.js",
         "study-doc.js",
         "tier-list.js",
-        "bracket.js"
+        "bracket.js",
+        "pick.js",
+        "pick-roulette.js",
+        "pick-ladder.js",
+        "pick-card.js",
+        "pick-slot.js",
+        "pick-marble.js",
+        "pick-capsule.js",
+        "pick-dice.js",
+        "pick-lotto.js",
+        "pick-bomb.js",
+        "pick-scratch.js",
+        "pick-bottle.js",
+        "pick-dart.js",
+        "pick-treasure.js",
+        "pick-croc.js",
+        "pick-bingo.js"
       ]
     },
     {
@@ -461,6 +493,60 @@
       "file-loaders.js",
       "history.js",
       "code-viewer.js"
+    ],
+    "pick.js": [
+      "tier-list.js",
+      "documents.js",
+      "file-loaders.js",
+      "history.js",
+      "code-viewer.js"
+    ],
+    "pick-roulette.js": [
+      "pick.js"
+    ],
+    "pick-ladder.js": [
+      "pick.js"
+    ],
+    "pick-card.js": [
+      "pick.js"
+    ],
+    "pick-slot.js": [
+      "pick.js"
+    ],
+    "pick-marble.js": [
+      "pick.js"
+    ],
+    "pick-capsule.js": [
+      "pick.js"
+    ],
+    "pick-dice.js": [
+      "pick.js"
+    ],
+    "pick-lotto.js": [
+      "pick.js"
+    ],
+    "pick-bomb.js": [
+      "pick.js"
+    ],
+    "pick-scratch.js": [
+      "pick.js"
+    ],
+    "pick-bottle.js": [
+      "pick.js"
+    ],
+    "pick-dart.js": [
+      "pick.js",
+      "pick-roulette.js"
+    ],
+    "pick-treasure.js": [
+      "pick.js",
+      "pick-card.js"
+    ],
+    "pick-croc.js": [
+      "pick.js"
+    ],
+    "pick-bingo.js": [
+      "pick.js"
     ],
     "diff-viewer.js": [
       "documents.js",
