@@ -17,21 +17,26 @@ const PICK_COLORS = ["#f7a193", "#a3e3c8", "#fbe09a", "#d3c1f6", "#b1d0fa", "#f9
 const PICK_COLOR_NAMES = ["살구", "민트", "노랑", "보라", "하늘", "분홍", "복숭아", "연두", "물빛", "모래", "라벤더", "장미"];
 /* 게임 목록 — 차례가 곧 '게임 선택' 메뉴 차례. 몸체(PICK_GAME_IMPL[id])가 아직 없는 게임은 메뉴에 나오지 않는다. */
 const PICK_GAMES = [
-  { id:"roulette", label:"룰렛 돌리기", short:"룰렛", sub:"돌려보세요!\n오늘의 주인공은 누구일까요?", go:"돌리기", note:"좋은 사람과\n좋은 시간이\n더 특별해져요!", layout:"side" },
-  { id:"ladder", label:"사다리타기", short:"사다리", sub:"누가 당첨될까요? 지금 사다리를 타보세요!", go:"사다리 타기", note:"", layout:"center" },
-  { id:"card", label:"카드 뽑기", short:"카드", sub:"카드를 한 장 골라보세요", go:"카드 섞기", note:"", layout:"center" },
-  { id:"slot", label:"슬롯 추첨", short:"슬롯", sub:"누가 오늘의 주인공일까요?", go:"추첨 시작", note:"두근두근\n누가 될까요?", layout:"center" },
-  { id:"marble", label:"구슬 경주", short:"구슬", sub:"구슬이 함께 달려요! 오늘의 우승자는 누구일까요?", go:"경주 시작", note:"", layout:"center" },
-  { id:"capsule", label:"캡슐 뽑기", short:"캡슐", sub:"손잡이를 돌려 캡슐을 뽑아요", go:"캡슐 뽑기", note:"어떤 친구가\n나올까요?", layout:"center" },
-  { id:"dice", label:"주사위 굴리기", short:"주사위", sub:"차례대로 굴려요 — 높은 숫자가 이겨요", go:"주사위 굴리기", note:"", layout:"center" },
-  { id:"lotto", label:"공 뽑기", short:"공", sub:"번호 공이 섞이다 하나씩 굴러 나와요", go:"공 뽑기", note:"좋은 일이\n뽑히기를!", layout:"center" },
-  { id:"bomb", label:"폭탄 돌리기", short:"폭탄", sub:"터지기 전에 다음 사람에게 넘겨요!", go:"폭탄 시작", note:"", layout:"center" },
-  { id:"scratch", label:"스크래치 뽑기", short:"스크래치", sub:"긁어서 결과를 확인하세요", go:"새로 섞기", note:"", layout:"center" },
-  { id:"bottle", label:"병 돌리기", short:"병", sub:"병이 가리키는 사람이 오늘의 주인공!", go:"병 돌리기", note:"", layout:"center" },
-  { id:"dart", label:"다트 추첨", short:"다트", sub:"다트가 꽂힌 칸의 친구가 당첨!", go:"다트 던지기", note:"", layout:"center" },
-  { id:"treasure", label:"보물상자 고르기", short:"보물상자", sub:"상자를 하나 골라보세요", go:"다시 섞기", note:"", layout:"center" },
-  { id:"croc", label:"악어 이빨 누르기", short:"악어", sub:"차례대로 이빨을 눌러요 — 악어가 물면 걸려요!", go:"게임 시작", note:"", layout:"center" },
-  { id:"bingo", label:"빙고 추첨", short:"빙고", sub:"번호를 뽑아 먼저 한 줄을 채우면 빙고!", go:"번호 뽑기", note:"", layout:"center" }
+  { id:"roulette", group:"draw", label:"룰렛 돌리기", short:"룰렛", sub:"돌려보세요!\n오늘의 주인공은 누구일까요?", go:"돌리기", note:"좋은 사람과\n좋은 시간이\n더 특별해져요!", layout:"side" },
+  { id:"ladder", group:"race", label:"사다리타기", short:"사다리", sub:"누가 당첨될까요? 지금 사다리를 타보세요!", go:"사다리 타기", note:"", layout:"center" },
+  { id:"card", group:"pick", label:"카드 뽑기", short:"카드", sub:"카드를 한 장 골라보세요", go:"카드 섞기", note:"", layout:"center" },
+  { id:"slot", group:"draw", label:"슬롯 추첨", short:"슬롯", sub:"누가 오늘의 주인공일까요?", go:"추첨 시작", note:"두근두근\n누가 될까요?", layout:"center" },
+  { id:"marble", group:"race", label:"구슬 경주", short:"구슬", sub:"구슬이 함께 달려요! 오늘의 우승자는 누구일까요?", go:"경주 시작", note:"", layout:"center" },
+  { id:"capsule", group:"draw", label:"캡슐 뽑기", short:"캡슐", sub:"손잡이를 돌려 캡슐을 뽑아요", go:"캡슐 뽑기", note:"어떤 친구가\n나올까요?", layout:"center" },
+  { id:"dice", group:"race", label:"주사위 굴리기", short:"주사위", sub:"차례대로 굴려요 — 높은 숫자가 이겨요", go:"주사위 굴리기", note:"", layout:"center" },
+  { id:"lotto", group:"draw", label:"공 뽑기", short:"공", sub:"번호 공이 섞이다 하나씩 굴러 나와요", go:"공 뽑기", note:"좋은 일이\n뽑히기를!", layout:"center" },
+  { id:"bomb", group:"race", label:"폭탄 돌리기", short:"폭탄", sub:"터지기 전에 다음 사람에게 넘겨요!", go:"폭탄 시작", note:"", layout:"center" },
+  { id:"scratch", group:"pick", label:"스크래치 뽑기", short:"스크래치", sub:"긁어서 결과를 확인하세요", go:"새로 섞기", note:"", layout:"center" },
+  { id:"bottle", group:"draw", label:"병 돌리기", short:"병", sub:"병이 가리키는 사람이 오늘의 주인공!", go:"병 돌리기", note:"", layout:"center" },
+  { id:"dart", group:"draw", label:"다트 추첨", short:"다트", sub:"다트가 꽂힌 칸의 친구가 당첨!", go:"다트 던지기", note:"", layout:"center" },
+  { id:"treasure", group:"pick", label:"보물상자 고르기", short:"보물상자", sub:"상자를 하나 골라보세요", go:"다시 섞기", note:"", layout:"center" },
+  { id:"croc", group:"pick", label:"악어 이빨 누르기", short:"악어", sub:"차례대로 이빨을 눌러요 — 악어가 물면 걸려요!", go:"게임 시작", note:"", layout:"center" },
+  { id:"bingo", group:"race", label:"빙고 추첨", short:"빙고", sub:"번호를 뽑아 먼저 한 줄을 채우면 빙고!", go:"번호 뽑기", note:"", layout:"center" },
+  { id:"lots", group:"draw", label:"제비뽑기", short:"제비", sub:"쪽지를 하나 뽑아보세요", go:"제비 뽑기", note:"", layout:"center" },
+  { id:"coin", group:"draw", label:"동전 던지기", short:"동전", sub:"두 편으로 나누고 동전을 던져요 — 나온 면의 편이 당첨!", go:"동전 던지기", note:"", layout:"center" },
+  { id:"strings", group:"pick", label:"끈 뽑기", short:"끈", sub:"마음에 드는 끈을 당겨보세요", go:"다시 준비", note:"", layout:"center" },
+  { id:"balloon", group:"pick", label:"풍선 터뜨리기", short:"풍선", sub:"자기 풍선을 터뜨려 보세요 — 당첨 쪽지는 누구 풍선에?", go:"풍선 다시 채우기", note:"", layout:"center" },
+  { id:"pinball", group:"draw", label:"핀볼 추첨", short:"핀볼", sub:"구슬을 떨어뜨려 오늘의 주인공을 뽑아보세요!", go:"구슬 떨어뜨리기", note:"", layout:"center" }
 ];
 const PICK_MOTION = { slow:1.4, normal:1, fast:0.6, off:0 };
 const PICK_MOTION_LABELS = [["slow", "느리게"], ["normal", "보통"], ["fast", "빠르게"], ["off", "움직임 끄기"]];
@@ -555,7 +560,17 @@ function mountPickEditor(doc){
 
   /* ── 머리말 단추·설정 메뉴 ── */
   const setModel = (key, value) => { if (model[key] === value) return; model[key] = value; changed(); };
-  const gameItems = () => pickReadyGames().map(info => ({ label:info.label, active:currentGame().id === info.id, action:() => { if (!busy) setModel("game", info.id); } }));
+  // 게임 메뉴 — 뽑기(한 번에 뽑힘) / 고르기(차례대로 하나씩 열기) / 겨루기(여럿이 함께 진행) 무리마다 구분선.
+  const PICK_GAME_GROUPS = ["draw", "pick", "race"];
+  const gameItems = () => {
+    const ready = pickReadyGames(), items = [];
+    PICK_GAME_GROUPS.concat([undefined]).forEach(group => {
+      const list = ready.filter(info => (PICK_GAME_GROUPS.includes(info.group) ? info.group : undefined) === group); if (!list.length) return;
+      if (items.length) items.push({ separator:true });
+      list.forEach(info => items.push({ label:info.label, active:currentGame().id === info.id, action:() => { if (!busy) setModel("game", info.id); } }));
+    });
+    return items;
+  };
   gameBtn.onclick = () => { if (busy) return; const rect = gameBtn.getBoundingClientRect(); openMenu(rect.left, rect.bottom + 6, gameItems(), gameBtn); };
   const toggleFullscreen = () => { if (typeof toggleViewerFullscreen === "function") toggleViewerFullscreen(); };
   function settingsItems(){

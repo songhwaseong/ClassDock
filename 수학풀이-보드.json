@@ -1,0 +1,357 @@
+{
+ "version": 1,
+ "items": [
+  {
+   "type": "text",
+   "x": 10,
+   "y": 4,
+   "text": "수학Ⅱ · 4점 — 삼차함수와 접선이 둘러싼 넓이",
+   "fontSize": 24,
+   "color": "#111111",
+   "textBaseFontSize": 24
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 18,
+   "y": 46,
+   "formulaSource": "\\text{최고차항의 계수가 1인 삼차함수 }f(x)\\text{가}\n\\text{다음 조건을 만족시킨다.}\n\\text{(가) 곡선 }y=f(x)\\text{ 위의 점 }(1,\\ f(1))\\text{에서의}\n\\qquad\\text{접선 }l\\text{은 곡선과 }x=4\\text{인 점에서 다시 만난다.}\n\\text{(나) }f'(0)=0\n\\text{(다) 방정식 }f(x)=0\\text{의 서로 다른 실근은 2개이다.}\n\\text{(라) }f(1)<0\n\\text{곡선 }y=f(x)\\text{와 직선 }l\\text{로 둘러싸인 부분의 넓이를}\nS\\text{라 할 때, }4S-f(2)\\text{의 값을 구하시오.}",
+   "formulaColor": "#111111",
+   "scale": 0.58,
+   "w": 540
+  },
+  {
+   "type": "rect",
+   "x1": 10,
+   "y1": 40,
+   "x2": 566,
+   "y2": 334,
+   "color": "#64748b",
+   "width": 2
+  },
+  {
+   "type": "text",
+   "x": 596,
+   "y": 44,
+   "text": "① 착안 — 접하면 중근, 다시 만나면 단근",
+   "fontSize": 21,
+   "color": "#1d4ed8",
+   "textBaseFontSize": 21,
+   "step": 1
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 596,
+   "y": 80,
+   "formulaSource": "f(x)-l(x)\\text{ 는 최고차항 계수 1인 삼차식}\nx=1\\text{ 에서 접함 }\\Rightarrow\\ (x-1)^2\\text{ 을 인수로}\nx=4\\text{ 에서 만남 }\\Rightarrow\\ (x-4)\\text{ 를 인수로}\n∴\\ f(x)-l(x)=(x-1)^2(x-4)",
+   "formulaColor": "#111111",
+   "scale": 0.6,
+   "w": 620,
+   "step": 1
+  },
+  {
+   "type": "text",
+   "x": 1250,
+   "y": 44,
+   "text": "② 식 세우기 — 조건 (나)",
+   "fontSize": 21,
+   "color": "#1d4ed8",
+   "textBaseFontSize": 21,
+   "step": 2
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 1250,
+   "y": 80,
+   "formulaSource": "l(x)=mx+n\\text{ 이라 하면}\nf(x)=(x-1)^2(x-4)+mx+n\nf'(x)=3x^2-12x+9+m\nf'(0)=0\\ \\Rightarrow\\ m=-9\nf(x)=x^3-6x^2+c\\quad(c=n-4)",
+   "formulaColor": "#111111",
+   "scale": 0.6,
+   "w": 630,
+   "step": 2
+  },
+  {
+   "type": "text",
+   "x": 10,
+   "y": 350,
+   "text": "③ 조건 (다) — 극값 하나가 0",
+   "fontSize": 21,
+   "color": "#1d4ed8",
+   "textBaseFontSize": 21,
+   "step": 3
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 18,
+   "y": 386,
+   "formulaSource": "f'(x)=3x^2-12x=3x(x-4)\n\\text{극값: }f(0)=c,\\quad f(4)=c-32\n\\text{실근 2개}\\ \\Leftrightarrow\\ \\text{극값 중 하나가 0}\nc=0\\ \\text{ 또는 }\\ c=32",
+   "formulaColor": "#111111",
+   "scale": 0.6,
+   "w": 540,
+   "step": 3
+  },
+  {
+   "type": "group",
+   "role": "education-plot",
+   "x": 590,
+   "y": 350,
+   "w": 400,
+   "h": 290,
+   "plotSpec": {
+    "curves": [
+     {
+      "source": "x^3 - 6x^2",
+      "color": "#2563eb"
+     }
+    ],
+    "xMin": -2,
+    "xMax": 7,
+    "yMin": -40,
+    "yMax": 20,
+    "width": 400,
+    "height": 290,
+    "title": "c = 0 :  y = x^3 - 6x^2"
+   },
+   "step": 3
+  },
+  {
+   "type": "group",
+   "role": "education-plot",
+   "x": 1020,
+   "y": 350,
+   "w": 400,
+   "h": 290,
+   "plotSpec": {
+    "curves": [
+     {
+      "source": "x^3 - 6x^2 + 32",
+      "color": "#9333ea"
+     }
+    ],
+    "xMin": -3,
+    "xMax": 6,
+    "yMin": -20,
+    "yMax": 45,
+    "width": 400,
+    "height": 290,
+    "title": "c = 32 :  y = x^3 - 6x^2 + 32"
+   },
+   "step": 3
+  },
+  {
+   "type": "text",
+   "x": 1450,
+   "y": 350,
+   "text": "④ 조건 (라) — 하나만 남기기",
+   "fontSize": 21,
+   "color": "#1d4ed8",
+   "textBaseFontSize": 21,
+   "step": 4
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 1450,
+   "y": 386,
+   "formulaSource": "f(1)=c-5<0\\ \\Rightarrow\\ c<5\n∴\\ c=0\\quad(c=32\\text{ 탈락})\nf(x)=x^3-6x^2",
+   "formulaColor": "#111111",
+   "scale": 0.6,
+   "w": 440,
+   "step": 4
+  },
+  {
+   "type": "rect",
+   "x1": 586,
+   "y1": 346,
+   "x2": 994,
+   "y2": 644,
+   "color": "#16a34a",
+   "width": 4,
+   "step": 4
+  },
+  {
+   "type": "text",
+   "x": 904,
+   "y": 650,
+   "text": "✔ 채택",
+   "fontSize": 20,
+   "color": "#16a34a",
+   "textBaseFontSize": 20,
+   "step": 4
+  },
+  {
+   "type": "line",
+   "x1": 1030,
+   "y1": 360,
+   "x2": 1410,
+   "y2": 630,
+   "color": "#dc2626",
+   "width": 6,
+   "step": 4
+  },
+  {
+   "type": "line",
+   "x1": 1410,
+   "y1": 360,
+   "x2": 1030,
+   "y2": 630,
+   "color": "#dc2626",
+   "width": 6,
+   "step": 4
+  },
+  {
+   "type": "text",
+   "x": 1334,
+   "y": 650,
+   "text": "✘ 탈락",
+   "fontSize": 20,
+   "color": "#dc2626",
+   "textBaseFontSize": 20,
+   "step": 4
+  },
+  {
+   "type": "text",
+   "x": 10,
+   "y": 690,
+   "text": "⑤ 접선 l 구하기",
+   "fontSize": 21,
+   "color": "#1d4ed8",
+   "textBaseFontSize": 21,
+   "step": 5
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 18,
+   "y": 726,
+   "formulaSource": "f(1)=-5,\\quad f'(1)=3-12=-9\nl:\\ y=-9(x-1)-5=-9x+4",
+   "formulaColor": "#111111",
+   "scale": 0.6,
+   "w": 540,
+   "step": 5
+  },
+  {
+   "type": "group",
+   "role": "education-plot",
+   "x": 590,
+   "y": 680,
+   "w": 430,
+   "h": 310,
+   "plotSpec": {
+    "curves": [
+     {
+      "source": "x^3 - 6x^2",
+      "color": "#2563eb"
+     },
+     {
+      "source": "-9x + 4",
+      "color": "#dc2626"
+     }
+    ],
+    "xMin": -2,
+    "xMax": 7,
+    "yMin": -40,
+    "yMax": 20,
+    "showIntersections": true,
+    "tangentX": 1,
+    "tangentCurve": 0,
+    "width": 430,
+    "height": 310,
+    "title": "y = f(x) 와 접선 l"
+   },
+   "step": 5
+  },
+  {
+   "type": "text",
+   "x": 1050,
+   "y": 690,
+   "text": "⑥ 넓이 S",
+   "fontSize": 21,
+   "color": "#1d4ed8",
+   "textBaseFontSize": 21,
+   "step": 6
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 1050,
+   "y": 726,
+   "formulaSource": "S=\\int_1^4\\{(-9x+4)-(x^3-6x^2)\\}\\,dx\n\\ \\ =\\int_1^4(x-1)^2(4-x)\\,dx\n\\ \\ =\\left[(x-1)^3-\\frac{(x-1)^4}{4}\\right]_1^4\n\\ \\ =27-\\frac{81}{4}=\\frac{27}{4}",
+   "formulaColor": "#111111",
+   "scale": 0.6,
+   "w": 400,
+   "step": 6
+  },
+  {
+   "type": "group",
+   "role": "education-plot",
+   "x": 1470,
+   "y": 680,
+   "w": 420,
+   "h": 310,
+   "plotSpec": {
+    "curves": [
+     {
+      "source": "(x-1)^2(4-x)",
+      "color": "#16a34a"
+     }
+    ],
+    "xMin": -0.5,
+    "xMax": 5,
+    "yMin": -2,
+    "yMax": 6,
+    "areaFrom": 1,
+    "areaTo": 4,
+    "areaCurve": 0,
+    "width": 420,
+    "height": 310,
+    "title": "y = l(x) - f(x)"
+   },
+   "step": 6
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 1060,
+   "y": 930,
+   "formulaSource": "4S-f(2)=27-(-16)=43",
+   "formulaColor": "#dc2626",
+   "scale": 0.72,
+   "w": 390,
+   "step": 7
+  },
+  {
+   "type": "rect",
+   "x1": 1050,
+   "y1": 922,
+   "x2": 1450,
+   "y2": 990,
+   "color": "#dc2626",
+   "width": 3,
+   "step": 7
+  },
+  {
+   "type": "text",
+   "x": 10,
+   "y": 850,
+   "text": "⑧ 검산 · 짚을 점",
+   "fontSize": 21,
+   "color": "#1d4ed8",
+   "textBaseFontSize": 21,
+   "step": 8
+  },
+  {
+   "type": "image",
+   "role": "education-formula",
+   "x": 18,
+   "y": 886,
+   "formulaSource": "S=\\frac{(4-1)^4}{12}=\\frac{27}{4}\\ (\\approx 6.75)\n\\text{※ }S\\text{ 는 }c\\text{ 와 무관 — 답을 가르는 건 }f(2)",
+   "formulaColor": "#111111",
+   "scale": 0.6,
+   "w": 540,
+   "step": 8
+  }
+ ]
+}

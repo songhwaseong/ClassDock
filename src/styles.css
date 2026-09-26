@@ -7875,6 +7875,112 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .pkg-drawn-chip{display:grid;place-items:center;min-width:34px;height:34px;padding:0 5px;border-radius:999px;color:#1f2547;font-size:14px;font-weight:900}
   @media(max-width:1100px){.pick-bingo{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto}.pkg-side{grid-row:1;grid-column:1;flex-direction:row;flex-wrap:wrap}.pkg-cards{grid-row:2}.pkg-drawn{grid-row:3}.pkg-ball{width:96px}.pkg-ball b{font-size:34px}}
   @media(prefers-reduced-motion:reduce){.pick-bottle *,.pick-dart *,.pick-treasure *,.pick-croc *,.pick-bingo *{animation:none!important}}
+  /* 제비뽑기 */
+  .pick-lots{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;height:100%;min-height:0}
+  .pkj-stage{flex:1;min-height:0;width:100%;display:flex;justify-content:center}
+  .pkj-svg{display:block;height:100%;max-width:100%;overflow:visible;cursor:pointer}
+  .pkj-table{fill:rgba(236,228,214,.55)}[data-theme="dark"] .pkj-table{fill:rgba(60,64,110,.4)}
+  .pkj-tray{fill:#fff;stroke:#ece5d6;stroke-width:2}[data-theme="dark"] .pkj-tray{fill:#2a2f4a;stroke:#3a4066}
+  .pkj-bowl-back{fill:rgba(236,240,250,.45)}.pkj-bowl{fill:none;stroke:rgba(160,170,210,.65);stroke-width:4}
+  .pkj-shine{fill:none;stroke:#fff;stroke-width:12;stroke-linecap:round;opacity:.6}
+  .pkj-mouth-cover{fill:var(--pk-bg)}.pkj-rim{fill:rgba(255,255,255,.5);stroke:rgba(160,170,210,.75);stroke-width:4}
+  .pkj-slip{fill:#fbf6ea;stroke:#e3d8c1;stroke-width:1.5}.pkj-fold{fill:none;stroke:#e3d8c1;stroke-width:1.2}
+  .pkj-tent{fill:#fbf6ea;stroke:#e0d5bd;stroke-width:1.5}.pkj-tent-side{fill:#efe6d2;stroke:#e0d5bd;stroke-width:1.5}
+  .pkj-tent-name{fill:var(--pk-muted);font-size:14px;font-weight:800;text-anchor:middle}
+  .pkj-svg.is-shaking .pkj-slips{animation:pkc-shake .16s linear infinite}
+  .pkj-banner{position:relative;z-index:2;display:flex;align-items:center;gap:14px;margin-top:-64px;padding:12px 40px;border:1.5px solid #e3d8c1;border-radius:6px;background:#fbf6ea;color:#1f2547;box-shadow:0 12px 24px rgba(120,90,40,.15);font-size:clamp(24px,3vw,44px);font-weight:900;transform:rotate(-1.5deg);transform-origin:top;animation:pkj-unfold .5s cubic-bezier(.2,1.3,.4,1)}
+  .pkj-banner small{color:#8a8070;font-size:13px;font-weight:800}.pkj-banner-star svg{display:block;width:1em;height:1em;fill:#fbc638}
+  @keyframes pkj-unfold{from{transform:scaleY(.1) rotate(-4deg);opacity:0}to{transform:rotate(-1.5deg);opacity:1}}
+  /* 동전 던지기 */
+  .pick-coin{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;height:100%;min-height:0}
+  .pick-coin .pick-game-tools{align-self:stretch}
+  .pkn-stage{position:relative;flex:1;min-height:200px;width:min(460px,100%);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;perspective:900px}
+  .pkn-toss{position:relative;z-index:2;margin-bottom:-40px}
+  .pkn-coin{position:relative;width:clamp(110px,18vh,190px);aspect-ratio:1;cursor:pointer;transform-style:preserve-3d}
+  .pkn-face{position:absolute;inset:0;display:grid;place-items:center;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff2a8,#fbc638 55%,#e39b00);box-shadow:inset 0 0 0 8px rgba(255,255,255,.35),inset 0 -8px 0 rgba(160,100,0,.25),0 10px 18px rgba(200,140,0,.3);backface-visibility:hidden;-webkit-backface-visibility:hidden}
+  .pkn-face.is-back{transform:rotateX(180deg)}
+  .pkn-face svg,.pkn-side-coin svg{width:52%;height:52%;fill:#fcd34d;stroke:#d99200;stroke-width:1.4;stroke-linejoin:round;filter:drop-shadow(0 2px 0 rgba(160,100,0,.3))}
+  .pkn-pedestal{width:min(420px,90%);height:70px;border-radius:50%;background:radial-gradient(ellipse at 50% 35%,#ddd2fb,#b3a0f4 70%);box-shadow:0 12px 0 #9c86ec,0 24px 30px rgba(90,70,190,.2)}
+  .pkn-swoosh{position:absolute;right:12%;top:14%;width:50px;height:84px;opacity:.85;transition:opacity .2s;pointer-events:none}.pkn-swoosh svg{width:100%;height:100%}.pkn-swoosh path{fill:none;stroke:#b69cf7;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
+  .pick-coin.is-flipping .pkn-swoosh{opacity:0}
+  .pkn-result{margin-top:16px;padding:8px 26px;border-radius:999px;background:#d7f3e3;color:#1f5a3b;font-size:clamp(20px,2.4vw,32px);font-weight:900;animation:pk-pop .4s cubic-bezier(.2,1.4,.4,1)}
+  .pkn-result.is-back{background:#e5dcfd;color:#4c2fb8}
+  .pkn-hint{color:var(--pk-muted);font-size:14px;font-weight:700}
+  .pkn-sides{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;width:min(640px,100%)}
+  .pkn-side{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px;border:2px solid var(--pk-line);border-radius:18px;background:var(--pk-panel);box-shadow:var(--pk-shadow);transition:border-color .2s,background .2s}
+  .pkn-side.is-win{border-color:#7c5ce6;background:color-mix(in srgb,#7c5ce6 8%,var(--pk-panel))}
+  .pkn-side-coin{display:grid;place-items:center;width:54px;height:54px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff2a8,#fbc638 55%,#e39b00);box-shadow:inset 0 -4px 0 rgba(160,100,0,.25)}
+  .pkn-side strong{font-weight:850}
+  .pkn-members{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;max-height:110px;overflow:auto}
+  .pkn-member{padding:4px 11px;border:0;border-radius:999px;background:color-mix(in srgb,var(--pk-c) 60%,#fff);color:#1f2547;font:inherit;font-size:13px;font-weight:800;cursor:pointer}.pkn-member:hover{box-shadow:0 0 0 2px #7c5ce6}
+  .pkn-empty{color:var(--pk-muted);font-size:13px}
+  .pkn-check{position:absolute;right:-8px;top:-8px;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#7c5ce6}.pkn-check svg{width:18px;height:18px;fill:none;stroke:#fff;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+  /* 끈 뽑기 — 끈 안쪽 g 엔 transform 속성이 없어 CSS 로 당긴다 */
+  .pick-strings{display:flex;flex-direction:column;gap:8px;width:100%;height:100%;min-height:0}
+  .pks3-stage{flex:1;min-height:0;display:flex;justify-content:center}
+  .pks3-svg{display:block;height:100%;max-width:100%;overflow:visible}
+  .pks3-shadow{fill:rgba(40,45,90,.1)}.pks3-foot{fill:#a893ef}
+  .pks3-box{fill:#fbf8f1;stroke:#ece5d6;stroke-width:2}[data-theme="dark"] .pks3-box{fill:#2a2f4a;stroke:#3a4066}
+  .pks3-top,.pks3-awn{fill:#b69cf7}.pks3-awn-w{fill:#fff}[data-theme="dark"] .pks3-awn-w{fill:#e8e2fb}
+  .pks3-bow path{fill:#b69cf7;stroke:#9a82ef;stroke-width:2}.pks3-bow circle{fill:#9a82ef}
+  .pks3-num{fill:#ece8fb;stroke:#d5cdf5;stroke-width:2}.pks3-num-text{fill:#1f2547;font-size:18px;font-weight:900;text-anchor:middle;dominant-baseline:central}
+  .pks3-hole{fill:#3b2f5c}
+  .pks3-string{cursor:pointer;outline:none;transition:transform .45s cubic-bezier(.3,1.3,.5,1)}
+  .pks3-string:hover{transform:translateY(6px)}.pks3-string:focus-visible .pks3-knob{stroke:#7c5ce6}
+  .pks3-string.is-pulling,.pks3-string.is-pulled.is-win{transform:translateY(80px)}
+  .pks3-string.is-pulled{cursor:default}.pks3-string.is-pulled:not(.is-win).is-new{animation:pks3-back .55s cubic-bezier(.3,1.4,.5,1)}
+  @keyframes pks3-back{from{transform:translateY(80px)}}
+  .pks3-string.is-rest{opacity:.5}
+  .pks3-cord{stroke:rgba(0,0,0,.08);stroke-width:1}.pks3-knob{stroke:#fff;stroke-width:4;filter:drop-shadow(0 6px 6px rgba(40,45,90,.2))}
+  .pks3-icon path,.pks3-icon circle{fill:#fff;stroke:#fff;stroke-width:1.2;stroke-linejoin:round}.pks3-icon .pks3-icon-hole{fill:rgba(0,0,0,.14);stroke:none}
+  .pks3-label{fill:var(--pk-muted);font-size:17px;font-weight:850;text-anchor:middle}
+  .pks3-prize.is-new{animation:pks3-rise .6s cubic-bezier(.2,1.4,.4,1)}
+  @keyframes pks3-rise{from{transform:translateY(90px)}}
+  .pks3-prize rect:first-child{fill:#ece8fb;stroke:#b69cf7;stroke-width:3}.pks3-prize-in{fill:#3b2f5c}.pks3-prize-star{fill:#fcd34d;filter:drop-shadow(0 0 6px #fcd34d)}
+  .pks3-prize-text{fill:#6b3fd8;font-size:18px;font-weight:900;text-anchor:middle;dominant-baseline:central}
+  /* 풍선 터뜨리기 */
+  .pick-balloon{display:flex;flex-direction:column;gap:8px;width:100%;height:100%;min-height:0}
+  .pkb3-area{flex:1;min-height:0;display:grid;place-items:center}
+  .pkb3-grid{display:grid;gap:18px;justify-content:center}
+  .pkb3-item{position:relative;display:flex;flex-direction:column;align-items:center;width:var(--pkb3-w,150px);padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer}
+  .pkb3-item:disabled{cursor:default}
+  .pkb3-svg{display:block;width:100%;height:auto;overflow:visible;filter:drop-shadow(0 10px 12px rgba(40,45,90,.12));animation:pkb3-bob 3s ease-in-out var(--pkb3-d,0s) infinite}
+  @keyframes pkb3-bob{50%{transform:translateY(-6px) rotate(1.5deg)}}
+  .pkb3-body,.pkb3-knot{filter:saturate(1.45) brightness(.97)}.pkb3-shade{fill:rgba(0,0,0,.06)}.pkb3-shine{fill:#fff;opacity:.55}.pkb3-star{fill:#fff;opacity:.85}.pkb3-string{fill:none;stroke:#9aa0c0;stroke-width:2}
+  .pkb3-item.is-wobble .pkb3-svg{animation:pkb3-wobble .1s linear infinite}
+  @keyframes pkb3-wobble{0%,100%{transform:scale(1.02) rotate(-3deg)}50%{transform:scale(1.07) rotate(3deg)}}
+  .pkb3-item.is-popped .pkb3-svg{animation:pkb3-pop .25s ease-out forwards}
+  @keyframes pkb3-pop{to{transform:scale(1.3);opacity:0}}
+  .pkb3-burst{position:absolute;left:50%;top:32%;width:0;height:0;pointer-events:none}
+  .pkb3-burst i{position:absolute;left:-10px;top:-6px;width:12px;height:12px;border-radius:3px;opacity:0}
+  .pkb3-burst .p1,.pkb3-burst .p2,.pkb3-burst .p3,.pkb3-burst .p4{width:28px;height:18px;border-radius:50% 50% 10% 50%;background:var(--pk-c);filter:saturate(1.45)}
+  .pkb3-burst .p1{--dx:-64px;--dy:-40px;--r:-120deg}.pkb3-burst .p2{--dx:62px;--dy:-30px;--r:140deg}.pkb3-burst .p3{--dx:-44px;--dy:52px;--r:80deg}.pkb3-burst .p4{--dx:52px;--dy:56px;--r:-90deg}
+  .pkb3-burst .c1{--dx:-84px;--dy:-10px;--r:200deg;background:#fcd34d}.pkb3-burst .c2{--dx:82px;--dy:4px;--r:-160deg;background:#a78bfa}.pkb3-burst .c3{--dx:-18px;--dy:-78px;--r:90deg;background:#7fdcb4}
+  .pkb3-burst .c4{--dx:30px;--dy:-84px;--r:-80deg;background:#fb8a78}.pkb3-burst .c5{--dx:-64px;--dy:64px;--r:120deg;background:#93c5fd}.pkb3-burst .c6{--dx:72px;--dy:52px;--r:-200deg;background:#f9a8d4}
+  .pkb3-item.is-popped .pkb3-burst i{animation:pkb3-fly .7s ease-out forwards}
+  @keyframes pkb3-fly{0%{opacity:1;transform:translate(0,0) rotate(0)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--r))}}
+  .pkb3-ticket{position:absolute;left:50%;top:24%;padding:8px 16px;border:1.5px solid #e2dfe9;border-radius:6px;background:#fff;color:#6b7090;box-shadow:0 6px 14px rgba(40,45,90,.14);font-size:clamp(14px,calc(var(--pkb3-w,150px) * .13),26px);font-weight:900;white-space:nowrap;opacity:0;pointer-events:none;transform:translate(-50%,0) rotate(-12deg) scale(.4)}
+  .pkb3-ticket.is-win{border-style:dashed;border-color:#f5b83d;color:#1f2547;background:#fffbea}
+  .pkb3-item.is-popped .pkb3-ticket{animation:pkb3-ticket .45s cubic-bezier(.2,1.5,.4,1) .12s forwards}
+  @keyframes pkb3-ticket{to{opacity:1;transform:translate(-50%,0) rotate(-12deg) scale(1)}}
+  .pkb3-item.is-rest{opacity:.6}.pkb3-item.is-rest .pkb3-svg{animation:none;opacity:.45}.pkb3-item.is-rest .pkb3-ticket{opacity:.9;transform:translate(-50%,0) rotate(-12deg) scale(.8)}
+  .pkb3-name{position:relative;z-index:1;margin-top:-4px;padding:2px 12px;border-radius:999px;background:var(--pk-panel);box-shadow:0 3px 8px rgba(40,45,90,.12);font-size:14px;font-weight:850;white-space:nowrap}
+  .pkb3-grid.is-filling .pkb3-svg{animation:pkb3-fill .5s cubic-bezier(.2,1.4,.4,1)}
+  @keyframes pkb3-fill{from{transform:scale(.2) translateY(40px);opacity:0}}
+  /* 핀볼 추첨 */
+  .pick-pinball{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;height:100%;min-height:0}
+  .pkp-stage{flex:1;min-height:0;width:100%;display:flex;justify-content:center;cursor:pointer}
+  .pkp-svg{display:block;height:100%;max-width:100%}
+  .pkp-frame{fill:#b69cf7}.pkp-board{fill:#fff8ea}[data-theme="dark"] .pkp-board{fill:#2a2f4a}
+  .pkp-funnel{fill:#b69cf7;stroke:#9a82ef;stroke-width:4}
+  .pkp-peg{fill:#a893ef;filter:drop-shadow(0 3px 2px rgba(90,70,190,.25))}.pkp-wall{fill:#b69cf7}
+  .pkp-bin text{fill:#1f2547;font-size:20px;font-weight:900;text-anchor:middle;dominant-baseline:central}
+  .pkp-bin.is-chosen rect{stroke:#fff;stroke-width:4;filter:brightness(1.04) drop-shadow(0 0 12px #fcd34d)}
+  .pkp-trail{fill:none;stroke:#f5c542;stroke-width:4;stroke-linecap:round;stroke-dasharray:2 10}
+  .pkp-ball{fill:#f5c542;stroke:#d99a00;stroke-width:2}.pkp-ball-shine{fill:#fff;opacity:.8}
+  .pkp-banner{display:flex;align-items:center;gap:16px;padding:8px 34px;border-radius:999px;background:#fff3c4;color:#7a4b00;font-size:clamp(22px,2.6vw,36px);font-weight:900;animation:pk-pop .4s cubic-bezier(.2,1.4,.4,1)}
+  .pkp-banner i{width:14px;height:4px;border-radius:2px;background:#f5c542;box-shadow:0 -9px 0 #f5c542,0 9px 0 #f5c542}
+  @media(prefers-reduced-motion:reduce){.pick-lots *,.pick-coin *,.pick-strings *,.pick-balloon *,.pick-pinball *{animation:none!important}}
 
 /* 지도: 표시 묶기·영역 분석·자료 교환·길찾기 비교 설정 */
 .map-marker-cluster{display:grid!important;place-items:center;border:0!important;background:transparent!important}

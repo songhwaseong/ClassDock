@@ -115,6 +115,11 @@
     "pick-treasure.js",
     "pick-croc.js",
     "pick-bingo.js",
+    "pick-lots.js",
+    "pick-coin.js",
+    "pick-strings.js",
+    "pick-balloon.js",
+    "pick-pinball.js",
     "remote-files.js",
     "remote-files-ui.js",
     "remote-terminal.js",
@@ -288,7 +293,12 @@
         "pick-dart.js",
         "pick-treasure.js",
         "pick-croc.js",
-        "pick-bingo.js"
+        "pick-bingo.js",
+        "pick-lots.js",
+        "pick-coin.js",
+        "pick-strings.js",
+        "pick-balloon.js",
+        "pick-pinball.js"
       ]
     },
     {
@@ -546,6 +556,22 @@
       "pick.js"
     ],
     "pick-bingo.js": [
+      "pick.js"
+    ],
+    "pick-lots.js": [
+      "pick.js"
+    ],
+    "pick-coin.js": [
+      "pick.js"
+    ],
+    "pick-strings.js": [
+      "pick.js",
+      "pick-card.js"
+    ],
+    "pick-balloon.js": [
+      "pick.js"
+    ],
+    "pick-pinball.js": [
       "pick.js"
     ],
     "diff-viewer.js": [

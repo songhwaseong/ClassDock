@@ -10,7 +10,7 @@ const { createWindow, MiniEvent } = require("./helpers/mini-dom.js");
 
 const root = path.join(__dirname, "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
-const FILES = ["history.js", "pick.js", "pick-roulette.js", "pick-ladder.js", "pick-card.js", "pick-slot.js", "pick-marble.js", "pick-capsule.js", "pick-dice.js", "pick-lotto.js", "pick-bomb.js", "pick-scratch.js", "pick-bottle.js", "pick-dart.js", "pick-treasure.js", "pick-croc.js", "pick-bingo.js"];
+const FILES = ["history.js", "pick.js", "pick-roulette.js", "pick-ladder.js", "pick-card.js", "pick-slot.js", "pick-marble.js", "pick-capsule.js", "pick-dice.js", "pick-lotto.js", "pick-bomb.js", "pick-scratch.js", "pick-bottle.js", "pick-dart.js", "pick-treasure.js", "pick-croc.js", "pick-bingo.js", "pick-lots.js", "pick-coin.js", "pick-strings.js", "pick-balloon.js", "pick-pinball.js"];
 const NAMES = ["민수", "지우", "서연", "준호", "하린", "도윤"];
 
 function boot(opts = {}){
@@ -122,7 +122,7 @@ test("구슬 경주 — 카운트다운 뒤 모두 도착하고, 1등과 전체 
 
 test("움직임 끄기면 모든 게임이 바로 결과까지 간다", () => {
   const app = boot({ motion:"off" });
-  ["룰렛 돌리기", "사다리타기", "슬롯 추첨", "구슬 경주", "캡슐 뽑기", "공 뽑기", "병 돌리기", "다트 추첨"].forEach(label => {
+  ["룰렛 돌리기", "사다리타기", "슬롯 추첨", "구슬 경주", "캡슐 뽑기", "공 뽑기", "병 돌리기", "다트 추첨", "제비뽑기", "동전 던지기", "핀볼 추첨"].forEach(label => {
     app.pickGame(label); app.go(); app.advance(100);
     assert.ok(app.resultShown(), label); app.$$(".pick-result-actions button").find(b => b.textContent === "닫기").click();
   });
@@ -130,7 +130,7 @@ test("움직임 끄기면 모든 게임이 바로 결과까지 간다", () => {
 
 test("게임을 바꿔도 명단 그대로 — 게임 설정은 바꿀 때만 파일에 쓴다", () => {
   const app = boot();
-  ["사다리타기", "카드 뽑기", "슬롯 추첨", "구슬 경주", "캡슐 뽑기", "주사위 굴리기", "공 뽑기", "폭탄 돌리기", "스크래치 뽑기", "병 돌리기", "다트 추첨", "보물상자 고르기", "악어 이빨 누르기", "빙고 추첨", "룰렛 돌리기"].forEach(label => app.pickGame(label));
+  ["사다리타기", "카드 뽑기", "슬롯 추첨", "구슬 경주", "캡슐 뽑기", "주사위 굴리기", "공 뽑기", "폭탄 돌리기", "스크래치 뽑기", "병 돌리기", "다트 추첨", "보물상자 고르기", "악어 이빨 누르기", "빙고 추첨", "제비뽑기", "동전 던지기", "끈 뽑기", "풍선 터뜨리기", "핀볼 추첨", "룰렛 돌리기"].forEach(label => app.pickGame(label));
   assert.equal(app.model.game, "roulette"); assert.deepEqual(Object.keys(app.model.games), []);
   assert.equal(app.$$(".pick-person").length, 6);
 });
@@ -246,4 +246,53 @@ test("빙고 — 사람마다 판을 받고, 번호를 뽑다 보면 한 줄을 
   assert.ok(app.resultShown(), "빙고가 안 남"); assert.ok(app.$$(".pkg-card.is-bingo").length >= 1);
   assert.ok(app.$$(".pkg-drawn-chip").length >= 4); assert.equal(app.$(".pkg-status").textContent, "빙고!");
   app.go(); assert.equal(app.$$(".pkg-drawn-chip").length, 0);
+});
+
+test("제비뽑기 — 누를 때마다 남은 사람 가운데 하나, 뽑은 쪽지는 탁자에 세우고 다 뽑으면 다시 넣기", () => {
+  const app = boot({ names:["가", "나", "다"] }); app.pickGame("제비뽑기");
+  assert.equal(app.$$(".pkj-slips > g").length, 3);
+  const got = [];
+  for (let k = 0; k < 3; k++){ app.go(); app.advance(4000); assert.ok(app.resultShown()); got.push(app.$(".pick-result-name").textContent); assert.match(app.$(".pkj-banner").textContent, /당첨/); }
+  assert.deepEqual([...got].sort(), ["가", "나", "다"]); assert.equal(app.$$(".pkj-tents > g").length, 3); assert.equal(app.$$(".pkj-slips > g").length, 0);
+  assert.equal(app.$(".pick-go-label").textContent, "다시 넣기"); app.go(); assert.equal(app.$$(".pkj-slips > g").length, 3);
+});
+
+test("동전 — 두 편으로 나뉘고, 이름을 누르면 편을 옮기며, 나온 면의 편이 모두 당첨", () => {
+  const app = boot(); app.pickGame("동전 던지기");
+  const count = side => app.$$(`.pkn-side[data-side="${side}"] .pkn-member`).length;
+  assert.equal(count(0) + count(1), 6); assert.equal(count(0), 3);
+  app.$(`.pkn-side[data-side="0"] .pkn-member`).click(); assert.equal(count(0), 2); assert.equal(count(1), 4);
+  app.go(); app.advance(3000);
+  assert.ok(app.resultShown()); const win = app.$(".pkn-side.is-win"); assert.ok(win);
+  const names = win.querySelectorAll(".pkn-member").map(el => el.textContent).sort(), shown = app.$$(".pick-result-one strong").map(el => el.textContent).sort();
+  assert.deepEqual(shown, names); assert.match(app.$(".pkn-result").textContent, /면 당첨/);
+  // 한쪽 편을 비우면 던질 수 없다
+  const app2 = boot({ names:["가", "나"] }); app2.pickGame("동전 던지기"); app2.$(`.pkn-side[data-side="0"] .pkn-member`).click();
+  assert.equal(app2.$(".pick-go").disabled, true);
+});
+
+test("끈 뽑기 — 차례대로 끈을 당기다 당첨 끈이 나오면 위 창이 열리고 끝난다", () => {
+  const app = boot(); app.pickGame("끈 뽑기");
+  assert.equal(app.$$(".pks3-string").length, 6);
+  let guard = 0;
+  while (!app.resultShown() && guard++ < 10){ app.$$(".pks3-string").find(el => !el.classList.contains("is-pulled")).dispatchEvent(new MiniEvent("click", { bubbles:true })); app.advance(1600); }
+  assert.ok(app.resultShown()); assert.equal(app.$$(".pks3-prize").length, 1); assert.equal(app.$$(".pks3-string.is-win").length, 1);
+});
+
+test("풍선 — 자기 풍선을 터뜨리다 당첨 쪽지가 나오면 끝, 쪽지 주인이 결과", () => {
+  const app = boot(); app.pickGame("풍선 터뜨리기");
+  assert.equal(app.$$(".pkb3-item").length, 6); assert.equal(app.$$(".pkb3-ticket.is-win").length, 1);
+  let guard = 0;
+  while (!app.resultShown() && guard++ < 8){ app.$$(".pkb3-item").find(el => !el.disabled).click(); app.advance(1500); }
+  assert.ok(app.resultShown());
+  const winner = app.$$(".pkb3-item").find(el => el.querySelector(".pkb3-ticket.is-win"));
+  assert.equal(winner.querySelector(".pkb3-name").textContent, app.$(".pick-result-name").textContent); assert.ok(winner.classList.contains("is-popped"));
+});
+
+test("핀볼 — 구슬이 핀을 지나 칸에 들어가고, 그 칸 이름이 결과와 같다", () => {
+  const app = boot(); app.pickGame("핀볼 추첨");
+  assert.equal(app.$$(".pkp-bin").length, 6); assert.ok(app.$$(".pkp-peg").length > 20);
+  app.go(); app.advance(6000);
+  assert.ok(app.resultShown()); assert.equal(app.$(".pkp-bin.is-chosen text").textContent, app.$(".pick-result-name").textContent);
+  assert.match(app.$(".pkp-trail").getAttribute("d"), /^M/);
 });

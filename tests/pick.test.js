@@ -19,6 +19,11 @@ const dt = require("../src/js/pick-dart.js");
 const tr = require("../src/js/pick-treasure.js");
 const cr = require("../src/js/pick-croc.js");
 const bg = require("../src/js/pick-bingo.js");
+const lo = require("../src/js/pick-lots.js");
+const cn = require("../src/js/pick-coin.js");
+const st = require("../src/js/pick-strings.js");
+const bl = require("../src/js/pick-balloon.js");
+const pb = require("../src/js/pick-pinball.js");
 
 const root = path.join(__dirname, "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
@@ -99,9 +104,9 @@ test("화면을 붙일 때 history.reset() 이 부르는 syncButtons 의 상태 
   assert.ok(mount.indexOf("let busy = false") > 0 && mount.indexOf("let busy = false") < mount.indexOf("history.reset(); doc._pickHistory"));
 });
 
-test("게임 열다섯 개가 모두 스스로 올라온다", () => {
+test("게임 스무 개가 모두 스스로 올라온다", () => {
   assert.equal(typeof pk.PICK_GAME_IMPL.roulette.mount, "function");
-  assert.deepEqual(pk.pickReadyGames().map(game => game.id), ["roulette", "ladder", "card", "slot", "marble", "capsule", "dice", "lotto", "bomb", "scratch", "bottle", "dart", "treasure", "croc", "bingo"]);
+  assert.deepEqual(pk.pickReadyGames().map(game => game.id), ["roulette", "ladder", "card", "slot", "marble", "capsule", "dice", "lotto", "bomb", "scratch", "bottle", "dart", "treasure", "croc", "bingo", "lots", "coin", "strings", "balloon", "pinball"]);
 });
 
 const lcg = seed => () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
@@ -268,4 +273,30 @@ test("빙고 — 판은 열마다 제 범위의 서로 다른 번호, 가운데�
   assert.equal(bg.pickBingoLines(card, new Set(card.filter(Boolean))).length, 12);
   const drawn = new Set(), rnd = lcg(5); for (let i = 0; i < 75; i++){ const n = bg.pickBingoDraw(drawn, rnd); assert.ok(n >= 1 && n <= 75 && !drawn.has(n)); drawn.add(n); }
   assert.equal(bg.pickBingoDraw(drawn, rnd), 0); assert.equal(bg.pickBingoLetter(75), "O"); assert.equal(bg.pickBingoLetter(31), "N");
+});
+
+test("동전 — 나올 면대로 멈추고(앞면 360의 배수·뒷면 +180), 편은 반반", () => {
+  for (const cur of [0, 90, 400, 725]) for (const side of [0, 1]){ const deg = cn.pickCoinSpin(cur, side, 4); assert.equal(cn.pickCoinSideAt(deg), side); assert.ok(deg >= cur + 4 * 360 - 360); }
+  const people = ["a", "b", "c", "d", "e"].map(id => ({ id })), team = cn.pickCoinSplit(people, lcg(2));
+  const zeros = [...team.values()].filter(v => v === 0).length; assert.ok(zeros === 2 || zeros === 3); assert.equal(team.size, 5);
+});
+
+test("핀볼 — 어느 칸이든 닿는 걸음이 나오고, 구슬은 벽 밖으로 나가지 않는다", () => {
+  for (let n = 2; n <= pb.PICK_PINBALL_MAX; n++){
+    const R = pb.pickPinballRows(n); assert.equal((R - (n - 1)) % 2, 0); assert.ok(R >= 7);
+    for (let t = 0; t < n; t++) for (let seed = 1; seed <= 6; seed++){
+      const path = pb.pickPinballPath(n, t, R, lcg(seed * 13 + t + n));
+      assert.equal(path.length, R + 1); assert.equal(path[0], 0); assert.equal(path[R], pb.pickPinballGoal(n, t), `n=${n} t=${t}`);
+      for (let i = 1; i <= R; i++){ assert.equal(Math.abs(path[i] - path[i - 1]), 1); assert.ok(Math.abs(path[i]) <= Math.max(1, n - 1)); }
+    }
+  }
+  const g = pb.pickPinballGeometry(6); assert.equal(g.x(pb.pickPinballGoal(6, 0)) - 45, 40); assert.equal(g.x(pb.pickPinballGoal(6, 5)) + 45, g.W - 40);
+});
+
+test("끈·풍선·제비 — 당첨 장수, 끈 자리, 그림 조각", () => {
+  assert.equal(bl.pickBalloonDeal(6, 2, lcg(4)).filter(Boolean).length, 2); assert.equal(bl.pickBalloonDeal(2, 5, lcg(4)).filter(Boolean).length, 1);
+  assert.equal(bl.pickBalloonNormalize({}).loseLabel, "꽝"); assert.match(bl.pickBalloonSvg("#ff0000"), /pkb3-body/);
+  const xs = st.pickStringsXs(6, 760); assert.equal(xs.length, 6); assert.ok(xs[0] > 60 && xs[5] < 700); for (let i = 1; i < 6; i++) assert.ok(xs[i] > xs[i - 1]);
+  assert.equal(st.pickStringsNormalize({ count:30 }).count, st.PICK_STRINGS_MAX);
+  assert.equal(lo.PICK_LOTS_TENTS.length, 8); assert.match(lo.pickLotsSlipSvg(40, "#abcdef"), /#abcdef/); assert.match(lo.pickLotsTentSvg(0, 0, "#fff", "<b>"), /&lt;b&gt;/);
 });
