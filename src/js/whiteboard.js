@@ -74,6 +74,39 @@ function whiteboardDetachedClipboardItem(value){
   return copy;
 }
 
+/* 보드 내용 JSON 붙여넣기 — 메모 스냅샷과 같은 모양({version:1, items:[…]})의 글을 Ctrl+V 하면
+   항목을 단계 번호째 들인다. 다른 곳에서 만든 보드(손으로 쓴 JSON 포함)를 받는 길이다.
+   수식은 formulaSource 만, 그래프는 plotSpec 만 적어도 된다 — 수식 그림 크기는 화면 글꼴로 재야 맞으므로
+   그리는 일은 보드가 붙일 때 한다. 돌려주는 항목의 kind: "item"(그대로) | "formula" | "plot". */
+const WB_PASTE_ITEM_MAX = 2000;
+function whiteboardPastedBoardEntries(text){
+  const raw = String(text || "").trim();
+  if (!raw.startsWith("{") || raw.length > 16 * 1024 * 1024) return null;
+  let data;
+  try { data = JSON.parse(raw); } catch(_){ return null; }
+  if (!data || data.version !== 1 || !Array.isArray(data.items) || !data.items.length || data.items.length > WB_PASTE_ITEM_MAX) return null;
+  const place = (value) => { const n = Number(value); return Number.isFinite(n) ? n : 0; };
+  const size = (value) => { const n = Number(value); return Number.isFinite(n) && n > 0 ? Math.min(16000, n) : 0; };
+  const entries = [];
+  for (const item of data.items){
+    if (!item || typeof item !== "object") continue;
+    const step = whiteboardItemStep(item);
+    const source = typeof item.formulaSource === "string" ? item.formulaSource.trim() : "";
+    if (item.type === "image" && item.role === "education-formula" && !item.src && source && source.length <= 4000){
+      const color = /^#[0-9a-f]{6}$/i.test(String(item.formulaColor || "")) ? String(item.formulaColor).toLowerCase() : "#111111";
+      // w = 폭, scale = 그려진 크기에 곱할 배율(글자 크기를 맞출 때). 둘 다 주면 작은 쪽.
+      const scale = Math.max(0, Math.min(4, Number(item.scale) || 0));
+      entries.push({ kind:"formula", source, color, x:place(item.x), y:place(item.y), w:size(item.w), scale, step });
+    } else if (item.type === "group" && item.role === "education-plot" && item.plotSpec && typeof item.plotSpec === "object" && !Array.isArray(item.items)){
+      entries.push({ kind:"plot", spec:item.plotSpec, x:place(item.x), y:place(item.y), w:size(item.w), h:size(item.h), step });
+    } else {
+      const copy = whiteboardDetachedClipboardItem(item);
+      if (copy) entries.push({ kind:"item", item:copy, step });
+    }
+  }
+  return entries.length ? entries : null;
+}
+
 function whiteboardGraphUsesManualY(spec){
   return !!(spec && spec.yMin != null && spec.yMax != null
     && Number.isFinite(Number(spec.yMin)) && Number.isFinite(Number(spec.yMax)));
@@ -3194,6 +3227,55 @@ function renderWhiteboard(doc, host){
     } else commit();
     return true;
   };
+  /* 보드 내용 JSON(whiteboardPastedBoardEntries) 들이기. 수식·그래프는 여기서 그리고, 다 모이면
+     보드 화면(W×H — 내보내기·메모 그림이 담는 범위)에 들어가도록 한 번에 줄여 놓는다. 줄이기는
+     덩어리 그룹으로 싸서 ungroupBoardItem 으로 푸는 것 — 글자 크기·선 굵기·그룹 속까지 같은 비율이 된다.
+     원래 좌표가 이미 화면 안이면 제자리, 아니면 왼쪽 위에 놓는다. 단계 번호는 항목에 그대로 따라온다. */
+  const pasteBoardEntries = (entries) => {
+    const build = (entry) => {
+      if (entry.kind === "formula"){
+        return buildFormulaImage(entry.source, entry.color).then(({ img, src, width, height }) => {
+          const scaled = entry.scale ? width * entry.scale : 0;
+          const w = (entry.w && scaled ? Math.min(entry.w, scaled) : entry.w || scaled) || width, h = w * height / width;
+          return whiteboardWithStep({ type:"image", img, src, x:entry.x, y:entry.y, w, h, role:"education-formula",
+            formulaSource:entry.source, formulaColor:entry.color, formulaBaseW:width, formulaBaseH:height }, entry.step);
+        });
+      }
+      if (entry.kind === "plot"){
+        const group = MNBoardTools.plotGroup(entry.spec);   // 못 읽는 식이면 여기서 던진다 → 그 항목만 빠진다
+        const w = entry.w || group.w, h = entry.h || group.h * w / group.w;
+        return whiteboardWithStep(Object.assign(group, { x:entry.x, y:entry.y, w, h }), entry.step);
+      }
+      return attachBoardImages(entry.item).then(() => entry.item);
+    };
+    Promise.allSettled(entries.map((entry) => Promise.resolve().then(() => build(entry)))).then((results) => {
+      const built = results.filter((r) => r.status === "fulfilled" && isSelectableBoardItem(r.value)).map((r) => r.value);
+      const failed = results.length - built.length;
+      if (!built.length){ if (typeof toast === "function") toast("붙여넣을 항목을 만들지 못했어요.", 2200, { type:"error" }); return; }
+      let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+      for (const it of built){
+        const b = boundsOf(it); if (!b) continue;
+        left = Math.min(left, b.x); top = Math.min(top, b.y); right = Math.max(right, b.x + b.w); bottom = Math.max(bottom, b.y + b.h);
+      }
+      if (!Number.isFinite(left)) return;
+      const margin = 16, bw = Math.max(1, right - left), bh = Math.max(1, bottom - top);
+      const scale = Math.min(1, (W - margin * 2) / bw, (H - margin * 2) / bh);
+      const inPlace = scale === 1 && left >= 0 && top >= 0 && right <= W && bottom <= H;
+      const wrapper = { type:"group", x:inPlace ? left : margin, y:inPlace ? top : margin, w:bw * scale, h:bh * scale, sourceW:bw, sourceH:bh,
+        items:built.map((it) => translateBoardItem(it, -left, -top)) };
+      const placed = ungroupBoardItem(wrapper, measureBoardText).filter((it) => isSelectableBoardItem(it));
+      wb.items.push(...placed); setTool("select"); setSelection(placed);
+      history.commit(); recordCommit();
+      if (typeof toast === "function"){
+        const steps = whiteboardStepValues(placed).length;
+        toast(`보드 항목 ${placed.length}개를 붙여 넣었어요`
+          + (steps ? ` (발표 단계 ${steps}개)` : "")
+          + (scale < 1 ? ` · 화면에 맞게 ${Math.round(scale * 100)}%로 줄였어요` : "")
+          + (failed ? ` · ${failed}개는 만들지 못했어요` : "") + ".", 3200);
+      }
+    });
+    return true;
+  };
   const writeSelectedClipboardEvent = (e) => {
     if (typeof activeId !== "undefined" && activeId !== doc.id) return;
     const ae = document.activeElement;
@@ -3217,6 +3299,8 @@ function renderWhiteboard(doc, host){
     if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return;
     const boardItem = e.clipboardData && e.clipboardData.getData(WB_ITEM_TRANSFER_TYPE);
     if (boardItem && pasteBoardClipboardItem(boardItem)){ setWhiteboardInternalClipboard(boardItem); e.preventDefault(); return; }
+    const entries = whiteboardPastedBoardEntries(e.clipboardData && e.clipboardData.getData("text/plain"));
+    if (entries && pasteBoardEntries(entries)){ e.preventDefault(); return; }
     const items = (e.clipboardData && e.clipboardData.items) || [];
     for (const it of items){
       if (it.kind === "file" && /^image\//.test(it.type)){
@@ -6700,7 +6784,7 @@ function renderWhiteboard(doc, host){
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     boardStateFromSnapshot, boardRecoveryKey, chooseBoardSnapshot, boardSnapshotBg,
-    whiteboardClipboardItem, whiteboardDetachedClipboardItem, whiteboardGraphUsesManualY,
+    whiteboardClipboardItem, whiteboardDetachedClipboardItem, whiteboardPastedBoardEntries, whiteboardGraphUsesManualY,
     setWhiteboardInternalClipboard, getWhiteboardInternalClipboard, hasWhiteboardInternalClipboard,
     whiteboardRecolorItem, whiteboardItemColor, whiteboardCanFlipItem, whiteboardFormulaReplacementRect, whiteboardPresetResizeItem, normalizeWhiteboardTextSize, normalizeWhiteboardObjectScale, whiteboardObjectScalePercent,
     whiteboardEducationCatalog, whiteboardSpecialCharGroups, normalizeWhiteboardRecentSymbols, whiteboardFormulaDictionary, expandWhiteboardFormulaTemplate, whiteboardFormulaNeedsInput, normalizeWhiteboardFormulaLibrary,
