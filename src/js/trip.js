@@ -16,11 +16,18 @@ const TRIP_FORMAT = "classdock-trip";
 //    영상이 조용히 사라진다 — 판을 올려 옛 앱이 아예 열지 않게 한다.
 // 4: 종이 밖 바탕(backdrop, 일기장과 같은 모양). 옛 앱은 바탕을 버리고 바탕 그림도 ZIP 에서 뺀 채
 //    저장하므로 판을 올린다. 없음(none)이면 여행일지 고유의 하늘 바탕 그대로다.
-const TRIP_VERSION = 4;
+// 5: 공용 종이의 사진 테두리·녹음 스티커(소리는 assets/*.webm 등) · 날에 안 붙는 경비(expenses) · 준비물·할 일(checklist).
+//    옛 앱은 녹음 소리를 모르는 자산으로 버리고 새 칸도 버린 채 저장하므로 판을 올린다.
+const TRIP_VERSION = 5;
 const TRIP_JSON_NAME = "trip.json";
 const TRIP_MAX_DAYS = 400;
 const TRIP_MAX_SPOTS = 60;            // 하루에 들를 곳
 const TRIP_MAX_HEADER = 8;            // 인쇄 머리의 자유 칸
+// 녹음 스티커의 소리(일기장 DIARY_AUDIO_RE 와 같은 규칙 — 여기 따로 두어 trip.js 가 혼자서도 가린다).
+const TRIP_AUDIO_RE = /^assets\/[a-z0-9_-]{4,64}\.(webm|ogg|oga|m4a|mp3|wav)$/;
+const TRIP_MAX_EXPENSES = 100;        // 날에 안 붙는 돈(항공권·숙소 선결제 …)
+const TRIP_MAX_CHECKLIST = 200;       // 준비물·할 일
+const TRIP_SPOT_DRAG_TYPE = "application/x-classdock-trip-spot";   // 장소 끌기(파일 끌기와 가르려고)
 const TRIP_ASSET_RE = /^assets\/[a-z0-9_-]{4,64}\.(png|jpe?g|webp|gif)$/;
 /* 장소 영상. 사진처럼 ZIP 안에 그대로 담는다(옆 파일로 두면 .trip 만 옮길 때 끊긴다).
    저장·복구본이 ZIP 전체를 매번 다시 쓰므로 '짧은' 영상만 받는다 — 한도는 여기 한 곳에서 정한다.
@@ -267,6 +274,35 @@ function tripSortSpotsByTime(spots){
     return a.index - b.index;
   }).map(item => item.spot);
 }
+/* 장소 하나를 beforeId 앞(없으면 맨 끝)으로 옮긴 뒤 시각 규칙(tripSortSpotsByTime)을 다시 건다.
+   시각이 있는 곳은 시각 차례로 되돌아가므로, 바란 자리와 결과가 다르면 snapped 로 알린다. */
+function tripMoveSpot(spots, id, beforeId){
+  const src = Array.isArray(spots) ? spots : [];
+  const list = src.slice();
+  const from = list.findIndex(s => s && s.id === id);
+  // 제 앞에 놓기 = 제자리다(끝으로 보내면 안 된다).
+  if (from < 0 || beforeId === id) return { spots:list, moved:false, snapped:false };
+  const [spot] = list.splice(from, 1);
+  let to = beforeId ? list.findIndex(s => s && s.id === beforeId) : -1;
+  if (to < 0) to = list.length;
+  list.splice(to, 0, spot);
+  const sorted = tripSortSpotsByTime(list);
+  const ids = (arr) => arr.map(s => s.id).join("\n");
+  return { spots:sorted, moved:ids(sorted) !== ids(src), snapped:ids(sorted) !== ids(list) };
+}
+/* 장소를 다른 날로 — 그 날 끝에 붙이고 시각 규칙을 건다. 날 배열 안의 spots 를 새 배열로 갈아 끼운다. */
+function tripMoveSpotToDay(days, spotId, toDayId){
+  const list = Array.isArray(days) ? days : [];
+  const from = list.find(d => d && (d.spots || []).some(s => s.id === spotId));
+  const to = list.find(d => d && d.id === toDayId);
+  if (!from || !to) return { ok:false, reason:"missing" };
+  if (from === to) return { ok:false, reason:"same" };
+  if ((to.spots || []).length >= TRIP_MAX_SPOTS) return { ok:false, reason:"full" };
+  const spot = from.spots.find(s => s.id === spotId);
+  from.spots = from.spots.filter(s => s.id !== spotId);
+  to.spots = tripSortSpotsByTime([...(to.spots || []), spot]);
+  return { ok:true, from, to };
+}
 function tripClampLat(v){
   if (v == null || (typeof v === "string" && !v.trim())) return null;
   const n = Number(v);
@@ -462,6 +498,35 @@ function tripNormalizeBudget(raw){
   };
 }
 
+/* 날에 안 붙는 경비 — { id, label, amount, currency, kind }. kind 는 장소 종류와 같은 값(비어도 된다) —
+   요약의 종류별 막대에 함께 쌓인다. 금액·화폐는 장소 경비(tripNormalizeCost)와 같은 규칙. */
+function tripNormalizeExpenses(raw){
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : []).map(item => {
+    if (!item || typeof item !== "object") return null;
+    const cost = tripNormalizeCost({ amount:item.amount, currency:item.currency });
+    const label = String(item.label == null ? "" : item.label).replace(/\s+/g, " ").trim().slice(0, 60);
+    if (!label && !(cost && cost.amount > 0)) return null;     // 이름도 금액도 없는 줄은 담지 않는다
+    let id = /^ex-[a-z0-9-]{1,40}$/.test(String(item.id || "")) ? item.id : "";
+    if (!id || seen.has(id)) id = "ex-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    seen.add(id);
+    return { id, label, amount:cost ? cost.amount : 0, currency:cost ? cost.currency : "KRW",
+      kind:typeof item.kind === "string" ? item.kind.trim().slice(0, 24) : "" };
+  }).filter(Boolean).slice(0, TRIP_MAX_EXPENSES);
+}
+// 준비물·할 일 — { id, text, done }. 빈 줄은 담지 않는다.
+function tripNormalizeChecklist(raw){
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : []).map(item => {
+    if (!item || typeof item !== "object") return null;
+    const text = String(item.text == null ? "" : item.text).replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!text) return null;
+    let id = /^ck-[a-z0-9-]{1,40}$/.test(String(item.id || "")) ? item.id : "";
+    if (!id || seen.has(id)) id = "ck-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    seen.add(id);
+    return { id, text, done:item.done === true };
+  }).filter(Boolean).slice(0, TRIP_MAX_CHECKLIST);
+}
 function tripEmpty(title){
   const now = Date.now();
   return {
@@ -474,6 +539,8 @@ function tripEmpty(title){
     header:[],
     map:tripNormalizeMap(null),
     budget:tripNormalizeBudget(null),
+    expenses:[],
+    checklist:[],
     source:"",
     days:[]
   };
@@ -503,6 +570,8 @@ function tripNormalize(raw, hasAsset){
     header:tripNormalizePairs(raw.header, TRIP_MAX_HEADER),
     map:tripNormalizeMap(raw.map, hasAsset),
     budget:tripNormalizeBudget(raw.budget),
+    expenses:tripNormalizeExpenses(raw.expenses),
+    checklist:tripNormalizeChecklist(raw.checklist),
     source:String(raw.source == null ? "" : raw.source).slice(0, 1000),
     days
   };
@@ -552,7 +621,9 @@ function tripModelJson(model){
     title:model.title || "", createdAt:model.createdAt || Date.now(), updatedAt:model.updatedAt || Date.now(),
     style:model.style, backdrop:model.backdrop || null, printPlain:!!model.printPlain,
     header:tripNormalizePairs(model.header, TRIP_MAX_HEADER),
-    map:model.map, budget:model.budget, source:model.source || "",
+    map:model.map, budget:model.budget,
+    expenses:tripNormalizeExpenses(model.expenses), checklist:tripNormalizeChecklist(model.checklist),
+    source:model.source || "",
     days:tripCleanDays(model)
   });
 }
@@ -565,7 +636,9 @@ function tripContentKey(model){
     title:model.title || "",
     style:model.style, backdrop:model.backdrop || null, printPlain:!!model.printPlain,
     header:tripNormalizePairs(model.header, TRIP_MAX_HEADER),
-    map, budget:model.budget, source:model.source || "",
+    map, budget:model.budget,
+    expenses:tripNormalizeExpenses(model.expenses), checklist:tripNormalizeChecklist(model.checklist),
+    source:model.source || "",
     days:tripCleanDays(model)
   });
 }
@@ -574,7 +647,7 @@ function tripContentKey(model){
    빠뜨리면 다음 저장에서 조용히 사라진다(일기장이 스티커 갈래마다 겪은 함정). */
 function tripReferencedAssets(model){
   const used = new Set();
-  const add = name => { if (typeof name === "string" && (TRIP_ASSET_RE.test(name) || TRIP_VIDEO_RE.test(name))) used.add(name); };
+  const add = name => { if (typeof name === "string" && (TRIP_ASSET_RE.test(name) || TRIP_VIDEO_RE.test(name) || TRIP_AUDIO_RE.test(name))) used.add(name); };
   add(model.style && model.style.bg);
   add(model.backdrop && model.backdrop.bg);
   add(model.map && model.map.still);
@@ -619,7 +692,7 @@ async function tripUnpack(bytes){
   if (!jsonBytes) throw new Error("trip-format");
   const assets = new Map();
   for (const [name, data] of files){
-    if (TRIP_ASSET_RE.test(name) || TRIP_VIDEO_RE.test(name)) assets.set(name, { bytes:data });
+    if (TRIP_ASSET_RE.test(name) || TRIP_VIDEO_RE.test(name) || TRIP_AUDIO_RE.test(name)) assets.set(name, { bytes:data });
   }
   const model = tripNormalize(JSON.parse(new TextDecoder("utf-8").decode(jsonBytes)), name => assets.has(name));
   const used = tripReferencedAssets(model);
@@ -935,6 +1008,154 @@ function tripRegionTally(model, index){
     || (a.sido + a.sgg).localeCompare(b.sido + b.sgg));
   const sidos = new Set(list.map(r => r.sido));
   return { list, sidos:[...sidos], unknown };
+}
+
+/* ---------- 이동 거리·여행 요약 ----------
+   거리는 두 곳 사이의 직선(대권) 거리다. 실제 길은 이보다 길다 — 화면에도 '직선'이라고 적는다.
+   좌표가 없는 곳은 건너뛰고 그 앞뒤 좌표를 잇는다(지도의 동선 선과 같은 규칙). */
+function tripDistanceKm(a, b){
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371.0088 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+const tripHasCoords = (s) => !!s && s.lat != null && s.lng != null;
+// 그 날 동선 — km 합계와, 장소마다 앞 좌표에서 온 거리(legs: id → km).
+function tripDayDistance(day){
+  const legs = new Map();
+  let km = 0, prev = null;
+  for (const spot of (day && day.spots) || []){
+    if (!tripHasCoords(spot)) continue;
+    if (prev){ const leg = tripDistanceKm(prev, spot); legs.set(spot.id, leg); km += leg; }
+    prev = spot;
+  }
+  return { km, legs };
+}
+function tripFormatKm(km){
+  if (!(km > 0)) return "0 km";
+  if (km < 1) return Math.max(10, Math.round(km * 100) * 10) + " m";
+  return (km < 100 ? (Math.round(km * 10) / 10).toFixed(1) : String(Math.round(km))) + " km";
+}
+function tripSummary(model){
+  const days = (model && model.days) || [];
+  const dates = days.map(d => d.date).filter(tripIsDateKey).sort();
+  const addMoney = (map, cur, amount) => map.set(cur, (map.get(cur) || 0) + amount);
+  const cost = new Map(), costByKind = new Map(), kinds = new Map();
+  let spots = 0, located = 0, photos = 0, videos = 0, within = 0, between = 0, lastPoint = null;
+  const perDay = [];
+  for (const day of days){
+    const dayCost = new Map();
+    let firstPoint = null, dayLast = null;
+    for (const spot of day.spots || []){
+      spots++;
+      if (tripHasCoords(spot)){ located++; if (!firstPoint) firstPoint = spot; dayLast = spot; }
+      photos += (spot.photos || []).length;
+      videos += (spot.videos || []).length;
+      const kind = spot.kind || "";
+      kinds.set(kind, (kinds.get(kind) || 0) + 1);
+      if (spot.cost){
+        const cur = spot.cost.currency || "KRW";
+        addMoney(cost, cur, spot.cost.amount);
+        addMoney(dayCost, cur, spot.cost.amount);
+        if (!costByKind.has(kind)) costByKind.set(kind, new Map());
+        addMoney(costByKind.get(kind), cur, spot.cost.amount);
+      }
+    }
+    photos += (day.stickers || []).filter(s => typeof diaryStickerKind === "function" ? diaryStickerKind(s) === "photo" : !!s.asset).length;
+    const km = tripDayDistance(day).km;
+    within += km;
+    // 날과 날 사이 — 앞 날 마지막 좌표 → 이 날 첫 좌표(지도의 회색 점선과 같은 자리).
+    if (lastPoint && firstPoint) between += tripDistanceKm(lastPoint, firstPoint);
+    if (dayLast) lastPoint = dayLast;
+    perDay.push({ id:day.id, date:day.date || "", title:day.title || "", spots:(day.spots || []).length, km, cost:dayCost });
+  }
+  // 날에 안 붙는 돈도 합계·종류별에 쌓는다(항공권은 '이동', 숙소 선결제는 '잠자리' …).
+  const extra = new Map();
+  for (const ex of tripNormalizeExpenses(model && model.expenses)){
+    if (!(ex.amount > 0)) continue;
+    addMoney(cost, ex.currency, ex.amount);
+    addMoney(extra, ex.currency, ex.amount);
+    if (!costByKind.has(ex.kind)) costByKind.set(ex.kind, new Map());
+    addMoney(costByKind.get(ex.kind), ex.currency, ex.amount);
+  }
+  let nights = 0;
+  if (dates.length > 1) nights = Math.round((new Date(dates[dates.length - 1] + "T00:00:00") - new Date(dates[0] + "T00:00:00")) / 86400000);
+  return {
+    days:days.length, first:dates[0] || "", last:dates[dates.length - 1] || "", nights,
+    spots, located, photos, videos,
+    km:{ within, between, total:within + between },
+    cost, costByKind, kinds, perDay, extraCost:extra
+  };
+}
+
+/* ---------- 여행 되돌아보기(재생) ----------
+   날 차례로 — 날마다 여는 장(날짜·제목·날씨) → 들른 곳마다 사진 한 장씩(사진이 없으면 장소 한 장) →
+   영상은 첫 장면으로 → 종이에 붙인 사진. 지도는 장소 장이 나올 때 그 자리로 날아간다.
+   hasAsset(이름) 이 거짓인 사진은 뺀다. [{ type:"day"|"spot"|"paper", dayId, dayIndex, spotId?, asset?, video? }] */
+const TRIP_REPLAY_MAX = 600;
+function tripReplaySlides(model, hasAsset){
+  const ok = (name) => !!name && (!hasAsset || hasAsset(name));
+  const out = [];
+  (model.days || []).forEach((day, dayIndex) => {
+    if (tripDayIsEmpty(day)) return;
+    out.push({ type:"day", dayId:day.id, dayIndex });
+    for (const spot of day.spots || []){
+      const photos = (spot.photos || []).filter(ok);
+      const videos = (spot.videos || []).filter(v => v && ok(v.v));
+      for (const asset of photos) out.push({ type:"spot", dayId:day.id, dayIndex, spotId:spot.id, asset });
+      for (const v of videos) out.push({ type:"spot", dayId:day.id, dayIndex, spotId:spot.id, asset:ok(v.p) ? v.p : "", video:v.v });
+      if (!photos.length && !videos.length) out.push({ type:"spot", dayId:day.id, dayIndex, spotId:spot.id, asset:"" });
+    }
+    const spotPhotos = new Set((day.spots || []).flatMap(sp => sp.photos || []));
+    for (const st of day.stickers || []){
+      const isPhoto = typeof diaryStickerKind === "function" ? diaryStickerKind(st) === "photo" : !!st.asset;
+      if (isPhoto && ok(st.asset) && !spotPhotos.has(st.asset)) out.push({ type:"paper", dayId:day.id, dayIndex, asset:st.asset });
+    }
+  });
+  return out.slice(0, TRIP_REPLAY_MAX);
+}
+
+/* ---------- 일기장으로 보내기 ----------
+   여행일지의 하루를 일기장 한 날로 옮겨 적는다. 종이가 같아서 글·스티커(사진·그림·글상자·녹음)·그림 획은
+   그대로 옮기고, 들른 곳은 글 끝에 "— 들른 곳 —" 줄로, 장소 사진은 글 아래에 사진첩처럼 깐다(12장까지).
+   꾸미기(줄 무늬·배경)는 옮기지 않는다 — 일기장에는 그 일기장의 꾸미기가 있다. 태그 '여행'을 더해 찾기 쉽게.
+   photoAr: 장소 사진 이름 → 높이÷폭(부르는 쪽이 그림을 읽어 잰다). 모르는 사진은 빼고 넣는다. */
+const TRIP_TO_DIARY_MAX_PHOTOS = 12;
+function tripDayToDiaryEntry(model, day, photoAr, en){
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const sid = () => "st-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  const lines = [];
+  for (const sp of day.spots || []){
+    const head = [sp.at, sp.name || (en ? "(unnamed place)" : "(이름 없는 곳)")].filter(Boolean).join(" ");
+    lines.push("· " + head + (sp.note ? " — " + String(sp.note).replace(/\s+/g, " ").trim() : ""));
+  }
+  const body = String(day.text || "").replace(/\s+$/, "");
+  const text = [body, lines.length ? (en ? "— Places —" : "— 들른 곳 —") + "\n" + lines.join("\n") : ""].filter(Boolean).join("\n\n");
+  const stickers = (day.stickers || []).map(st => ({ ...clone(st), id:sid() }));
+  const photos = [];
+  for (const sp of day.spots || []) for (const asset of sp.photos || []){
+    if (photos.length >= TRIP_TO_DIARY_MAX_PHOTOS || !photoAr || !(photoAr.get(asset) > 0)) continue;
+    if (photos.some(x => x.asset === asset) || stickers.some(x => x.asset === asset)) continue;
+    photos.push({ id:sid(), kind:"photo", asset, ar:photoAr.get(asset), w:0.3, x:0, y:0, rot:0, flip:false });
+  }
+  if (photos.length && typeof diaryArrangeStickers === "function"){
+    const bottom = (st) => typeof diaryStickerBottom === "function" ? diaryStickerBottom(st) : st.y + st.w * (st.ar || 1);
+    const textH = typeof diaryEstimateTextHeight === "function" ? diaryEstimateTextHeight(text) : 0;
+    const top = Math.max(0.04, textH, ...stickers.filter(st => Number(st.ar) > 0).map(bottom)) + 0.02;
+    const places = new Map(diaryArrangeStickers(photos, "scatter", { top }).map(pl => [pl.id, pl]));
+    for (const ph of photos){ const pl = places.get(ph.id); if (pl) Object.assign(ph, { x:pl.x, y:pl.y, w:pl.w, rot:pl.rot || 0 }); }
+  }
+  const all = [...stickers, ...photos];
+  const assetNames = new Set(all.map(st => st.asset).filter(Boolean));
+  return {
+    entry:{
+      date:day.date, title:day.title || model.title || "", text,
+      weather:day.weather || "", mood:day.mood || "", favorite:!!day.favorite,
+      tags:[...(day.tags || []), en ? "trip" : "여행"],
+      drawing:clone(day.drawing || []), stickers:all
+    },
+    assets:[...assetNames]
+  };
 }
 
 /* ---------- 다른 문서로 내보내기 ----------
@@ -1316,6 +1537,8 @@ function mountTripEditor(doc){
   };
 
   const dayOf = (id) => (model.days || []).find(d => d.id === id) || null;
+  const railMarks = new Map();       // 날 id → 칸에 그린 대표 사진·날씨(바뀌었는지 가리려고)
+  const railMarkOf = (day) => dayThumbAsset(day) + "|" + (day.weather || "");
   const ensureDay = (id) => {
     let day = dayOf(id);
     if (!day){
@@ -1423,13 +1646,31 @@ function mountTripEditor(doc){
   railChevron.className = "trip-rail-chevron";
   railChevron.setAttribute("aria-hidden", "true");
   if (typeof window.uiIcon === "function") railChevron.innerHTML = window.uiIcon("chevronUp");
-  railTitlebar.append(railIcon, railHead, railChevron);
+  // 여행 요약 — 여정 띠 머리에 둔다(여정 전체를 보는 자리).
+  const summaryBtn = diaryButton("", "", "diary-btn trip-summary-btn", "chart");
+  const summaryTip = tripIsEn() ? "Trip summary — period, distance, spending, regions" : "여행 요약 — 기간·이동 거리·경비·다녀온 지역";
+  summaryBtn.title = summaryTip;
+  summaryBtn.setAttribute("aria-label", summaryTip);
+  const replayBtn = diaryButton("", "", "diary-btn trip-replay-open", "play");
+  const replayTip = tripIsEn() ? "Replay the trip — photos and places, day by day" : "여행 되돌아보기 — 날 차례로 사진·장소를 넘겨 보기";
+  replayBtn.title = replayTip;
+  replayBtn.setAttribute("aria-label", replayTip);
+  railTitlebar.append(railIcon, railHead, replayBtn, summaryBtn, railChevron);
   const railList = document.createElement("div");
   railList.className = "trip-rail-list";
   const addDayBtn = document.createElement("button");
   addDayBtn.type = "button";
   addDayBtn.className = "diary-btn trip-add-day";
-  rail.append(railTitlebar, railList, addDayBtn);
+  // 준비물·할 일 — 여행 전체에 하나. 여정 띠 아래에 접어 둔다(펼침은 이 브라우저에만).
+  const checkBox = document.createElement("section");
+  checkBox.className = "trip-checklist";
+  const checkHead = document.createElement("button");
+  checkHead.type = "button";
+  checkHead.className = "trip-check-toggle";
+  const checkBody = document.createElement("div");
+  checkBody.className = "trip-check-body";
+  checkBox.append(checkHead, checkBody);
+  rail.append(railTitlebar, railList, addDayBtn, checkBox);
 
   /* 지도 칸 — 좌표가 있는 장소를 표시로 찍고 목록 차례대로 잇는다(설계 2.3).
      칸은 접을 수 있다. 접기는 보는 사람 편의라 파일이 아니라 이 브라우저에만 남긴다. */
@@ -1546,7 +1787,10 @@ function mountTripEditor(doc){
   const addSpotBtn = document.createElement("button");
   addSpotBtn.type = "button";
   addSpotBtn.className = "diary-btn trip-add-spot";
-  spotsHead.append(spotsTitle, addSpotBtn);
+  const spotsDist = document.createElement("span");
+  spotsDist.className = "trip-spots-dist";
+  spotsDist.hidden = true;
+  spotsHead.append(spotsTitle, spotsDist, addSpotBtn);
   const spotList = document.createElement("div");
   spotList.className = "trip-spot-list";
   const spotsEmpty = document.createElement("p");
@@ -1565,7 +1809,20 @@ function mountTripEditor(doc){
   rateInput.type = "text"; rateInput.className = "trip-rate"; rateInput.maxLength = 12; rateInput.inputMode = "decimal";
   rateInput.title = "1 단위가 몇 원인지 — 받은 날 값을 그대로 굳혀 둡니다";
   const rateBtn = diaryButton("", "환율 찾아보기", "diary-btn trip-rate-btn", "exchange");
-  budgetBox.append(budgetSum, currencyInput, rateInput, rateBtn);
+  const budgetLine = document.createElement("div");
+  budgetLine.className = "trip-budget-line";
+  budgetLine.append(budgetSum, currencyInput, rateInput, rateBtn);
+  /* 날에 안 붙는 돈(항공권·숙소 선결제·보험 …) — 접어 두고, 펴면 줄마다 이름·금액·화폐·종류.
+     펼침은 보는 사람 편의라 이 브라우저에만 둔다. */
+  const extraHead = document.createElement("button");
+  extraHead.type = "button";
+  extraHead.className = "diary-btn trip-extra-toggle";
+  const extraBox = document.createElement("div");
+  extraBox.className = "trip-extra";
+  extraBox.hidden = true;
+  let extraOpen = false;
+  try { extraOpen = localStorage.getItem("mn.tripExtraOpen") === "1"; } catch(_){}
+  budgetBox.append(budgetLine, extraHead, extraBox);
   spotsBox.append(spotsHead, spotList, spotsEmpty, budgetBox);
 
   main.append(pageHead, els.paper, spotsBox);
@@ -1598,6 +1855,9 @@ function mountTripEditor(doc){
   };
   doc.flushBackupRecovery = flushRecovery;
   function touch(immediate){
+    // 종이에 사진을 붙이거나 떼면 여정 띠의 대표 사진이 바뀔 수 있다 — 그 날 것이 달라졌을 때만 다시 그린다.
+    const live = dayOf(current);
+    if (live && railMarks.has(live.id) && railMarkOf(live) !== railMarks.get(live.id)) renderRail();
     refreshDirty();
     scheduleRecovery();
     if (history){ if (immediate) history.commit(); else history.commitSoon(400); }
@@ -1702,7 +1962,7 @@ function mountTripEditor(doc){
       children:tripEditorMenuItems() }]
   });
   const { addStickers, addAsset, applyStyle, layout, redrawDrawing, renderStickers, setDrawMode, clearSelection,
-    addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers,
+    addArtSticker, addTextSticker, addAudioSticker, applyStickerColor, applyStickerOpacity, selectedStickers,
     stickerColorNow, stickerOpacityNow } = paperApi;
 
   /* ----- 꾸미기 창·스티커 창 ----- */
@@ -1726,6 +1986,7 @@ function mountTripEditor(doc){
     renderCalendar:() => renderRail(),
     addArtSticker:(...a) => addArtSticker(...a),
     addTextSticker:(...a) => addTextSticker(...a),
+    addAudioSticker:(...a) => addAudioSticker(...a),
     applyStickerColor:(...a) => applyStickerColor(...a),
     applyStickerOpacity:(...a) => applyStickerOpacity(...a),
     selectedStickers:(...a) => selectedStickers(...a),
@@ -2270,6 +2531,8 @@ function mountTripEditor(doc){
     }
   }
   recallBtn.addEventListener("click", openRecall);
+  summaryBtn.addEventListener("click", openSummary);
+  replayBtn.addEventListener("click", openReplay);
 
   photoBtn.addEventListener("click", () => photoInput.click());
   photoInput.addEventListener("change", async () => {
@@ -2863,8 +3126,22 @@ function mountTripEditor(doc){
   }
 
   /* ----- 여정 띠 ----- */
+  // 여정 띠 칸의 대표 사진 — 들른 곳 첫 사진 → 영상 첫 장면 → 종이에 붙인 사진 차례.
+  function dayThumbAsset(day){
+    for (const spot of day.spots || []){
+      const photo = (spot.photos || []).find(name => assets.has(name));
+      if (photo) return photo;
+    }
+    for (const spot of day.spots || []){
+      const video = (spot.videos || []).find(v => v && v.p && assets.has(v.p));
+      if (video) return video.p;
+    }
+    const sticker = (day.stickers || []).find(s => typeof diaryStickerKind === "function" && diaryStickerKind(s) === "photo" && assets.has(s.asset));
+    return sticker ? sticker.asset : "";
+  }
   function renderRail(){
     railList.innerHTML = "";
+    railMarks.clear();
     railHead.textContent = tripWordf("dayCount", { n:(model.days || []).length });
     for (const day of (model.days || [])){
       const chip = document.createElement("button");
@@ -2886,7 +3163,41 @@ function mountTripEditor(doc){
       const spots = (day.spots || []).length;
       sub.textContent = day.title || (spots ? tripWord("spot") + " " + spots : tripWord("dayEmpty"));
       chip.append(head, sub);
+      // 그날 날씨 그림과 대표 사진 — 글자만으로는 날을 알아보기 어렵다. 문서에 따로 담지 않고 이미 연 사진 주소를 쓴다.
+      const weather = typeof diaryWeatherInfo === "function" ? diaryWeatherInfo(day.weather) : null;
+      if (weather && typeof diaryMarkFill === "function"){
+        const mark = document.createElement("span");
+        mark.className = "trip-day-chip-wx ui-keep-symbols";
+        mark.title = typeof diaryName === "function" ? diaryName(weather) : "";
+        diaryMarkFill(mark, weather);
+        head.prepend(mark);
+      }
+      railMarks.set(day.id, railMarkOf(day));
+      const thumb = dayThumbAsset(day);
+      if (thumb){
+        const img = document.createElement("img");
+        img.className = "trip-day-chip-thumb";
+        img.src = assetUrl(thumb); img.alt = ""; img.loading = "lazy"; img.draggable = false;
+        chip.append(img);
+        chip.classList.add("has-thumb");
+      }
       chip.addEventListener("click", () => goTo(day.id));
+      // 장소를 끌어 다른 날 위에 놓으면 그 날로 옮긴다(보고 있는 날은 받지 않는다).
+      chip.addEventListener("dragover", (e) => {
+        if (!draggingSpot || day.id === current) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        chip.classList.add("is-drop");
+      });
+      chip.addEventListener("dragleave", (e) => { if (!chip.contains(e.relatedTarget)) chip.classList.remove("is-drop"); });
+      chip.addEventListener("drop", (e) => {
+        if (!draggingSpot || day.id === current) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const moving = draggingSpot;
+        endSpotDrag();
+        moveSpotToDay(moving, day.id);
+      });
       railList.append(chip);
     }
     addDayBtn.textContent = tripWord("dayAdd");
@@ -2954,6 +3265,624 @@ function mountTripEditor(doc){
     }
   }
 
+  /* ----- 여행 요약 -----
+     여행 한 건을 한 장에 — 기간·날·장소·사진·이동 거리·경비(종류별)·다녀온 지역·날마다 한 줄.
+     모두 모델에서 그때그때 셈한다(파일에 담지 않는다). 날 줄을 누르면 그 날로 간다. */
+  let summary = null;
+  function buildSummary(){
+    const modal = document.createElement("div");
+    modal.className = "modal trip-summary-modal";
+    modal.hidden = true;
+    const card = document.createElement("div");
+    card.className = "modal-card trip-summary-card";
+    card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+    const head = document.createElement("div"); head.className = "trip-summary-head";
+    const titles = document.createElement("div"); titles.className = "trip-summary-titles";
+    const title = document.createElement("h3"); title.className = "trip-summary-title";
+    const sub = document.createElement("div"); sub.className = "trip-summary-sub";
+    titles.append(title, sub);
+    const closeBtn = document.createElement("button"); closeBtn.type = "button"; closeBtn.className = "trip-recall-x trip-summary-x"; closeBtn.textContent = "×";
+    const replayGo = document.createElement("button"); replayGo.type = "button"; replayGo.className = "diary-btn trip-summary-replay";
+    replayGo.textContent = tripIsEn() ? "▶ Replay" : "▶ 되돌아보기";
+    replayGo.addEventListener("click", () => openReplay());
+    head.append(titles, replayGo, closeBtn);
+    const content = document.createElement("div"); content.className = "trip-summary-body";
+    card.append(head, content);
+    modal.append(card);
+    document.body.append(modal);
+    const s = { modal, card, title, sub, closeBtn, content, lastFocus:null };
+    s.onKey = (e) => {
+      if (modal.hidden || e.key !== "Escape") return;
+      e.preventDefault(); e.stopPropagation(); closeSummary();
+    };
+    closeBtn.addEventListener("click", () => closeSummary());
+    modal.addEventListener("mousedown", (e) => { if (e.target === modal) closeSummary(); });
+    return s;
+  }
+  function openSummary(){
+    if (history) history.flush();
+    if (!summary) summary = buildSummary();
+    if (summary.modal.hidden){
+      summary.lastFocus = document.activeElement;
+      window.addEventListener("keydown", summary.onKey, true);
+    }
+    summary.modal.hidden = false;
+    renderSummary();
+    try { summary.closeBtn.focus(); } catch(_){}
+  }
+  function closeSummary(keepFocus){
+    if (!summary || summary.modal.hidden) return;
+    summary.modal.hidden = true;
+    summary.content.innerHTML = "";
+    window.removeEventListener("keydown", summary.onKey, true);
+    const back = summary.lastFocus; summary.lastFocus = null;
+    if (!keepFocus && back && typeof back.focus === "function" && back.isConnected){ try { back.focus(); } catch(_){} }
+  }
+  function renderSummary(){
+    const en = tripIsEn();
+    const s = summary;
+    const sum = tripSummary(model);
+    const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const shortDate = (key) => { const [y, m, d] = key.split("-"); return en ? `${Number(m)}/${Number(d)}/${y}` : `${y}. ${Number(m)}. ${Number(d)}`; };
+    const moneyList = (map) => [...map].map(([cur, amount]) => moneyText(amount, cur)).join(" + ");
+    s.card.setAttribute("aria-label", en ? "Trip summary" : "여행 요약");
+    s.closeBtn.title = en ? "Close (Esc)" : "닫기 (Esc)"; s.closeBtn.setAttribute("aria-label", s.closeBtn.title);
+    s.title.textContent = en ? "Trip summary" : "여행 요약";
+    s.sub.textContent = model.title || tripWord("docName");
+
+    const parts = [];
+    // 큰 숫자 칸
+    const cards = el("div", "trip-summary-cards");
+    const addCard = (cls, value, label, note) => {
+      const c = el("div", "trip-summary-stat " + cls);
+      c.append(el("strong", "", value), el("span", "", label));
+      if (note) c.append(el("small", "", note));
+      cards.append(c);
+    };
+    const period = sum.first
+      ? (sum.first === sum.last ? shortDate(sum.first) : shortDate(sum.first) + " ~ " + shortDate(sum.last))
+      : "";
+    const span = !sum.first ? "" : sum.nights ? (en ? `${sum.nights} nights · ${sum.nights + 1} days` : `${sum.nights}박 ${sum.nights + 1}일`) : (en ? "Day trip" : "당일");
+    addCard("is-period", span || "—", en ? "Period" : "기간", period);
+    addCard("is-days", String(sum.days), en ? "Days written" : "기록한 날");
+    addCard("is-spots", String(sum.spots), tripWord("spot"),
+      sum.spots ? (en ? `${sum.located} with location` : `위치 있는 곳 ${sum.located}`) : "");
+    addCard("is-photos", String(sum.photos), en ? "Photos" : "사진", sum.videos ? (en ? `${sum.videos} videos` : `영상 ${sum.videos}`) : "");
+    addCard("is-km", sum.km.total > 0 ? tripFormatKm(sum.km.total) : "—", en ? "Distance (straight line)" : "이동 거리(직선)",
+      sum.km.between > 0 ? (en ? `within days ${tripFormatKm(sum.km.within)} · between ${tripFormatKm(sum.km.between)}`
+        : `날 안 ${tripFormatKm(sum.km.within)} · 날 사이 ${tripFormatKm(sum.km.between)}`) : "");
+    parts.push(cards);
+
+    const section = (label) => { const box = el("section", "trip-summary-section"); box.append(el("h4", "", label)); parts.push(box); return box; };
+    const kindName = (kind) => kind ? tripSpotKindName(kind) : (en ? "Unsorted" : "종류 없음");
+    const kindIcon = (kind) => { const i = el("span", "trip-summary-kind-icon"); if (kind && tripSpotKindInfo(kind)) i.innerHTML = diaryArtSvg(tripSpotKindIcon(kind), "trip-spot-art"); return i; };
+
+    // 경비 — 화폐별 합계, 여행 화폐가 원이 아니고 환율을 적었으면 원화 환산, 그리고 종류별 막대.
+    if (sum.cost.size){
+      const box = section(en ? "Spending" : "쓴 돈");
+      const total = el("div", "trip-summary-money", moneyList(sum.cost));
+      const rate = model.budget && model.budget.rate, cur = (model.budget && model.budget.currency) || "KRW";
+      if (rate && cur !== "KRW" && sum.cost.has(cur)) total.append(el("span", "", " ≈ " + moneyText(sum.cost.get(cur) * rate, "KRW")));
+      box.append(total);
+      if (sum.extraCost.size) box.append(el("div", "trip-summary-note",
+        (en ? "Includes costs not tied to a day: " : "날에 안 붙는 돈 포함: ") + moneyList(sum.extraCost)));
+      const main = sum.cost.has(cur) ? cur : [...sum.cost.keys()][0];
+      const rows = [...sum.costByKind].sort((a, b) => (b[1].get(main) || 0) - (a[1].get(main) || 0));
+      const max = Math.max(...rows.map(([, m]) => m.get(main) || 0), 0);
+      const list = el("div", "trip-summary-bars");
+      for (const [kind, money] of rows){
+        const row = el("div", "trip-summary-bar");
+        const name = el("span", "trip-summary-bar-name");
+        name.append(kindIcon(kind), el("span", "", kindName(kind)));
+        const track = el("span", "trip-summary-bar-track");
+        const fill = el("i", "");
+        fill.style.width = max > 0 ? Math.max(2, Math.round((money.get(main) || 0) / max * 100)) + "%" : "0";
+        if (kind && tripSpotKindInfo(kind) && typeof MAP_MARKER_COLORS !== "undefined"){
+          const c = MAP_MARKER_COLORS.find(x => x.id === tripSpotKindColor(kind));
+          if (c) fill.style.background = c.hex;
+        }
+        track.append(fill);
+        row.append(name, track, el("span", "trip-summary-bar-value", moneyList(money)));
+        list.append(row);
+      }
+      box.append(list);
+    }
+
+    // 종류별 장소 수
+    if (sum.spots){
+      const box = section(en ? "Places by kind" : "종류별 장소");
+      const chips = el("div", "trip-summary-chips");
+      const order = [...TRIP_SPOT_KIND_IDS, ...[...sum.kinds.keys()].filter(k => !TRIP_SPOT_KIND_IDS.includes(k))];
+      for (const kind of order){
+        if (!sum.kinds.has(kind)) continue;
+        const chip = el("span", "trip-summary-chip");
+        chip.append(kindIcon(kind), el("span", "", kindName(kind) + " " + sum.kinds.get(kind)));
+        chips.append(chip);
+      }
+      box.append(chips);
+    }
+
+    // 다녀온 지역 — 지도 칸이 이미 읽어 둔 경계로만(국내 문서일 때).
+    if (regionIndex && tripIsDomestic(model)){
+      const tally = tripRegionTally(model, regionIndex);
+      if (tally.list.length){
+        const box = section(tripWord("choro") || (en ? "Regions visited" : "다녀온 지역"));
+        box.append(el("div", "trip-summary-note", en ? `${tally.sidos.length} provinces · ${tally.list.length} districts`
+          : `시도 ${tally.sidos.length}곳 · 시군구 ${tally.list.length}곳`));
+        const chips = el("div", "trip-summary-chips");
+        for (const r of tally.list) chips.append(el("span", "trip-summary-chip", `${r.sido} ${r.sgg} ${r.count}`));
+        box.append(chips);
+      }
+    }
+
+    // 날마다 한 줄
+    if (sum.perDay.length){
+      const box = section(en ? "Day by day" : "날마다");
+      const table = el("div", "trip-summary-days");
+      const maxKm = Math.max(...sum.perDay.map(d => d.km), 0);
+      sum.perDay.forEach((d) => {
+        const day = dayOf(d.id);
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "trip-summary-day" + (d.id === current ? " is-on" : "");
+        row.dataset.id = d.id;
+        const label = el("span", "trip-summary-day-label", day ? tripDayLabel(model, day) : "");
+        const title = el("span", "trip-summary-day-title", d.title || "");
+        const count = el("span", "trip-summary-day-num", en ? `${d.spots} places` : `${d.spots}곳`);
+        const km = el("span", "trip-summary-day-km");
+        const bar = el("i", "");
+        bar.style.width = maxKm > 0 ? Math.round(d.km / maxKm * 70) + "px" : "0";   // 가장 먼 날 = 70px
+        bar.style.background = tripDayRouteColor(sum.perDay.indexOf(d));
+        km.append(bar, el("span", "", d.km > 0 ? tripFormatKm(d.km) : "—"));
+        const money = el("span", "trip-summary-day-money", d.cost.size ? moneyList(d.cost) : "");
+        row.append(label, title, count, km, money);
+        row.addEventListener("click", () => { closeSummary(true); goTo(d.id); });
+        table.append(row);
+      });
+      box.append(table);
+    }
+    if (!sum.days) parts.push(el("p", "trip-summary-empty", tripT("아직 쓴 날이 없어요.")));
+    s.content.replaceChildren(...parts);
+  }
+
+  /* ----- 이름·주소로 위치 찾기 -----
+     지도 문서와 같은 길(mapGeocode — 런처 /geocode, 카카오를 켰으면 카카오 → 없으면 OSM)로 묻는다.
+     주소를 먼저, 없으면 이름으로. 후보는 메뉴로 보여 주고 고른 것만 넣는다(첫 후보를 멋대로 넣지 않는다).
+     비어 있던 주소·이름 칸만 채운다 — 사용자가 적은 글은 덮어쓰지 않는다. */
+  let finding = "";
+  async function findSpotLocation(spotId, anchor){
+    const en = tripIsEn();
+    const day = dayOf(current);
+    const spot = day && day.spots.find(s => s.id === spotId);
+    if (!spot || finding) return;
+    const query = String(spot.address || "").trim() || String(spot.name || "").trim();
+    if (!query){ setStatus(en ? "Write a name or address first." : "이름이나 주소를 먼저 적어 주세요."); return; }
+    if (typeof mapGeocode !== "function"){ setStatus(en ? "Location search is not available." : "위치 찾기를 쓸 수 없어요."); return; }
+    finding = spotId;
+    anchor.classList.add("is-busy");
+    setStatus(en ? "Searching…" : "찾는 중…");
+    let places = [];
+    try { places = await mapGeocode(query); }
+    catch(error){
+      const launcher = /launcher-required/.test(String(error && error.message || error));
+      setStatus(launcher
+        ? (en ? "Location search works when opened from the ClassDock launcher (EXE)." : "위치 찾기는 ClassDock 런처(EXE)로 열었을 때 돼요. 지도에서 직접 찍을 수는 있어요.")
+        : (en ? "Couldn't search. Check the internet connection." : "찾지 못했어요. 인터넷 연결을 확인해 주세요."));
+      return;
+    } finally {
+      finding = "";
+      anchor.classList.remove("is-busy");
+    }
+    if (!root.isConnected) return;
+    places = (places || []).filter(p => p.lat != null && p.lng != null).slice(0, 8);
+    if (!places.length){ setStatus(tripTf(en ? "No place found for \"{q}\"." : "'{q}'(으)로 찾은 곳이 없어요.", { q:query })); return; }
+    setStatus(en ? "Pick the right place." : "맞는 곳을 고르세요.");
+    const r = anchor.getBoundingClientRect();
+    if (typeof MNContextMenu === "undefined") return;
+    MNContextMenu.open(r.left, r.bottom + 4, places.map(place => ({
+      label:place.name.length > 70 ? place.name.slice(0, 69) + "…" : place.name,
+      title:place.name,
+      action:() => applyFoundLocation(spotId, place)
+    })));
+  }
+  function applyFoundLocation(spotId, place){
+    const day = dayOf(current);
+    const spot = day && day.spots.find(s => s.id === spotId);
+    if (!spot) return;
+    if (history) history.flush();
+    spot.lat = Math.round(place.lat * 1e6) / 1e6;
+    spot.lng = Math.round(place.lng * 1e6) / 1e6;
+    if (!String(spot.address || "").trim()) spot.address = String(place.road || place.address || place.name || "").slice(0, 300);
+    if (!String(spot.name || "").trim() && place.title) spot.name = String(place.title).slice(0, 120);
+    if (pickingFor === spotId){ pickingFor = ""; mapStage.classList.remove("is-picking"); }
+    renderSpots(); renderRail(); renderMap(); syncWeather(); touch(true);
+    if (mapReady && leafletMap) leafletMap.setView([spot.lat, spot.lng], Math.max(leafletMap.getZoom(), 14));
+    setStatus(tripIsEn() ? "Location set. Ctrl+Z to undo." : "위치를 넣었어요. Ctrl+Z 로 되돌릴 수 있어요.");
+  }
+
+  /* ----- 여행 되돌아보기(재생) -----
+     보기만 하는 창이다(파일에 아무것도 더하지 않는다). 지도는 편집 칸의 지도와 따로 하나 더 띄운다 —
+     편집 칸 지도의 자리(center·zoom)를 건드리면 저장본의 지도 자리가 바뀌기 때문이다. */
+  let replay = null;
+  const REPLAY_SPEEDS = [3, 5, 8];
+  function buildReplay(){
+    const en = tripIsEn();
+    const make = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const modal = make("div", "modal trip-replay-modal");
+    modal.hidden = true;
+    const card = make("div", "trip-replay-card");
+    card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+    const stage = make("div", "trip-replay-stage ui-keep-symbols");
+    const mapBox = make("div", "trip-replay-map");
+    const bar = make("div", "trip-replay-bar");
+    const btn = (icon, title, cls) => {
+      const b = make("button", "trip-replay-btn " + (cls || "")); b.type = "button";
+      if (typeof window.setUiIcon === "function") window.setUiIcon(b, icon, title); else b.textContent = title;
+      b.title = title; return b;
+    };
+    const prev = btn("arrowLeft", en ? "Previous (←)" : "앞으로 (←)");
+    const play = btn("pause", en ? "Pause (Space)" : "멈추기 (Space)", "is-main");
+    const next = btn("arrow", en ? "Next (→)" : "다음 (→)");
+    const counter = make("span", "trip-replay-count");
+    const progress = make("div", "trip-replay-progress"); const fill = make("i", ""); progress.append(fill);
+    const speed = make("select", "trip-replay-speed");
+    speed.setAttribute("aria-label", en ? "Seconds per slide" : "한 장에 머무는 시간");
+    for (const sec of REPLAY_SPEEDS){ const o = make("option", "", en ? sec + " s" : sec + "초"); o.value = String(sec); speed.append(o); }
+    let saved = 5;
+    try { const v = Number(localStorage.getItem("mn.tripReplaySpeed")); if (REPLAY_SPEEDS.includes(v)) saved = v; } catch(_){}
+    speed.value = String(saved);
+    const close = btn("close", en ? "Close (Esc)" : "닫기 (Esc)", "is-close");
+    bar.append(prev, play, next, counter, progress, speed, close);
+    card.append(stage, mapBox, bar);
+    modal.append(card);
+    document.body.append(modal);
+    const r = { modal, card, stage, mapBox, prev, play, next, counter, fill, speed, close,
+      slides:[], index:0, playing:true, timer:0, map:null, tiles:null, markers:null, lastFocus:null, mapFailed:false };
+    r.onKey = (e) => {
+      if (modal.hidden) return;
+      if (document.querySelector(".modal.trip-video-modal:not([hidden])")) return;
+      if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); closeReplay(); }
+      else if (e.key === "ArrowRight"){ e.preventDefault(); e.stopPropagation(); showReplaySlide(r.index + 1, true); }
+      else if (e.key === "ArrowLeft"){ e.preventDefault(); e.stopPropagation(); showReplaySlide(r.index - 1, true); }
+      else if (e.key === " " && !/^(select|button)$/i.test(String(e.target && e.target.tagName || ""))){ e.preventDefault(); e.stopPropagation(); setReplayPlaying(!r.playing); }
+    };
+    prev.addEventListener("click", () => showReplaySlide(r.index - 1, true));
+    next.addEventListener("click", () => showReplaySlide(r.index + 1, true));
+    play.addEventListener("click", () => setReplayPlaying(!r.playing));
+    close.addEventListener("click", () => closeReplay());
+    speed.addEventListener("change", () => {
+      try { localStorage.setItem("mn.tripReplaySpeed", speed.value); } catch(_){}
+      if (r.playing) scheduleReplay();
+    });
+    modal.addEventListener("mousedown", (e) => { if (e.target === modal) closeReplay(); });
+    return r;
+  }
+  async function ensureReplayMap(){
+    const r = replay;
+    if (r.map || r.mapFailed) return !!r.map;
+    const located = (model.days || []).some(d => (d.spots || []).some(s => s.lat != null && s.lng != null));
+    if (!located || typeof MNLazy === "undefined" || typeof mapCreateTileLayer !== "function"){ r.mapFailed = true; return false; }
+    try {
+      if (!await MNLazy.tryNeed("leaflet")) throw new Error("leaflet");
+      if (!replay || replay !== r) return false;
+      const proxyBase = typeof mapTileProxyBase === "function" ? await mapTileProxyBase() : "";
+      r.map = L.map(r.mapBox, { zoomControl:false, attributionControl:true });
+      r.map.setView((model.map && model.map.center) || TRIP_DEFAULT_MAP_CENTER, (model.map && model.map.zoom) || TRIP_DEFAULT_MAP_ZOOM);
+      r.tiles = mapCreateTileLayer((model.map && model.map.basemap) || "osm", proxyBase, () => {});
+      r.tiles.addTo(r.map);
+      r.markers = L.layerGroup().addTo(r.map);
+      let prevLast = null;
+      (model.days || []).forEach((day, dayIndex) => {
+        const pts = (day.spots || []).filter(s => s.lat != null && s.lng != null).map(s => [s.lat, s.lng]);
+        if (!pts.length) return;
+        if (prevLast) L.polyline([prevLast, pts[0]], { color:"#94a3b8", weight:2, opacity:.8, dashArray:"2 6" }).addTo(r.map);
+        if (pts.length > 1) L.polyline(pts, { color:tripDayRouteColor(dayIndex), weight:3, opacity:.85 }).addTo(r.map);
+        for (const pt of pts) L.circleMarker(pt, { radius:5, color:"#fff", weight:2, fillColor:tripDayRouteColor(dayIndex), fillOpacity:1 }).addTo(r.map);
+        prevLast = pts[pts.length - 1];
+      });
+      return true;
+    } catch(error){
+      console.warn("되돌아보기 지도를 열지 못했어요:", error);
+      r.mapFailed = true;
+      return false;
+    }
+  }
+  function openReplay(){
+    const en = tripIsEn();
+    if (history) history.flush();
+    const slides = tripReplaySlides(model, name => assets.has(name));
+    if (!slides.length){ setStatus(en ? "Nothing to replay yet." : "아직 되돌아볼 것이 없어요."); return; }
+    if (summary) closeSummary(true);
+    if (!replay) replay = buildReplay();
+    const r = replay;
+    r.slides = slides;
+    r.lastFocus = document.activeElement;
+    r.modal.hidden = false;
+    window.addEventListener("keydown", r.onKey, true);
+    r.card.setAttribute("aria-label", en ? "Trip replay" : "여행 되돌아보기");
+    const startDay = slides.findIndex(sl => sl.dayId === current);
+    ensureReplayMap().then((ok) => {
+      if (!replay || replay.modal.hidden) return;
+      r.card.classList.toggle("no-map", !ok);
+      if (ok){ r.map.invalidateSize(); showReplaySlide(r.index, false); }
+    });
+    r.card.classList.toggle("no-map", !r.map);
+    setReplayPlaying(true);
+    showReplaySlide(startDay >= 0 ? startDay : 0, false);
+    try { r.play.focus(); } catch(_){}
+  }
+  function closeReplay(keepFocus){
+    const r = replay;
+    if (!r || r.modal.hidden) return;
+    clearTimeout(r.timer);
+    r.modal.hidden = true;
+    r.stage.replaceChildren();
+    window.removeEventListener("keydown", r.onKey, true);
+    const back = r.lastFocus; r.lastFocus = null;
+    if (!keepFocus && back && typeof back.focus === "function" && back.isConnected){ try { back.focus(); } catch(_){} }
+  }
+  function setReplayPlaying(on){
+    const r = replay;
+    r.playing = on;
+    const en = tripIsEn();
+    const title = on ? (en ? "Pause (Space)" : "멈추기 (Space)") : (en ? "Play (Space)" : "재생 (Space)");
+    if (typeof window.setUiIcon === "function") window.setUiIcon(r.play, on ? "pause" : "play", title);
+    r.play.title = title;
+    r.card.classList.toggle("is-paused", !on);
+    if (on) scheduleReplay(); else clearTimeout(r.timer);
+  }
+  function scheduleReplay(){
+    const r = replay;
+    clearTimeout(r.timer);
+    if (!r.playing) return;
+    const slide = r.slides[r.index];
+    const sec = Number(r.speed.value) || 5;
+    const wait = (slide && slide.type === "day" ? Math.max(2.5, sec * 0.7) : sec) * 1000;
+    r.card.style.setProperty("--replay-ms", wait + "ms");
+    r.fill.style.animation = "none"; void r.fill.offsetWidth; r.fill.style.animation = "";
+    r.timer = setTimeout(() => {
+      if (r.index >= r.slides.length - 1){ setReplayPlaying(false); return; }
+      showReplaySlide(r.index + 1, false);
+    }, wait);
+  }
+  function showReplaySlide(index, byHand){
+    const r = replay;
+    if (!r || !r.slides.length) return;
+    const en = tripIsEn();
+    r.index = Math.max(0, Math.min(r.slides.length - 1, index));
+    const slide = r.slides[r.index];
+    const day = dayOf(slide.dayId);
+    if (!day){ closeReplay(); return; }
+    const spot = slide.spotId ? (day.spots || []).find(sp => sp.id === slide.spotId) : null;
+    const make = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const view = make("div", "trip-replay-slide is-" + slide.type);
+    if (slide.type === "day"){
+      const label = make("div", "trip-replay-day-label", tripDayLabel(model, day));
+      const title = make("h2", "trip-replay-day-title", day.title || model.title || "");
+      const meta = make("div", "trip-replay-day-meta");
+      const weather = typeof diaryWeatherInfo === "function" ? diaryWeatherInfo(day.weather) : null;
+      if (weather && typeof diaryMarkFill === "function"){ const w = make("span", "trip-replay-wx"); diaryMarkFill(w, weather); meta.append(w); }
+      const count = (day.spots || []).length;
+      const km = tripDayDistance(day).km;
+      meta.append(make("span", "", [count ? (en ? count + " places" : "들른 곳 " + count) : "", km > 0 ? tripFormatKm(km) : ""].filter(Boolean).join(" · ")));
+      const text = String(day.text || "").trim();
+      view.append(label, title, meta);
+      if (text) view.append(make("p", "trip-replay-day-text", text.length > 220 ? text.slice(0, 219) + "…" : text));
+    } else {
+      if (slide.asset){
+        const img = make("img", "trip-replay-photo"); img.src = assetUrl(slide.asset); img.alt = spot ? spot.name || "" : "";
+        view.append(img);
+        if (slide.video){
+          const playVideo = make("button", "trip-replay-video", en ? "▶ Play video" : "▶ 영상 보기"); playVideo.type = "button";
+          playVideo.addEventListener("click", () => {
+            setReplayPlaying(false);
+            tripOpenVideoPlayer([{ src:assetUrl(slide.video), poster:slide.asset ? assetUrl(slide.asset) : "", title:spot ? spot.name || "" : "" }], 0);
+          });
+          view.append(playVideo);
+        }
+      } else {
+        const art = make("div", "trip-replay-spot-art");
+        if (spot && spot.kind && tripSpotKindInfo(spot.kind)) art.innerHTML = diaryArtSvg(tripSpotKindIcon(spot.kind), "trip-replay-kind");
+        view.append(art);
+      }
+      const cap = make("div", "trip-replay-caption");
+      if (spot){
+        cap.append(make("strong", "", [spot.at, spot.name || (en ? "Unnamed place" : "이름 없는 곳")].filter(Boolean).join("  ")));
+        const sub = [spot.kind ? tripSpotKindName(spot.kind) : "", spot.address].filter(Boolean).join(" · ");
+        if (sub) cap.append(make("span", "", sub));
+        if (spot.note) cap.append(make("p", "", spot.note));
+      } else cap.append(make("strong", "", tripDayLabel(model, day) + (day.title ? " · " + day.title : "")));
+      view.append(cap);
+    }
+    r.stage.replaceChildren(view);
+    r.counter.textContent = (r.index + 1) + " / " + r.slides.length;
+    r.prev.disabled = r.index === 0;
+    r.next.disabled = r.index === r.slides.length - 1;
+    // 지도 — 장소면 그 자리로, 날 여는 장이면 그 날 전체가 보이게.
+    if (r.map){
+      const pts = (day.spots || []).filter(sp => sp.lat != null && sp.lng != null).map(sp => [sp.lat, sp.lng]);
+      if (r.here){ r.here.remove(); r.here = null; }
+      if (spot && spot.lat != null && spot.lng != null){
+        r.here = L.circleMarker([spot.lat, spot.lng], { radius:11, color:"#fff", weight:3, fillColor:"#e11d48", fillOpacity:1 }).addTo(r.map);
+        r.map.flyTo([spot.lat, spot.lng], Math.max(13, Math.min(16, r.map.getZoom())), { duration:byHand ? 0.6 : 1.2 });
+      } else if (pts.length > 1) r.map.flyToBounds(pts, { padding:[30, 30], duration:byHand ? 0.6 : 1.2, maxZoom:14 });
+      else if (pts.length === 1) r.map.flyTo(pts[0], 13, { duration:byHand ? 0.6 : 1.2 });
+    }
+    if (r.playing) scheduleReplay();
+  }
+
+  /* ----- 일기장으로 보내기 ----- */
+  const openDiaryDocs = () => (typeof docs !== "undefined" ? docs : [])
+    .filter(d => d && d.kind === "diary" && d.diary && typeof d._diaryReceiveEntry === "function");
+  async function sendDayToDiary(target){
+    const en = tripIsEn();
+    const day = dayOf(current);
+    if (!day) return;
+    if (!day.date){ setStatus(en ? "Pick a date for this day first — a diary page needs a date." : "이 날의 날짜를 먼저 정해 주세요 — 일기장은 날짜로 쪽을 찾아요."); return; }
+    if (history) history.flush();
+    if (target){
+      const has = (target.diary.entries || []).find(e => e.date === day.date);
+      if (has && typeof diaryEntryIsEmpty === "function" && !diaryEntryIsEmpty(has) && typeof confirmDialog === "function"){
+        const ok = await confirmDialog(en ? "That diary already has an entry for " + day.date + ". Add this day after it?"
+          : day.date + " 에 이미 일기가 있어요. 그 뒤에 이어 붙일까요?", en ? "Add" : "이어 붙이기", en ? "Cancel" : "취소");
+        if (!ok) return;
+      }
+    }
+    setStatus(en ? "Sending to the diary…" : "일기장으로 보내는 중…");
+    // 장소 사진의 가로세로 — 그림을 읽어 잰다(못 읽는 사진은 뺀다).
+    const photoAr = new Map();
+    for (const sp of day.spots || []) for (const name of sp.photos || []){
+      if (photoAr.size >= TRIP_TO_DIARY_MAX_PHOTOS || photoAr.has(name) || !assets.has(name)) continue;
+      try {
+        const bmp = await createImageBitmap(new Blob([assets.get(name).bytes], { type:tripAssetMime(name) }));
+        if (bmp.width > 0) photoAr.set(name, bmp.height / bmp.width);
+        if (bmp.close) bmp.close();
+      } catch(_){}
+    }
+    const out = tripDayToDiaryEntry(model, day, photoAr, en);
+    const payloadAssets = new Map(out.assets.filter(name => assets.has(name)).map(name => [name, { bytes:assets.get(name).bytes }]));
+    let doc2 = target;
+    if (!doc2){
+      const before = new Set((typeof docs !== "undefined" ? docs : []).map(d => d.id));
+      if (typeof newDiaryScratch !== "function"){ setStatus(en ? "Couldn't make a diary." : "일기장을 만들지 못했어요."); return; }
+      await newDiaryScratch();
+      for (let i = 0; i < 80 && !doc2; i++){
+        doc2 = openDiaryDocs().find(d => !before.has(d.id)) || null;
+        if (!doc2) await new Promise(r => setTimeout(r, 50));
+      }
+      if (!doc2){ setStatus(en ? "Couldn't make a diary." : "일기장을 만들지 못했어요."); return; }
+    }
+    if (typeof setActiveDoc === "function") setActiveDoc(doc2.id);
+    const result = doc2._diaryReceiveEntry({ entry:out.entry, assets:payloadAssets });
+    if (!result){ setStatus(en ? "The diary didn't take it (is it locked?)." : "일기장이 받지 못했어요(잠겨 있나요?)."); return; }
+    setStatus(en ? "Sent to the diary." : "일기장으로 보냈어요.");
+  }
+  function diaryTargetItems(){
+    const en = tripIsEn();
+    const day = dayOf(current);
+    const open = openDiaryDocs();
+    const nameOf = (d) => String(d.name || (d.diary && d.diary.title) || (en ? "Diary" : "일기장")).replace(/\.diary$/i, "");
+    return [
+      ...open.map(d => ({ label:nameOf(d), disabled:!day || !day.date, action:() => sendDayToDiary(d) })),
+      open.length ? { separator:true } : null,
+      { label:en ? "New diary" : "새 일기장으로", disabled:!day || !day.date, action:() => sendDayToDiary(null) }
+    ].filter(Boolean);
+  }
+
+  /* ----- 장소 차례 바꾸기·다른 날로 옮기기 -----
+     시각이 있는 곳은 늘 시각 차례다(tripSortSpotsByTime — 열 때도 이 규칙으로 줄 세운다).
+     그래서 끌어 놓은 자리가 시각과 어긋나면 시각 자리로 돌아가고, 그렇다고 알려 준다. */
+  let draggingSpot = "";
+  const snapMessage = () => tripIsEn()
+    ? "Places with a time stay in time order. Change or clear the time to move it."
+    : "시각이 있는 곳은 시각 차례로 놓여요. 차례를 바꾸려면 시각을 고치거나 지우세요.";
+  /* 끄는 동안 저절로 굴리기 — 네이티브 끌기 중에는 휠이 오지 않고, 안쪽 스크롤 칸(종이·목록 칸, 여정 띠)은
+     브라우저가 가장자리에서 굴려 주지 않는다. 포인터가 칸의 위·아래 가장자리(칸 밖으로 벗어난 곳 포함)에
+     가까울수록 빨리 굴린다. dragover 는 포인터가 멈춰 있어도 계속 오므로 자리는 거기서 받는다. */
+  const DRAG_EDGE = 70;          // 이만큼 안쪽부터 굴리기 시작(px)
+  const DRAG_MAX_STEP = 22;      // 한 프레임 최대 이동(px)
+  let dragPoint = null, dragScrollRaf = 0;
+  const dragScrollStep = (scroller) => {
+    if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 1) return 0;
+    const r = scroller.getBoundingClientRect();
+    if (dragPoint.x < r.left || dragPoint.x > r.right) return 0;
+    const zone = Math.min(DRAG_EDGE, r.height / 4);
+    const speed = (depth) => Math.ceil(DRAG_MAX_STEP * Math.min(1, depth / zone));
+    if (dragPoint.y < r.top + zone && scroller.scrollTop > 0) return -speed(r.top + zone - dragPoint.y);
+    if (dragPoint.y > r.bottom - zone && scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight)
+      return speed(dragPoint.y - (r.bottom - zone));
+    return 0;
+  };
+  const dragScrollTick = () => {
+    dragScrollRaf = 0;
+    if (!draggingSpot || !dragPoint) return;
+    // 좁은 화면에서는 굴러가는 칸이 바뀔 수 있어 목록의 실제 스크롤 조상도 함께 본다.
+    let outer = spotsBox.parentElement;
+    while (outer && outer !== root && outer.scrollHeight <= outer.clientHeight + 1) outer = outer.parentElement;
+    for (const scroller of new Set([main, rail, outer && outer !== root ? outer : null])){
+      const step = dragScrollStep(scroller);
+      if (step) scroller.scrollTop += step;
+    }
+    dragScrollRaf = requestAnimationFrame(dragScrollTick);
+  };
+  const onDragScrollOver = (e) => {
+    if (!draggingSpot) return;
+    dragPoint = { x:e.clientX, y:e.clientY };
+    if (!dragScrollRaf) dragScrollRaf = requestAnimationFrame(dragScrollTick);
+  };
+  document.addEventListener("dragover", onDragScrollOver, true);
+  function stopDragScroll(){
+    dragPoint = null;
+    if (dragScrollRaf){ cancelAnimationFrame(dragScrollRaf); dragScrollRaf = 0; }
+  }
+  function endSpotDrag(){
+    draggingSpot = "";
+    stopDragScroll();
+    root.classList.remove("is-spot-dragging");
+    for (const el of root.querySelectorAll(".is-dragging, .is-drop-before, .is-drop-after, .trip-day-chip.is-drop"))
+      el.classList.remove("is-dragging", "is-drop-before", "is-drop-after", "is-drop");
+  }
+  function afterSpotMove(id){
+    renderSpots(); renderRail(); renderMap(); syncWeather(); touch(true);
+    const row = id ? spotList.querySelector(`.trip-spot[data-id="${id}"]`) : null;
+    if (!row) return;
+    flashRows([row]);
+    const grip = row.querySelector(".trip-spot-grip");
+    if (grip) grip.focus({ preventScroll:true });
+  }
+  function moveSpotWithin(id, beforeId){
+    const day = dayOf(current);
+    if (!day) return;
+    if (history) history.flush();
+    const result = tripMoveSpot(day.spots, id, beforeId);
+    if (!result.moved){
+      if (result.snapped) setStatus(snapMessage());
+      return;
+    }
+    day.spots = result.spots;
+    afterSpotMove(id);
+    setStatus(result.snapped ? snapMessage()
+      : tripIsEn() ? "Moved. Ctrl+Z to undo." : "차례를 옮겼어요. Ctrl+Z 로 되돌릴 수 있어요.");
+  }
+  function stepSpot(id, dir){
+    const day = dayOf(current);
+    if (!day) return;
+    const at = day.spots.findIndex(s => s.id === id);
+    if (at < 0 || (dir < 0 && at === 0) || (dir > 0 && at === day.spots.length - 1)) return;
+    moveSpotWithin(id, dir < 0 ? day.spots[at - 1].id : ((day.spots[at + 2] || {}).id || ""));
+  }
+  function moveSpotToDay(id, dayId){
+    if (history) history.flush();
+    const result = tripMoveSpotToDay(model.days, id, dayId);
+    if (!result.ok){
+      if (result.reason === "full") setStatus(tripT("한 날에 넣을 수 있는 수를 넘었어요."));
+      return;
+    }
+    if (pickingFor === id){ pickingFor = ""; mapStage.classList.remove("is-picking"); }
+    afterSpotMove("");
+    const chip = railList.querySelector(`.trip-day-chip[data-id="${dayId}"]`);
+    if (chip) flashRows([chip]);
+    const label = tripDayLabel(model, result.to);
+    setStatus(tripIsEn() ? "Moved to " + label + ". Ctrl+Z to undo." : label + "(으)로 옮겼어요. Ctrl+Z 로 되돌릴 수 있어요.");
+  }
+  function openSpotMoveMenu(id, anchor){
+    const day = dayOf(current);
+    if (!day || typeof MNContextMenu === "undefined") return;
+    const at = day.spots.findIndex(s => s.id === id);
+    const others = (model.days || []).filter(d => d !== day);
+    const r = anchor.getBoundingClientRect();
+    MNContextMenu.open(r.left, r.bottom + 4, [
+      { label:tripIsEn() ? "Move up" : "위로 옮기기", title:"Alt+↑", disabled:at <= 0, action:() => stepSpot(id, -1) },
+      { label:tripIsEn() ? "Move down" : "아래로 옮기기", title:"Alt+↓", disabled:at < 0 || at >= day.spots.length - 1, action:() => stepSpot(id, 1) },
+      { separator:true },
+      others.length
+        ? { label:tripIsEn() ? "Move to another day" : "다른 날로 옮기기",
+            children:others.map(d => ({ label:tripDayLabel(model, d) + (d.title ? " · " + d.title : ""),
+              disabled:(d.spots || []).length >= TRIP_MAX_SPOTS, action:() => moveSpotToDay(id, d.id) })) }
+        : { label:tripIsEn() ? "Move to another day" : "다른 날로 옮기기", disabled:true, action:() => {} }
+    ]);
+  }
+
   function renderSpots(){
     const day = dayOf(current);
     spotsTitle.textContent = tripWord("spotList");
@@ -2963,11 +3892,38 @@ function mountTripEditor(doc){
     const spots = day ? day.spots : [];
     spotsEmpty.textContent = tripWord("spotEmpty");
     spotsEmpty.hidden = !!spots.length;
+    const route = tripDayDistance(day);
+    spotsDist.hidden = !(route.km > 0);
+    spotsDist.textContent = route.km > 0 ? (tripIsEn() ? "Moved " : "이동 ") + tripFormatKm(route.km) : "";
+    spotsDist.title = tripIsEn() ? "Straight-line distance between places in list order (real roads are longer)"
+      : "목록 차례대로 이은 직선 거리(실제 길은 이보다 길어요)";
 
     for (const spot of spots){
       const row = document.createElement("div");
       row.className = "trip-spot";
       row.dataset.id = spot.id;
+
+      /* 차례 손잡이 — 끌어서 목록 안 차례를 바꾸거나 여정 띠의 다른 날 위에 놓는다.
+         누르면 같은 일을 메뉴로, Alt+↑/↓ 는 한 칸씩(끌기가 어려운 사람·자판 사용자). */
+      const grip = diaryButton("", tripIsEn()
+        ? "Drag to reorder, or onto another day · Click for menu · Alt+↑/↓"
+        : "끌어서 차례 바꾸기·다른 날로 옮기기 · 누르면 메뉴 · Alt+↑/↓", "diary-btn trip-spot-grip", "grip");
+      grip.draggable = true;
+      grip.addEventListener("dragstart", (e) => {
+        draggingSpot = spot.id;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData(TRIP_SPOT_DRAG_TYPE, spot.id);
+        try { e.dataTransfer.setDragImage(row, 18, 18); } catch(_){}
+        row.classList.add("is-dragging");
+        root.classList.add("is-spot-dragging");
+      });
+      grip.addEventListener("dragend", endSpotDrag);
+      grip.addEventListener("click", () => openSpotMoveMenu(spot.id, grip));
+      grip.addEventListener("keydown", (e) => {
+        if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+        e.preventDefault();
+        stepSpot(spot.id, e.key === "ArrowUp" ? -1 : 1);
+      });
 
       const line1 = document.createElement("div");
       line1.className = "trip-spot-line";
@@ -2991,18 +3947,41 @@ function mountTripEditor(doc){
       const videoBtn = diaryButton("", tripIsEn()
         ? "Add a short video (up to " + tripLimitText(TRIP_VIDEO_MAX_SEC) + ")"
         : "짧은 영상 넣기 (" + tripLimitText(TRIP_VIDEO_MAX_SEC) + "까지)", "diary-btn trip-spot-video-add", "video");
-      line1.append(at, icon, kindSelect, name, videoBtn, pickBtn, removeBtn);
+      line1.append(grip, at, icon, kindSelect, name, videoBtn, pickBtn, removeBtn);
       pickBtn.addEventListener("click", () => startPicking(spot.id));
       videoBtn.addEventListener("click", () => { videoTarget = spot.id; videoInput.click(); });
+      // 줄 위쪽 반이면 이 줄 앞, 아래쪽 반이면 뒤에 놓는다.
+      const dropAfter = (e) => { const r = row.getBoundingClientRect(); return e.clientY > r.top + r.height / 2; };
       row.addEventListener("dragover", (e) => {
+        if (draggingSpot){
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          const after = dropAfter(e);
+          row.classList.toggle("is-drop-before", !after);
+          row.classList.toggle("is-drop-after", after);
+          return;
+        }
         if (!hasVideoItems(e.dataTransfer)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         row.classList.add("is-drop");
       });
-      row.addEventListener("dragleave", (e) => { if (!row.contains(e.relatedTarget)) row.classList.remove("is-drop"); });
+      row.addEventListener("dragleave", (e) => {
+        if (row.contains(e.relatedTarget)) return;
+        row.classList.remove("is-drop", "is-drop-before", "is-drop-after");
+      });
       row.addEventListener("drop", (e) => {
         row.classList.remove("is-drop");
+        if (draggingSpot){
+          e.preventDefault();
+          e.stopPropagation();
+          const moving = draggingSpot;
+          const at2 = day.spots.indexOf(spot);
+          const beforeId = dropAfter(e) ? ((day.spots[at2 + 1] || {}).id || "") : spot.id;
+          endSpotDrag();
+          moveSpotWithin(moving, beforeId);
+          return;
+        }
         const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
         const videos = files.filter(tripIsAnyVideoFile);
         if (!videos.length) return;
@@ -3020,7 +3999,10 @@ function mountTripEditor(doc){
       const note = document.createElement("input");
       note.type = "text"; note.className = "trip-spot-note"; note.maxLength = 2000;
       note.value = spot.note || ""; note.placeholder = tripWord("spotNote");
-      line2.append(address, note);
+      const findBtn = diaryButton("", tripIsEn() ? "Find the location by name or address" : "이름·주소로 위치 찾기",
+        "diary-btn trip-spot-find", "search");
+      findBtn.addEventListener("click", () => findSpotLocation(spot.id, findBtn));
+      line2.append(address, findBtn, note);
       row.append(line1, line2);
 
       const spotPhotos = (spot.photos || []).map((asset, at2) => ({ asset, at:at2, src:assetUrl(asset) })).filter(item => item.src);
@@ -3115,6 +4097,14 @@ function mountTripEditor(doc){
         touch();
       });
       line3.append(cost, unit);
+      if (route.legs.has(spot.id)){
+        const leg = document.createElement("span");
+        leg.className = "trip-spot-leg";
+        leg.textContent = (tripIsEn() ? "↑ " : "앞 곳에서 ") + tripFormatKm(route.legs.get(spot.id));
+        leg.title = tripIsEn() ? "Straight-line distance from the previous place with a location"
+          : "위치가 있는 앞 장소에서 온 직선 거리";
+        line3.append(leg);
+      }
       row.append(line3);
 
       at.addEventListener("change", () => {
@@ -3172,12 +4162,111 @@ function mountTripEditor(doc){
       ? MNExchangeRate.formatMoney(amount, digits) : String(Math.round(amount));
     return currency === "KRW" ? text + "원" : text + " " + currency;
   };
+  function paintExtraHead(list){
+    const en = tripIsEn();
+    const sums = new Map();
+    for (const ex of list) if (ex.amount > 0) sums.set(ex.currency, (sums.get(ex.currency) || 0) + ex.amount);
+    const total = [...sums].map(([c, a]) => moneyText(a, c)).join(" + ");
+    extraHead.textContent = (extraOpen ? "▾ " : "▸ ") + (en ? "Other costs" : "날에 안 붙는 돈")
+      + (list.length ? " · " + list.length + (en ? "" : "건") + (total ? " · " + total : "") : "");
+    extraHead.title = en ? "Flights, prepaid stays, insurance … — money not tied to a day" : "항공권·숙소 선결제·보험처럼 어느 날에도 안 붙는 돈";
+    extraHead.setAttribute("aria-expanded", String(extraOpen));
+  }
+  function renderExtraCosts(list){
+    const en = tripIsEn();
+    const cur = (model.budget && model.budget.currency) || "KRW";
+    paintExtraHead(tripNormalizeExpenses(list));
+    extraBox.hidden = !extraOpen;
+    if (!extraOpen){ extraBox.replaceChildren(); return; }
+    const rows = list.map(ex => {
+      const row = document.createElement("div");
+      row.className = "trip-extra-row";
+      row.dataset.id = ex.id;
+      const label = document.createElement("input");
+      label.type = "text"; label.className = "trip-extra-label"; label.maxLength = 60; label.value = ex.label;
+      label.placeholder = en ? "e.g. Flights" : "예: 항공권"; label.setAttribute("aria-label", en ? "What" : "무엇");
+      const amount = document.createElement("input");
+      amount.type = "text"; amount.className = "trip-extra-amount"; amount.maxLength = 12; amount.inputMode = "decimal";
+      amount.value = ex.amount ? String(ex.amount) : ""; amount.placeholder = en ? "Amount" : "금액"; amount.setAttribute("aria-label", amount.placeholder);
+      const currency = document.createElement("input");
+      currency.type = "text"; currency.className = "trip-currency trip-extra-currency"; currency.maxLength = 3; currency.value = ex.currency;
+      currency.setAttribute("aria-label", en ? "Currency" : "화폐");
+      const kind = document.createElement("select");
+      kind.className = "trip-select trip-extra-kind"; kind.setAttribute("aria-label", tripWord("spotKindLabel"));
+      fillKindSelect(kind, ex.kind);
+      const remove = diaryButton("", en ? "Remove this line" : "이 줄 빼기", "diary-btn trip-extra-remove", "close");
+      const update = (patch, immediate) => {
+        const live = (model.expenses || []).find(x => x.id === ex.id);
+        if (!live) return;
+        if (immediate && history) history.flush();
+        Object.assign(live, patch);
+        renderBudgetSumsOnly();
+        touch(immediate);
+      };
+      label.addEventListener("input", () => update({ label:label.value.slice(0, 60) }));
+      amount.addEventListener("input", () => {
+        const text = amount.value.replace(/[^0-9.]/g, "");
+        update({ amount:text ? Math.max(0, Math.round(Number(text) * 100) / 100) || 0 : 0 });
+      });
+      currency.addEventListener("change", () => {
+        const value = String(currency.value || "").trim().toUpperCase().slice(0, 3);
+        update({ currency:/^[A-Z]{3}$/.test(value) ? value : cur }, true);
+        renderBudget();
+      });
+      kind.addEventListener("change", () => update({ kind:kind.value }, true));
+      remove.addEventListener("click", () => {
+        if (history) history.flush();
+        model.expenses = (model.expenses || []).filter(x => x.id !== ex.id);
+        renderBudget(); touch(true);
+        setStatus(tripT("지웠어요. Ctrl+Z 로 되돌릴 수 있어요."));
+      });
+      row.append(label, amount, currency, kind, remove);
+      return row;
+    });
+    const add = document.createElement("button");
+    add.type = "button"; add.className = "diary-btn trip-extra-add";
+    add.textContent = en ? "+ Add a cost" : "+ 돈 쓴 곳 더하기";
+    add.disabled = list.length >= TRIP_MAX_EXPENSES;
+    add.addEventListener("click", () => {
+      if (history) history.flush();
+      const item = { id:"ex-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7), label:"", amount:0, currency:cur, kind:"" };
+      model.expenses = [...(model.expenses || []), item];
+      renderBudget(); touch(true);
+      const input = extraBox.querySelector(`.trip-extra-row[data-id="${item.id}"] .trip-extra-label`);
+      if (input) input.focus();
+    });
+    extraBox.replaceChildren(...rows, add);
+  }
+  // 칸에 적는 중에는 줄을 다시 그리지 않는다(포커스가 빠진다) — 합계 글자만 고친다.
+  function renderBudgetSumsOnly(){
+    const list = tripNormalizeExpenses(model.expenses);
+    const day = dayOf(current);
+    const here = sumCost(day ? [day] : []);
+    const all = sumCost(model.days || []);
+    for (const ex of list) if (ex.amount > 0) all.set(ex.currency, (all.get(ex.currency) || 0) + ex.amount);
+    paintExtraHead(list);
+    budgetLine.hidden = !all.size;
+    if (all.size) paintBudgetSum(here, all);
+  }
+  extraHead.addEventListener("click", () => {
+    extraOpen = !extraOpen;
+    try { localStorage.setItem("mn.tripExtraOpen", extraOpen ? "1" : "0"); } catch(_){}
+    renderBudget();
+  });
   function renderBudget(){
     const day = dayOf(current);
     const here = sumCost(day ? [day] : []);
     const all = sumCost(model.days || []);
-    budgetBox.hidden = !all.size;
+    const expenses = tripNormalizeExpenses(model.expenses);
+    for (const ex of expenses) if (ex.amount > 0) all.set(ex.currency, (all.get(ex.currency) || 0) + ex.amount);
+    budgetBox.hidden = !day && !(model.expenses || []).length;
+    // 줄은 모델 그대로 그린다 — 방금 더한 빈 줄도 보여야 적을 수 있다(빈 줄은 저장할 때만 걸러진다).
+    renderExtraCosts(model.expenses || []);
+    budgetLine.hidden = !all.size;
     if (!all.size) return;
+    paintBudgetSum(here, all);
+  }
+  function paintBudgetSum(here, all){
     const parts = [];
     for (const [cur, amount] of here) parts.push(tripWordf("costTotal", { sum:moneyText(amount, cur) }));
     const total = [...all].map(([cur, amount]) => moneyText(amount, cur)).join(" + ");
@@ -3310,6 +4399,97 @@ function mountTripEditor(doc){
   });
   titleInput.addEventListener("input", () => { model.title = titleInput.value; touch(); });
 
+  /* ----- 준비물·할 일 ----- */
+  let checkOpen = false;
+  try { checkOpen = localStorage.getItem("mn.tripChecklistOpen") === "1"; } catch(_){}
+  function paintCheckHead(){
+    const en = tripIsEn();
+    const list = model.checklist || [];
+    const done = list.filter(x => x.done).length;
+    checkHead.textContent = (checkOpen ? "▾ " : "▸ ") + (en ? "Packing & to-do" : "준비물·할 일") + (list.length ? " " + done + "/" + list.length : "");
+    checkHead.classList.toggle("is-done", !!list.length && done === list.length);
+    checkHead.setAttribute("aria-expanded", String(checkOpen));
+    const clear = checkBody.querySelector(".trip-check-clear");
+    if (clear) clear.hidden = !done;                  // 체크한 것이 생기거나 없어지면 바로 보이고 숨는다
+  }
+  function renderChecklist(){
+    const en = tripIsEn();
+    paintCheckHead();
+    checkBody.hidden = !checkOpen;
+    if (!checkOpen){ checkBody.replaceChildren(); return; }
+    const list = model.checklist || [];
+    const rows = list.map(item => {
+      const row = document.createElement("div");
+      row.className = "trip-check-row" + (item.done ? " is-done" : "");
+      row.dataset.id = item.id;
+      const box = document.createElement("input");
+      box.type = "checkbox"; box.checked = !!item.done; box.className = "trip-check-box";
+      box.setAttribute("aria-label", item.text);
+      const text = document.createElement("input");
+      text.type = "text"; text.className = "trip-check-text"; text.maxLength = 120; text.value = item.text;
+      const remove = diaryButton("", en ? "Remove" : "빼기", "diary-btn trip-check-remove", "close");
+      box.addEventListener("change", () => {
+        if (history) history.flush();
+        item.done = box.checked;
+        row.classList.toggle("is-done", item.done);
+        paintCheckHead(); touch(true);
+      });
+      text.addEventListener("input", () => { item.text = text.value; paintCheckHead(); touch(); });
+      text.addEventListener("change", () => {
+        // 글을 다 지우면 그 줄을 뺀다(빈 줄은 저장되지도 않는다).
+        if (!text.value.trim()){
+          if (history) history.flush();
+          model.checklist = (model.checklist || []).filter(x => x.id !== item.id);
+          renderChecklist(); touch(true);
+        }
+      });
+      remove.addEventListener("click", () => {
+        if (history) history.flush();
+        model.checklist = (model.checklist || []).filter(x => x.id !== item.id);
+        renderChecklist(); touch(true);
+      });
+      row.append(box, text, remove);
+      return row;
+    });
+    const add = document.createElement("input");
+    add.type = "text"; add.className = "trip-check-add"; add.maxLength = 120;
+    add.placeholder = en ? "+ Add (Enter)" : "+ 더하기 (Enter)";
+    add.setAttribute("aria-label", en ? "Add a packing or to-do item" : "준비물·할 일 더하기");
+    add.disabled = list.length >= TRIP_MAX_CHECKLIST;
+    add.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      const value = add.value.replace(/\s+/g, " ").trim().slice(0, 120);
+      if (!value) return;
+      if (history) history.flush();
+      model.checklist = [...(model.checklist || []), { id:"ck-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7), text:value, done:false }];
+      renderChecklist(); touch(true);
+      const next = checkBody.querySelector(".trip-check-add");
+      if (next) next.focus();
+    });
+    const actions = [];
+    {
+      const clear = document.createElement("button");
+      clear.type = "button"; clear.className = "trip-check-clear";
+      clear.textContent = en ? "Uncheck all" : "체크 모두 풀기";
+      clear.title = en ? "Reuse this list for the next trip" : "다음 여행에 다시 쓰도록 체크를 풀어요";
+      clear.addEventListener("click", () => {
+        if (history) history.flush();
+        for (const item of model.checklist || []) item.done = false;
+        renderChecklist(); touch(true);
+      });
+      clear.hidden = !list.some(x => x.done);
+      actions.push(clear);
+    }
+    checkBody.replaceChildren(...rows, add, ...actions);
+  }
+  checkHead.addEventListener("click", () => {
+    checkOpen = !checkOpen;
+    try { localStorage.setItem("mn.tripChecklistOpen", checkOpen ? "1" : "0"); } catch(_){}
+    renderChecklist();
+    if (checkOpen){ const add = checkBody.querySelector(".trip-check-add"); if (add && !(model.checklist || []).length) add.focus(); }
+  });
+
   /* ----- 고정 낱말 — 처음 한 번, 되돌리기 뒤에도 다시 그린다 ----- */
   function applyLabels(){
     brandTitle.textContent = tripWord("docName");
@@ -3321,10 +4501,12 @@ function mountTripEditor(doc){
     addDayBtn.textContent = tripWord("dayAdd");
     renderRail();
     renderPage();
+    renderChecklist();
   }
 
   /* ----- 되돌리기 ----- */
   const snapshot = () => JSON.stringify({ title:model.title, style:model.style, backdrop:model.backdrop, days:model.days,
+    budget:model.budget, expenses:model.expenses || [], checklist:model.checklist || [],
     mapStill:(model.map && model.map.still) || "", mapStillKey:(model.map && model.map.stillKey) || "" });
   history = MNEditHistory.create({
     limit:80,
@@ -3338,6 +4520,9 @@ function mountTripEditor(doc){
       model.style = parsed.style;
       model.backdrop = parsed.backdrop || diaryDefaultBackdrop();
       model.days = parsed.days;
+      model.budget = tripNormalizeBudget(parsed.budget);
+      model.expenses = tripNormalizeExpenses(parsed.expenses);
+      model.checklist = tripNormalizeChecklist(parsed.checklist);
       model.map = { ...model.map, still:parsed.mapStill || "", stillKey:parsed.mapStillKey || "" };
       if (!dayOf(current)) current = model.days.length ? model.days[0].id : "";
       titleInput.value = model.title || "";
@@ -3585,6 +4770,13 @@ function mountTripEditor(doc){
       { label:tripIsEn() ? "Add photo" : "사진 추가", action:() => photoBtn.click() },
       { label:tripIsEn() ? "Create places from photo info" : "사진정보로 장소 만들기", action:() => exifBtn.click() },
       { label:tripIsEn() ? "What did I do? (this day's photos)" : "뭐 했지? (그날 사진 크게 보기)", action:openRecall },
+      { label:tripIsEn() ? "Trip summary" : "여행 요약", action:openSummary },
+      { label:tripIsEn() ? "Replay the trip" : "여행 되돌아보기", icon:"play", action:openReplay },
+      { label:tripIsEn() ? "Send this day to a diary" : "이 날을 일기장으로 보내기",
+        title:tripIsEn() ? "Copies text, stickers, places and photos into a diary page for the same date" : "글·스티커·들른 곳·사진을 같은 날짜의 일기로 옮겨 적어요",
+        disabled:!dayOf(current) || !(dayOf(current) || {}).date, children:diaryTargetItems() },
+      { label:(tripIsEn() ? "Spell check" : "맞춤법 검사") + " (F7)", disabled:!dayOf(current),
+        action:() => paperApi.runSpellcheck() },
       { label:tripIsEn() ? "Pictures and text boxes" : "그림·글상자 붙이기", action:() => stickerBtn.click() },
       { label:tripIsEn() ? "Paper style and settings" : "종이 꾸미기·설정", action:() => styleBtn.click() },
       pictureItems.length ? { label:tripIsEn() ? "Picture area" : "그림 칸", children:pictureItems } : null,
@@ -3657,10 +4849,15 @@ function mountTripEditor(doc){
     window.removeEventListener("resize", onTripWindowResize);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("dragover", onDragScrollOver, true);
+    stopDragScroll();
+    if (panels && typeof panels.stopRecording === "function") panels.stopRecording();
     if (typeof paperApi.destroyPaper === "function") paperApi.destroyPaper();
     if (leafletMap){ leafletMap.remove(); leafletMap = null; }
     if (_tripVideoPlayer) _tripVideoPlayer.close();   // 아래에서 영상 주소를 거두기 전에 닫는다
     if (recall){ closeRecall(true); recall.modal.remove(); recall = null; }
+    if (summary){ closeSummary(true); summary.modal.remove(); summary = null; }
+    if (replay){ closeReplay(true); if (replay.map) replay.map.remove(); replay.modal.remove(); replay = null; }
     if (history) history.cancel();
     for (const url of urls.values()) URL.revokeObjectURL(url);
     urls.clear();
@@ -3681,7 +4878,9 @@ if (typeof module !== "undefined" && module.exports){
     TRIP_WORDS, TRIP_WORDS_EN, TRIP_SPOT_KINDS, TRIP_SPOT_KIND_IDS,
     tripWord, tripWordf,
     tripSpotKindInfo, tripSpotKindName, tripSpotKindIcon, tripSpotKindColor,
-    tripIsDateKey, tripNormalizeTime, tripSortSpotsByTime, tripNormalizeSpot, tripNormalizeDay, tripDayIsEmpty,
+    tripIsDateKey, tripNormalizeTime, tripSortSpotsByTime, tripMoveSpot, tripMoveSpotToDay,
+    tripDistanceKm, tripDayDistance, tripFormatKm, tripSummary, tripDayToDiaryEntry, tripReplaySlides, tripNormalizeExpenses, tripNormalizeChecklist,
+    TRIP_MAX_EXPENSES, TRIP_MAX_CHECKLIST, tripNormalizeSpot, tripNormalizeDay, tripDayIsEmpty,
     tripMissingPhotoDates, tripPlaceDayByDate, tripDateTakenBy, tripNextDayDate,
     tripNormalizePairs, tripNormalizeCost, tripNormalizeMap, tripNormalizeBudget,
     tripEmpty, tripNormalize, tripCleanDays, tripCleanSpot, tripModelJson, tripContentKey,

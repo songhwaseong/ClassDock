@@ -19,8 +19,9 @@ const DIARY_FORMAT = "classdock-diary";
 // · 12: 줄 무늬 8종 추가(두 줄·세 줄·점선·목록·세로줄·십자·오선·사선 격자).
 // · 13: 종이 밖 일기장 바탕(backdrop) — 템플릿·사용자 그림·맞춤·밝기.
 // · 14: 일기장 바탕 그림 템플릿 5종 추가.
+// · 15: 사진 테두리(frame) · 녹음 스티커(kind "audio", 소리 바이트는 assets/) · 기념일(anniversaries).
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 14;
+const DIARY_VERSION = 15;
 const DIARY_JSON_NAME = "diary.json";
 const DIARY_LINES = ["ruled", "double", "triple", "dashed", "list", "grid", "columns", "dots", "crosses", "staff", "diagonal", "blank", "picture", "genko"];
 const DIARY_LINE_LABELS = { ruled:"줄 공책", double:"두 줄", triple:"세 줄", dashed:"점선", list:"목록", grid:"모눈", columns:"세로줄", dots:"점", crosses:"십자", staff:"오선", diagonal:"사선 격자", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
@@ -228,7 +229,19 @@ const DIARY_PBKDF2_ITER = 600000;
 const DIARY_PBKDF2_MIN = 1000;
 const DIARY_PBKDF2_MAX = 2000000;
 const DIARY_ASSET_RE = /^assets\/[a-z0-9_-]{4,64}\.(png|jpe?g|webp|gif)$/;
-const DIARY_ASSET_MIME = { png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", webp:"image/webp", gif:"image/gif" };
+const DIARY_ASSET_MIME = { png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", webp:"image/webp", gif:"image/gif",
+  webm:"audio/webm", ogg:"audio/ogg", oga:"audio/ogg", m4a:"audio/mp4", mp3:"audio/mpeg", wav:"audio/wav" };
+// 녹음 스티커의 소리 — 사진과 같은 assets/ 에 해시 이름으로 둔다(사진 규칙 DIARY_ASSET_RE 와는 따로 가린다).
+const DIARY_AUDIO_RE = /^assets\/[a-z0-9_-]{4,64}\.(webm|ogg|oga|m4a|mp3|wav)$/;
+const DIARY_AUDIO_MAX_BYTES = 12 * 1024 * 1024;     // 한 개
+const DIARY_AUDIO_MAX_SEC = 300;                    // 5분
+// 사진 테두리 — 사진 상자(x·y·w·ar) 안에 그린다. 그래서 테두리를 바꿔도 종이 길이·인쇄 자리가 흔들리지 않는다.
+const DIARY_PHOTO_FRAMES = [["", "없음", "None"], ["white", "흰 테두리", "White border"], ["polaroid", "폴라로이드", "Polaroid"],
+  ["round", "둥근 모서리", "Rounded"], ["shadow", "그림자", "Shadow"], ["tape", "마스킹테이프", "Washi tape"]];
+const DIARY_PHOTO_FRAME_IDS = DIARY_PHOTO_FRAMES.map(f => f[0]).filter(Boolean);
+// 기념일 — 매년(생일), 한 번(시험 날), 그날부터 세기(만난 지 n일).
+const DIARY_ANNIVERSARY_REPEATS = ["yearly", "once", "since"];
+const DIARY_MAX_ANNIVERSARIES = 60;
 const DIARY_WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const DIARY_WEEKDAYS_EN = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const DIARY_MAX_TAGS = 12;
@@ -943,7 +956,9 @@ function diaryArtSvg(id, cls){
 const DIARY_TEXT_ALIGNS = ["left", "center", "right"];
 const DIARY_TEXT_SIZES = [["small", 0.034, "작게", "Small"], ["mid", 0.048, "보통", "Medium"], ["big", 0.072, "크게", "Large"]];
 const DIARY_TEXT_MAX = 500;
-const DIARY_STICKER_KINDS = ["photo", "art", "text"];
+const DIARY_AUDIO_DEFAULT_COLOR = "#f472b6";
+const DIARY_AUDIO_AR = 0.3;                         // 녹음 스티커는 가로로 긴 알약 모양(높이 = 폭 × 0.3)
+const DIARY_STICKER_KINDS = ["photo", "art", "text", "audio"];
 function diaryStickerKind(raw){
   const kind = String(raw && raw.kind || "");
   if (DIARY_STICKER_KINDS.includes(kind)) return kind;
@@ -980,9 +995,18 @@ function diaryNormalizeSticker(raw, hasAsset){
       align:DIARY_TEXT_ALIGNS.includes(raw.align) ? raw.align : "left",
       w:num(raw.w, 0.03, 1.5, 0.4) };
   }
+  if (kind === "audio"){
+    const asset = String(raw.asset || "");
+    if (!DIARY_AUDIO_RE.test(asset) || (hasAsset && !hasAsset(asset))) return null;   // 소리가 없는 녹음은 버린다
+    return { ...base, asset, color:color || DIARY_AUDIO_DEFAULT_COLOR, opacity, flip:false,
+      d:Math.round(num(raw.d, 0, 36000, 0) * 10) / 10,
+      label:String(raw.label == null ? "" : raw.label).replace(/\s+/g, " ").trim().slice(0, 40),
+      ar:DIARY_AUDIO_AR };
+  }
   const asset = String(raw.asset || "");
   if (!DIARY_ASSET_RE.test(asset) || (hasAsset && !hasAsset(asset))) return null;
-  return { ...base, asset, ...(opacity < 1 ? { opacity } : {}) };
+  const frame = DIARY_PHOTO_FRAME_IDS.includes(raw.frame) ? raw.frame : "";
+  return { ...base, asset, ...(opacity < 1 ? { opacity } : {}), ...(frame ? { frame } : {}) };
 }
 // 각도는 -180 초과 ~ 180 이하로 모은다(돌리기를 여러 바퀴 해도 같은 값이 저장되게).
 function diaryNormalizeAngle(deg){
@@ -1083,7 +1107,8 @@ function diaryEntryIsEmpty(entry){
 function diaryEmpty(title){
   const now = Date.now();
   return { format:DIARY_FORMAT, version:DIARY_VERSION, title:String(title || "일기장").slice(0, 200),
-    createdAt:now, updatedAt:now, style:diaryDefaultStyle(), backdrop:diaryDefaultBackdrop("blossom"), printPlain:false, entries:[] };
+    createdAt:now, updatedAt:now, style:diaryDefaultStyle(), backdrop:diaryDefaultBackdrop("blossom"), printPlain:false,
+    anniversaries:[], entries:[] };
 }
 // 신뢰할 수 없는 diary.json 을 안전한 모델로. hasAsset(이름) 이 주어지면 ZIP 에 없는 사진을 가리키는 칸은 버린다.
 function diaryNormalize(raw, hasAsset){
@@ -1103,6 +1128,7 @@ function diaryNormalize(raw, hasAsset){
     backdrop:diaryNormalizeBackdrop(raw.backdrop, hasAsset),
     // 인쇄할 땐 배경 빼기 — 꾸미기와 달리 날짜별로 갈리지 않는다(한 번 인쇄에 여러 날이 함께 나가므로).
     printPlain:!!raw.printPlain,
+    anniversaries:diaryNormalizeAnniversaries(raw.anniversaries),
     entries:[...byDate.values()].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
   };
 }
@@ -1126,19 +1152,116 @@ function diaryCleanSticker(s){
     return { ...box, kind:"text", text:s.text, color:s.color || DIARY_TEXT_DEFAULT_COLOR, opacity:s.opacity == null ? 1 : s.opacity,
       font:s.font || "gothic", size:s.size, align:s.align || "left", flip:false };
   }
+  if (kind === "audio"){
+    return { ...box, kind:"audio", asset:s.asset, color:s.color || DIARY_AUDIO_DEFAULT_COLOR,
+      opacity:s.opacity == null ? 1 : s.opacity, d:s.d || 0, label:s.label || "", flip:false };
+  }
   return { ...box, kind:"photo", asset:s.asset, ar:s.ar,
-    ...(s.opacity != null && s.opacity < 1 ? { opacity:s.opacity } : {}) };
+    ...(s.opacity != null && s.opacity < 1 ? { opacity:s.opacity } : {}),
+    ...(s.frame && DIARY_PHOTO_FRAME_IDS.includes(s.frame) ? { frame:s.frame } : {}) };
 }
 // 저장본과 같은지 가르는 열쇠 — 시각(updatedAt)은 빼야 저장 → 편집 → 되돌리기 뒤 다시 '깨끗'이 된다.
 function diaryContentKey(model){
-  return JSON.stringify({ title:model.title || "", style:model.style, backdrop:model.backdrop, printPlain:!!model.printPlain, entries:diaryCleanEntries(model) });
+  return JSON.stringify({ title:model.title || "", style:model.style, backdrop:model.backdrop, printPlain:!!model.printPlain,
+    anniversaries:diaryCleanAnniversaries(model), entries:diaryCleanEntries(model) });
 }
 function diaryModelJson(model){
   return JSON.stringify({
     format:DIARY_FORMAT, version:DIARY_VERSION, title:model.title || "일기장",
     createdAt:model.createdAt || Date.now(), updatedAt:model.updatedAt || Date.now(),
-    style:model.style, backdrop:model.backdrop, printPlain:!!model.printPlain, entries:diaryCleanEntries(model)
+    style:model.style, backdrop:model.backdrop, printPlain:!!model.printPlain,
+    anniversaries:diaryCleanAnniversaries(model), entries:diaryCleanEntries(model)
   }, null, 2);
+}
+/* ---------- 기념일 ----------
+   { id, name, date:"YYYY-MM-DD", repeat:"yearly"|"once"|"since" }. 날짜는 처음 그날(생일이면 태어난 날).
+   · yearly — 해마다 같은 월·일(2월 29일은 평년엔 2월 28일). 달력에 표시하고 "n번째"를 센다.
+   · once   — 그날 한 번(시험·여행 출발). 다가오면 D-n.
+   · since  — 그날부터 세기(만난 지 n일, 첫날이 1일). 100일마다와 해마다 달력에 표시한다. */
+function diaryNormalizeAnniversaries(raw){
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : []).map(item => {
+    if (!item || typeof item !== "object" || !diaryIsDateKey(item.date)) return null;
+    const name = String(item.name == null ? "" : item.name).replace(/\s+/g, " ").trim().slice(0, 30);
+    if (!name) return null;
+    let id = /^an-[a-z0-9-]{1,40}$/.test(String(item.id || "")) ? item.id : "";
+    if (!id || seen.has(id)) id = "an-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    seen.add(id);
+    return { id, name, date:item.date, repeat:DIARY_ANNIVERSARY_REPEATS.includes(item.repeat) ? item.repeat : "yearly" };
+  }).filter(Boolean).slice(0, DIARY_MAX_ANNIVERSARIES);
+}
+function diaryCleanAnniversaries(model){
+  return diaryNormalizeAnniversaries(model && model.anniversaries)
+    .sort((a, b) => a.date.slice(5).localeCompare(b.date.slice(5)) || a.date.localeCompare(b.date) || a.name.localeCompare(b.name));
+}
+const _diaryDayMs = 86400000;
+const diaryDateNum = (key) => Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, Number(key.slice(8, 10))) / _diaryDayMs;
+function diaryDateFromNum(n){
+  const d = new Date(n * _diaryDayMs);
+  return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0") + "-" + String(d.getUTCDate()).padStart(2, "0");
+}
+// 그 해의 같은 월·일(2월 29일은 평년이면 2월 28일).
+function diaryYearlyDate(a, year){
+  const md = a.date.slice(5);
+  const key = String(year).padStart(4, "0") + "-" + md;
+  return diaryIsDateKey(key) ? key : String(year).padStart(4, "0") + "-02-28";
+}
+// 그 날짜에 걸리는 기념일들 — [{ a, label }]. label 은 "생일 · 12번째"처럼 화면에 바로 쓰는 글.
+function diaryAnniversariesOn(list, key){
+  const en = diaryIsEn();
+  const out = [];
+  if (!diaryIsDateKey(key)) return out;
+  const day = diaryDateNum(key);
+  for (const a of list || []){
+    const start = diaryDateNum(a.date);
+    if (a.repeat === "once"){
+      if (a.date === key) out.push({ a, label:a.name });
+    } else if (a.repeat === "yearly"){
+      const years = Number(key.slice(0, 4)) - Number(a.date.slice(0, 4));
+      if (years >= 0 && diaryYearlyDate(a, Number(key.slice(0, 4))) === key)
+        out.push({ a, label:years ? a.name + " · " + (en ? diaryOrdinal(years) : years + "번째") : a.name });
+    } else if (day >= start){
+      const n = day - start + 1;                      // 첫날이 1일
+      const years = Number(key.slice(0, 4)) - Number(a.date.slice(0, 4));
+      if (n === 1) out.push({ a, label:a.name });
+      else if (n % 100 === 0) out.push({ a, label:a.name + " · " + (en ? "day " + n : n + "일") });
+      else if (years > 0 && diaryYearlyDate(a, Number(key.slice(0, 4))) === key)
+        out.push({ a, label:a.name + " · " + (en ? years + (years === 1 ? " year" : " years") : years + "주년") });
+    }
+  }
+  return out;
+}
+function diaryOrdinal(n){
+  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1:"st", 2:"nd", 3:"rd" }[n % 10] || "th");
+  return n + tail;
+}
+/* 오늘 기준으로 볼 것 — 다가오는 기념일(D-n, 가까운 차례)과 세는 중인 기념일(n일째).
+   [{ a, date, days, text }] — days 는 다가오는 날까지 남은 날(오늘이면 0), since 는 null. */
+function diaryAnniversaryCountdown(list, todayKey, limit){
+  const en = diaryIsEn();
+  if (!diaryIsDateKey(todayKey)) return [];
+  const today = diaryDateNum(todayKey), year = Number(todayKey.slice(0, 4));
+  const rows = [];
+  for (const a of list || []){
+    if (a.repeat === "since"){
+      const n = today - diaryDateNum(a.date) + 1;
+      if (n < 1){ rows.push({ a, date:a.date, days:1 - n, text:"D-" + (1 - n) }); continue; }
+      // 다음 100일 단위까지도 알려 준다.
+      const next = Math.ceil(n / 100) * 100;
+      rows.push({ a, date:a.date, days:null, count:n,
+        text:(en ? "Day " + n : n + "일째") + (next > n ? " · " + (en ? next + " in " + (next - n) + "d" : next + "일까지 " + (next - n) + "일") : "") });
+      continue;
+    }
+    let date = a.date;
+    if (a.repeat === "yearly"){
+      date = diaryYearlyDate(a, year);
+      if (diaryDateNum(date) < today) date = diaryYearlyDate(a, year + 1);
+    } else if (diaryDateNum(date) < today) continue;             // 지난 '한 번' 은 뺀다
+    const days = diaryDateNum(date) - today;
+    rows.push({ a, date, days, text:days === 0 ? "D-DAY" : "D-" + days });
+  }
+  rows.sort((x, y) => (x.days == null ? 1e9 : x.days) - (y.days == null ? 1e9 : y.days) || x.a.name.localeCompare(y.a.name));
+  return limit ? rows.slice(0, limit) : rows;
 }
 function diaryEffectiveStyle(model, entry){
   return (entry && entry.style) ? entry.style : model.style;
@@ -1171,14 +1294,18 @@ function diaryEntryLabel(entry){
 }
 // 종이 위 글상자에 쓴 글을 모은 것 — 목록 이름·검색·통합 검색이 본문과 함께 읽는다.
 function diaryStickerText(entry){
-  return ((entry && entry.stickers) || []).filter(s => diaryStickerKind(s) === "text").map(s => String(s.text || "")).filter(Boolean).join("\n");
+  // 녹음 스티커의 이름표도 찾을 수 있게 넣는다(종이에 보이는 글이니까).
+  return ((entry && entry.stickers) || []).map(s => diaryStickerKind(s) === "text" ? String(s.text || "")
+    : diaryStickerKind(s) === "audio" ? String(s.label || "") : "").filter(Boolean).join("\n");
 }
 // "사진 2장 · 스티커 3개" — 갈래가 섞여 있으므로 사진만 세던 이름을 쪼갠다.
 function diaryStickerCountLabel(stickers){
   const list = stickers || [];
   const photos = list.filter(s => diaryStickerKind(s) === "photo").length;
   const arts = list.filter(s => diaryStickerKind(s) === "art").length;
-  return [photos && diaryTf("사진 {n}장", { n:photos }), arts && diaryTf("스티커 {n}개", { n:arts })].filter(Boolean).join(" · ")
+  const audios = list.filter(s => diaryStickerKind(s) === "audio").length;
+  return [photos && diaryTf("사진 {n}장", { n:photos }), arts && diaryTf("스티커 {n}개", { n:arts }),
+    audios && (diaryIsEn() ? audios + (audios === 1 ? " recording" : " recordings") : "녹음 " + audios + "개")].filter(Boolean).join(" · ")
     || diaryTf("스티커 {n}개", { n:list.length });
 }
 function diaryPlainText(model){
@@ -1220,6 +1347,205 @@ function diaryReviewStats(entries, year, month){
     mood:top(mood), weather:top(weather),
     words:[...words.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5)
   };
+}
+
+// 한 해 기록 지도용 — 쓴 날마다 기분(모르는 값·없으면 "")과, 나온 기분별 날 수(DIARY_MOODS 차례).
+function diaryYearMoods(entries, year){
+  const prefix = String(year) + "-";
+  const days = new Map(), counts = new Map();
+  let blank = 0;
+  for (const e of entries || []){
+    if (!e || !e.date || !e.date.startsWith(prefix) || diaryEntryIsEmpty(e)) continue;
+    const mood = diaryMoodInfo(e.mood) ? e.mood : "";
+    days.set(e.date, mood);
+    if (mood) counts.set(mood, (counts.get(mood) || 0) + 1); else blank++;
+  }
+  return { days, blank, moods:DIARY_MOODS.filter(m => counts.has(m[0])).map(m => [m[0], counts.get(m[0])]) };
+}
+function diaryMoodColor(id){ return (DIARY_MOOD_ART[id] || [])[0] || ""; }
+
+/* ---------- 일기 묶음 내보내기(Markdown·HTML) ----------
+   암호를 건 일기장도 다른 앱으로 옮기거나 따로 남길 길이 있어야 한다. 파일은 그 자리에서 만들어 내려받기만 한다.
+   종이 모양(줄 무늬·스티커 자리)은 옮기지 않는다 — 글·날씨·기분·태그·글상자·사진이 내용이고, 모양은 인쇄(PDF)가 맡는다.
+   Markdown 은 글만(사진은 장 수), HTML 은 사진을 파일 안에 넣은 한 파일. */
+function diaryExportMeta(e){
+  const en = diaryIsEn();
+  const parts = [];
+  const weather = diaryWeatherInfo(e.weather), mood = diaryMoodInfo(e.mood);
+  if (weather) parts.push((en ? "Weather " : "날씨 ") + diaryName(weather));
+  if (mood) parts.push((en ? "Mood " : "기분 ") + diaryName(mood));
+  if (e.favorite) parts.push("★");
+  if (e.tags && e.tags.length) parts.push(e.tags.map(t => "#" + t).join(" "));
+  return parts;
+}
+function diaryExportRange(entries){
+  if (!entries.length) return "";
+  const first = entries[0].date, last = entries[entries.length - 1].date;
+  const count = diaryIsEn() ? entries.length + (entries.length === 1 ? " entry" : " entries") : entries.length + "편";
+  return (first === last ? diaryUiDateLabel(first) : diaryUiDateLabel(first) + " ~ " + diaryUiDateLabel(last)) + " · " + count;
+}
+function diaryEntriesMarkdown(model, entries){
+  const en = diaryIsEn();
+  // 줄 머리의 #·>·-·+·*·숫자. 는 Markdown 이 제목·인용·목록으로 읽으므로 막는다. 한 줄 바꿈은 강제 줄바꿈(끝 공백 둘)으로.
+  const escapeLine = (line) => line.replace(/^(\s*)([#>+\-*]|\d+[.)])(\s|$)/, "$1\\$2$3");
+  const body = (text) => String(text || "").replace(/\r\n?/g, "\n").split("\n").map(escapeLine).join("  \n");
+  const out = ["# " + String(model.title || (en ? "Diary" : "일기장")).replace(/\n/g, " ")];
+  const range = diaryExportRange(entries);
+  if (range) out.push("", "*" + range + "*");
+  for (const e of entries){
+    out.push("", "---", "", "## " + diaryUiDateLabel(e.date) + (e.title ? " — " + e.title.replace(/\n/g, " ") : ""));
+    const meta = diaryExportMeta(e);
+    if (meta.length) out.push("", meta.join(" · "));
+    if (String(e.text || "").trim()) out.push("", body(e.text.replace(/\s+$/, "")));
+    for (const s of e.stickers || []){
+      if (diaryStickerKind(s) === "text" && String(s.text || "").trim())
+        out.push("", s.text.replace(/\s+$/, "").split("\n").map(line => "> " + line).join("\n"));
+    }
+    const photos = (e.stickers || []).filter(s => diaryStickerKind(s) === "photo").length;
+    const audios = (e.stickers || []).filter(s => diaryStickerKind(s) === "audio");
+    const extra = [];
+    if (photos) extra.push(en ? photos + (photos === 1 ? " photo" : " photos") : "사진 " + photos + "장");
+    for (const a of audios) extra.push((en ? "voice memo " : "녹음 ") + (a.label ? "'" + a.label + "' " : "") + diaryFormatSeconds(a.d));
+    if (e.drawing && e.drawing.length) extra.push(en ? "drawing" : "그림");
+    if (extra.length) out.push("", "*(" + extra.join(" · ") + ")*");
+  }
+  return out.join("\n") + "\n";
+}
+/* 녹음 스티커의 몸통 — 화면(재생 단추)과 인쇄(그림만)가 같은 모양을 쓴다. 글은 textContent 로만. */
+function diaryFormatSeconds(sec){
+  const n = Math.max(0, Math.round(Number(sec) || 0));
+  return Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
+}
+function diaryAudioStickerBody(s, live){
+  const body = document.createElement("div");
+  body.className = "diary-sticker-body diary-sticker-audio";
+  body.style.setProperty("--audio-color", s.color || DIARY_AUDIO_DEFAULT_COLOR);
+  const play = document.createElement(live ? "button" : "span");
+  play.className = "diary-audio-play";
+  if (live){ play.type = "button"; play.title = diaryIsEn() ? "Play" : "듣기"; play.setAttribute("aria-label", play.title); }
+  if (typeof window !== "undefined" && typeof window.uiIcon === "function") play.innerHTML = window.uiIcon("play");
+  const wave = document.createElement("span");
+  wave.className = "diary-audio-wave";
+  wave.setAttribute("aria-hidden", "true");
+  for (const h of [35, 70, 50, 90, 60, 80, 40, 65, 30]){ const bar = document.createElement("i"); bar.style.height = h + "%"; wave.append(bar); }
+  const text = document.createElement("span");
+  text.className = "diary-audio-text";
+  const label = document.createElement("span");
+  label.className = "diary-audio-label";
+  label.textContent = s.label || (diaryIsEn() ? "Voice memo" : "녹음");
+  const time = document.createElement("span");
+  time.className = "diary-audio-time";
+  time.textContent = diaryFormatSeconds(s.d);
+  text.append(label, time);
+  body.append(play, wave, text);
+  return body;
+}
+// 소리 파일 형식 → 담을 확장자(모르면 ""). 녹음기는 보통 audio/webm;codecs=opus 를 준다.
+function diaryAudioExt(mime){
+  const m = String(mime || "").toLowerCase().split(";")[0].trim();
+  return ({ "audio/webm":"webm", "video/webm":"webm", "audio/ogg":"ogg", "audio/mp4":"m4a", "audio/x-m4a":"m4a", "audio/m4a":"m4a",
+    "audio/aac":"m4a", "audio/mpeg":"mp3", "audio/mp3":"mp3", "audio/wav":"wav", "audio/x-wav":"wav", "audio/wave":"wav" })[m] || "";
+}
+/* 넣기 전 검사 — 형식·크기, 그리고 실제 <audio> 로 길이를 읽어 틀 수 있는지 본다. → { ok, seconds, reason } */
+function diaryCheckAudio(blob){
+  return new Promise((resolve) => {
+    if (!blob || !diaryAudioExt(blob.type)) return resolve({ ok:false, reason:"type" });
+    if (blob.size > DIARY_AUDIO_MAX_BYTES) return resolve({ ok:false, reason:"size" });
+    const url = URL.createObjectURL(blob);
+    const el = new Audio();
+    let done = false;
+    const finish = (result) => { if (done) return; done = true; clearTimeout(timer); el.removeAttribute("src"); URL.revokeObjectURL(url); resolve(result); };
+    const timer = setTimeout(() => finish({ ok:false, reason:"play" }), 8000);
+    el.preload = "metadata";
+    el.addEventListener("error", () => finish({ ok:false, reason:"play" }));
+    el.addEventListener("loadedmetadata", () => {
+      // MediaRecorder 로 만든 webm 은 길이가 Infinity 로 오는 일이 있다 — 끝으로 한 번 건너뛰면 제 길이가 나온다.
+      if (el.duration === Infinity){
+        el.addEventListener("durationchange", () => { if (Number.isFinite(el.duration)) check(); });
+        try { el.currentTime = 1e7; } catch(_){ check(); }
+        return;
+      }
+      check();
+    });
+    const check = () => {
+      const seconds = Number.isFinite(el.duration) ? el.duration : 0;
+      if (seconds > DIARY_AUDIO_MAX_SEC + 1) return finish({ ok:false, reason:"long", seconds });
+      finish({ ok:true, seconds });
+    };
+    el.src = url;
+  });
+}
+// 글이 종이에서 차지하는 높이(종이 폭 비율)를 어림한다 — 줄 간격 34px·폭 780px·한 줄 42자 기준.
+// 받은 스티커·사진을 글 아래로 놓을 때만 쓴다(정확할 필요 없다 — 종이는 스티커에 맞춰 늘어난다).
+function diaryEstimateTextHeight(text){
+  const lines = String(text || "").split("\n").reduce((n, line) => n + Math.max(1, Math.ceil(line.length / 42)), 0);
+  return String(text || "").trim() ? (40 + lines * 34) / 780 : 0;
+}
+function diaryHtmlEscape(text){
+  return String(text == null ? "" : text).replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
+}
+// srcOf(asset 이름) → 그 사진의 data: 주소(없으면 ""). 부르는 쪽이 미리 만들어 둔다.
+function diaryEntriesHtml(model, entries, srcOf){
+  const en = diaryIsEn();
+  const esc = diaryHtmlEscape;
+  const title = String(model.title || (en ? "Diary" : "일기장"));
+  const parts = [];
+  for (const e of entries){
+    const meta = diaryExportMeta(e);
+    const text = String(e.text || "").replace(/\s+$/, "");
+    const photos = (e.stickers || []).filter(s => diaryStickerKind(s) === "photo").map(s => srcOf ? srcOf(s.asset) : "").filter(Boolean);
+    const boxes = (e.stickers || []).filter(s => diaryStickerKind(s) === "text" && String(s.text || "").trim());
+    const audios = (e.stickers || []).filter(s => diaryStickerKind(s) === "audio").map(s => ({ s, src:srcOf ? srcOf(s.asset) : "" })).filter(x => x.src);
+    parts.push(`<article class="entry" id="d-${esc(e.date)}">`
+      + `<h2><time datetime="${esc(e.date)}">${esc(diaryUiDateLabel(e.date))}</time>${e.title ? ` <span class="t">${esc(e.title)}</span>` : ""}</h2>`
+      + (meta.length ? `<p class="meta">${esc(meta.join(" · "))}</p>` : "")
+      + (text ? `<div class="text">${text.split(/\n{2,}/).map(p => "<p>" + esc(p).replace(/\n/g, "<br>") + "</p>").join("")}</div>` : "")
+      + boxes.map(s => `<blockquote>${esc(s.text.replace(/\s+$/, "")).replace(/\n/g, "<br>")}</blockquote>`).join("")
+      + audios.map(({ s, src }) => `<p class="audio"><span>${esc((s.label || (en ? "Voice memo" : "녹음")) + " · " + diaryFormatSeconds(s.d))}</span><audio controls preload="none" src="${src}"></audio></p>`).join("")
+      + (photos.length ? `<div class="photos">${photos.map(src => `<img src="${src}" alt="" loading="lazy">`).join("")}</div>` : "")
+      + (e.drawing && e.drawing.length ? `<p class="note">${en ? "(Includes a drawing — print to PDF to keep it.)" : "(그림이 있어요 — 그림까지 남기려면 인쇄에서 PDF로 저장하세요.)"}</p>` : "")
+      + `</article>`);
+  }
+  return `<!doctype html>\n<html lang="${en ? "en" : "ko"}"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>`
+    + `body{margin:0;background:#f6f3ee;color:#2b2723;font:16px/1.75 system-ui,-apple-system,"Malgun Gothic","Apple SD Gothic Neo",sans-serif}`
+    + `main{max-width:760px;margin:0 auto;padding:32px 20px 60px}h1{margin:0 0 4px;font-size:28px}.range{margin:0 0 28px;color:#8a8178}`
+    + `.entry{margin:0 0 22px;padding:22px 24px;border-radius:14px;background:#fff;box-shadow:0 2px 10px rgba(60,40,20,.08);break-inside:avoid-page}`
+    + `h2{margin:0 0 6px;font-size:18px}h2 .t{margin-left:6px;color:#6b625a;font-weight:600}.meta{margin:0 0 10px;color:#8a8178;font-size:14px}`
+    + `.text p{margin:0 0 10px;white-space:pre-wrap;overflow-wrap:anywhere}blockquote{margin:8px 0;padding:6px 14px;border-left:4px solid #e7c9a9;background:#fbf6f0}`
+    + `.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-top:10px}.photos img{width:100%;border-radius:8px;display:block}`
+    + `.audio{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0;color:#8a8178;font-size:14px}.audio audio{max-width:100%}`
+    + `.note{color:#8a8178;font-size:13px}@media (prefers-color-scheme:dark){body{background:#1d1b19;color:#ebe6e0}.entry{background:#2a2724;box-shadow:none}blockquote{background:#332e29;border-color:#8a6a4c}h2 .t,.meta,.range,.note{color:#a79d93}}`
+    + `</style></head><body><main><h1>${esc(title)}</h1><p class="range">${esc(diaryExportRange(entries))}</p>`
+    + parts.join("\n") + `</main></body></html>\n`;
+}
+function diaryBytesToDataUrl(bytes, mime){
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return "data:" + mime + ";base64," + (typeof btoa === "function" ? btoa(binary) : Buffer.from(binary, "binary").toString("base64"));
+}
+function diaryExportFileName(model, suffix, ext){
+  const base = String(model.title || "일기장").replace(/[\\/:*?"<>|\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || "diary";
+  return base + (suffix ? " " + suffix : "") + "." + ext;
+}
+
+/* 내 글감 — 사용자가 만든 질문 양식. 일기장 파일이 아니라 이 컴퓨터(localStorage mn.diaryUserPrompts)에 둔다:
+   글감은 일기 내용이 아니라 쓰는 사람의 도구라 여러 일기장에서 함께 쓴다(내장 글감도 파일에 안 담는다). */
+const DIARY_USER_PROMPT_MAX = 20;
+const DIARY_USER_PROMPT_NAME_MAX = 30;
+const DIARY_USER_PROMPT_TEXT_MAX = 2000;
+function diaryNormalizeUserPrompts(raw){
+  const seen = new Set();
+  return (Array.isArray(raw) ? raw : []).map(item => {
+    if (!item || typeof item !== "object") return null;
+    const name = String(item.name == null ? "" : item.name).replace(/\s+/g, " ").trim().slice(0, DIARY_USER_PROMPT_NAME_MAX);
+    const text = String(item.text == null ? "" : item.text).replace(/\r\n?/g, "\n").slice(0, DIARY_USER_PROMPT_TEXT_MAX);
+    if (!name || !text.trim()) return null;
+    let id = /^up-[a-z0-9-]{1,40}$/.test(String(item.id || "")) ? item.id : "";
+    if (!id || seen.has(id)) id = "up-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    seen.add(id);
+    return { id, name, text };
+  }).filter(Boolean).slice(0, DIARY_USER_PROMPT_MAX);
 }
 
 // 쌓는 순서 바꾸기(배열 뒤가 앞). picked = 고른 id 의 Set. 고른 것끼리의 순서는 그대로 둔다.
@@ -1749,7 +2075,7 @@ async function diaryUnpack(bytes){
   if (!jsonBytes) throw new Error("diary-format");
   const assets = new Map();
   for (const [name, data] of files){
-    if (DIARY_ASSET_RE.test(name)) assets.set(name, { bytes:data });
+    if (DIARY_ASSET_RE.test(name) || DIARY_AUDIO_RE.test(name)) assets.set(name, { bytes:data });
   }
   const model = diaryNormalize(JSON.parse(new TextDecoder("utf-8").decode(jsonBytes)), name => assets.has(name));
   // 모델이 가리키지 않는 사진은 들고 있지 않는다.
@@ -1982,6 +2308,7 @@ function diaryColorInput(className, onPick){
    DOM 뼈대를 만드는 일은 부르는 쪽이 하고 여기는 '행동'만 붙인다 — 여행일지(.trip)가 같은 종이를 쓰되
    달력이 아니라 여정 띠를 두르기 때문이다. 바뀌는 값(날짜·되돌리기·펜)은 ctx 의 창구로 그때그때 읽는다. */
 function mountDiaryPaper(els, paperEnv){
+  let audioPlayer = null, audioPlayingId = "";      // 녹음 스티커 듣기(한 번에 하나)
   const { paper, area, bgLayer, veilLayer, genkoLayer, genkoCaret, genkoGrid, stickerLayer, artBgLayer, drawLayer, drawCanvas, pictureBox, pictureHint, main } = els;
   const { model, assets, assetUrl, currentLabel, ensureEntry, entryOf, onDrawModeChange, onEntryChange, onStickerSelect, openStickerColorPicker, refreshCurrentLabel, refreshDirty, renderCalendar, repaintCardPapers, scheduleRecovery, setStatus, syncDrawBar, syncPanel, touch, translateUi } = paperEnv;
   /* ----- 종이 ----- */
@@ -2188,8 +2515,29 @@ function mountDiaryPaper(els, paperEnv){
     event.preventDefault();
     await addStickers(imgs);
   });
-  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area,
-    { contextMenuActions:paperEnv.contextMenuActions });
+  /* 맞춤법 검사 — 도구막대 단추는 두지 않는다(2026-09-18 사용자 결정으로 뺐다). 글칸 우클릭 메뉴와 F7 로만 연다.
+     공용 검사기는 단추를 하나 만들어 그걸 눌러 여닫으므로 보이지 않는 자리에 두고 처음 쓸 때 붙인다. */
+  let spell = null;
+  const spellHost = document.createElement("span");
+  spellHost.className = "diary-spell-host";
+  spellHost.hidden = true;
+  (els.main || paper).append(spellHost);
+  const runSpellcheck = () => {
+    if (area.disabled || typeof MNKoreanSpellcheck === "undefined" || !MNKoreanSpellcheck) return;
+    if (!spell) spell = MNKoreanSpellcheck.attach({ textarea:area, buttonHost:spellHost, mode:"plain", label:"맞춤법 검사" });
+    if (spell) spell.button.click();
+  };
+  area.addEventListener("keydown", (e) => {
+    if (e.key !== "F7" || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    e.preventDefault();
+    runSpellcheck();
+  });
+  if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area, {
+    contextMenuActions:() => [
+      { label:(diaryIsEn() ? "Spell check" : "맞춤법 검사") + " (F7)", disabled:area.disabled, action:runSpellcheck },
+      ...(typeof paperEnv.contextMenuActions === "function" ? paperEnv.contextMenuActions() || [] : [])
+    ]
+  });
   paper.addEventListener("pointerdown", (e) => { if (!e.target.closest(".diary-sticker")) selectSticker(""); });
   genkoLayer.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || !genkoLay) return;
@@ -2333,6 +2681,7 @@ function mountDiaryPaper(els, paperEnv){
     const entry = entryOf(paperEnv.current());
     const list = entry ? entry.stickers : [];
     selection = selection.filter(id => list.some(s => s.id === id));
+    if (audioPlayingId && !list.some(s => s.id === audioPlayingId) && audioPlayer){ audioPlayer.pause(); audioPlayingId = ""; }
     // 다시 그리면 스티커 요소가 새로 생겨 포커스가 빠진다 — 같은 스티커에 되돌려야 방향키·단축키가 이어진다.
     const focusedId = document.activeElement && stickerLayer.contains(document.activeElement)
       ? document.activeElement.dataset.id : "";
@@ -2342,7 +2691,8 @@ function mountDiaryPaper(els, paperEnv){
     stickerLayer.replaceChildren(...list.map(s => {
       const kind = diaryStickerKind(s);
       const node = document.createElement("div");
-      node.className = "diary-sticker diary-sticker-is-" + kind + (selection.includes(s.id) ? " is-selected" : "");
+      node.className = "diary-sticker diary-sticker-is-" + kind + (selection.includes(s.id) ? " is-selected" : "")
+        + (kind === "photo" && s.frame ? " diary-frame-" + s.frame : "") + (kind === "audio" && audioPlayingId === s.id ? " is-playing" : "");
       node.dataset.id = s.id;
       node.dataset.kind = kind;
       node.tabIndex = 0;
@@ -2351,9 +2701,16 @@ function mountDiaryPaper(els, paperEnv){
         ? "글상자 — 두 번 누르면 고쳐 쓰기, 끌어서 옮기기, 모서리로 너비, 우클릭으로 글자 크기·맞춤"
         : kind === "art"
           ? "붙인 스티커 — 끌어서 옮기기, 모서리로 크기, 위 손잡이로 돌리기, 우클릭으로 순서·색"
-          : "붙인 사진 — 끌어서 옮기기, 두 번 누르면 크게 보기, Alt+누르기로 겹친 것 고르기, 우클릭으로 정렬·순서");
+          : kind === "audio"
+            ? (diaryIsEn() ? "Voice memo — press play to listen, drag to move, right-click to rename" : "녹음 — 재생 단추로 듣기, 끌어서 옮기기, 우클릭으로 이름표")
+            : "붙인 사진 — 끌어서 옮기기, 두 번 누르면 크게 보기, Alt+누르기로 겹친 것 고르기, 우클릭으로 정렬·순서");
       let body;
-      if (kind === "art"){
+      if (kind === "audio"){
+        body = diaryAudioStickerBody(s, true);
+        const play = body.querySelector(".diary-audio-play");
+        play.addEventListener("pointerdown", e => e.stopPropagation());   // 누르기가 끌기로 넘어가지 않게
+        play.addEventListener("click", (e) => { e.stopPropagation(); toggleAudioSticker(s.id); });
+      } else if (kind === "art"){
         body = document.createElement("span");
         body.className = "diary-sticker-body diary-sticker-art";
         body.innerHTML = diaryArtSvg(s.art);                       // 앱이 만든 고정 SVG 표에서만 나온다(사용자 입력 아님)
@@ -2718,6 +3075,15 @@ function mountDiaryPaper(els, paperEnv){
       ...textItems,
       (kind !== "photo" || many) ? null : { label:diaryEn("크게 보기", "View large"), icon:"zoomIn", title:"Enter", action:() => openPhotoViewer(id) },
       (kind !== "photo" || many) ? null : { separator:true },
+      (kind !== "audio" || many) ? null : { label:diaryIsEn() ? (audioPlayingId === id ? "Pause" : "Play") : (audioPlayingId === id ? "멈추기" : "듣기"),
+        icon:audioPlayingId === id ? "pause" : "play", action:() => toggleAudioSticker(id) },
+      (kind !== "audio" || many) ? null : { label:diaryIsEn() ? "Recording label…" : "이름표 붙이기…", icon:"text", action:() => renameAudioSticker(id) },
+      (kind !== "audio" || many) ? null : { separator:true },
+      list.some(item => diaryStickerKind(item) === "photo")
+        ? { label:diaryIsEn() ? "Photo frame" : "사진 테두리", children:DIARY_PHOTO_FRAMES.map(([frame, ko, en]) => ({
+            label:diaryIsEn() ? en : ko,
+            active:list.filter(item => diaryStickerKind(item) === "photo").every(item => (item.frame || "") === frame),
+            action:() => setPhotoFrame(frame) })) } : null,
       colorful ? { label:diaryT("색 바꾸기"), children:colorChildren } : null,
       colorful ? { separator:true } : null,
       paperEnv.photoOpacity && list.some(item => diaryStickerKind(item) === "photo")
@@ -2731,7 +3097,7 @@ function mountDiaryPaper(els, paperEnv){
       { label:diaryT("오른쪽으로 15° 돌리기"), icon:"rotateRight", title:"] (Shift: 15°)", action:() => rotateStickers(15) },
       { label:diaryT("돌리기 되돌리기"), disabled:!list.some(x => x.rot), action:() => rotateStickers(0, true) },
       // 글상자는 뒤집지 않는다 — 거울 글씨가 될 뿐이다.
-      list.every(x => diaryStickerKind(x) === "text") ? null
+      list.every(x => diaryStickerKind(x) === "text" || diaryStickerKind(x) === "audio") ? null
         : { label:diaryT("좌우 뒤집기"), icon:"flipH", active:list.every(x => x.flip), action:() => flipStickers() },
       // 사진 여러 장은 자리를 하나하나 끌지 않고 한 번에 정돈한다 — 고른 것이 둘 이상이면 그것만, 아니면 그 날 전부.
       arrangeCount < 2 ? null : { label:diaryEn("정렬해서 깔기", "Arrange photos"), icon:"table", children:[
@@ -2923,6 +3289,81 @@ function mountDiaryPaper(els, paperEnv){
     const entry = entryOf(paperEnv.current());
     return ((entry ? entry.stickers.length : 0) % 8) * 0.025;
   }
+  /* 녹음 스티커 듣기 — 한 번에 하나만. 소리 주소는 사진과 같은 assetUrl(열린 동안만 쓰는 blob 주소). */
+  function audioNodeOf(id){ return stickerLayer.querySelector(`.diary-sticker[data-id="${CSS.escape(id)}"]`); }
+  function syncAudioNode(){
+    for (const node of stickerLayer.querySelectorAll(".diary-sticker-is-audio")){
+      const on = node.dataset.id === audioPlayingId;
+      node.classList.toggle("is-playing", on);
+      const play = node.querySelector(".diary-audio-play");
+      if (play && typeof window.setUiIcon === "function")
+        window.setUiIcon(play, on ? "pause" : "play", on ? (diaryIsEn() ? "Pause" : "멈추기") : (diaryIsEn() ? "Play" : "듣기"));
+      if (!on) node.style.removeProperty("--audio-progress");
+    }
+  }
+  function stopAudioSticker(){
+    if (audioPlayer){ audioPlayer.pause(); }
+    audioPlayingId = "";
+    syncAudioNode();
+  }
+  function toggleAudioSticker(id){
+    const st = stickerOf(id);
+    if (!st || diaryStickerKind(st) !== "audio") return;
+    if (audioPlayingId === id && audioPlayer && !audioPlayer.paused){ stopAudioSticker(); return; }
+    if (!audioPlayer){
+      audioPlayer = new Audio();
+      audioPlayer.addEventListener("timeupdate", () => {
+        const node = audioPlayingId && audioNodeOf(audioPlayingId);
+        if (node && audioPlayer.duration) node.style.setProperty("--audio-progress", String(Math.min(1, audioPlayer.currentTime / audioPlayer.duration)));
+      });
+      audioPlayer.addEventListener("ended", () => { audioPlayingId = ""; syncAudioNode(); });
+      audioPlayer.addEventListener("error", () => {
+        audioPlayingId = ""; syncAudioNode();
+        setStatus(diaryIsEn() ? "This recording can't be played on this computer." : "이 컴퓨터에서 틀 수 없는 소리예요.");
+      });
+    }
+    audioPlayer.pause();
+    audioPlayer.src = assetUrl(st.asset);
+    audioPlayingId = id;
+    syncAudioNode();
+    audioPlayer.play().catch(() => { audioPlayingId = ""; syncAudioNode(); });
+  }
+  /* 녹음·소리 파일을 스티커로. blob 은 이미 길이·크기를 검사한 것(창 쪽 diaryCheckAudio). */
+  async function addAudioSticker(blob, seconds, label){
+    const ext = diaryAudioExt(blob && blob.type);
+    if (!ext){ setStatus(diaryIsEn() ? "This kind of sound file can't be added." : "넣을 수 없는 소리 파일이에요."); return null; }
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const name = "assets/" + await diaryHashBytes(bytes) + "." + ext;
+    if (!assets.has(name)) assets.set(name, { bytes });
+    const o = stickerOrigin(), width = 0.3, off = cascadeOffset();
+    const st = pushSticker({ id:diaryStickerId(), kind:"audio", asset:name, d:Math.round((Number(seconds) || 0) * 10) / 10,
+      label:String(label || "").slice(0, 40), color:artColorPicked ? artColor : DIARY_AUDIO_DEFAULT_COLOR, opacity:1,
+      w:width, ar:DIARY_AUDIO_AR, x:Math.max(0, Math.min(1 - width, o.x / o.w - width / 2 + off)), y:Math.max(0, o.y / o.w + off),
+      rot:0, flip:false });
+    if (st) setStatus(diaryIsEn() ? "Voice memo added — press play to listen." : "녹음을 붙였어요 — 재생 단추로 들어요.");
+    return st;
+  }
+  async function renameAudioSticker(id){
+    const st = stickerOf(id);
+    if (!st || diaryStickerKind(st) !== "audio") return;
+    const en = diaryIsEn();
+    if (typeof askText !== "function") return;
+    const value = await askText({ title:en ? "Recording label" : "녹음 이름표", message:en ? "Up to 40 characters. Leave empty to remove." : "40자까지 · 비우면 이름표를 뗍니다.",
+      value:st.label || "", placeholder:en ? "e.g. Birthday song" : "예: 생일 노래", okText:en ? "OK" : "확인" });
+    if (value == null) return;
+    const live = stickerOf(id);
+    if (!live) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    live.label = String(value).replace(/\s+/g, " ").trim().slice(0, 40);
+    renderStickers(); touch(true);
+  }
+  function setPhotoFrame(frame){
+    const list = selectedStickers().filter(item => diaryStickerKind(item) === "photo");
+    if (!list.length) return;
+    if (paperEnv.history()) paperEnv.history().flush();
+    for (const item of list){ if (frame) item.frame = frame; else delete item.frame; }
+    renderStickers(); touch(true);
+  }
   function pushSticker(sticker){
     const entry = ensureEntry(paperEnv.current());
     if (entry.stickers.length >= DIARY_MAX_STICKERS){
@@ -3064,9 +3505,13 @@ function mountDiaryPaper(els, paperEnv){
 
 
   // 종이가 문서에 직접 건 처리기는 종이가 거둔다.
-  const destroyPaper = () => document.removeEventListener("selectionchange", onSelectionChange);
+  const destroyPaper = () => {
+    document.removeEventListener("selectionchange", onSelectionChange);
+    if (audioPlayer){ audioPlayer.pause(); audioPlayer.removeAttribute("src"); audioPlayer = null; }
+    if (spell){ spell.destroy(); spell = null; }
+  };
 
-  return { addArtSticker, addAsset, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow };
+  return { addArtSticker, addAsset, addAudioSticker, addStickers, addTextSticker, stopAudioSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, runSpellcheck, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow };
 }
 
 /* ===== 꾸미기 창·스티커 창(일기장·여행일지 공용) =====
@@ -3075,7 +3520,7 @@ function mountDiaryPaper(els, paperEnv){
    창을 화면에 붙이는 것도 부르는 쪽 몫이다 — 일기장은 잠금 덮개 아래, 여행일지는 다른 자리다.
    (매개변수를 ctx 로 지으면 안 된다 — 그리기 코드가 캔버스 컨텍스트 이름으로 쓴다.) */
 function mountDiaryPanels(panelEnv){
-  const { model, assets, assetUrl, addAsset, entryOf, ensureEntry, touch, setStatus, applyStyle, applyBackdrop, layout, renderCalendar, bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker, addTextSticker, applyStickerColor, applyStickerOpacity, selectedStickers, stickerColorNow, stickerOpacityNow } = panelEnv;
+  const { model, assets, assetUrl, addAsset, entryOf, ensureEntry, touch, setStatus, applyStyle, applyBackdrop, layout, renderCalendar, bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker, addTextSticker, addAudioSticker, applyStickerColor, applyStickerOpacity, selectedStickers, stickerColorNow, stickerOpacityNow } = panelEnv;
   const supportsBackdrop = !!backdropInput && typeof applyBackdrop === "function";
   // 여행일지도 같은 바탕 칸을 쓴다 — 이름·안내 문구만 바꿔 넘긴다([한국어, 영어]).
   const backdropWords = {
@@ -3390,11 +3835,106 @@ function mountDiaryPanels(panelEnv){
     return b;
   });
   const artTextRow = artSection("글상자");
-  const artTextBtn = diaryButton("글상자 넣기", "종이 위 아무 데나 글을 얹어요 — 두 번 누르면 고쳐 써요", "diary-btn", "text");
+  const artTextBtn = diaryButton("글상자 넣기", "종이 위 아무 데나 글을 얹어요 — 두 번 누르면 고쳐 써요", "diary-btn diary-art-text-btn", "text");
   artTextBtn.addEventListener("click", () => { setArtPanelOpen(false); addTextSticker(); });
   const artTextNote = document.createElement("span");
   artTextNote.className = "diary-style-note";
   artTextRow.append(artTextBtn, artTextNote);
+
+  /* 녹음·소리 — 마이크로 녹음하거나 소리 파일을 골라 녹음 스티커로 붙인다(5분·12MB까지).
+     녹음 중에는 이 창에 멈추기 단추와 시간이 뜬다. 창을 닫으면 녹음을 멈추고 붙인다(녹음을 잃지 않게). */
+  const audioRow = artSection("녹음·소리");
+  const recordBtn = diaryButton("녹음하기", "마이크로 녹음해서 붙여요 (5분까지)", "diary-btn diary-audio-record", "record");
+  const recordCancel = diaryButton("녹음 취소", "녹음을 버려요", "diary-btn diary-audio-cancel", "close");
+  recordCancel.hidden = true;
+  const audioFileBtn = diaryButton("소리 파일 넣기", "mp3·m4a·wav·ogg·webm 파일을 붙여요 (12MB·5분까지)", "diary-btn diary-audio-file", "volume");
+  const audioInput = document.createElement("input");
+  audioInput.type = "file"; audioInput.accept = "audio/*"; audioInput.hidden = true;
+  const recordClock = document.createElement("span");
+  recordClock.className = "diary-audio-clock";
+  recordClock.hidden = true;
+  audioRow.append(recordBtn, recordClock, recordCancel, audioFileBtn, audioInput);
+  let rec = null;                    // { stream, recorder, chunks, started, timer, cancelled }
+  const audioProblem = (reason) => {
+    const en = diaryIsEn();
+    return reason === "size" ? (en ? "Sound files can be up to 12 MB." : "소리 파일은 12MB까지 넣을 수 있어요.")
+      : reason === "long" ? (en ? "Sound can be up to 5 minutes." : "소리는 5분까지 넣을 수 있어요.")
+      : reason === "type" ? (en ? "This kind of sound file can't be added." : "넣을 수 없는 소리 파일이에요.")
+      : (en ? "This sound can't be played on this computer." : "이 컴퓨터에서 틀 수 없는 소리예요.");
+  };
+  async function attachAudio(blob, secondsHint){
+    if (typeof addAudioSticker !== "function") return;
+    setStatus(diaryIsEn() ? "Checking the sound…" : "소리를 확인하는 중…");
+    const check = await diaryCheckAudio(blob);
+    if (!check.ok){ setStatus(audioProblem(check.reason)); return; }
+    await addAudioSticker(blob, check.seconds || secondsHint || 0, "");
+  }
+  function syncRecordUi(){
+    const on = !!rec;
+    recordBtn.classList.toggle("is-recording", on);
+    const label = recordBtn.querySelector("span");
+    if (label) label.textContent = on ? (diaryIsEn() ? "Stop and add" : "멈추고 붙이기") : (diaryIsEn() ? "Record" : "녹음하기");
+    if (typeof window.setUiIcon === "function"){
+      const icon = recordBtn.querySelector("svg");
+      if (icon) icon.outerHTML = window.uiIcon(on ? "stop" : "record");
+    }
+    recordCancel.hidden = !on;
+    recordClock.hidden = !on;
+    audioFileBtn.disabled = on;
+  }
+  function stopRecording(cancel){
+    if (!rec) return;
+    rec.cancelled = !!cancel;
+    clearInterval(rec.timer);
+    try { if (rec.recorder.state !== "inactive") rec.recorder.stop(); else rec.stream.getTracks().forEach(t => t.stop()); }
+    catch(_){ rec.stream.getTracks().forEach(t => t.stop()); }
+  }
+  async function startRecording(){
+    const en = diaryIsEn();
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function" || typeof MediaRecorder === "undefined"){
+      setStatus(en ? "Recording isn't available here." : "여기서는 녹음할 수 없어요."); return;
+    }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio:true }); }
+    catch(_){ setStatus(en ? "Couldn't use the microphone — check the permission." : "마이크를 쓸 수 없어요 — 권한을 확인해 주세요."); return; }
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"]
+      .find(type => typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(type)) || "";
+    let recorder;
+    try { recorder = new MediaRecorder(stream, mime ? { mimeType:mime } : undefined); }
+    catch(_){ stream.getTracks().forEach(t => t.stop()); setStatus(en ? "Recording isn't available here." : "여기서는 녹음할 수 없어요."); return; }
+    const state = { stream, recorder, chunks:[], started:Date.now(), timer:0, cancelled:false };
+    rec = state;
+    recorder.addEventListener("dataavailable", (e) => { if (e.data && e.data.size) state.chunks.push(e.data); });
+    recorder.addEventListener("stop", () => {
+      stream.getTracks().forEach(t => t.stop());
+      const seconds = (Date.now() - state.started) / 1000;
+      if (rec === state) rec = null;
+      syncRecordUi();
+      if (state.cancelled){ setStatus(diaryIsEn() ? "Recording discarded." : "녹음을 버렸어요."); return; }
+      const blob = new Blob(state.chunks, { type:(recorder.mimeType || mime || "audio/webm").split(";")[0] });
+      if (!blob.size){ setStatus(diaryIsEn() ? "Nothing was recorded." : "녹음된 소리가 없어요."); return; }
+      attachAudio(blob, seconds);
+    });
+    const tick = () => {
+      const sec = (Date.now() - state.started) / 1000;
+      recordClock.textContent = diaryFormatSeconds(sec) + " / " + diaryFormatSeconds(DIARY_AUDIO_MAX_SEC);
+      if (sec >= DIARY_AUDIO_MAX_SEC) stopRecording(false);
+    };
+    state.timer = setInterval(tick, 250);
+    tick();
+    recorder.start(1000);
+    syncRecordUi();
+    setStatus(en ? "Recording… press Stop and add when done." : "녹음 중… 다 되면 '멈추고 붙이기'를 누르세요.");
+  }
+  recordBtn.addEventListener("click", () => { if (rec) stopRecording(false); else startRecording(); });
+  recordCancel.addEventListener("click", () => stopRecording(true));
+  audioFileBtn.addEventListener("click", () => audioInput.click());
+  audioInput.addEventListener("change", async () => {
+    const file = audioInput.files && audioInput.files[0];
+    audioInput.value = "";
+    if (!file) return;
+    await attachAudio(file, 0);
+  });
 
   // 날씨·기분 고르개(머리줄 단추 아래에 뜬다)
 
@@ -3508,6 +4048,7 @@ function mountDiaryPanels(panelEnv){
     });
   }
   const setArtPanelOpen = (open) => {
+    if (!open && rec) stopRecording(false);         // 창을 닫으면 녹음을 멈추고 붙인다
     artPanel.hidden = !open;
     stickerBtn.setAttribute("aria-expanded", String(open));
     stickerBtn.classList.toggle("is-on", open);
@@ -3515,7 +4056,8 @@ function mountDiaryPanels(panelEnv){
   };
   stickerBtn.addEventListener("click", (e) => { e.stopPropagation(); setPanelOpen(false); setArtPanelOpen(artPanel.hidden); });
 
-  return { panel, artPanel, artCustomColor, artOpacityRange, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen, changeStyle };
+  return { panel, artPanel, artCustomColor, artOpacityRange, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen, changeStyle,
+    stopRecording:() => stopRecording(true) };
 }
 
 /* ===== 인쇄 층의 종이 한 장(일기장·여행일지 공용) =====
@@ -3588,13 +4130,15 @@ function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
   for (const st of entry.stickers){
     const kind = diaryStickerKind(st);
     const node = document.createElement("div");
-    node.className = "diary-print-sticker diary-sticker-is-" + kind;
+    node.className = "diary-print-sticker diary-sticker-is-" + kind + (kind === "photo" && st.frame ? " diary-frame-" + st.frame : "");
     Object.assign(node.style, { left:st.x * width + "px", top:st.y * width + "px", width:st.w * width + "px",
       transform:st.rot ? `rotate(${st.rot}deg)` : "" });
     // 글상자만 높이를 글에 맡긴다 — 글자 크기가 종이 폭 비율이라 680px 에서도 화면과 같은 자리에서 줄이 바뀐다.
     if (kind !== "text") node.style.height = st.w * st.ar * width + "px";
     node.style.opacity = String(st.opacity == null ? 1 : st.opacity);
-    if (kind === "art"){
+    if (kind === "audio"){
+      node.append(diaryAudioStickerBody(st, false));
+    } else if (kind === "art"){
       const art = document.createElement("span");
       art.className = "diary-sticker-body diary-sticker-art";
       art.innerHTML = diaryArtSvg(st.art);
@@ -3768,7 +4312,18 @@ function mountDiaryEditor(doc){
   calGrid.setAttribute("role", "grid");
   const monthList = document.createElement("div");
   monthList.className = "diary-month-list ui-keep-symbols";
-  calendarPane.append(calHead, calGrid);
+  // 기념일 — 다가오는 날(D-n)과 세는 날(n일째)을 달력 아래에. 고치기는 작은 창에서.
+  const annivBox = document.createElement("section");
+  annivBox.className = "diary-anniv-box ui-keep-symbols";
+  const annivHead = document.createElement("div");
+  annivHead.className = "diary-anniv-head";
+  const annivTitle = document.createElement("strong");
+  const annivEdit = diaryButton("", "", "diary-btn diary-anniv-edit", "calendar");
+  annivHead.append(annivTitle, annivEdit);
+  const annivList = document.createElement("div");
+  annivList.className = "diary-anniv-list";
+  annivBox.append(annivHead, annivList);
+  calendarPane.append(calHead, calGrid, annivBox);
 
   const searchPane = document.createElement("div");
   searchPane.className = "diary-side-pane diary-search-pane";
@@ -3822,6 +4377,9 @@ function mountDiaryEditor(doc){
   const specialBadge = document.createElement("span");
   specialBadge.className = "diary-special";
   specialBadge.hidden = true;
+  const annivBadge = document.createElement("span");
+  annivBadge.className = "diary-anniv-badge ui-keep-symbols";
+  annivBadge.hidden = true;
   const entryTitle = document.createElement("input");
   entryTitle.className = "diary-entry-title";
   entryTitle.type = "text";
@@ -3847,7 +4405,7 @@ function mountDiaryEditor(doc){
   const headToggleBtn = diaryButton("", "제목·태그 줄 접기", "diary-btn diary-head-toggle", "chevronUp");
   const dateRow = document.createElement("div");
   dateRow.className = "diary-date-row";
-  dateRow.append(prevDay, dateLabel, todayBadge, specialBadge, nextDay, headSummary, headToggleBtn);
+  dateRow.append(prevDay, dateLabel, todayBadge, specialBadge, annivBadge, nextDay, headSummary, headToggleBtn);
   const titleRow = document.createElement("div");
   titleRow.className = "diary-title-row";
   titleRow.append(entryTitle, weatherBtn, moodBtn, favoriteBtn, templateBtn, deleteBtn);
@@ -3963,7 +4521,11 @@ function mountDiaryEditor(doc){
   const lockNote = document.createElement("p"); lockNote.textContent = "내용을 다시 보려면 파일 암호를 입력하세요.";
   const unlockBtn = diaryButton("잠금 풀기", "일기장 화면 잠금 풀기", "diary-btn diary-primary", "lock");
   lockScreen.append(lockIcon, lockTitle, lockNote, unlockBtn);
-  root.append(bar, body, pickPop, templatePanel, lockScreen);
+  const annivPanel = document.createElement("div");
+  annivPanel.className = "diary-anniv-panel";
+  annivPanel.hidden = true;
+  annivPanel.setAttribute("role", "dialog");
+  root.append(bar, body, pickPop, templatePanel, annivPanel, lockScreen);
   doc.el.appendChild(root);
 
   /* ----- 상태 표시·되돌리기·복구본 ----- */
@@ -4061,7 +4623,7 @@ function mountDiaryEditor(doc){
       b.dataset.special = names;
       b.classList.toggle("is-holiday", found.some(i => i.holiday));
       b.classList.toggle("is-term", found.some(i => i.term));
-      b.title = names;
+      b.title = b.title ? names + " · " + b.title : names;
       b.setAttribute("aria-label", b.getAttribute("aria-label") + " · " + names);
     }
   }
@@ -4670,6 +5232,10 @@ function mountDiaryEditor(doc){
     node.focus({ preventScroll:true });
     if (typeof node.scrollIntoView === "function") node.scrollIntoView({ block:"center", inline:"nearest" });
   }
+  // 기록 지도를 무엇으로 칠할지는 보는 사람 편의라 파일이 아니라 localStorage 에만(접기 상태와 같은 자리).
+  let heatMode = (() => { try { return localStorage.getItem("mn.diaryHeatMode") === "entry" ? "entry" : "mood"; } catch(_){ return "mood"; } })();
+  let heatFocus = "";
+  const rememberHeatMode = () => { try { localStorage.setItem("mn.diaryHeatMode", heatMode); } catch(_){} };
   function renderReview(){
     const stats = diaryReviewStats(model.entries, viewYear, viewMonth + 1);
     const heading = document.createElement("div"); heading.className = "diary-review-heading";
@@ -4698,10 +5264,21 @@ function mountDiaryEditor(doc){
       for (const [word, count] of stats.words){ const chip = document.createElement("button"); chip.type = "button"; chip.textContent = word + " " + count; chip.addEventListener("click", () => { searchInput.value = word; setSideTab("search", true); }); wordBox.append(chip); }
       insights.append(wordBox);
     }
+    // 기록 지도 — '기분' 으로 보면 쓴 날을 그날 기분 색으로 칠한다(기분 없는 날은 흐린 기본색).
+    const year = diaryYearMoods(model.entries, viewYear);
+    const byMood = heatMode === "mood";
+    const heatHead = document.createElement("div"); heatHead.className = "diary-review-heat-head";
     const heatTitle = document.createElement("div"); heatTitle.className = "diary-review-subhead";
-    heatTitle.textContent = diaryIsEn() ? viewYear + " writing map" : viewYear + "년 기록 지도";
-    const heat = document.createElement("div"); heat.className = "diary-review-heatmap";
-    const dates = new Set(diaryCleanEntries(model).filter(e => e.date.startsWith(String(viewYear) + "-")).map(e => e.date));
+    heatTitle.textContent = diaryIsEn() ? viewYear + (byMood ? " mood map" : " writing map") : viewYear + (byMood ? "년 기분 지도" : "년 기록 지도");
+    const modeBox = document.createElement("div"); modeBox.className = "diary-review-heat-modes"; modeBox.setAttribute("role", "group");
+    for (const [mode, ko, en] of [["entry", "기록", "Entries"], ["mood", "기분", "Mood"]]){
+      const b = document.createElement("button"); b.type = "button"; b.className = "diary-review-heat-mode" + (heatMode === mode ? " is-on" : "");
+      b.dataset.mode = mode; b.textContent = diaryIsEn() ? en : ko; b.setAttribute("aria-pressed", String(heatMode === mode));
+      b.addEventListener("click", () => { if (heatMode === mode) return; heatMode = mode; heatFocus = ""; rememberHeatMode(); renderReview(); });
+      modeBox.append(b);
+    }
+    heatHead.append(heatTitle, modeBox);
+    const heat = document.createElement("div"); heat.className = "diary-review-heatmap" + (byMood ? " is-mood" : "");
     for (let month = 1; month <= 12; month++){
       const row = document.createElement("div"); row.className = "diary-review-heat-row";
       const monthName = document.createElement("span"); monthName.textContent = diaryIsEn() ? String(month) : month + "월"; row.append(monthName);
@@ -4711,12 +5288,46 @@ function mountDiaryEditor(doc){
         if (day <= last){
           dot.type = "button";
           const key = viewYear + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
-          dot.classList.toggle("has-entry", dates.has(key)); dot.title = diaryUiDateLabel(key);
+          const has = year.days.has(key), mood = has ? year.days.get(key) : "";
+          dot.classList.toggle("has-entry", has);
+          let label = diaryUiDateLabel(key);
+          if (byMood && has){
+            dot.dataset.mood = mood;
+            if (mood){ dot.style.background = diaryMoodColor(mood); label += " · " + diaryName(diaryMoodInfo(mood)); }
+            else dot.classList.add("no-mood");
+            if (heatFocus && mood !== heatFocus) dot.classList.add("is-dim");
+          }
+          dot.title = label;
           dot.addEventListener("click", () => goTo(key));
         } else dot.classList.add("is-empty");
         row.append(dot);
       }
       heat.append(row);
+    }
+    // 범례 — 나온 기분만, 누르면 그 기분인 날만 또렷하게(다시 누르면 풀림).
+    const legend = document.createElement("div"); legend.className = "diary-review-mood-legend";
+    legend.hidden = !byMood;
+    if (byMood){
+      if (!year.moods.length){
+        const none = document.createElement("span"); none.className = "diary-review-mood-none";
+        none.textContent = diaryIsEn() ? "Pick a mood on entries to color this map." : "일기에 기분을 고르면 이 지도에 색이 칠해져요.";
+        legend.append(none);
+      }
+      for (const [id, count] of year.moods){
+        const chip = document.createElement("button"); chip.type = "button";
+        chip.className = "diary-review-mood-chip" + (heatFocus === id ? " is-on" : "");
+        chip.dataset.mood = id; chip.setAttribute("aria-pressed", String(heatFocus === id));
+        const swatch = document.createElement("i"); swatch.style.background = diaryMoodColor(id);
+        const text = document.createElement("span"); text.textContent = diaryName(diaryMoodInfo(id)) + " " + count;
+        chip.append(swatch, text);
+        chip.addEventListener("click", () => { heatFocus = heatFocus === id ? "" : id; renderReview(); });
+        legend.append(chip);
+      }
+      if (year.moods.length && year.blank){
+        const rest = document.createElement("span"); rest.className = "diary-review-mood-rest";
+        rest.textContent = diaryIsEn() ? "No mood " + year.blank : "기분 없음 " + year.blank;
+        legend.append(rest);
+      }
     }
     const memoryTitle = document.createElement("div"); memoryTitle.className = "diary-review-subhead";
     memoryTitle.textContent = diaryIsEn() ? "On this day" : "그해 오늘";
@@ -4724,7 +5335,7 @@ function mountDiaryEditor(doc){
     const memoryBox = document.createElement("div"); memoryBox.className = "diary-review-memories";
     if (!memories.length) memoryBox.textContent = diaryIsEn() ? "No earlier entry for this date." : "같은 날짜의 지난 기록이 아직 없어요.";
     for (const e of memories){ const b = document.createElement("button"); b.type = "button"; b.textContent = e.date.slice(0, 4) + " · " + diaryEntryLabel(e); b.addEventListener("click", () => goTo(e.date)); memoryBox.append(b); }
-    reviewPane.replaceChildren(heading, cards, insights, heatTitle, heat, memoryTitle, memoryBox);
+    reviewPane.replaceChildren(heading, cards, insights, heatHead, heat, legend, memoryTitle, memoryBox);
   }
   function refreshSideLanguage(){
     // 탭은 아이콘만 보이므로 이름은 툴팁·aria-label 까지 함께 바꿔야 한다(감춘 span 도 맞춰 둔다).
@@ -4747,6 +5358,121 @@ function mountDiaryEditor(doc){
   if (typeof matchMedia === "function" && matchMedia("(max-width:760px)").matches) side.classList.add("is-mobile-collapsed");
 
   /* ----- 달력 ----- */
+  /* ----- 기념일 ----- */
+  function renderAnnivBadge(){
+    const hits = diaryAnniversariesOn(model.anniversaries, current);
+    annivBadge.hidden = !hits.length;
+    annivBadge.textContent = hits.length ? "♥ " + hits.map(hit => hit.label).join(" · ") : "";
+  }
+  function anniversaryRepeatName(repeat){
+    const en = diaryIsEn();
+    return repeat === "once" ? (en ? "Once" : "한 번") : repeat === "since" ? (en ? "Count from" : "그날부터 세기") : (en ? "Every year" : "매년");
+  }
+  function renderAnniversaries(){
+    const en = diaryIsEn();
+    annivTitle.textContent = en ? "Special days" : "기념일";
+    annivEdit.title = en ? "Add or edit special days" : "기념일 넣기·고치기";
+    annivEdit.setAttribute("aria-label", annivEdit.title);
+    const rows = diaryAnniversaryCountdown(model.anniversaries, today, 6);
+    annivList.replaceChildren(...rows.map(row => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "diary-anniv-row" + (row.days === 0 ? " is-today" : "");
+      const name = document.createElement("span"); name.className = "diary-anniv-name"; name.textContent = row.a.name;
+      const when = document.createElement("span"); when.className = "diary-anniv-when"; when.textContent = row.text;
+      b.append(name, when);
+      const target = row.days == null ? today : row.date;
+      b.title = diaryUiDateLabel(target);
+      b.addEventListener("click", () => goTo(target));
+      return b;
+    }));
+    if (!rows.length){
+      const empty = document.createElement("button");
+      empty.type = "button"; empty.className = "diary-anniv-empty";
+      empty.textContent = en ? "+ Add a birthday or special day" : "+ 생일·기념일 넣기";
+      empty.addEventListener("click", () => setAnnivOpen(true));
+      annivList.append(empty);
+    }
+  }
+  let annivDraft = null;             // 고치는 중인 기념일(id 가 "" 이면 새 것)
+  function renderAnnivPanel(){
+    const en = diaryIsEn();
+    const make = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const title = make("strong", "", en ? "Special days" : "기념일");
+    const note = make("span", "diary-template-note", en ? "Saved in this diary. Every year · once · count from a day."
+      : "이 일기장에 담겨요 · 매년 / 한 번 / 그날부터 세기(만난 지 n일)");
+    const list = diaryCleanAnniversaries(model).map(a => {
+      const row = make("div", "diary-anniv-item");
+      const text = make("button", "diary-anniv-item-text"); text.type = "button";
+      text.append(make("strong", "", a.name), make("span", "", diaryUiDateLabel(a.date) + " · " + anniversaryRepeatName(a.repeat)));
+      text.addEventListener("click", () => { annivDraft = { ...a }; renderAnnivPanel(); focusAnnivForm(); });
+      const remove = diaryButton("", en ? "Delete" : "지우기", "diary-btn diary-anniv-remove", "delete");
+      remove.addEventListener("click", () => {
+        if (history) history.flush();
+        model.anniversaries = (model.anniversaries || []).filter(x => x.id !== a.id);
+        if (annivDraft && annivDraft.id === a.id) annivDraft = null;
+        renderCalendar(); renderAnnivBadge(); renderAnnivPanel(); touch(true);
+        focusAnnivForm();
+        setStatus(en ? "Deleted. Ctrl+Z to undo." : "지웠어요. Ctrl+Z 로 되돌릴 수 있어요.");
+      });
+      row.append(text, remove);
+      return row;
+    });
+    const draft = annivDraft || { id:"", name:"", date:current, repeat:"yearly" };
+    const form = make("form", "diary-template-form diary-anniv-form");
+    const name = make("input", "diary-anniv-name-input"); name.type = "text"; name.maxLength = 30;
+    name.placeholder = en ? "Name (e.g. Mom's birthday)" : "이름 (예: 엄마 생신)"; name.value = draft.name; name.setAttribute("aria-label", name.placeholder);
+    const date = make("input", "diary-anniv-date-input"); date.type = "date"; date.value = draft.date;
+    date.setAttribute("aria-label", en ? "Date" : "날짜");
+    const repeat = make("select", "diary-select diary-anniv-repeat"); repeat.setAttribute("aria-label", en ? "Repeat" : "되풀이");
+    for (const value of DIARY_ANNIVERSARY_REPEATS){ const o = make("option", "", anniversaryRepeatName(value)); o.value = value; repeat.append(o); }
+    repeat.value = draft.repeat;
+    const msg = make("span", "diary-template-msg");
+    const save = make("button", "diary-btn diary-primary", draft.id ? (en ? "Save" : "고치기") : (en ? "Add" : "넣기")); save.type = "submit";
+    const actions = make("div", "diary-template-form-actions");
+    if (draft.id){
+      const cancel = make("button", "diary-btn", en ? "Cancel" : "취소"); cancel.type = "button";
+      cancel.addEventListener("click", () => { annivDraft = null; renderAnnivPanel(); focusAnnivForm(); });
+      actions.append(msg, cancel, save);
+    } else actions.append(msg, save);
+    const dateRow = make("div", "diary-anniv-form-row"); dateRow.append(date, repeat);
+    form.append(name, dateRow, actions);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const item = diaryNormalizeAnniversaries([{ id:draft.id, name:name.value, date:date.value, repeat:repeat.value }])[0];
+      if (!item){ msg.textContent = en ? "Write a name and pick a date." : "이름과 날짜를 적어 주세요."; return; }
+      const listNow = model.anniversaries || [];
+      const at = draft.id ? listNow.findIndex(x => x.id === draft.id) : -1;
+      if (at < 0 && listNow.length >= DIARY_MAX_ANNIVERSARIES){ msg.textContent = en ? "Up to 60 special days." : "기념일은 60개까지예요."; return; }
+      if (history) history.flush();
+      model.anniversaries = at >= 0 ? listNow.map((x, i) => i === at ? item : x) : [...listNow, item];
+      annivDraft = null;
+      renderCalendar(); renderAnnivBadge(); renderAnnivPanel(); touch(true);
+      focusAnnivForm();
+    });
+    const listHead = list.length ? [make("div", "diary-template-subhead", en ? "Saved" : "넣어 둔 기념일")] : [];
+    annivPanel.replaceChildren(title, note, form, ...listHead, ...list);
+  }
+  // 창을 다시 그리면 누른 단추가 사라져 포커스가 창 밖으로 빠진다 — Esc 가 닿도록 이름 칸으로 돌려놓는다.
+  function focusAnnivForm(){
+    const input = annivPanel.querySelector(".diary-anniv-name-input");
+    if (input) input.focus({ preventScroll:true });
+  }
+  function setAnnivOpen(open){
+    annivPanel.hidden = !open;
+    annivEdit.classList.toggle("is-on", open);
+    annivEdit.setAttribute("aria-expanded", String(open));
+    if (!open){ annivDraft = null; return; }
+    renderAnnivPanel();
+    const r = annivEdit.getBoundingClientRect(), base = root.getBoundingClientRect();
+    annivPanel.style.left = Math.max(8, Math.min(base.width - 300, r.left - base.left)) + "px";
+    annivPanel.style.top = Math.max(8, r.bottom - base.top + 6) + "px";
+    const first = annivPanel.querySelector("input");
+    if (first) first.focus();
+  }
+  annivEdit.setAttribute("aria-haspopup", "dialog"); annivEdit.setAttribute("aria-expanded", "false");
+  annivEdit.addEventListener("click", (event) => { event.stopPropagation(); setAnnivOpen(annivPanel.hidden); });
+  annivPanel.addEventListener("keydown", (event) => { if (event.key === "Escape"){ event.preventDefault(); setAnnivOpen(false); annivEdit.focus(); } });
   function renderCalendar(){
     monthLabel.textContent = diaryUiMonthLabel(viewYear, viewMonth);
     const filled = new Set(model.entries.filter(e => !diaryEntryIsEmpty(e)).map(e => e.date));
@@ -4786,12 +5512,19 @@ function mountDiaryEditor(doc){
         b.classList.add("has-emoji");
       }
       const marks = entry ? [diaryWeatherInfo(entry.weather), diaryMoodInfo(entry.mood)].filter(Boolean).map(diaryName) : [];
-      b.setAttribute("aria-label", [diaryUiDateLabel(cell.key), filled.has(cell.key) ? diaryT("일기 있음") : "", ...marks].filter(Boolean).join(" · "));
+      const annivs = diaryAnniversariesOn(model.anniversaries, cell.key).map(hit => hit.label);
+      if (annivs.length){
+        b.classList.add("has-anniv");
+        const heart = document.createElement("span"); heart.className = "diary-cal-anniv"; heart.textContent = "♥"; b.append(heart);
+        b.title = annivs.join(" · ");
+      }
+      b.setAttribute("aria-label", [diaryUiDateLabel(cell.key), filled.has(cell.key) ? diaryT("일기 있음") : "", ...marks, ...annivs].filter(Boolean).join(" · "));
       if (cell.key === current) b.setAttribute("aria-current", "date");
       b.addEventListener("click", () => goTo(cell.key));
       return b;
     });
     calGrid.replaceChildren(...head, ...cells);
+    renderAnniversaries();
     paintSpecialDays();
     paintSchoolDays();
 
@@ -4888,12 +5621,12 @@ function mountDiaryEditor(doc){
       // 사진도 여행일지처럼 투명도를 고른다 — 저장 형식은 예전부터 사진 opacity 를 담아 왔다.
       photoOpacity:true, openStickerOpacityPanel:() => { if (!panels) return; panels.setArtPanelOpen(true); panels.artOpacityRange.focus({ preventScroll:true }); } }
   );
-  const { addArtSticker, addAsset, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow } = paperApi;
+  const { addArtSticker, addAsset, addAudioSticker, addStickers, addTextSticker, applyStickerColor, applyStickerOpacity, applyStyle, clearSelection, destroyPaper, isDrawing, layout, nudgeStickers, openPhotoViewer, paperWidthNow, positionStickers, redrawDrawing, removeStickers, renderStickers, reorderStickers, rotateStickers, selectSticker, selectedStickers, selectionIds, setDrawMode, setSelection, stickerColorNow, stickerOpacityNow } = paperApi;
 
   /* ----- 꾸미기 바꾸기 ----- */
   /* ----- 꾸미기 창·스티커 창 ----- */
   // 창은 종이 뒤에 세운다 — 창이 종이의 스티커 색·투명도를 되비추기 때문이다.
-  const panels = mountDiaryPanels({ model, assets, assetUrl:(...a) => assetUrl(...a), addAsset:(...a) => addAsset(...a), entryOf:(...a) => entryOf(...a), ensureEntry:(...a) => ensureEntry(...a), touch:(...a) => touch(...a), setStatus:(...a) => setStatus(...a), applyStyle:(...a) => applyStyle(...a), applyBackdrop, layout:(...a) => layout(...a), renderCalendar:(...a) => renderCalendar(...a), bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker:(...a) => addArtSticker(...a), addTextSticker:(...a) => addTextSticker(...a), applyStickerColor:(...a) => applyStickerColor(...a), applyStickerOpacity:(...a) => applyStickerOpacity(...a), selectedStickers:(...a) => selectedStickers(...a), stickerColorNow:(...a) => stickerColorNow(...a), stickerOpacityNow:(...a) => stickerOpacityNow(...a), photoOpacity:true, current:() => current, history:() => history });
+  const panels = mountDiaryPanels({ model, assets, assetUrl:(...a) => assetUrl(...a), addAsset:(...a) => addAsset(...a), entryOf:(...a) => entryOf(...a), ensureEntry:(...a) => ensureEntry(...a), touch:(...a) => touch(...a), setStatus:(...a) => setStatus(...a), applyStyle:(...a) => applyStyle(...a), applyBackdrop, layout:(...a) => layout(...a), renderCalendar:(...a) => renderCalendar(...a), bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker:(...a) => addArtSticker(...a), addTextSticker:(...a) => addTextSticker(...a), addAudioSticker:(...a) => addAudioSticker(...a), applyStickerColor:(...a) => applyStickerColor(...a), applyStickerOpacity:(...a) => applyStickerOpacity(...a), selectedStickers:(...a) => selectedStickers(...a), stickerColorNow:(...a) => stickerColorNow(...a), stickerOpacityNow:(...a) => stickerOpacityNow(...a), photoOpacity:true, current:() => current, history:() => history });
   const { panel, artPanel, artCustomColor, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen } = panels;
   // 덮개(잠금)보다 아래에 오도록 자리를 지켜 끼운다.
   root.insertBefore(panel, pickPop);
@@ -4902,6 +5635,7 @@ function mountDiaryEditor(doc){
   const onOutside = (e) => {
     if (!pickPop.hidden && !pickPop.contains(e.target) && !weatherBtn.contains(e.target) && !moodBtn.contains(e.target)) closePicker();
     if (!templatePanel.hidden && !templatePanel.contains(e.target) && !templateBtn.contains(e.target)) setTemplateOpen(false);
+    if (!annivPanel.hidden && !annivPanel.contains(e.target) && !annivEdit.contains(e.target)) setAnnivOpen(false);
     // 스티커 창은 종이 위 스티커를 고르며 색을 바꾸는 창이라, 종이를 눌렀다고 닫지 않는다.
     if (!artPanel.hidden && !artPanel.contains(e.target) && !stickerBtn.contains(e.target) && !paper.contains(e.target)) setArtPanelOpen(false);
     if (panel.hidden) return;
@@ -5047,30 +5781,116 @@ function mountDiaryEditor(doc){
   tagInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === ","){ event.preventDefault(); addCurrentTag(); }
   });
-  function setTemplateOpen(open){
-    templatePanel.hidden = !open; templateBtn.classList.toggle("is-on", open); templateBtn.setAttribute("aria-expanded", String(open));
-    if (!open) return;
-    const title = document.createElement("strong"); title.textContent = diaryIsEn() ? "Choose a writing prompt" : "오늘의 글감 고르기";
-    const note = document.createElement("span"); note.className = "diary-template-note";
-    note.textContent = diaryIsEn() ? "Questions are inserted into the current entry." : "고른 질문을 지금 일기에 넣어 드려요.";
-    const buttons = templates.map(([, ko, en, text]) => {
-      const b = document.createElement("button"); b.type = "button"; b.className = "diary-template-option"; b.textContent = diaryIsEn() ? en : ko;
-      b.addEventListener("click", () => {
-        if (history) history.flush();
-        const chosen = diaryIsEn() ? ({
-          "하루 돌아보기":"What was the most memorable moment today?\n\nHow did it make you feel?\n\nA note to tomorrow's me",
-          "감사 일기":"Three things I was grateful for today\n\n1. \n2. \n3. \n\nSomeone I want to thank",
-          "학교생활":"What I learned today\n\nSomething that happened with friends\n\nWhat to prepare for tomorrow",
-          "독서 기록":"Book title: \n\nA memorable scene or sentence\n\nMy thoughts after reading",
-          "여행 일기":"Place: \n\nThe best moment\n\nSomething new I discovered\n\nWhy I want to return"
-        }[ko] || text) : text;
-        area.value = area.value.trim() ? area.value.replace(/\s*$/, "") + "\n\n" + chosen : chosen;
-        area.dispatchEvent(new Event("input", { bubbles:true }));
-        setTemplateOpen(false); area.focus(); area.setSelectionRange(area.value.length, area.value.length);
-      });
+  /* 내 글감 — 이 컴퓨터에만 둔다(diaryNormalizeUserPrompts 설명). 고치는 중인 글감은 창 안 작은 양식으로. */
+  const USER_PROMPT_KEY = "mn.diaryUserPrompts";
+  const readUserPrompts = () => { try { return diaryNormalizeUserPrompts(JSON.parse(localStorage.getItem(USER_PROMPT_KEY) || "[]")); } catch(_){ return []; } };
+  const writeUserPrompts = (list) => {
+    try { localStorage.setItem(USER_PROMPT_KEY, JSON.stringify(diaryNormalizeUserPrompts(list))); return true; }
+    catch(_){ return false; }
+  };
+  let promptDraft = null;          // 고치는 중: { id:""(새 것) | 글감 id, name, text }
+  function insertPrompt(text){
+    if (history) history.flush();
+    area.value = area.value.trim() ? area.value.replace(/\s*$/, "") + "\n\n" + text : text;
+    area.dispatchEvent(new Event("input", { bubbles:true }));
+    setTemplateOpen(false); area.focus(); area.setSelectionRange(area.value.length, area.value.length);
+  }
+  function renderTemplatePanel(){
+    const en = diaryIsEn();
+    const make = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    const title = make("strong", "", en ? "Choose a writing prompt" : "오늘의 글감 고르기");
+    const note = make("span", "diary-template-note", en ? "Questions are inserted into the current entry." : "고른 질문을 지금 일기에 넣어 드려요.");
+    const buttons = templates.map(([, ko, en2, text]) => {
+      const b = make("button", "diary-template-option", en ? en2 : ko); b.type = "button";
+      b.addEventListener("click", () => insertPrompt(en ? ({
+        "하루 돌아보기":"What was the most memorable moment today?\n\nHow did it make you feel?\n\nA note to tomorrow's me",
+        "감사 일기":"Three things I was grateful for today\n\n1. \n2. \n3. \n\nSomeone I want to thank",
+        "학교생활":"What I learned today\n\nSomething that happened with friends\n\nWhat to prepare for tomorrow",
+        "독서 기록":"Book title: \n\nA memorable scene or sentence\n\nMy thoughts after reading",
+        "여행 일기":"Place: \n\nThe best moment\n\nSomething new I discovered\n\nWhy I want to return"
+      }[ko] || text) : text));
       return b;
     });
-    templatePanel.replaceChildren(title, note, ...buttons);
+    const mine = readUserPrompts();
+    const head = make("div", "diary-template-subhead", en ? "My prompts" : "내 글감");
+    const userRows = mine.map(p => {
+      const row = make("div", "diary-template-user");
+      row.dataset.id = p.id;
+      const use = make("button", "diary-template-option diary-template-user-use", p.name); use.type = "button";
+      use.title = p.text.slice(0, 200);
+      use.addEventListener("click", () => insertPrompt(p.text));
+      const edit = diaryButton("", en ? "Edit this prompt" : "이 글감 고치기", "diary-btn diary-template-user-edit", "pen");
+      edit.addEventListener("click", () => { promptDraft = { ...p }; renderTemplatePanel(); });
+      const remove = diaryButton("", en ? "Delete this prompt" : "이 글감 지우기", "diary-btn diary-template-user-remove", "delete");
+      remove.addEventListener("click", async () => {
+        const ok = typeof confirmDialog !== "function" || await confirmDialog(
+          en ? `Delete the prompt "${p.name}"? This can't be undone.` : `'${p.name}' 글감을 지울까요? 되돌릴 수 없어요.`,
+          en ? "Delete" : "지우기", en ? "Cancel" : "취소");
+        if (!ok) return;
+        writeUserPrompts(readUserPrompts().filter(item => item.id !== p.id));
+        if (!templatePanel.hidden){ renderTemplatePanel(); focusTemplatePanel(); }
+      });
+      row.append(use, edit, remove);
+      return row;
+    });
+    const tail = [];
+    if (promptDraft){
+      const form = make("form", "diary-template-form");
+      const name = make("input", "diary-template-name"); name.type = "text"; name.maxLength = DIARY_USER_PROMPT_NAME_MAX;
+      name.placeholder = en ? "Prompt name" : "글감 이름"; name.value = promptDraft.name || "";
+      name.setAttribute("aria-label", name.placeholder);
+      const text = make("textarea", "diary-template-text"); text.rows = 5; text.maxLength = DIARY_USER_PROMPT_TEXT_MAX;
+      text.placeholder = en ? "Questions to insert — one per line" : "넣을 질문 — 한 줄에 하나씩"; text.value = promptDraft.text || "";
+      text.setAttribute("aria-label", text.placeholder);
+      const actions = make("div", "diary-template-form-actions");
+      const save = make("button", "diary-btn diary-primary diary-template-save", en ? "Save" : "저장"); save.type = "submit";
+      const cancel = make("button", "diary-btn diary-template-cancel", en ? "Cancel" : "취소"); cancel.type = "button";
+      const msg = make("span", "diary-template-msg");
+      actions.append(msg, cancel, save);
+      form.append(name, text, actions);
+      cancel.addEventListener("click", () => { promptDraft = null; renderTemplatePanel(); focusTemplatePanel(); });
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const item = { id:promptDraft.id, name:name.value, text:text.value };
+        if (!diaryNormalizeUserPrompts([item]).length){
+          msg.textContent = en ? "Write a name and at least one question." : "이름과 질문을 적어 주세요."; return;
+        }
+        const list = readUserPrompts();
+        const at = item.id ? list.findIndex(x => x.id === item.id) : -1;
+        if (at < 0 && list.length >= DIARY_USER_PROMPT_MAX){
+          msg.textContent = en ? `Up to ${DIARY_USER_PROMPT_MAX} prompts.` : `글감은 ${DIARY_USER_PROMPT_MAX}개까지예요.`; return;
+        }
+        if (at >= 0) list[at] = item; else list.push(item);
+        if (!writeUserPrompts(list)){ msg.textContent = en ? "Couldn't save on this computer." : "이 컴퓨터에 저장하지 못했어요."; return; }
+        promptDraft = null; renderTemplatePanel(); focusTemplatePanel();
+      });
+      tail.push(form);
+      requestAnimationFrame(() => { if (form.isConnected) name.focus(); });
+    } else {
+      const add = make("button", "diary-btn diary-template-add", en ? "+ New prompt" : "+ 새 글감"); add.type = "button";
+      add.disabled = mine.length >= DIARY_USER_PROMPT_MAX;
+      add.addEventListener("click", () => { promptDraft = { id:"", name:"", text:"" }; renderTemplatePanel(); });
+      const fromText = make("button", "diary-btn diary-template-from-text", en ? "From this entry" : "지금 쓴 글로 만들기"); fromText.type = "button";
+      fromText.title = en ? "Start a prompt from the text of this entry" : "지금 일기 본문을 글감으로 만들어요";
+      fromText.disabled = !area.value.trim() || mine.length >= DIARY_USER_PROMPT_MAX;
+      fromText.addEventListener("click", () => { promptDraft = { id:"", name:"", text:area.value.slice(0, DIARY_USER_PROMPT_TEXT_MAX) }; renderTemplatePanel(); });
+      const addRow = make("div", "diary-template-add-row");
+      addRow.append(add, fromText);
+      tail.push(addRow);
+    }
+    const empty = !mine.length && !promptDraft
+      ? [make("span", "diary-template-note", en ? "Make your own questions — saved on this computer for every diary." : "나만의 질문을 만들어 두세요 — 이 컴퓨터의 모든 일기장에서 쓸 수 있어요.")] : [];
+    templatePanel.replaceChildren(title, note, ...buttons, head, ...userRows, ...empty, ...tail);
+  }
+  // 다시 그리면 누른 단추가 사라져 포커스가 창 밖으로 빠진다 — Esc 가 닿도록 방금 만든(또는 첫) 글감으로 돌려놓는다.
+  function focusTemplatePanel(){
+    const target = templatePanel.querySelector(".diary-template-user:last-of-type .diary-template-user-use") || templatePanel.querySelector("button");
+    if (target) target.focus({ preventScroll:true });
+  }
+  function setTemplateOpen(open){
+    templatePanel.hidden = !open; templateBtn.classList.toggle("is-on", open); templateBtn.setAttribute("aria-expanded", String(open));
+    if (!open){ promptDraft = null; return; }
+    renderTemplatePanel();
     const r = templateBtn.getBoundingClientRect(), base = root.getBoundingClientRect();
     templatePanel.style.left = Math.max(8, Math.min(base.width - 260, r.left - base.left)) + "px";
     templatePanel.style.top = (r.bottom - base.top + 6) + "px";
@@ -5091,6 +5911,7 @@ function mountDiaryEditor(doc){
     focusDate.textContent = diaryUiHeadDate(current) + (current === today ? " · " + diaryT("오늘") : "");
     focusDate.title = diaryUiDateLabel(current) + " — " + (diaryIsEn() ? "Alt+PageUp / Alt+PageDown to change day" : "Alt+PageUp / Alt+PageDown 으로 날짜 옮기기");
     renderSpecialBadge();
+    renderAnnivBadge();
     renderSchoolStrip();
     entryTitle.value = entry ? entry.title : "";
     if (area.value !== (entry ? entry.text : "")) area.value = entry ? entry.text : "";
@@ -5430,7 +6251,7 @@ function mountDiaryEditor(doc){
   });
 
   /* ----- 되돌리기 ----- */
-  const snapshot = () => JSON.stringify({ title:model.title, style:model.style, backdrop:model.backdrop, entries:model.entries });
+  const snapshot = () => JSON.stringify({ title:model.title, style:model.style, backdrop:model.backdrop, anniversaries:model.anniversaries || [], entries:model.entries });
   history = MNEditHistory.create({
     limit:80,
     sizeOf:(s) => s.length,
@@ -5442,6 +6263,7 @@ function mountDiaryEditor(doc){
       model.title = parsed.title;
       model.style = parsed.style;
       model.backdrop = parsed.backdrop || diaryDefaultBackdrop();
+      model.anniversaries = diaryNormalizeAnniversaries(parsed.anniversaries);
       model.entries = parsed.entries;
       titleInput.value = model.title || "";
       applyBackdrop();
@@ -5468,7 +6290,7 @@ function mountDiaryEditor(doc){
        이 처리기는 capture 라 글상자 textarea 의 Esc 보다 먼저 온다 — 그래서 여기서 걸러야 한다. */
     if (e.key === "Escape" && focusMode && !selectionIds().length
       && (!inField || target === area)
-      && panel.hidden && artPanel.hidden && pickPop.hidden && templatePanel.hidden){
+      && panel.hidden && artPanel.hidden && pickPop.hidden && templatePanel.hidden && annivPanel.hidden){
       e.preventDefault();
       setFocusMode(false);
       return;
@@ -5603,9 +6425,49 @@ function mountDiaryEditor(doc){
     MNContextMenu.open(r.left, r.bottom + 4, [
       { label:diaryTf("이 날 인쇄 ({date})", { date:diaryUiShortDate(current) }), title:tip, disabled:!day.length, action:() => printEntries(day) },
       { label:diaryTf("이번 달 인쇄 ({month} · {n}편)", { month:monthName, n:month.length }), title:tip, disabled:!month.length, action:() => printEntries(month, monthName) },
-      { label:diaryTf("일기장 전체 인쇄 ({n}편)", { n:all.length }), title:tip, disabled:!all.length, action:() => printEntries(all) }
+      { label:diaryTf("일기장 전체 인쇄 ({n}편)", { n:all.length }), title:tip, disabled:!all.length, action:() => printEntries(all) },
+      { separator:true },
+      { label:diaryIsEn() ? "Export as file" : "파일로 내보내기", disabled:!all.length, children:[
+        { label:diaryIsEn() ? `This month · Markdown (.md)` : `이번 달 · Markdown (.md)`, disabled:!month.length,
+          action:() => exportEntries(month, "md", monthName) },
+        { label:diaryIsEn() ? `This month · web page with photos (.html)` : `이번 달 · 사진 넣은 웹 문서 (.html)`, disabled:!month.length,
+          action:() => exportEntries(month, "html", monthName) },
+        { separator:true },
+        { label:diaryIsEn() ? `Whole diary · Markdown (.md)` : `일기장 전체 · Markdown (.md)`, action:() => exportEntries(all, "md", "") },
+        { label:diaryIsEn() ? `Whole diary · web page with photos (.html)` : `일기장 전체 · 사진 넣은 웹 문서 (.html)`, action:() => exportEntries(all, "html", "") }
+      ] }
     ], { autoFocus:true });
   }
+  /* 내보내기 — Markdown 은 글만, HTML 은 사진을 파일 안에 넣는다. 암호를 건 일기장도 풀린 채로 나가므로 한 번 알린다. */
+  async function exportEntries(list, kind, suffix){
+    if (!list.length || typeof MNDownload === "undefined") return;
+    const en = diaryIsEn();
+    if (doc.diaryProtection && typeof confirmDialog === "function"){
+      const ok = await confirmDialog(en
+        ? "This diary has a password, but the exported file will not. Anyone who opens it can read it. Export anyway?"
+        : "이 일기장은 암호가 걸려 있지만 내보낸 파일에는 암호가 없어요. 누구나 열어 볼 수 있어요. 그래도 내보낼까요?",
+        en ? "Export" : "내보내기", en ? "Cancel" : "취소");
+      if (!ok) return;
+    }
+    const name = diaryExportFileName(model, suffix, kind);
+    if (kind === "md"){
+      MNDownload.saveText(diaryEntriesMarkdown(model, list), name, "text/markdown;charset=utf-8");
+      setStatus(en ? "Exported " + name : name + " 로 내보냈어요.");
+      return;
+    }
+    const srcs = new Map();
+    for (const e of list) for (const s of e.stickers || []){
+      const kind = diaryStickerKind(s);
+      if ((kind !== "photo" && kind !== "audio") || srcs.has(s.asset)) continue;
+      const asset = assets.get(s.asset);
+      if (asset && asset.bytes) srcs.set(s.asset, diaryBytesToDataUrl(asset.bytes, diaryAssetMime(s.asset)));
+    }
+    const html = diaryEntriesHtml(model, list, (asset) => srcs.get(asset) || "");
+    MNDownload.saveText(html, name, "text/html;charset=utf-8");
+    const mb = new Blob([html]).size / 1048576;
+    setStatus(en ? `Exported ${name} (${mb.toFixed(1)} MB)` : `${name} 로 내보냈어요 (${mb.toFixed(1)} MB).`);
+  }
+  doc._diaryExportEntries = exportEntries;         // e2e 에서 고르기 없이 부를 때
   // 도구막대엔 인쇄 단추를 두지 않는다 — 상단 인쇄 단추(app.js)·Ctrl+P 가 이 고르기 메뉴를 연다.
   doc.printDiary = () => openPrintMenu(document.getElementById("btnPrint"));
   doc._diaryPrintEntries = printEntries;           // e2e·명령에서 고르기 없이 부를 때
@@ -5625,6 +6487,46 @@ function mountDiaryEditor(doc){
   }) : null;
   if (resizeObserver) resizeObserver.observe(paper);
 
+  /* 다른 문서(여행일지)가 보낸 하루를 받는다 — { entry, assets:Map(이름 → { bytes }) }.
+     그 날 일기가 이미 있으면 뒤에 이어 붙인다: 글은 한 줄 띄워 잇고, 스티커는 있던 것 아래로 내려 겹치지 않게 한다.
+     빈 칸(제목·날씨·기분)만 채우고 이미 적힌 것은 그대로 둔다. 한 번의 되돌리기로 돌아간다. */
+  doc._diaryReceiveEntry = (payload) => {
+    if (screenLocked || !payload || !payload.entry) return null;
+    for (const [name, asset] of (payload.assets || new Map())){
+      if (asset && asset.bytes && !assets.has(name)) assets.set(name, { bytes:asset.bytes });
+    }
+    const incoming = diaryNormalizeEntry(payload.entry, name => assets.has(name));
+    if (!incoming) return null;
+    if (history) history.flush();
+    const existing = entryOf(incoming.date);
+    let merged = false;
+    if (existing && !diaryEntryIsEmpty(existing)){
+      merged = true;
+      const shift = Math.max(0, ...existing.stickers.map(diaryStickerBottom), diaryEstimateTextHeight(existing.text)) + 0.03;
+      existing.text = existing.text.trim() ? existing.text.replace(/\s+$/, "") + "\n\n" + incoming.text : incoming.text;
+      if (!existing.title) existing.title = incoming.title;
+      if (!existing.weather) existing.weather = incoming.weather;
+      if (!existing.mood) existing.mood = incoming.mood;
+      existing.favorite = existing.favorite || incoming.favorite;
+      existing.tags = diaryNormalizeTags([...(existing.tags || []), ...incoming.tags]);
+      const room = Math.max(0, DIARY_MAX_STICKERS - existing.stickers.length);
+      existing.stickers = [...existing.stickers, ...incoming.stickers.slice(0, room).map(st => ({ ...st, y:st.y + shift }))];
+      if (!existing.drawing.length) existing.drawing = incoming.drawing;
+    } else {
+      model.entries = model.entries.filter(e => e.date !== incoming.date);
+      model.entries.push(incoming);
+      model.entries.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    }
+    const [y, m] = incoming.date.split("-").map(Number);
+    viewYear = y; viewMonth = m - 1;
+    goTo(incoming.date);
+    renderCalendar();
+    touch(true);
+    setStatus(merged ? (diaryIsEn() ? "Added to the end of that day's entry. Ctrl+Z to undo." : "그 날 일기 뒤에 이어 붙였어요. Ctrl+Z 로 되돌릴 수 있어요.")
+      : (diaryIsEn() ? "Received from the travel journal. Ctrl+Z to undo." : "여행일지에서 받았어요. Ctrl+Z 로 되돌릴 수 있어요."));
+    return { merged };
+  };
+
   // 통합 검색 결과를 누르면 그 글귀가 든 날로 간다(가장 최근 일기부터).
   doc._diaryFocus = (query) => {
     const hit = diaryCleanEntries(model).reverse().find(e => diaryEntryMatches(e, query));
@@ -5639,6 +6541,7 @@ function mountDiaryEditor(doc){
     clearTimeout(autoLockTimer);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
+    if (panels && typeof panels.stopRecording === "function") panels.stopRecording();
     destroyPaper();
     window.removeEventListener("mni18nchange", onLangChange);
     if (doc.printDiary) delete doc.printDiary;
@@ -5677,7 +6580,7 @@ if (typeof module !== "undefined" && module.exports){
     diaryReorder, DIARY_ARRANGE_MODES, DIARY_ARRANGE_GAP, DIARY_ARRANGE_ROW_H, diaryArrangeAutoCols, diaryArrangeStickers, diaryArrangeInBox,
     DIARY_GENKO_COLS, diaryGenkoGrid, diaryPictureBox, diaryUsesGenko, diaryStickerBottom, diaryGenkoMetrics, diaryGenkoLayout, diaryGenkoIndexAt,
     diaryUiDateLabel, diaryUiHeadDate, diaryUiMonthLabel, diaryUiWeekday, diaryT, diaryTf,
-    diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryReviewStats, diaryLineMetrics, diaryLineBackground,
+    diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryReviewStats, diaryYearMoods, diaryMoodColor, diaryNormalizeUserPrompts, DIARY_USER_PROMPT_MAX, diaryEntriesMarkdown, diaryEntriesHtml, diaryBytesToDataUrl, diaryExportFileName, DIARY_PHOTO_FRAMES, DIARY_AUDIO_RE, DIARY_AUDIO_AR, diaryAudioExt, diaryFormatSeconds, diaryNormalizeAnniversaries, diaryCleanAnniversaries, diaryAnniversariesOn, diaryAnniversaryCountdown, diaryEstimateTextHeight, diaryLineMetrics, diaryLineBackground,
     diaryCrc32, diaryZipBuild, diaryZipRead, diaryPack, diaryUnpack, diaryScratchFileName, diaryStarterBytes,
     diaryCryptoReady, diaryIsEncrypted, diaryEncryptedInfo, diaryDeriveProtection, diarySealBytes, diaryOpenSealed, diaryOutputBytes
   };

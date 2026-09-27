@@ -1007,7 +1007,7 @@ test("색을 직접 골라 붙이면 그림도 글상자도 그 색이고, 고�
 
   // 그림도 글상자도 직접 고른 색을 따른다(글상자만 검정으로 붙지 않는다)
   await panel.locator('.diary-art-chip[data-art="heart"]').click();
-  await panel.locator(".diary-btn").click();                                  // 글상자 넣기
+  await panel.locator(".diary-art-text-btn").click();                         // 글상자 넣기
   await page.keyboard.type("보라색 글");
   await page.keyboard.press("Control+Enter");
   expect(await rows()).toEqual([{ kind:"art", color:"#7d5fff" }, { kind:"text", color:"#7d5fff" }]);
@@ -1071,7 +1071,7 @@ test("글상자: 종이에 글을 얹고 두 번 눌러 고쳐 쓰며, 비우면
     return e ? e.stickers.filter(s => s.kind === "text").map(s => ({ text:s.text, align:s.align, size:s.size })) : [];
   });
   await page.locator(".diary-bar .diary-sticker-btn").click();
-  await page.locator(".diary-art-panel .diary-btn").click();          // 글상자 넣기
+  await page.locator(".diary-art-panel .diary-art-text-btn").click();          // 글상자 넣기
 
   // 붙자마자 고쳐 쓰는 칸이 열리고 견본 글이 모두 골라져 있다 → 바로 덮어쓴다
   const edit = page.locator(".diary-sticker-edit");
@@ -1108,7 +1108,7 @@ test("글상자: 종이에 글을 얹고 두 번 눌러 고쳐 쓰며, 비우면
 test("글상자 글자 크기는 종이 폭 비율이라 창이 좁아져도 줄바꿈 자리가 같다", async ({ page }) => {
   await boot(page);
   await page.locator(".diary-bar .diary-sticker-btn").click();
-  await page.locator(".diary-art-panel .diary-btn").click();
+  await page.locator(".diary-art-panel .diary-art-text-btn").click();
   await page.keyboard.type("한 줄에 담기지 않을 만큼 제법 기다란 문장이다");
   await page.keyboard.press("Control+Enter");
   const box = page.locator(".diary-sticker-text");
@@ -1271,7 +1271,7 @@ test("머리 접기: 제목·태그 줄만 접고, 날짜 줄과 그 날의 요�
 test("몰입 중 Esc 는 글상자 고치기·열린 창·고른 스티커를 먼저 처리한다", async ({ page }) => {
   await boot(page);
   await page.locator(".diary-bar .diary-sticker-btn").click();
-  await page.locator(".diary-art-panel .diary-btn").click();            // 글상자 넣기
+  await page.locator(".diary-art-panel .diary-art-text-btn").click();            // 글상자 넣기
   await page.keyboard.type("쪽지");
   await page.keyboard.press("Control+Enter");
   await page.locator(".diary-focus-btn").click();
@@ -1534,4 +1534,40 @@ test("저장한 일기장은 탭을 열고 둘러보기만 해서는 '저장 안
   await expect(page.locator(".office:not([hidden]) .diary-paper")).toBeVisible();
   await page.waitForTimeout(500);
   expect(await dirtyOf()).toBe(false);
+});
+
+test("돌아보기의 기록 지도를 기분으로 칠하고, 범례를 누르면 그 기분인 날만 또렷하다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await page.addInitScript(() => { try { localStorage.removeItem("mn.diaryHeatMode"); } catch(_){} });
+  await boot(page);
+  const year = new Date().getFullYear();
+  const key = (m, d) => year + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+  await page.evaluate((days) => {
+    const doc = docs.find(d => d.kind === "diary");
+    for (const [date, mood] of days) doc.diary.entries.push(diaryNormalizeEntry({ date, text:"글 " + date, mood }));
+  }, [[key(1, 3), "happy"], [key(1, 4), "happy"], [key(2, 1), "sad"], [key(3, 1), ""]]);
+  await page.locator('.diary-side-tab[data-side-tab="review"]').click();
+
+  const heat = page.locator(".diary-review-heatmap");
+  await expect(heat).toHaveClass(/is-mood/);                                  // 처음엔 기분으로 본다
+  const happy = heat.locator(".diary-review-day.has-entry[data-mood=happy]");
+  await expect(happy).toHaveCount(2);
+  const color = await happy.first().evaluate(el => getComputedStyle(el).backgroundColor);
+  expect(color).toBe("rgb(246, 186, 51)");                                    // DIARY_MOOD_ART.happy
+  await expect(heat.locator(".diary-review-day.no-mood")).toHaveCount(1);
+  await expect(page.locator(".diary-review-mood-chip")).toHaveText(["기쁨 2", "슬픔 1"]);
+  await expect(page.locator(".diary-review-mood-rest")).toHaveText("기분 없음 1");
+
+  await page.locator('.diary-review-mood-chip[data-mood="sad"]').click();
+  await expect(heat.locator(".diary-review-day.is-dim")).toHaveCount(3);      // 기쁨 2 + 기분 없음 1
+  await expect(page.locator('.diary-review-mood-chip[data-mood="sad"]')).toHaveAttribute("aria-pressed", "true");
+
+  // '기록' 으로 바꾸면 예전처럼 쓴 날만 한 색 — 그 선택은 기억된다
+  await page.locator('.diary-review-heat-mode[data-mode="entry"]').click();
+  await expect(heat).not.toHaveClass(/is-mood/);
+  await expect(page.locator(".diary-review-mood-legend")).toBeHidden();
+  await expect(heat.locator(".diary-review-day[data-mood]")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("mn.diaryHeatMode"))).toBe("entry");
+  // 보기를 바꾸는 것은 편집이 아니다
+  await expect(page.locator(".diary-status")).not.toContainText("저장 안 됨");
 });

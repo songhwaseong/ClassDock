@@ -693,11 +693,11 @@ test("다녀온 지역을 좌표에서 가려 센다(인터넷 없이)", async (
 test("경비는 날마다·여행 전체로 더하고, 화폐가 섞이면 따로 센다", async ({ page }) => {
   await boot(page);
   await page.locator(".trip-add-day").click();
-  await expect(page.locator(".trip-budget")).toBeHidden();       // 쓴 돈이 없으면 감춘다
+  await expect(page.locator(".trip-budget-line")).toBeHidden();  // 쓴 돈이 없으면 합계 줄은 감춘다(날에 안 붙는 돈 칸은 남는다)
 
   await page.locator(".trip-add-spot").click();
   await page.locator(".trip-spot-cost").fill("5000");
-  await expect(page.locator(".trip-budget")).toBeVisible();
+  await expect(page.locator(".trip-budget-line")).toBeVisible();
   await expect(page.locator(".trip-budget-sum")).toContainText("이 날 5,000원");
   await expect(page.locator(".trip-budget-sum")).toContainText("모두 5,000원");
 
@@ -1087,4 +1087,152 @@ test("뭐했지? — 그날 사진을 창 안에 크게 넘겨 보고 곧장 메
   await expect(modal.locator(".trip-recall-note")).toHaveText("해 뜨는 걸 봤다");
   await page.keyboard.press("Escape");
   await expect(modal).toBeHidden();
+});
+
+/* 장소 차례 바꾸기·다른 날로 옮기기·이동 거리·여행 요약 */
+async function seedTwoDays(page){
+  await page.locator(".trip-add-day").click();
+  await page.locator(".trip-add-day").click();
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    const spot = (id, at, name, lat, lng, extra) => ({ id, at, name, address:"", note:"", kind:"", lat, lng,
+      color:"", cost:null, photos:[], ...extra });
+    doc.trip.days[0].title = "첫날";
+    doc.trip.days[0].spots.push(
+      spot("sp-a", "09:00", "가", 33.5, 126.5, { kind:"food", cost:{ amount:12000, currency:"KRW" } }),
+      spot("sp-x", "", "엑스", 33.5, 126.6),
+      spot("sp-y", "", "와이", null, null));
+    doc.trip.days[1].title = "둘째 날";
+    doc.trip.days[1].spots.push(spot("sp-b", "10:00", "나", 33.4, 126.6, { kind:"stay", cost:{ amount:80000, currency:"KRW" } }));
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  await expect(page.locator(".trip-spot")).toHaveCount(3);
+  // 밖에서 넣은 장소는 되돌리기 기록에 없다 — 편집 한 번으로 기록에 남긴다(옮기기 전에 flush 된다).
+  await page.locator(".trip-title").fill("제주");
+}
+const spotNames = page => page.locator(".trip-spot .trip-spot-name").evaluateAll(els => els.map(e => e.value));
+
+test("장소 손잡이 메뉴로 차례를 바꾸고, 시각 있는 곳은 시각 차례로 돌아가며 그렇다고 알린다", async ({ page }) => {
+  await boot(page);
+  await seedTwoDays(page);
+  expect(await spotNames(page)).toEqual(["가", "엑스", "와이"]);
+
+  await page.locator(".trip-spot").nth(2).locator(".trip-spot-grip").click();
+  await page.locator(".text-context-menu").getByText("위로 옮기기").click();
+  expect(await spotNames(page)).toEqual(["가", "와이", "엑스"]);
+  await expect(page.locator(".trip-status")).toContainText("차례를 옮겼어요");
+
+  // Alt+↑ 로 시각 없는 곳을 시각 있는 곳 앞으로 — 시각 규칙 때문에 돌아가고 알림이 뜬다
+  await page.locator(".trip-spot").nth(1).locator(".trip-spot-grip").focus();
+  await page.keyboard.press("Alt+ArrowUp");
+  expect(await spotNames(page)).toEqual(["가", "와이", "엑스"]);
+  await expect(page.locator(".trip-status")).toContainText("시각 차례로 놓여요");
+
+  // 되돌리기 한 번이면 처음 차례
+  await page.locator(".trip-undo-btn").click();
+  expect(await spotNames(page)).toEqual(["가", "엑스", "와이"]);
+});
+
+test("장소를 다른 날로 옮기면 그 날 시각 차례에 끼고, 되돌리기로 돌아온다", async ({ page }) => {
+  await boot(page);
+  await seedTwoDays(page);
+  await page.locator(".trip-spot").nth(0).locator(".trip-spot-grip").click();
+  const menu = page.locator(".text-context-menu");
+  await menu.getByText("다른 날로 옮기기").hover();
+  await menu.getByText(/둘째 날/).click();
+  expect(await spotNames(page)).toEqual(["엑스", "와이"]);
+  let model = await modelOf(page);
+  expect(model.days[1].spots.map(s => s.id)).toEqual(["sp-a", "sp-b"]);   // 09:00 이 10:00 앞
+
+  await page.locator(".trip-undo-btn").click();
+  model = await modelOf(page);
+  expect(model.days[0].spots.map(s => s.id)).toEqual(["sp-a", "sp-x", "sp-y"]);
+  expect(model.days[1].spots.map(s => s.id)).toEqual(["sp-b"]);
+});
+
+test("손잡이를 끌어 목록 안 차례를 바꾸거나 여정 띠의 다른 날 위에 놓는다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:900 });
+  await boot(page);
+  await seedTwoDays(page);
+  // '와이'를 '엑스' 위쪽 반에 놓으면 엑스 앞
+  const x = page.locator(".trip-spot").nth(1);
+  await page.locator(".trip-spot").nth(2).locator(".trip-spot-grip").dragTo(x, { targetPosition:{ x:40, y:4 } });
+  expect(await spotNames(page)).toEqual(["가", "와이", "엑스"]);
+
+  // '엑스'를 둘째 날 칸에 놓으면 그 날로 간다(시각이 없으니 끝에)
+  await page.locator(".trip-spot").nth(2).locator(".trip-spot-grip").dragTo(page.locator(".trip-day-chip").nth(1));
+  expect(await spotNames(page)).toEqual(["가", "와이"]);
+  const model = await modelOf(page);
+  expect(model.days[1].spots.map(s => s.id)).toEqual(["sp-b", "sp-x"]);
+  await expect(page.locator(".trip-status")).toContainText("옮겼어요");
+});
+
+test("들른 곳에 직선 이동 거리가 붙고, 여행 요약 창이 기간·거리·경비·날마다를 보여 준다", async ({ page }) => {
+  await boot(page);
+  await seedTwoDays(page);
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    doc.trip.days[0].date = "2026-07-20";
+    doc.trip.days[1].date = "2026-07-22";
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  await expect(page.locator(".trip-spots-dist")).toContainText(/이동 9\.\d km/);        // 경도 0.1° ≈ 9.3km
+  await expect(page.locator(".trip-spot").nth(1).locator(".trip-spot-leg")).toContainText(/9\.\d km/);
+  await expect(page.locator(".trip-spot").nth(0).locator(".trip-spot-leg")).toHaveCount(0);   // 첫 곳엔 없다
+
+  await page.locator(".trip-summary-btn").click();
+  const card = page.locator(".trip-summary-card");
+  await expect(card).toBeVisible();
+  await expect(card.locator(".trip-summary-stat.is-period strong")).toHaveText("2박 3일");
+  await expect(card.locator(".trip-summary-stat.is-spots strong")).toHaveText("4");
+  await expect(card.locator(".trip-summary-stat.is-km strong")).toContainText("km");
+  await expect(card.locator(".trip-summary-money")).toContainText("92,000원");
+  await expect(card.locator(".trip-summary-bar")).toHaveCount(2);
+  await expect(card.locator(".trip-summary-day")).toHaveCount(2);
+
+  // 날 줄을 누르면 창이 닫히고 그 날로 간다
+  await card.locator(".trip-summary-day").nth(1).click();
+  await expect(card).toBeHidden();
+  await expect(page.locator(".trip-day-title")).toHaveValue("둘째 날");
+  // 요약을 여닫는 것만으로는 저장할 것이 생기지 않는다
+  await page.locator(".trip-summary-btn").click();
+  await page.keyboard.press("Escape");
+  await expect(card).toBeHidden();
+});
+
+test("장소를 끄는 동안 칸 아래 가장자리로 가면 목록 칸이 저절로 굴러 내려가고, 놓으면 멈춘다", async ({ page }) => {
+  await page.setViewportSize({ width:1400, height:700 });
+  await boot(page);
+  await page.locator(".trip-add-day").click();
+  await page.evaluate(() => {
+    const doc = docs.find(d => d.kind === "trip");
+    for (let i = 0; i < 16; i++) doc.trip.days[0].spots.push({ id:"sp-" + i, at:"", name:"곳 " + i, address:"", note:"",
+      kind:"", lat:null, lng:null, color:"", cost:null, photos:[] });
+  });
+  await page.locator(".trip-day-chip").nth(0).click();
+  await expect(page.locator(".trip-spot")).toHaveCount(16);
+  const main = page.locator(".trip-main");
+  await main.evaluate(el => { el.scrollTop = el.scrollHeight; });           // 목록이 보이게 내린 뒤
+  await main.evaluate(el => { el.scrollTop = Math.max(0, el.scrollTop - 300); });
+  const before = await main.evaluate(el => el.scrollTop);
+
+  // 네이티브 끌기는 휠이 안 오므로 dragover 로만 자리가 온다 — 그대로 흉내 낸다.
+  await page.evaluate(() => {
+    const grip = document.querySelector(".trip-spot .trip-spot-grip");
+    const dt = new DataTransfer();
+    window.__tripDt = dt;
+    grip.dispatchEvent(new DragEvent("dragstart", { bubbles:true, cancelable:true, dataTransfer:dt }));
+    const r = document.querySelector(".trip-main").getBoundingClientRect();
+    window.__tripOver = setInterval(() => document.querySelector(".trip-main").dispatchEvent(new DragEvent("dragover",
+      { bubbles:true, cancelable:true, dataTransfer:dt, clientX:r.left + r.width / 2, clientY:r.bottom - 5 })), 50);
+  });
+  await expect.poll(() => main.evaluate(el => el.scrollTop)).toBeGreaterThan(before + 100);
+
+  await page.evaluate(() => {
+    clearInterval(window.__tripOver);
+    document.querySelector(".trip-spot .trip-spot-grip").dispatchEvent(new DragEvent("dragend", { bubbles:true, dataTransfer:window.__tripDt }));
+  });
+  const stopped = await main.evaluate(el => el.scrollTop);
+  await page.waitForTimeout(200);
+  expect(await main.evaluate(el => el.scrollTop)).toBe(stopped);
 });

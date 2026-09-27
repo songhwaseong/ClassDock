@@ -70,11 +70,11 @@ test("영상은 저장본에 담겨 되살아나고, 빼면 되돌리기로 되�
     const doc = docs.find(d => d.kind === "trip");
     const back = await tripUnpack(tripPack(doc.trip, doc.tripAssets, Date.now()));
     const video = back.model.days[0].spots[0].videos[0];
-    return { video, size:back.assets.get(video.v).bytes.length, version:JSON.parse(tripModelJson(back.model)).version,
+    return { video, size:back.assets.get(video.v).bytes.length, version:JSON.parse(tripModelJson(back.model)).version, current:TRIP_VERSION,
       same:tripContentKey(back.model) === tripContentKey(doc.trip) };
   });
   expect(round.size).toBe(CLIP.length);
-  expect(round.version).toBe(3);
+  expect(round.version).toBe(round.current);
   expect(round.same).toBe(true);
 
   await page.locator(".trip-spot-video .trip-spot-photo-remove").click();

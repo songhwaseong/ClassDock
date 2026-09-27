@@ -8915,6 +8915,37 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-spots-empty{margin:2px 0;color:var(--muted);font-size:12px}
 .trip-budget{display:flex;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
 .trip-budget-sum{flex:1;min-width:0;color:var(--ink);font-size:13px;font-weight:600}
+.trip-budget{flex-direction:column;align-items:stretch}
+.trip-budget-line{display:flex;align-items:center;gap:6px}
+.trip-budget-line[hidden]{display:none}
+.trip-extra-toggle{align-self:flex-start;padding:3px 8px;border:0;background:none;color:var(--muted);font-size:12px;font-weight:600}
+.trip-extra-toggle:hover{color:var(--accent)}
+.trip-extra{display:flex;flex-direction:column;gap:5px}
+.trip-extra[hidden]{display:none}
+.trip-extra-row{display:flex;align-items:center;gap:5px}
+.trip-extra-label{flex:1;min-width:80px}
+.trip-extra-amount{width:100px;text-align:right}
+.trip-extra-label,.trip-extra-amount{padding:4px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
+.trip-extra-kind{max-width:110px}
+.trip-extra-remove{flex:none}
+.trip-extra-add{align-self:flex-start;font-size:12px}
+/* 준비물·할 일 — 여정 띠 아래 */
+.trip-checklist{margin-top:10px;padding-top:8px;border-top:1px dashed #c3d4e8}
+.trip-check-toggle{width:100%;padding:5px 4px;border:0;background:none;color:#263966;font:inherit;font-size:12.5px;font-weight:800;text-align:left;cursor:pointer}
+.trip-check-toggle.is-done{color:#16a34a}
+.trip-check-body{display:flex;flex-direction:column;gap:3px;margin-top:3px}
+.trip-check-body[hidden]{display:none}
+.trip-check-row{display:flex;align-items:center;gap:4px}
+.trip-check-box{flex:none;width:15px;height:15px;accent-color:#526cf4}
+.trip-check-text{flex:1;min-width:0;padding:3px 5px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ink);font:inherit;font-size:12.5px}
+.trip-check-text:hover,.trip-check-text:focus{border-color:var(--border);background:var(--bg)}
+.trip-check-row.is-done .trip-check-text{color:var(--muted);text-decoration:line-through}
+.trip-check-remove{flex:none;width:22px;min-width:22px;height:22px;padding:0;border:0;background:none;color:var(--muted);opacity:0}
+.trip-check-row:hover .trip-check-remove,.trip-check-remove:focus-visible{opacity:1}
+.trip-check-remove .ui-icon{width:13px;height:13px}
+.trip-check-add{padding:4px 6px;border:1px dashed #b9c9e1;border-radius:6px;background:rgba(255,255,255,.4);color:var(--ink);font:inherit;font-size:12.5px}
+.trip-check-clear{align-self:flex-start;padding:2px 4px;border:0;background:none;color:var(--muted);font:inherit;font-size:11.5px;cursor:pointer}
+.trip-check-clear:hover{color:var(--accent)}
 .trip-currency{width:56px;text-align:center;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
 .trip-rate{width:96px;text-align:right;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--ink);font-size:13px}
 .trip-spot-list{display:flex;flex-direction:column;gap:8px}
@@ -9053,6 +9084,84 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .trip-rail-icon{display:flex;color:#526cf4}.trip-rail-icon .ui-icon{width:20px;height:20px}
 .trip-rail-head{flex:1;padding:0;color:#1d3468;font-size:14px;font-weight:800}
 .trip-rail-chevron{display:flex;color:#60729b}.trip-rail-chevron .ui-icon{width:15px;height:15px}
+.trip-summary-btn,.trip-replay-open{flex:none;width:30px;min-width:30px;height:28px;padding:0;border:1px solid #c9d6ee;border-radius:8px;background:rgba(255,255,255,.6);color:#526cf4}
+.trip-summary-btn:hover,.trip-replay-open:hover{border-color:#5b8def;background:#fff}
+.trip-summary-btn .ui-icon,.trip-replay-open .ui-icon{width:16px;height:16px}
+/* 여행 되돌아보기 — 어두운 큰 창: 왼쪽 사진, 오른쪽 지도, 아래 조작 줄 */
+.trip-replay-modal{z-index:1310;background:rgba(8,12,20,.82)}
+.trip-replay-card{position:relative;display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,38%);grid-template-rows:minmax(0,1fr) auto;width:calc(96vw / var(--ui-zoom, 1));height:calc(92vh / var(--ui-zoom, 1));border-radius:16px;background:#0f1522;color:#eef2fb;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.trip-replay-card.no-map{grid-template-columns:minmax(0,1fr)}
+.trip-replay-card.no-map .trip-replay-map{display:none}
+.trip-replay-stage{position:relative;display:flex;min-width:0;min-height:0}
+.trip-replay-map{min-height:0;border-left:1px solid rgba(255,255,255,.08)}
+.trip-replay-slide{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-width:0;min-height:0;padding:22px 26px;animation:trip-replay-in .45s ease-out}
+@keyframes trip-replay-in{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
+.trip-replay-photo{flex:1;min-height:0;max-width:100%;object-fit:contain;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+.trip-replay-caption{display:flex;flex-direction:column;align-items:center;gap:3px;max-width:760px;text-align:center}
+.trip-replay-caption strong{font-size:20px}
+.trip-replay-caption span{color:#a9b6cf;font-size:13.5px}
+.trip-replay-caption p{margin:4px 0 0;color:#dbe3f3;font-size:15px;line-height:1.55;white-space:pre-wrap}
+.trip-replay-spot-art{display:flex;align-items:center;justify-content:center;width:140px;height:140px;border-radius:50%;background:rgba(255,255,255,.07);color:#8fb3ff}
+.trip-replay-spot-art svg{width:70px;height:70px}
+.trip-replay-video{padding:6px 14px;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:rgba(255,255,255,.08);color:#fff;font:inherit;font-size:13px;cursor:pointer}
+.trip-replay-slide.is-day{gap:10px;text-align:center}
+.trip-replay-day-label{color:#8fb3ff;font-size:15px;font-weight:700;letter-spacing:.02em}
+.trip-replay-day-title{margin:0;font-size:34px;line-height:1.25}
+.trip-replay-day-meta{display:flex;align-items:center;gap:10px;color:#a9b6cf;font-size:15px}
+.trip-replay-wx{display:inline-flex;width:34px;height:34px}.trip-replay-wx .diary-wx{width:100%;height:100%}
+.trip-replay-day-text{max-width:640px;margin:6px 0 0;color:#dbe3f3;font-size:16px;line-height:1.7;white-space:pre-wrap}
+.trip-replay-bar{grid-column:1 / -1;display:flex;align-items:center;gap:8px;padding:10px 14px;border-top:1px solid rgba(255,255,255,.08);background:#0b101a}
+.trip-replay-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.08);color:#eef2fb;cursor:pointer}
+.trip-replay-btn:hover:not(:disabled){background:rgba(255,255,255,.18)}
+.trip-replay-btn:disabled{opacity:.35;cursor:default}
+.trip-replay-btn.is-main{width:44px;height:44px;background:#526cf4}
+.trip-replay-btn.is-close{margin-left:4px}
+.trip-replay-btn .ui-icon{width:18px;height:18px}
+.trip-replay-count{min-width:64px;color:#a9b6cf;font-size:13px;font-variant-numeric:tabular-nums;text-align:center}
+.trip-replay-progress{flex:1;height:4px;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden}
+.trip-replay-progress i{display:block;height:100%;width:100%;background:#8fb3ff;transform-origin:left;animation:trip-replay-bar var(--replay-ms,5000ms) linear forwards}
+.trip-replay-card.is-paused .trip-replay-progress i{animation-play-state:paused}
+@keyframes trip-replay-bar{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.trip-replay-speed{padding:5px 6px;border:1px solid rgba(255,255,255,.2);border-radius:8px;background:#0f1522;color:#eef2fb;font:inherit;font-size:12.5px}
+.trip-summary-replay{flex:none;font-size:12.5px}
+@media (max-width:760px){.trip-replay-card{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) 34% auto}.trip-replay-map{border-left:0;border-top:1px solid rgba(255,255,255,.08)}}
+/* 여행 요약 창 */
+.trip-summary-modal{z-index:1300}
+.trip-summary-card{display:flex;flex-direction:column;gap:10px;width:min(760px,calc(96vw / var(--ui-zoom, 1)));max-height:min(860px,calc(94vh / var(--ui-zoom, 1)));padding:14px 16px;overflow:hidden}
+.trip-summary-head{display:flex;align-items:center;gap:10px;flex:none}
+.trip-summary-titles{flex:1;min-width:0}
+.trip-summary-title{margin:0;font-size:16px}
+.trip-summary-sub{overflow:hidden;color:var(--muted);font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}
+.trip-summary-body{display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto;padding:2px 2px 6px}
+.trip-summary-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px}
+.trip-summary-stat{display:flex;flex-direction:column;gap:2px;padding:10px 11px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--trip-blue,#2563eb) 5%,var(--field))}
+.trip-summary-stat strong{color:var(--trip-blue,#2563eb);font-size:19px;line-height:1.25}
+.trip-summary-stat span{color:var(--ink);font-size:12px;font-weight:600}
+.trip-summary-stat small{color:var(--muted);font-size:11px}
+.trip-summary-section{display:flex;flex-direction:column;gap:7px}
+.trip-summary-section h4{margin:0;color:var(--muted);font-size:12.5px;font-weight:700}
+.trip-summary-money{font-size:15px;font-weight:700}.trip-summary-money span{color:var(--muted);font-size:13px;font-weight:600}
+.trip-summary-bars{display:flex;flex-direction:column;gap:5px}
+.trip-summary-bar{display:grid;grid-template-columns:minmax(90px,130px) minmax(60px,1fr) auto;align-items:center;gap:8px;font-size:12.5px}
+.trip-summary-bar-name{display:flex;align-items:center;gap:5px;min-width:0;white-space:nowrap}
+.trip-summary-bar-track{height:8px;border-radius:999px;background:color-mix(in srgb,var(--border) 60%,transparent);overflow:hidden}
+.trip-summary-bar-track i{display:block;height:100%;border-radius:999px;background:var(--trip-blue,#2563eb)}
+.trip-summary-bar-value{color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.trip-summary-kind-icon{display:inline-flex;width:16px;height:16px;flex:none}.trip-summary-kind-icon svg{width:100%;height:100%}
+.trip-summary-chips{display:flex;flex-wrap:wrap;gap:5px}
+.trip-summary-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border:1px solid var(--border);border-radius:999px;background:var(--field);font-size:12px}
+.trip-summary-note{color:var(--muted);font-size:12px}
+.trip-summary-days{display:flex;flex-direction:column;gap:3px}
+.trip-summary-day{display:grid;grid-template-columns:minmax(110px,150px) minmax(0,1fr) 52px minmax(110px,160px) minmax(60px,auto);align-items:center;gap:8px;padding:6px 8px;border:1px solid transparent;border-radius:8px;background:none;color:var(--ink);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
+.trip-summary-day:hover{background:var(--panel-hover)}
+.trip-summary-day.is-on{border-color:color-mix(in srgb,var(--trip-blue,#2563eb) 45%,transparent)}
+.trip-summary-day-label{font-weight:700;white-space:nowrap}
+.trip-summary-day-title{overflow:hidden;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}
+.trip-summary-day-num,.trip-summary-day-money{color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.trip-summary-day-km{display:flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.trip-summary-day-km i{display:block;flex:0 1 auto;height:6px;min-width:0;max-width:70px;border-radius:999px}
+.trip-summary-empty{margin:0;color:var(--muted)}
+@media (max-width:620px){.trip-summary-day{grid-template-columns:1fr auto}.trip-summary-day-title,.trip-summary-day-km{display:none}}
 .trip-rail-list{position:relative;gap:0}
 .trip-day-chip{position:relative;min-height:54px;margin:0 0 7px;padding:8px 8px 8px 32px;border-color:transparent;border-radius:11px;background:transparent;overflow:visible}
 .trip-day-chip::before{content:"";position:absolute;z-index:2;left:9px;top:17px;width:9px;height:9px;border:3px solid var(--trip-card);border-radius:50%;background:#6f8cbd;box-shadow:0 0 0 1px rgba(64,104,160,.18)}
@@ -9090,6 +9199,28 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .trip-spot{border-color:rgba(125,158,193,.22);border-radius:11px;background:color-mix(in srgb,var(--bg) 76%,transparent)}
 .trip-spot.is-fresh{animation:trip-spot-fresh 1.8s ease-out}
 @keyframes trip-spot-fresh{0%,35%{border-color:var(--trip-blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--trip-blue) 30%,transparent)}100%{box-shadow:0 0 0 0 transparent}}
+/* 장소 차례 손잡이·끌어 놓을 자리 */
+.trip-spot{position:relative}
+.trip-spot-grip{flex:0 0 auto;width:22px;min-width:22px;height:28px;padding:0;border:0;background:transparent;color:var(--muted);cursor:grab}
+.trip-spot-grip:hover,.trip-spot-grip:focus-visible{color:var(--trip-blue);background:color-mix(in srgb,var(--trip-blue) 10%,transparent)}
+.trip-spot-grip:active{cursor:grabbing}
+.trip-spot-grip .ui-icon{width:16px;height:16px}
+.trip-spot.is-dragging{opacity:.45}
+.trip-spot.is-drop-before::before,.trip-spot.is-drop-after::after{content:"";position:absolute;left:6px;right:6px;height:3px;border-radius:3px;background:var(--trip-blue);pointer-events:none}
+.trip-spot.is-drop-before::before{top:-5px}
+.trip-spot.is-drop-after::after{bottom:-5px}
+.trip-root.is-spot-dragging .trip-day-chip:not(.is-on){outline:1px dashed color-mix(in srgb,var(--trip-blue) 45%,transparent);outline-offset:-2px}
+.trip-day-chip.is-drop{outline:2px solid var(--trip-blue)!important;background:color-mix(in srgb,var(--trip-blue) 12%,transparent)}
+.trip-day-chip.is-fresh{animation:trip-spot-fresh 1.8s ease-out}
+.trip-day-chip.has-thumb{padding-right:56px}
+.trip-day-chip-thumb{position:absolute;top:50%;right:7px;width:42px;height:42px;border-radius:8px;object-fit:cover;transform:translateY(-50%);box-shadow:0 2px 6px rgba(40,60,100,.22);pointer-events:none}
+.trip-day-chip-wx{display:inline-flex;width:17px;height:17px;margin-right:4px;vertical-align:-3px}
+.trip-day-chip-wx .diary-wx{width:100%;height:100%}
+.trip-spot-find{flex:0 0 auto}
+.trip-spot-find.is-busy{opacity:.5;pointer-events:none;animation:trip-find-pulse 1s ease-in-out infinite}
+@keyframes trip-find-pulse{50%{opacity:.25}}
+.trip-spot-leg{margin-left:auto;color:var(--muted);font-size:11.5px;white-space:nowrap}
+.trip-spots-dist{padding:1px 8px;border-radius:999px;background:color-mix(in srgb,var(--trip-blue) 10%,transparent);color:var(--trip-blue);font-size:11.5px;font-weight:600;white-space:nowrap}
 .trip-map-divider{margin:10px 0;border-radius:999px;background:transparent}
 .trip-map-divider::before{background:rgba(92,131,172,.2)}
 .trip-map-pane{margin:0 0 0 2px;border:1px solid rgba(255,255,255,.86);border-radius:16px;background:var(--trip-card);box-shadow:0 9px 24px rgba(53,107,146,.15);overflow:hidden;backdrop-filter:blur(10px)}
@@ -9316,6 +9447,17 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .diary-review-heat-row{display:grid;grid-template-columns:24px repeat(31,5px);gap:2px;align-items:center;min-width:235px}
 .diary-review-heat-row>span:first-child{color:var(--muted);font-size:9px;text-align:right}
 .diary-review-day{width:5px;height:7px;padding:0;border:0;border-radius:2px;background:var(--border);opacity:.5}.diary-review-day.has-entry{background:var(--accent);opacity:1;cursor:pointer}.diary-review-day.is-empty{visibility:hidden}
+.diary-review-heat-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:2px}
+.diary-review-heat-head .diary-review-subhead{margin-top:0}
+.diary-review-heat-modes{display:inline-flex;padding:2px;border:1px solid var(--border);border-radius:999px;background:var(--field)}
+.diary-review-heat-mode{padding:1px 8px;border:0;border-radius:999px;background:none;color:var(--muted);font:inherit;font-size:11px;cursor:pointer}
+.diary-review-heat-mode.is-on{background:var(--accent);color:#fff}
+.diary-review-heatmap.is-mood .diary-review-day.no-mood{opacity:.35}
+.diary-review-heatmap.is-mood .diary-review-day.is-dim{opacity:.15}
+.diary-review-mood-legend{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:11px;color:var(--muted)}
+.diary-review-mood-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 7px 2px 5px;border:1px solid var(--border);border-radius:999px;background:var(--field);color:var(--ink);font:inherit;font-size:11px;cursor:pointer}
+.diary-review-mood-chip i{width:9px;height:9px;border-radius:50%}
+.diary-review-mood-chip.is-on{border-color:var(--accent);box-shadow:0 0 0 1.5px color-mix(in srgb,var(--accent) 35%,transparent)}
 .diary-review-memories{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:12px}
 .diary-review-memories button{padding:6px;border:0;border-radius:6px;background:none;color:var(--ink);font:inherit;font-size:12px;text-align:left;cursor:pointer}.diary-review-memories button:hover{background:var(--panel-hover)}
 .diary-main{min-width:0;overflow:auto;padding:16px 16px 40px}
@@ -9380,6 +9522,50 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-tag-input{width:90px;height:25px;padding:2px 7px;border:1px dashed var(--border);border-radius:999px;background:transparent;color:var(--ink);font:inherit;font-size:11.5px;outline:0}.diary-tag-input:focus{width:130px;border-color:var(--accent);background:var(--field)}
 .diary-template-panel{position:absolute;z-index:46;width:250px;display:flex;flex-direction:column;gap:5px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
 .diary-template-panel[hidden]{display:none}.diary-template-panel>strong{font-size:13px}.diary-template-note{color:var(--muted);font-size:11.5px;margin-bottom:2px}
+.diary-template-panel{width:280px;max-height:min(560px,calc(80vh / var(--ui-zoom, 1)));overflow:auto}
+/* 기념일 — 달력 아래 목록, 날짜 옆 배지, 달력 칸의 하트, 고치는 창 */
+.diary-anniv-box{display:flex;flex-direction:column;gap:4px;margin-top:10px;padding-top:9px;border-top:1px solid var(--border)}
+.diary-anniv-head{display:flex;align-items:center;justify-content:space-between;gap:6px;color:var(--muted);font-size:12px}
+.diary-anniv-edit{width:28px;min-width:28px;height:26px;padding:0}
+.diary-anniv-edit .ui-icon{width:15px;height:15px}
+.diary-anniv-list{display:flex;flex-direction:column;gap:2px}
+.diary-anniv-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 7px;border:0;border-radius:7px;background:none;color:var(--ink);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
+.diary-anniv-row:hover{background:var(--panel-hover)}
+.diary-anniv-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.diary-anniv-when{flex:none;color:#e11d48;font-weight:700;font-variant-numeric:tabular-nums}
+.diary-anniv-row.is-today{background:color-mix(in srgb,#e11d48 10%,transparent)}
+.diary-anniv-empty{padding:5px 7px;border:1px dashed var(--border);border-radius:7px;background:none;color:var(--muted);font:inherit;font-size:12px;text-align:left;cursor:pointer}
+.diary-anniv-empty:hover{color:var(--accent);border-color:var(--accent)}
+.diary-anniv-badge{display:inline-flex;align-items:center;max-width:260px;padding:2px 9px;border-radius:999px;background:color-mix(in srgb,#e11d48 12%,transparent);color:#be123c;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.diary-anniv-badge[hidden]{display:none}
+.diary-cal-day{position:relative}
+.diary-cal-anniv{position:absolute;top:1px;right:3px;color:#e11d48;font-size:9px;line-height:1}
+.diary-anniv-panel{position:absolute;z-index:46;width:290px;max-height:min(560px,calc(80vh / var(--ui-zoom, 1)));overflow:auto;display:flex;flex-direction:column;gap:5px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow)}
+.diary-anniv-panel[hidden]{display:none}
+.diary-anniv-panel>strong{font-size:13px}
+.diary-anniv-form-row{display:flex;gap:5px}
+.diary-anniv-form-row input{flex:1;min-width:0}
+.diary-anniv-item{display:flex;align-items:center;gap:2px}
+.diary-anniv-item-text{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;padding:5px 7px;border:0;border-radius:7px;background:none;color:var(--ink);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}
+.diary-anniv-item-text:hover{background:var(--panel-hover)}
+.diary-anniv-item-text span{color:var(--muted);font-size:11.5px}
+.diary-anniv-remove{flex:none;width:26px;min-width:26px;height:26px;padding:0;border:0;background:none;color:var(--muted)}
+.diary-anniv-remove:hover{color:#dc2626}
+.diary-anniv-remove .ui-icon{width:14px;height:14px}
+.diary-doc.is-screen-locked>.diary-anniv-panel{display:none}
+.diary-template-subhead{margin-top:6px;padding-top:7px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;font-weight:700}
+.diary-template-user{display:flex;align-items:center;gap:2px}
+.diary-template-user-use{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.diary-template-user .diary-btn{flex:none;width:26px;min-width:26px;height:26px;padding:0;border:0;background:none;color:var(--muted)}
+.diary-template-user .diary-btn:hover{color:var(--accent);background:var(--panel-hover)}
+.diary-template-user .diary-btn .ui-icon{width:14px;height:14px}
+.diary-template-add-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+.diary-template-add-row .diary-btn{font-size:12px}
+.diary-template-form{display:flex;flex-direction:column;gap:5px;margin-top:2px}
+.diary-template-form input,.diary-template-form textarea{width:100%;box-sizing:border-box;padding:6px 7px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;font-size:12.5px}
+.diary-template-form textarea{resize:vertical;min-height:84px;line-height:1.45}
+.diary-template-form-actions{display:flex;align-items:center;gap:5px}
+.diary-template-msg{flex:1;color:#dc2626;font-size:11.5px}
 .diary-template-option{padding:7px 8px;border:0;border-radius:7px;background:none;color:var(--ink);font:inherit;font-size:12.5px;text-align:left;cursor:pointer}.diary-template-option:hover{background:var(--panel-hover);color:var(--accent)}
 .diary-paper{position:relative;max-width:780px;margin:0 auto;background:var(--diary-paper);border-radius:6px;box-shadow:0 1px 3px rgba(15,23,42,.12),0 8px 24px rgba(15,23,42,.08);overflow:hidden}
 .diary-paper.is-drop{outline:3px dashed var(--accent);outline-offset:-6px}
@@ -9402,6 +9588,32 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-sticker{position:absolute;pointer-events:auto;cursor:grab;touch-action:none;outline:none;user-select:none}
 .diary-sticker img{display:block;width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.18));pointer-events:none}
 .diary-sticker.is-dragging{cursor:grabbing}
+/* 사진 테두리 — 사진 상자 안에 그린다(상자 크기는 그대로라 종이 길이·인쇄 자리가 변하지 않는다). 화면·인쇄 공용. */
+:is(.diary-sticker,.diary-print-sticker)[class*="diary-frame-"] .diary-sticker-body{box-sizing:border-box;width:100%;height:100%;object-fit:cover;filter:none}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-white .diary-sticker-body{padding:4%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.22)}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-polaroid .diary-sticker-body{padding:5% 5% 19%;background:#fffdf8;box-shadow:0 3px 9px rgba(0,0,0,.25)}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-round .diary-sticker-body{border-radius:9%}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-shadow .diary-sticker-body{box-shadow:0 7px 16px rgba(0,0,0,.35),0 1px 3px rgba(0,0,0,.2)}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-tape .diary-sticker-body{padding:3%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-tape::before,:is(.diary-sticker,.diary-print-sticker).diary-frame-tape::after{content:"";position:absolute;top:-4%;width:34%;height:12%;min-height:10px;background:rgba(250,204,120,.72);box-shadow:0 1px 2px rgba(0,0,0,.08);pointer-events:none;z-index:1}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-tape::before{left:-6%;transform:rotate(-32deg)}
+:is(.diary-sticker,.diary-print-sticker).diary-frame-tape::after{right:-6%;transform:rotate(32deg);background:rgba(147,197,253,.7)}
+/* 녹음 스티커 — 알약 모양. 글자 크기는 상자 높이를 따른다(container 단위) — 인쇄 폭에서도 같은 비율. */
+:is(.diary-sticker,.diary-print-sticker).diary-sticker-is-audio{container-type:size}
+.diary-sticker-audio{--audio-color:#f472b6;box-sizing:border-box;display:flex;align-items:center;gap:5cqh;width:100%;height:100%;padding:0 9cqh 0 7cqh;border-radius:999px;border:max(1px,3cqh) solid color-mix(in srgb,var(--audio-color) 70%,#000 0%);background:linear-gradient(90deg,color-mix(in srgb,var(--audio-color) 28%,#fff) calc(var(--audio-progress,0) * 100%),color-mix(in srgb,var(--audio-color) 12%,#fff) 0);color:color-mix(in srgb,var(--audio-color) 55%,#1f2937);overflow:hidden;box-shadow:0 2px 5px rgba(0,0,0,.14)}
+.diary-audio-play{flex:none;display:inline-flex;align-items:center;justify-content:center;width:72cqh;height:72cqh;padding:0;border:0;border-radius:50%;background:var(--audio-color);color:#fff;cursor:pointer}
+.diary-audio-play .ui-icon{width:55%;height:55%}
+.diary-audio-wave{flex:none;display:flex;align-items:center;gap:3cqh;height:52cqh}
+.diary-audio-wave i{display:block;width:4.5cqh;min-width:1.5px;border-radius:2px;background:currentColor;opacity:.7}
+.diary-sticker.is-playing .diary-audio-wave i{animation:diary-audio-bounce .9s ease-in-out infinite}
+.diary-sticker.is-playing .diary-audio-wave i:nth-child(2n){animation-delay:-.3s}.diary-sticker.is-playing .diary-audio-wave i:nth-child(3n){animation-delay:-.6s}
+@keyframes diary-audio-bounce{50%{transform:scaleY(.45)}}
+.diary-audio-text{display:flex;flex-direction:column;min-width:0;line-height:1.15}
+.diary-audio-label{overflow:hidden;font-size:24cqh;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.diary-audio-time{font-size:19cqh;opacity:.8;font-variant-numeric:tabular-nums}
+.diary-audio-record.is-recording{border-color:#dc2626;color:#dc2626;animation:diary-rec-glow 1.2s ease-in-out infinite}
+@keyframes diary-rec-glow{50%{box-shadow:0 0 0 4px rgba(220,38,38,.25)}}
+.diary-audio-clock{align-self:center;color:#dc2626;font-size:12px;font-variant-numeric:tabular-nums}
 .diary-sticker.is-selected{outline:2px solid var(--accent);outline-offset:2px}
 .diary-sticker-handle{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border:2px solid #fff;border-radius:50%;background:var(--accent);cursor:nwse-resize;display:none;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .diary-sticker-remove{position:absolute;top:-11px;right:-11px;width:22px;height:22px;display:none;align-items:center;justify-content:center;padding:0;border:2px solid #fff;border-radius:50%;background:var(--danger);color:#fff;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.3)}

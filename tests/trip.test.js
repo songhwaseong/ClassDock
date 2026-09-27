@@ -10,7 +10,8 @@ const diary = require("../src/js/diary.js");
 for (const name of ["diaryCrc32", "diaryZipBuild", "diaryZipRead", "diaryNormalizeSticker", "diaryNormalizeStroke",
   "diaryNormalizeStyle", "diaryNormalizeTags", "diaryCleanSticker", "diaryDefaultStyle", "diaryWeatherInfo",
   "diaryMoodInfo", "diaryStickerKind", "diaryNormalizeAngle", "DIARY_ART_DEFAULT_COLOR", "DIARY_TEXT_DEFAULT_COLOR",
-  "DIARY_MAX_STROKES", "DIARY_MAX_STICKERS", "diaryAssetMime", "diaryDefaultBackdrop", "diaryNormalizeBackdrop"]) {
+  "DIARY_MAX_STROKES", "DIARY_MAX_STICKERS", "diaryAssetMime", "diaryDefaultBackdrop", "diaryNormalizeBackdrop",
+  "diaryArrangeStickers", "diaryStickerBottom", "diaryEstimateTextHeight"]) {
   if (diary[name] !== undefined) globalThis[name] = diary[name];
 }
 const trip = require("../src/js/trip.js");
@@ -664,4 +665,170 @@ test("여행일지 화면도 일기장 바탕 테마 CSS 를 모두 받는다", 
   for (const theme of ["blossom", "linen", "night", "custom", "paper-flowers", "pastel-sky", "wood-desk", "moonlit-sky", "leafy-bokeh"]){
     assert.ok(css.includes(`.trip-root[data-backdrop="${theme}"]`), theme);
   }
+});
+
+test("장소 옮기기: 시각 없는 곳은 놓은 자리로, 시각 있는 곳은 시각 차례로 돌아가며 snapped 로 알린다", () => {
+  const spots = [{ id:"a", at:"09:00" }, { id:"b", at:"12:00" }, { id:"x", at:"" }, { id:"y", at:"" }, { id:"z", at:"" }];
+  const ids = r => r.spots.map(s => s.id);
+  let r = trip.tripMoveSpot(spots, "z", "x");
+  assert.deepEqual(ids(r), ["a", "b", "z", "x", "y"]);
+  assert.equal(r.moved, true); assert.equal(r.snapped, false);
+  assert.deepEqual(spots.map(s => s.id), ["a", "b", "x", "y", "z"], "원래 배열은 건드리지 않는다");
+  r = trip.tripMoveSpot(spots, "x", "");              // 맨 끝으로
+  assert.deepEqual(ids(r), ["a", "b", "y", "z", "x"]);
+  r = trip.tripMoveSpot(spots, "b", "a");             // 12:00 을 09:00 앞으로 — 시각 자리로 돌아간다
+  assert.deepEqual(ids(r), ["a", "b", "x", "y", "z"]);
+  assert.equal(r.moved, false); assert.equal(r.snapped, true);
+  r = trip.tripMoveSpot(spots, "x", "x");             // 제 앞 = 제자리(끝으로 가면 안 된다)
+  assert.deepEqual(ids(r), ["a", "b", "x", "y", "z"]);
+  assert.equal(r.moved, false); assert.equal(r.snapped, false);
+  const same = [{ id:"p", at:"10:00" }, { id:"q", at:"10:00" }];
+  assert.deepEqual(ids(trip.tripMoveSpot(same, "q", "p")), ["q", "p"], "같은 시각끼리는 차례를 바꿀 수 있다");
+});
+
+test("장소를 다른 날로 옮기면 그 날 시각 차례에 끼고, 가득 찬 날·같은 날은 받지 않는다", () => {
+  const days = [
+    { id:"d1", spots:[{ id:"s1", at:"10:00" }, { id:"s2", at:"" }] },
+    { id:"d2", spots:[{ id:"t1", at:"09:00" }, { id:"t2", at:"11:00" }] }
+  ];
+  const r = trip.tripMoveSpotToDay(days, "s1", "d2");
+  assert.equal(r.ok, true);
+  assert.deepEqual(days[0].spots.map(s => s.id), ["s2"]);
+  assert.deepEqual(days[1].spots.map(s => s.id), ["t1", "s1", "t2"]);
+  assert.equal(trip.tripMoveSpotToDay(days, "s1", "d2").reason, "same");
+  assert.equal(trip.tripMoveSpotToDay(days, "nope", "d1").reason, "missing");
+  days[0].spots = Array.from({ length:trip.TRIP_MAX_SPOTS }, (_, i) => ({ id:"f" + i, at:"" }));
+  assert.equal(trip.tripMoveSpotToDay(days, "t1", "d1").reason, "full");
+  assert.deepEqual(days[1].spots.map(s => s.id), ["t1", "s1", "t2"], "못 옮기면 그대로");
+});
+
+test("이동 거리는 좌표 있는 곳끼리 목록 차례로 잇는 직선 거리다", () => {
+  // 서울시청 → 부산시청 ≈ 325km
+  const seoul = { lat:37.5663, lng:126.9779 }, busan = { lat:35.1798, lng:129.075 };
+  const km = trip.tripDistanceKm(seoul, busan);
+  assert.ok(km > 320 && km < 330, String(km));
+  const day = { spots:[{ id:"a", ...seoul }, { id:"n", lat:null, lng:null }, { id:"b", ...busan }, { id:"c", ...busan }] };
+  const route = trip.tripDayDistance(day);
+  assert.ok(Math.abs(route.km - km) < 1e-9);
+  assert.deepEqual([...route.legs.keys()], ["b", "c"], "좌표 없는 곳은 건너뛰고 앞 좌표에서 잰다");
+  assert.equal(route.legs.get("c"), 0);
+  assert.equal(trip.tripFormatKm(0), "0 km");
+  assert.equal(trip.tripFormatKm(0.4321), "430 m");
+  assert.equal(trip.tripFormatKm(12.345), "12.3 km");
+  assert.equal(trip.tripFormatKm(325.4), "325 km");
+});
+
+test("여행 요약은 기간·장소·사진·거리(날 안/날 사이)·경비(화폐별·종류별)를 센다", () => {
+  const model = trip.tripNormalize({ format:trip.TRIP_FORMAT, version:trip.TRIP_VERSION, days:[
+    { id:"d1", date:"2026-07-20", spots:[
+      { id:"a", name:"a", lat:33.5, lng:126.5, kind:"food", cost:{ amount:12000, currency:"KRW" } },
+      { id:"b", name:"b", lat:33.5, lng:126.6, kind:"food", cost:{ amount:8000, currency:"KRW" } }] },
+    { id:"d2", date:"2026-07-23", spots:[
+      { id:"c", name:"c", lat:33.4, lng:126.6, kind:"stay", cost:{ amount:100, currency:"USD" } },
+      { id:"d", name:"d" }] }
+  ] });
+  const s = trip.tripSummary(model);
+  assert.equal(s.days, 2);
+  assert.equal(s.first, "2026-07-20"); assert.equal(s.last, "2026-07-23"); assert.equal(s.nights, 3);
+  assert.equal(s.spots, 4); assert.equal(s.located, 3);
+  assert.ok(s.km.within > 9 && s.km.within < 10, String(s.km.within));       // 경도 0.1° ≈ 9.3km
+  assert.ok(s.km.between > 11 && s.km.between < 11.3, String(s.km.between)); // 위도 0.1° ≈ 11.1km
+  assert.equal(s.km.total, s.km.within + s.km.between);
+  assert.deepEqual([...s.cost], [["KRW", 20000], ["USD", 100]]);
+  assert.deepEqual([...s.costByKind.get("food")], [["KRW", 20000]]);
+  assert.equal(s.kinds.get("food"), 2); assert.equal(s.kinds.get(""), 1);
+  assert.deepEqual(s.perDay.map(d => d.spots), [2, 2]);
+  assert.equal(trip.tripSummary(trip.tripEmpty()).days, 0);
+});
+
+test("판 5: 날에 안 붙는 돈·준비물은 걸러 담고, 저장·비교·요약에 들어간다", async () => {
+  assert.ok(trip.TRIP_VERSION >= 5, "옛 앱이 새 칸·녹음 소리를 버리고 덮어쓰지 않게 판을 올린다");
+  const ex = trip.tripNormalizeExpenses([
+    { id:"ex-a", label:"  항공권 ", amount:"320000", currency:"krw", kind:"move" },
+    { id:"ex-a", label:"같은 id", amount:10, currency:"USD" },
+    { label:"", amount:null },
+    { label:"금액만 없음" },
+    { amount:-5, label:"" }
+  ]);
+  assert.equal(ex.length, 3);
+  assert.deepEqual(ex[0], { id:"ex-a", label:"항공권", amount:320000, currency:"KRW", kind:"move" });
+  assert.notEqual(ex[1].id, "ex-a");
+  assert.equal(ex[2].amount, 0);
+  const ck = trip.tripNormalizeChecklist([{ id:"ck-a", text:" 여권 ", done:true }, { text:"  " }, { text:"충전기" }, "x"]);
+  assert.deepEqual(ck.map(x => [x.text, x.done]), [["여권", true], ["충전기", false]]);
+
+  const model = trip.tripEmpty("제주");
+  assert.deepEqual([model.expenses, model.checklist], [[], []]);
+  const key0 = trip.tripContentKey(model);
+  model.expenses = ex; model.checklist = ck;
+  assert.notEqual(trip.tripContentKey(model), key0);
+  model.days.push(trip.tripNormalizeDay({ id:"d1", date:"2026-07-20", spots:[{ id:"s", name:"a", kind:"food", cost:{ amount:10000, currency:"KRW" } }] }));
+  const back = await trip.tripUnpack(trip.tripPack(model, new Map()));
+  assert.deepEqual(back.model.expenses, ex);
+  assert.deepEqual(back.model.checklist, ck);
+  const sum = trip.tripSummary(back.model);
+  assert.deepEqual([...sum.cost], [["KRW", 330000], ["USD", 10]]);
+  assert.deepEqual([...sum.extraCost], [["KRW", 320000], ["USD", 10]]);
+  assert.deepEqual([...sum.costByKind.get("move")], [["KRW", 320000]]);
+  const old = trip.tripNormalize({ format:trip.TRIP_FORMAT, version:4, days:[] });
+  assert.deepEqual([old.expenses, old.checklist], [[], []]);
+});
+
+test("여행일지 종이의 녹음 스티커 소리도 ZIP 에 담겨 돌아온다", async () => {
+  const model = trip.tripEmpty("녹음");
+  const has = (name) => name === "assets/abcd1234.webm";
+  model.days.push(trip.tripNormalizeDay({ id:"d1", date:"2026-07-20",
+    stickers:[{ id:"a", kind:"audio", asset:"assets/abcd1234.webm", d:3, x:.1, y:.1, w:.3 }] }, has));
+  assert.equal(model.days[0].stickers[0].kind, "audio");
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const back = await trip.tripUnpack(trip.tripPack(model, new Map([["assets/abcd1234.webm", { bytes }]])));
+  assert.deepEqual([...back.assets.get("assets/abcd1234.webm").bytes], [1, 2, 3, 4]);
+  assert.equal(back.model.days[0].stickers[0].kind, "audio");
+});
+
+test("하루를 일기장으로: 글 끝에 들른 곳, 스티커는 새 id, 장소 사진은 글 아래 사진첩처럼, 태그 '여행'", () => {
+  const model = trip.tripEmpty("제주 여행");
+  const day = trip.tripNormalizeDay({ id:"d1", date:"2026-07-20", title:"", text:"바람이 셌다\n", weather:"sunny", mood:"happy", tags:["가족"],
+    stickers:[{ id:"st-old", kind:"art", art:"heart", x:.1, y:.1, w:.2 }],
+    spots:[
+      { id:"s1", at:"09:30", name:"성산일출봉", note:"일출\n좋음", photos:["assets/aaaa1111.jpg", "assets/bbbb2222.jpg"] },
+      { id:"s2", name:"", address:"주소만", photos:["assets/cccc3333.jpg"] }] }, () => true);
+  const ar = new Map([["assets/aaaa1111.jpg", 0.75], ["assets/cccc3333.jpg", 1.5]]);   // bbbb 는 못 읽은 사진
+  const out = trip.tripDayToDiaryEntry(model, day, ar, false);
+  assert.equal(out.entry.date, "2026-07-20");
+  assert.equal(out.entry.title, "제주 여행", "그 날 제목이 없으면 여행 제목");
+  assert.equal(out.entry.text, "바람이 셌다\n\n— 들른 곳 —\n· 09:30 성산일출봉 — 일출 좋음\n· (이름 없는 곳)");
+  assert.deepEqual(out.entry.tags, ["가족", "여행"]);
+  assert.equal(out.entry.weather, "sunny");
+  const [art, ...photos] = out.entry.stickers;
+  assert.notEqual(art.id, "st-old");
+  assert.deepEqual(photos.map(p => p.asset), ["assets/aaaa1111.jpg", "assets/cccc3333.jpg"]);
+  assert.ok(photos.every(p => p.y > 0.1), "사진은 글·스티커 아래에");
+  assert.deepEqual(out.assets.sort(), ["assets/aaaa1111.jpg", "assets/cccc3333.jpg"]);
+  // 일기장 정규화를 그대로 통과한다
+  assert.ok(diary.diaryNormalizeEntry(out.entry, () => true));
+});
+
+test("되돌아보기 장 순서: 날 여는 장 → 장소 사진(없으면 장소 한 장) → 영상 첫 장면 → 종이 사진, 빈 날·없는 사진은 뺀다", () => {
+  const model = trip.tripEmpty("재생");
+  const has = (name) => name !== "assets/gone0000.jpg";
+  model.days.push(
+    trip.tripNormalizeDay({ id:"d1", date:"2026-07-20", title:"첫날",
+      spots:[
+        { id:"a", name:"가", photos:["assets/aaaa1111.jpg", "assets/gone0000.jpg"] },
+        { id:"b", name:"나" },
+        { id:"c", name:"다", videos:[{ v:"assets/vvvv1111.mp4", p:"assets/pppp1111.jpg", d:3 }] }],
+      stickers:[{ id:"s1", asset:"assets/aaaa1111.jpg", x:0, y:0, w:.2, ar:1 }, { id:"s2", asset:"assets/ssss1111.jpg", x:0, y:0, w:.2, ar:1 }] }),
+    trip.tripNormalizeDay({ id:"d2", date:"", title:"" }),
+    trip.tripNormalizeDay({ id:"d3", date:"2026-07-22", text:"마지막 날" }));
+  const slides = trip.tripReplaySlides(model, has);
+  assert.deepEqual(slides.map(s => [s.type, s.dayId, s.spotId || "", s.asset || "", s.video || ""]), [
+    ["day", "d1", "", "", ""],
+    ["spot", "d1", "a", "assets/aaaa1111.jpg", ""],
+    ["spot", "d1", "b", "", ""],
+    ["spot", "d1", "c", "assets/pppp1111.jpg", "assets/vvvv1111.mp4"],
+    ["paper", "d1", "", "assets/ssss1111.jpg", ""],
+    ["day", "d3", "", "", ""]
+  ]);
+  assert.deepEqual(trip.tripReplaySlides(trip.tripEmpty()), []);
 });

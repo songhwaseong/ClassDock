@@ -338,6 +338,25 @@ test("월간 돌아보기는 작성일·연속 기록·사진·기분·자주 �
   assert.deepEqual(stats.words[0], ["산책", 3]);
 });
 
+test("기분 지도는 한 해의 쓴 날마다 기분을 담고, 나온 기분만 DIARY_MOODS 차례로 센다", () => {
+  const entries = [
+    diary.diaryNormalizeEntry({ date:"2026-03-01", text:"a", mood:"sad" }),
+    diary.diaryNormalizeEntry({ date:"2026-09-01", text:"b", mood:"happy" }),
+    diary.diaryNormalizeEntry({ date:"2026-09-02", text:"c", mood:"happy" }),
+    diary.diaryNormalizeEntry({ date:"2026-09-03", text:"기분 없는 날" }),
+    diary.diaryNormalizeEntry({ date:"2026-09-04", mood:"happy" }),           // 기분만 — 빈 날이 아니다
+    diary.diaryNormalizeEntry({ date:"2026-09-05" }),                         // 빈 날은 빠진다
+    diary.diaryNormalizeEntry({ date:"2025-09-01", text:"다른 해", mood:"angry" })
+  ];
+  const year = diary.diaryYearMoods(entries, 2026);
+  assert.deepEqual([...year.days.keys()].sort(), ["2026-03-01", "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"]);
+  assert.equal(year.days.get("2026-09-03"), "");
+  assert.deepEqual(year.moods, [["happy", 3], ["sad", 1]]);
+  assert.equal(year.blank, 1);
+  assert.match(diary.diaryMoodColor("happy"), /^#[0-9a-f]{6}$/i);
+  assert.equal(diary.diaryMoodColor("nope"), "");
+});
+
 test("그림일기는 그림 칸 아래가 원고지이고, 그림 칸 좌우가 원고지 칸 줄 끝에 맞는다", () => {
   for (const gap of Object.keys(diary.DIARY_GAPS)){
     const style = { lines:"picture", gap };
@@ -572,9 +591,9 @@ test("내장 그림·글상자만 붙인 날도 빈 날로 버리지 않는다",
   }
 });
 
-test("새 바탕 템플릿이 추가된 파일은 version 14 이고 다음 버전은 거절한다", () => {
-  assert.equal(diary.DIARY_VERSION, 14);
-  const json = JSON.stringify({ format:"classdock-diary", version:15, title:"미래", entries:[] });
+test("사진 테두리·녹음·기념일이 들어간 파일은 version 15 이고 다음 버전은 거절한다", () => {
+  assert.equal(diary.DIARY_VERSION, 15);
+  const json = JSON.stringify({ format:"classdock-diary", version:16, title:"미래", entries:[] });
   assert.throws(() => diary.diaryNormalize(JSON.parse(json)), /diary-version/);
 });
 
@@ -1142,4 +1161,145 @@ test("붙이는 사진은 긴 변 1200px 로 줄여 담는다(배경 그림만 2
   assert.match(source, /addAsset\(blob, DIARY_STICKER_MAX_DIM\)/);
   assert.match(source, /addAsset\(file, DIARY_BG_MAX_DIM\)/);
   assert.ok(read("사용법.md").includes("긴 쪽 1200픽셀"));        // 문서와 코드가 같은 수를 말한다
+});
+
+test("내 글감은 이름·질문이 있는 것만, 20개까지, 겹친 id 는 새로 받는다", () => {
+  const list = diary.diaryNormalizeUserPrompts([
+    { id:"up-a", name:"  주간   회고 ", text:"잘한 것\n아쉬운 것" },
+    { id:"up-a", name:"같은 id", text:"x" },
+    { name:"", text:"이름 없음" },
+    { name:"질문 없음", text:"   " },
+    null, "문자열",
+    { id:"<script>", name:"n".repeat(50), text:"t".repeat(3000) }
+  ]);
+  assert.equal(list.length, 3);
+  assert.deepEqual(list[0], { id:"up-a", name:"주간 회고", text:"잘한 것\n아쉬운 것" });
+  assert.notEqual(list[1].id, "up-a");
+  assert.match(list[2].id, /^up-/);
+  assert.equal(list[2].name.length, 30);
+  assert.equal(list[2].text.length, 2000);
+  const many = Array.from({ length:30 }, (_, i) => ({ name:"g" + i, text:"q" }));
+  assert.equal(diary.diaryNormalizeUserPrompts(many).length, diary.DIARY_USER_PROMPT_MAX);
+  assert.deepEqual(diary.diaryNormalizeUserPrompts("x"), []);
+});
+
+test("Markdown 내보내기는 날마다 제목·날씨·기분·태그·글·글상자·사진 수를 적고, 줄 머리 기호는 막는다", () => {
+  const model = diary.diaryEmpty("나의 일기");
+  const entries = [
+    diary.diaryNormalizeEntry({ date:"2026-09-01", title:"개학", text:"# 제목 아님\n- 목록 아님\n둘째 줄", weather:"sunny", mood:"happy",
+      favorite:true, tags:["학교"], stickers:[
+        { id:"a", kind:"text", text:"좋은 하루\n정말", x:0, y:0, w:.3 },
+        { id:"b", asset:"assets/aaaa1111.png", x:0, y:0, w:.2, ar:1 },
+        { id:"c", asset:"assets/bbbb2222.png", x:0, y:0, w:.2, ar:1 }] }, () => true),
+    diary.diaryNormalizeEntry({ date:"2026-09-03", text:"짧게" })
+  ];
+  const md = diary.diaryEntriesMarkdown(model, entries);
+  assert.match(md, /^# 나의 일기\n/);
+  assert.match(md, /2편/);
+  assert.match(md, /## .*— 개학/);
+  assert.match(md, /날씨 맑음 · 기분 기쁨 · ★ · #학교/);
+  assert.ok(md.includes("\\# 제목 아님  \n\\- 목록 아님  \n둘째 줄"), md);
+  assert.match(md, /> 좋은 하루\n> 정말/);
+  assert.match(md, /\*\(사진 2장\)\*/);
+  assert.equal((md.match(/^---$/gm) || []).length, 2);
+});
+
+test("HTML 내보내기는 글을 이스케이프하고 사진을 받은 주소로 넣은 한 파일이다", () => {
+  const model = diary.diaryEmpty("<b>일기</b>");
+  const entries = [diary.diaryNormalizeEntry({ date:"2026-09-01", text:"a<script>\n\n둘째 문단", stickers:[
+    { id:"b", asset:"assets/aaaa1111.png", x:0, y:0, w:.2, ar:1 },
+    { id:"c", asset:"assets/nono0000.png", x:0, y:0, w:.2, ar:1 }] }, () => true)];
+  const html = diary.diaryEntriesHtml(model, entries, (name) => name === "assets/aaaa1111.png" ? "data:image/png;base64,AAAA" : "");
+  assert.match(html, /^<!doctype html>/);
+  assert.match(html, /<title>&lt;b&gt;일기&lt;\/b&gt;<\/title>/);
+  assert.ok(!html.includes("<script>"));
+  assert.match(html, /<p>a&lt;script&gt;<\/p><p>둘째 문단<\/p>/);
+  assert.equal((html.match(/<img /g) || []).length, 1, "주소가 없는 사진은 빠진다");
+  assert.equal(diary.diaryBytesToDataUrl(new Uint8Array([104, 105]), "text/plain"), "data:text/plain;base64,aGk=");
+  assert.equal(diary.diaryExportFileName({ title:'a/b:c' }, "2026년 9월", "md"), "a b c 2026년 9월.md");
+});
+
+test("사진 테두리는 아는 이름만 사진 스티커에 남고, 저장했다 열어도 그대로다", async () => {
+  const has = () => true;
+  const keep = diary.diaryNormalizeSticker({ id:"p", asset:"assets/aaaa1111.png", w:.3, ar:1, frame:"polaroid" }, has);
+  assert.equal(keep.frame, "polaroid");
+  assert.equal(diary.diaryNormalizeSticker({ id:"q", asset:"assets/aaaa1111.png", frame:"neon" }, has).frame, undefined);
+  assert.equal(diary.diaryNormalizeSticker({ id:"r", kind:"art", art:"heart", frame:"white" }, has).frame, undefined);
+  assert.equal(diary.diaryCleanSticker(keep).frame, "polaroid");
+  assert.deepEqual(diary.DIARY_PHOTO_FRAMES.map(f => f[0]), ["", "white", "polaroid", "round", "shadow", "tape"]);
+  const model = diary.diaryEmpty("테두리");
+  model.entries.push(diary.diaryNormalizeEntry({ date:"2026-09-01", stickers:[keep] }, has));
+  const assets = new Map([["assets/aaaa1111.png", { bytes:png(3) }]]);
+  const back = await diary.diaryUnpack(diary.diaryPack(model, assets));
+  assert.equal(back.model.entries[0].stickers[0].frame, "polaroid");
+});
+
+test("녹음 스티커는 소리 바이트가 있어야 남고, 알약 비율·이름표·길이를 담아 ZIP 왕복한다", async () => {
+  const has = (name) => name === "assets/abcd1234.webm";
+  const s = diary.diaryNormalizeSticker({ id:"a", kind:"audio", asset:"assets/abcd1234.webm", d:12.34, label:"  생일   노래 ", ar:5, flip:true }, has);
+  assert.equal(s.kind, "audio");
+  assert.equal(s.ar, diary.DIARY_AUDIO_AR);
+  assert.equal(s.d, 12.3);
+  assert.equal(s.label, "생일 노래");
+  assert.equal(s.flip, false);
+  assert.equal(diary.diaryNormalizeSticker({ kind:"audio", asset:"assets/abcd1234.png" }, () => true), null, "그림 확장자는 소리가 아니다");
+  assert.equal(diary.diaryNormalizeSticker({ kind:"audio", asset:"assets/zzzz9999.webm" }, has), null, "ZIP 에 없는 소리는 버린다");
+  assert.equal(diary.diaryAudioExt("audio/webm;codecs=opus"), "webm");
+  assert.equal(diary.diaryAudioExt("audio/mpeg"), "mp3");
+  assert.equal(diary.diaryAudioExt("video/mp4"), "");
+  assert.equal(diary.diaryFormatSeconds(75.4), "1:15");
+  const model = diary.diaryEmpty("녹음");
+  model.entries.push(diary.diaryNormalizeEntry({ date:"2026-09-02", stickers:[s] }, has));
+  assert.deepEqual([...diary.diaryReferencedAssets(model)], ["assets/abcd1234.webm"]);
+  assert.match(diary.diaryStickerCountLabel(model.entries[0].stickers), /녹음 1개/);
+  assert.ok(diary.diaryEntryMatches(model.entries[0], "생일 노래"), "이름표로 찾을 수 있다");
+  const bytes = new Uint8Array([26, 69, 223, 163, 1, 2, 3]);
+  const back = await diary.diaryUnpack(diary.diaryPack(model, new Map([["assets/abcd1234.webm", { bytes }]])));
+  assert.deepEqual([...back.assets.get("assets/abcd1234.webm").bytes], [...bytes]);
+  assert.equal(back.model.entries[0].stickers[0].label, "생일 노래");
+  assert.match(diary.diaryEntriesMarkdown(model, model.entries), /녹음 '생일 노래' 0:12/);
+});
+
+test("기념일: 매년·한 번·그날부터 세기를 날짜에 맞춰 가리고, 다가오는 차례로 D-n 을 센다", () => {
+  const list = diary.diaryNormalizeAnniversaries([
+    { id:"an-b", name:"  엄마   생신 ", date:"1970-10-01", repeat:"yearly" },
+    { id:"an-l", name:"윤일", date:"2004-02-29", repeat:"yearly" },
+    { id:"an-s", name:"만난 날", date:"2026-01-01", repeat:"since" },
+    { id:"an-o", name:"시험", date:"2026-10-15", repeat:"once" },
+    { id:"an-p", name:"지난 시험", date:"2026-01-15", repeat:"once" },
+    { name:"날짜 없음" }, { name:"", date:"2026-01-01" }, { name:"이상한 되풀이", date:"2026-05-05", repeat:"weekly" }
+  ]);
+  assert.equal(list.length, 6);
+  assert.equal(list[0].name, "엄마 생신");
+  assert.equal(list[5].repeat, "yearly", "모르는 되풀이는 매년으로");
+  const on = (key) => diary.diaryAnniversariesOn(list, key).map(hit => hit.label);
+  assert.deepEqual(on("2026-10-01"), ["엄마 생신 · 56번째"]);
+  assert.deepEqual(on("2027-02-28"), ["윤일 · 23번째"], "평년엔 2월 28일");
+  assert.deepEqual(on("2028-02-29"), ["윤일 · 24번째"]);
+  assert.deepEqual(on("2026-01-01"), ["만난 날"]);
+  assert.deepEqual(on("2026-04-10"), ["만난 날 · 100일"], "첫날이 1일이라 4월 10일이 100일");
+  assert.deepEqual(on("2027-01-01"), ["만난 날 · 1주년"]);
+  assert.deepEqual(on("2026-10-15"), ["시험"]);
+  assert.deepEqual(on("1969-10-01"), [], "처음 날짜보다 앞은 없다");
+  const rows = diary.diaryAnniversaryCountdown(list, "2026-09-28");
+  assert.deepEqual(rows.filter(r => r.days != null).map(r => [r.a.name, r.text]),
+    [["엄마 생신", "D-3"], ["시험", "D-17"], ["이상한 되풀이", "D-219"], ["윤일", "D-153"]].sort((x, y) => Number(x[1].slice(2)) - Number(y[1].slice(2))));
+  const since = rows.find(r => r.a.name === "만난 날");
+  assert.equal(since.count, 271);
+  assert.match(since.text, /271일째 · 300일까지 29일/);
+  assert.ok(!rows.some(r => r.a.name === "지난 시험"), "지난 '한 번'은 빠진다");
+  assert.equal(diary.diaryAnniversaryCountdown(list, "2026-10-01")[0].text, "D-DAY");
+});
+
+test("기념일은 일기장에 담겨 저장·비교되고, 옛 파일은 빈 목록으로 열린다", () => {
+  const model = diary.diaryEmpty("기념일");
+  assert.deepEqual(model.anniversaries, []);
+  const before = diary.diaryContentKey(model);
+  model.anniversaries = [{ id:"an-a", name:"생일", date:"2010-05-05", repeat:"yearly" }];
+  assert.notEqual(diary.diaryContentKey(model), before, "기념일을 바꾸면 '저장 안 됨'");
+  const json = JSON.parse(diary.diaryModelJson(model));
+  assert.equal(json.version, diary.DIARY_VERSION);
+  assert.deepEqual(json.anniversaries, model.anniversaries);
+  const old = diary.diaryNormalize({ format:"classdock-diary", version:14, title:"옛 일기장", entries:[] });
+  assert.deepEqual(old.anniversaries, []);
 });

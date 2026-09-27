@@ -111,6 +111,7 @@
     ,arrowDown: '<path d="M12 5v14M6 13l6 6 6-6"/>'
     ,spellcheck: '<path d="m3 17 4.5-11 4.5 11M4.7 13h5.6"/><path d="m13.5 15 2.8 2.8L21 12"/>'
     ,pin: '<path d="M9 3.5h6l-1 5 3.5 3.5h-11L10 8.5z"/><path d="M12 12v8.5"/>'
+    ,grip: '<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>'
   };
   window.uiIcon = function(name){
     const content = paths[name] || paths.code;
