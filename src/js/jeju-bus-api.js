@@ -45,7 +45,7 @@ const MNJejuBusApi = (() => {
   }
   function route(body){
     return rows(body).filter(r=>r && coords(r)).sort((a,b)=>Number(a.nodeord)-Number(b.nodeord))
-      .map(r=>({id:text(r.nodeid),name:text(r.nodenm),at:coords(r)}));
+      .map(r=>({id:text(r.nodeid),name:text(r.nodenm),at:coords(r),order:Number(r.nodeord),direction:text(r.updowncd)}));
   }
   function positions(body,id,fetchedAt,cacheAgeMs=0){
     if (!validId(id) || !Number.isFinite(fetchedAt) || fetchedAt<=0) throw new Error("bus-invalid-data");
@@ -131,7 +131,7 @@ const MNJejuBusApi = (() => {
   // stId 는 버스 위치의 '막 지난 정류장'(lastStnId)과 맞춰 정류장 이름을 붙이는 데 쓴다.
   function seoulRoute(body){
     return seoulRows(body).filter(r=>r && seoulAt(r)).sort((a,b)=>Number(a.seq)-Number(b.seq))
-      .map(r=>({id:seoulStop(r.arsId),name:text(r.stationNm),at:seoulAt(r),stId:text(r.station)}));
+      .map(r=>({id:seoulStop(r.arsId),name:text(r.stationNm),at:seoulAt(r),stId:text(r.station),order:Number(r.seq),direction:text(r.direction),turn:text(r.transYn)==="Y"}));
   }
   function seoulPositions(body,id,fetchedAt,cacheAgeMs=0){
     if (!validId(id) || !Number.isFinite(fetchedAt) || fetchedAt<=0) throw new Error("bus-invalid-data");
@@ -275,8 +275,61 @@ const MNJejuBusApi = (() => {
     result.stale=response.headers.get("X-ClassDock-Bus-Stale")==="1";
     return result;
   }
+  // 같은 이름·ID가 반복되어도 정류장 "등장 순서"로 구간을 고른다.
+  function tripStopLabel(stop,index){
+    return (Number.isInteger(stop.order) && stop.order>0?stop.order:index+1)+". "+stop.name
+      +(stop.id?" ("+stop.id+")":"")+(stop.direction && !/^[0-9]+$/.test(stop.direction)?" · "+stop.direction:"");
+  }
+  function tripStopIndex(stops,value){
+    const query=String(value || "").trim();
+    if(!query)return -1;
+    const labeled=stops.findIndex((stop,index)=>tripStopLabel(stop,index)===query);
+    if(labeled>=0)return labeled;
+    const matches=stops.flatMap((stop,index)=>stop.name===query?[index]:[]);
+    return matches.length===1?matches[0]:-1;
+  }
+  function tripSection(stops,from,to){
+    if(!Number.isInteger(from) || !Number.isInteger(to) || from<0 || to<0 || from>=stops.length || to>=stops.length)return {error:"stops"};
+    if(from===to)return {error:"same"};
+    if(from>to)return {error:"direction"};
+    const section=stops.slice(from,to+1);
+    // 좌표 없는 정류장이 기존 지도 목록에서 빠졌다면 그 틈을 임의로 한 구간으로 계산하지 않는다.
+    if(section.some((stop,i)=>!Number.isInteger(stop.order) || stop.order<1 || (i && stop.order!==section[i-1].order+1)))return {error:"gap",section};
+    return {section,count:to-from};
+  }
+  function tripEstimate(data,choice,section,now=Date.now()){
+    if(!choice || choice.city!==seoulCity)return {error:"unsupported"};
+    if(!data || data.version!==1 || data.unit!=="seconds" || !data.routes)return {error:"data"};
+    const end=Date.parse(data.to+"T23:59:59+09:00");
+    if(!Number.isFinite(end) || !Number.isFinite(now) || now>end+90*86400000 || now<Date.parse(data.from+"T00:00:00+09:00"))return {error:"old"};
+    const rows=data.routes[choice.id];
+    if(!Array.isArray(rows) || !Array.isArray(section) || section.length<2)return {error:"missing"};
+    const edges=new Map(rows.map(row=>[[row[0],row[1],row[2],row[3]].join(":"),row]));
+    let seconds=0;
+    for(let i=1;i<section.length;i++){
+      const a=section[i-1],b=section[i];
+      if(!Number.isInteger(a.order) || b.order!==a.order+1)return {error:"missing"};
+      const edge=edges.get([a.stId,b.stId,a.order,b.order].join(":"));
+      const hour=new Date(now+seconds*1000+9*3600000).getUTCHours();
+      const duration=edge && edge[5+hour];
+      if(!Number.isFinite(duration) || duration<=0 || duration>7200)return {error:"missing"};
+      seconds+=duration;
+    }
+    return {seconds,from:data.from,to:data.to};
+  }
+  let tripDataPromise=null;
+  function loadTripData(){
+    if(!tripDataPromise)tripDataPromise=(async()=>{
+      const embedded=typeof document!=="undefined" && document.getElementById("mnBusTravelData");
+      if(embedded && embedded.textContent.trim())return JSON.parse(embedded.textContent);
+      const response=await fetch("src/assets/bus-travel-seoul.json",{cache:"no-cache"});
+      if(!response.ok)throw new Error("bus-travel-data-unavailable");
+      return response.json();
+    })().catch(error=>{tripDataPromise=null;throw error;});
+    return tripDataPromise;
+  }
   return {provider,coords,rows,routes,route,positions,cities,arrivals,nearby,arrivalText,validNumber,
-    request,catalog,catalogGroups,loadCatalog,catalogJob,
+    request,catalog,catalogGroups,loadCatalog,catalogJob,tripStopLabel,tripStopIndex,tripSection,tripEstimate,loadTripData,
     seoulCity,seoulRows,seoulRoutes,seoulRoute,seoulPositions,seoulArrival,seoulArrivals,seoulNearby};
 })();
 if (typeof module!=="undefined" && module.exports) module.exports=MNJejuBusApi;

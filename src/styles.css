@@ -9659,3 +9659,10 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-stickers.is-multi .diary-sticker.is-selected{outline-style:dashed}
 .diary-marquee{position:absolute;z-index:6;border:1.5px dashed var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);pointer-events:none}
 .diary-marquee[hidden]{display:none}
+
+.map-jeju-bus-trip{border-top:1px solid #98b9bd;padding-top:12px;margin-top:12px}
+.map-jeju-bus-trip-fields{display:grid;gap:8px;margin:8px 0}
+.map-jeju-bus-trip-fields label{display:grid;gap:3px}
+.map-jeju-bus-trip-fields input{width:100%;min-width:0;box-sizing:border-box}
+.map-jeju-bus-trip-result{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
+.map-jeju-bus-trip a[hidden]{display:none}

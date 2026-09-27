@@ -100,6 +100,11 @@ html = html.replace(
   () => `<script type="application/json" id="mnPyodideWheels">${esc(JSON.stringify(bundledWheelRegistry))}</script>\n${coreScriptTag}`
 );
 
+// 실행되지 않는 JSON 블록. 버스 소요시간을 조회할 때만 파싱한다.
+const busTravelPlaceholder = "<!--MN_BUS_TRAVEL_DATA-->";
+requireTag(html, busTravelPlaceholder, "Bus travel statistics");
+html = html.replace(busTravelPlaceholder, () => `<script type="application/json" id="mnBusTravelData">${esc(read("src/assets/bus-travel-seoul.json"))}</script>`);
+
 for (const file of manifest.localScripts) {
   const tag = `<script src="src/js/${file}"></script>`;
   requireTag(html, tag, "Local script");

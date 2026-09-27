@@ -3,6 +3,7 @@
    처음엔 제주 버스만 봤다(이름 jeju-bus 는 그때 것). 지금은 TAGO 도시코드를 골라 전국 도시를 보고,
    정류장 도착 예정·근처 정류장도 함께 본다. 도시 빈칸("") = 제주 — 앱에 넣어 둔 노선 목록도 제주 것이다. */
 const MNJejuBusMap = (() => {
+  let tripPanelId=0;
   function mount({map,stage,toolRow,doc,t = value=>value,movePanel = null}){
     const el=(tag,cls,label)=>{const node=document.createElement(tag);node.className=cls;if(label)node.textContent=t(label);return node;};
     const button=(label,cls="")=>{const node=el("button","map-btn "+cls,label);node.type="button";return node;};
@@ -37,18 +38,36 @@ const MNJejuBusMap = (() => {
     arrivalStatus.setAttribute("role","status");arrivalStatus.setAttribute("aria-live","polite");
     arrivalBox.append(arrivalHead,arrivalList,arrivalStatus);
     stopBox.append(stopTools,stopList,arrivalBox);
+    const tripBox=el("form","map-jeju-bus-trip");
+    const tripHeading=el("strong","","구간 예상시간"),tripFields=el("div","map-jeju-bus-trip-fields");
+    const tripInputs=[],tripLists=[],tripId=++tripPanelId;
+    for(const [i,title] of ["출발 정류장","도착 정류장"].entries()){
+      const label=el("label","",title),field=el("input","map-input"),list=el("datalist","");
+      list.id="map-bus-trip-"+tripId+"-"+i;field.setAttribute("list",list.id);
+      field.setAttribute("aria-label",t(title));field.placeholder=t("정류장명을 입력하거나 목록에서 고르세요.");field.maxLength=250;field.disabled=true;
+      label.append(field);tripFields.append(label,list);tripInputs.push(field);tripLists.push(list);
+    }
+    const tripActions=el("div","map-jeju-bus-actions"),tripSearch=button("예상시간 조회"),tripFit=button("선택 구간 보기");
+    tripSearch.type="submit";tripSearch.disabled=true;tripFit.disabled=true;tripActions.append(tripSearch,tripFit);
+    const tripResult=el("p","map-jeju-bus-trip-result","노선을 검색한 뒤 출발·도착 정류장을 골라 주세요.");
+    tripResult.setAttribute("role","status");tripResult.setAttribute("aria-live","polite");
+    const tripSource=el("a","","소요시간 통계: 서울 열린데이터광장");tripSource.href="https://data.seoul.go.kr/dataList/OA-21217/S/1/datasetView.do";
+    tripSource.target="_blank";tripSource.rel="noopener noreferrer";tripSource.hidden=true;
+    tripBox.append(tripHeading,tripFields,tripActions,tripResult,tripSource);
     const note=el("p","map-jeju-bus-note","위치는 지연될 수 있으며, 갱신 사이에는 마지막 위치를 표시합니다.");
     const source=el("a","");source.target="_blank";source.rel="noopener noreferrer";
     const catalogRow=el("div","map-jeju-bus-catalog-info"),catalogText=el("span","");
     const catalogRefresh=button("목록 최신화","map-jeju-bus-catalog-refresh"),catalogCancel=button("최신화 취소");
     catalogRefresh.disabled=true;catalogCancel.hidden=true;catalogRow.append(catalogText,catalogRefresh,catalogCancel);
     // 목록 최신화 줄은 노선 목록 바로 밑에 둔다. 패널 맨 아래로 내리면 접힌 부분에 숨어 보이지 않는다.
-    panel.append(heading,form,catalogRow,select,preview,actions,status,stopBox,note,source);stage.appendChild(panel);
+    panel.append(heading,form,catalogRow,select,preview,actions,status,stopBox,tripBox,note,source);stage.appendChild(panel);
     L.DomEvent.disableClickPropagation(panel);L.DomEvent.disableScrollPropagation(panel);
     if(typeof movePanel==="function")movePanel(panel,heading);
     const pane=map.createPane("mapJejuBusPane");pane.style.zIndex="640";
     const routePane=map.createPane("mapJejuBusRoutePane");routePane.style.zIndex="370";
     const vehicles=L.layerGroup(),routesLayer=L.layerGroup(),stopsLayer=L.layerGroup(),markers=new Map();
+    const tripLayer=L.layerGroup();
+    let tripAbort=null,tripGeneration=0,tripPoints=[];
     const reduced=window.matchMedia("(prefers-reduced-motion: reduce)");
     const capability=new AbortController();
     let destroyed=false,active=null,state=MNJejuBusLive.create(),shape=null,stations=[],choices=[],on=false;
@@ -162,24 +181,25 @@ const MNJejuBusMap = (() => {
       stopLive();const seq=++selectionGeneration;
       if(detailAbort)detailAbort.abort();detailAbort=new AbortController();
       const controller=detailAbort,choice=choices.find(r=>r.id===select.value);
-      stations=[];shape=null;start.disabled=true;refresh.disabled=!choice;
+      stations=[];shape=null;start.disabled=true;refresh.disabled=!choice;resetTrip();
       if(!choice)return;
       preview.textContent=t("정류장 목록을 받는 중…");
       // TAGO 에는 도로를 따라 그린 노선 경로가 없다. 그래서 shape 는 비워 두고 이동은 옮겨 놓기로만 보인다
       // (정류장 사이를 곧게 잇는 선으로 보간하면 건물·바다를 가로지른다).
-      let failure=null;
-      try{stations=await MNJejuBusApi.request("route",choice.id,{signal:controller.signal,refresh:force,city:choice.city});}
-      catch(error){failure=error;stations=[];}
+      let failure=null,loadedStations=[];
+      try{loadedStations=await MNJejuBusApi.request("route",choice.id,{signal:controller.signal,refresh:force,city:choice.city});}
+      catch(error){failure=error;}
       if(destroyed || controller.signal.aborted || seq!==selectionGeneration)return;
+      stations=loadedStations;
       preview.textContent=choice.from+" → "+choice.to+"\n"+(stations.length?stations.map(s=>s.name).join(" → ")
         :failure?failureText(failure,"정류장 정보를 받지 못했어요. 노선을 새로고침해 주세요.","route",choice.city):t("정류장 정보가 없어요."));
-      start.disabled=false;
+      start.disabled=false;populateTrip();
     }
     // 검색·목록 고르기 어느 쪽이든 되돌릴 일(늦은 응답·보던 노선)을 먼저 끊는다.
     function resetSearch(){
       stopLive();selectionGeneration++;if(detailAbort)detailAbort.abort();
       searchGeneration++;if(searchAbort)searchAbort.abort();searchAbort=null;
-      select.replaceChildren();select.disabled=true;choices=[];start.disabled=true;refresh.disabled=true;search.disabled=false;
+      stations=[];resetTrip();select.replaceChildren();select.disabled=true;choices=[];start.disabled=true;refresh.disabled=true;search.disabled=false;
     }
     async function searchRoutes(event){
       event.preventDefault();const value=input.value.trim();
@@ -413,16 +433,88 @@ const MNJejuBusMap = (() => {
       input.value=item.number;
       searchRoutes({preventDefault(){}});
     }
+    function cancelTrip(){
+      tripGeneration++;if(tripAbort)tripAbort.abort();tripAbort=null;tripSearch.disabled=stations.length<2;
+    }
+    function clearTripHighlight(){tripLayer.clearLayers();map.removeLayer(tripLayer);tripPoints=[];tripFit.disabled=true;}
+    function resetTrip(){
+      cancelTrip();clearTripHighlight();tripSource.hidden=true;
+      for(const field of tripInputs){field.value="";field.disabled=true;}
+      for(const list of tripLists)list.replaceChildren();
+      tripSearch.disabled=true;tripResult.textContent=t("노선을 검색한 뒤 출발·도착 정류장을 골라 주세요.");
+    }
+    function populateTrip(){
+      for(const list of tripLists)list.replaceChildren(...stations.map((stop,index)=>{
+        const option=el("option","");option.value=MNJejuBusApi.tripStopLabel(stop,index);return option;
+      }));
+      for(const field of tripInputs)field.disabled=stations.length<2;
+      tripSearch.disabled=stations.length<2;
+      tripResult.textContent=t(stations.length<2?"구간을 선택할 정류장 정보가 부족해요.":"출발·도착 정류장을 골라 주세요. 같은 이름은 순번·정류장 번호로 구별합니다.");
+    }
+    const tripMinutes=seconds=>Math.max(1,Math.round(seconds/60))+t("분");
+    function highlightTrip(section){
+      clearTripHighlight();tripPoints=section.map(stop=>stop.at);
+      tripLayer.addTo(map);
+      tripLayer.addLayer(L.polyline(tripPoints,{pane:"mapJejuBusRoutePane",color:"#df6c16",weight:5,opacity:0.85,dashArray:"6 5",interactive:false}));
+      for(const [stop,title] of [[section[0],"출발"],[section[section.length-1],"도착"]]){
+        tripLayer.addLayer(L.circleMarker(stop.at,{pane:"mapJejuBusRoutePane",radius:7,color:"#df6c16",weight:3,fillOpacity:1}).bindTooltip(el("span","",t(title)+" · "+stop.name)));
+      }
+      tripFit.disabled=false;
+      map.fitBounds(L.latLngBounds(tripPoints),{padding:[35,35],maxZoom:15});
+    }
+    async function queryTrip(event){
+      event.preventDefault();cancelTrip();clearTripHighlight();tripSource.hidden=true;
+      const choice=choices.find(r=>r.id===select.value),from=MNJejuBusApi.tripStopIndex(stations,tripInputs[0].value),to=MNJejuBusApi.tripStopIndex(stations,tripInputs[1].value);
+      const picked=MNJejuBusApi.tripSection(stations,from,to);
+      const errors={stops:"목록에서 출발·도착 정류장을 골라 주세요. 같은 이름이 여러 개면 순번까지 선택해 주세요.",same:"출발·도착 정류장이 같아요.",direction:"도착 정류장이 출발보다 앞에 있어요. 반대 방향의 세부 노선을 고르거나 정류장 순번을 확인해 주세요.",gap:"중간 정류장 정보가 빠져 있어 구간 예상시간을 제공할 수 없어요."};
+      if(!choice || picked.error){tripResult.textContent=t(errors[picked.error] || errors.stops);return;}
+      highlightTrip(picked.section);
+      const header=choice.number+" · "+stations[from].name+" → "+stations[to].name+" · "+picked.count+t("구간");
+      const controller=new AbortController(),seq=tripGeneration;tripAbort=controller;tripSearch.disabled=true;
+      tripResult.textContent=header+"\n"+t("예상시간과 출발 정류장 도착정보를 확인하는 중…");
+      let estimate={error:"unsupported"},tripData=null,waiting=null,waitStamp=0,waitError="";
+      // 두 조회가 독립적이며, 하나가 실패해도 다른 결과는 보여 준다.
+      const stop=stations[from],uniqueStop=stop.id && stations.filter(s=>s.id===stop.id).length===1;
+      await Promise.all([
+        (async()=>{if(isSeoul(choice.city))try{tripData=await MNJejuBusApi.loadTripData();estimate=MNJejuBusApi.tripEstimate(tripData,choice,picked.section,Date.now());}catch(_){estimate={error:"data"};}})(),
+        (async()=>{
+          if(!uniqueStop){waitError=t("이 정류장을 노선이 여러 번 지나거나 정류장 번호가 없어 대기시간을 구별할 수 없어요.");return;}
+          try{
+            const result=await MNJejuBusApi.request("arrivals",stop.id,{city:choice.city,signal:controller.signal,refresh:true});
+            if(Date.now()-result.fetchedAt>120000){waitError=t("도착정보가 오래되어 대기시간을 제공할 수 없어요.");return;}
+            const candidates=result.items.filter(item=>item.routeId===choice.id && Number.isFinite(item.seconds) && item.seconds>=0);
+            waiting=candidates.length?Math.min(...candidates.map(item=>item.seconds)):null;waitStamp=result.fetchedAt;
+          }catch(error){waitError=failureText(error,"출발 정류장의 도착정보를 받지 못했어요.","arrivals",choice.city);}
+        })()
+      ]);
+      if(destroyed || seq!==tripGeneration || controller.signal.aborted)return;
+      if(waiting!=null && !estimate.error)estimate=MNJejuBusApi.tripEstimate(tripData,choice,picked.section,Date.now()+waiting*1000);
+      const lines=[header];
+      if(!estimate.error){
+        lines.push(t("탑승 후 예상 소요시간: 약 ")+tripMinutes(estimate.seconds));
+        lines.push(t("통계 기준: ")+estimate.from+" ~ "+estimate.to+" · "+t("시간대별 평균 · 요일 구분 없음"));
+        lines.push(t("실시간 정체·대기·도보·환승 시간은 포함하지 않습니다."));tripSource.hidden=false;
+      }else lines.push(t(estimate.error==="unsupported"?"이 지역은 구간 운행시간 자료가 연결되어 있지 않아 예상시간을 제공할 수 없어요.":estimate.error==="old"?"운행시간 통계가 오래되어 예상시간을 제공할 수 없어요.":"선택 구간 또는 시간대의 운행시간 자료가 없어 예상시간을 제공할 수 없어요."));
+      if(waiting!=null){
+        lines.push(t("출발 정류장 버스 도착: ")+(waiting<60?t("곧 도착"):t("약 ")+tripMinutes(waiting)+t(" 후")));
+        if(!estimate.error)lines.push(t("대기 포함 예상시간: 약 ")+tripMinutes(waiting+estimate.seconds));
+      }else lines.push(waitError || t("현재 선택 노선의 대기시간 정보가 없어요."));
+      if(waitStamp)lines.push(t("도착정보 수신: ")+clock(waitStamp));
+      tripResult.textContent=lines.join("\n");tripAbort=null;tripSearch.disabled=false;
+    }
+    tripBox.addEventListener("submit",queryTrip);
+    for(const field of tripInputs)field.addEventListener("input",()=>{cancelTrip();clearTripHighlight();tripSource.hidden=true;tripResult.textContent=t("정류장을 변경했어요. 예상시간을 다시 조회해 주세요.");});
+    tripFit.addEventListener("click",()=>{if(tripPoints.length)map.fitBounds(L.latLngBounds(tripPoints),{padding:[35,35],maxZoom:15});});
     nearbyButton.addEventListener("click",findNearby);
     arrivalRefresh.addEventListener("click",()=>showArrivals(arrivalStation,true));
     renderCities();applyPlaceholder();renderCatalog();
     toggle.addEventListener("click",()=>{
       if(on){stopLive();panel.hidden=true;}
       else panel.hidden=!panel.hidden;
-      if(panel.hidden)clearStops();
+      if(panel.hidden){clearStops();cancelTrip();clearTripHighlight();}
       toggle.setAttribute("aria-expanded",String(!panel.hidden));if(!panel.hidden)input.focus();
     });
-    close.addEventListener("click",()=>{panel.hidden=true;clearStops();toggle.setAttribute("aria-expanded","false");toggle.focus();});
+    close.addEventListener("click",()=>{panel.hidden=true;clearStops();cancelTrip();clearTripHighlight();toggle.setAttribute("aria-expanded","false");toggle.focus();});
     panel.addEventListener("keydown",event=>{if(event.key==="Escape"){event.stopPropagation();close.click();}});
     form.addEventListener("submit",searchRoutes);select.addEventListener("change",()=>loadSelection());refresh.addEventListener("click",()=>loadSelection(true));
     start.addEventListener("click",()=>{
@@ -465,7 +557,7 @@ const MNJejuBusMap = (() => {
     const controller={
       freeze(){frozen++;stopFrame();return ()=>{frozen=Math.max(0,frozen-1);nextPoll=0;tick();};},
       captureNote(){return on && state.fetchedAt?t("버스 위치")+" · "+t("마지막 수신")+" "+new Date(state.fetchedAt).toLocaleString()+" · "+(active && isSeoul(active.city)?t("서울특별시"):"TAGO"):"";},
-      destroy(){destroyed=true;stopLive();clearStops();clearInterval(timer);capability.abort();if(searchAbort)searchAbort.abort();if(detailAbort)detailAbort.abort();
+      destroy(){destroyed=true;cancelTrip();clearTripHighlight();stopLive();clearStops();clearInterval(timer);capability.abort();if(searchAbort)searchAbort.abort();if(detailAbort)detailAbort.abort();
         document.removeEventListener("visibilitychange",tick);map.off("zoomend",paint);panel.remove();toggle.remove();pane.remove();routePane.remove();}
     };
     if(!Array.isArray(doc.cleanupFns))doc.cleanupFns=[];doc.cleanupFns.push(()=>controller.destroy());

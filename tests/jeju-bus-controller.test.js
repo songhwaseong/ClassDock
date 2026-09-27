@@ -3,7 +3,7 @@ const test=require("node:test"),assert=require("node:assert/strict"),fs=require(
 const api=require("../src/js/jeju-bus-api.js"),live=require("../src/js/jeju-bus-live.js");
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve();};
-function harness(){
+function harness({routeStops=null,tripData=null,at=1000000}={}){
   class Element{
     constructor(tag){this.tagName=tag;this.children=[];this.style={};this.attrs={};this.handlers={};this.className="";this.textContent="";this.value="";this.offsetParent={};this.classList={add(){},remove(){},toggle(){}};}
     append(...items){items.forEach(item=>this.appendChild(item));}
@@ -17,7 +17,7 @@ function harness(){
     focus(){}
     remove(){this.removed=true;}
   }
-  const requests=[],groups=[],circles=[],intervals=new Set(),frames=new Map(),pending=[];let now=1000000,frameId=0;
+  const requests=[],groups=[],circles=[],intervals=new Set(),frames=new Map(),pending=[];let now=at,frameId=0;
   class Clock extends Date {constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
   const doc=new Element("document");doc.createElement=tag=>new Element(tag);doc.hidden=false;
   const map={handlers:{},getCenter:()=>({lat:33.5,lng:126.53}),createPane:()=>new Element("pane"),removeLayer(){},getZoom:()=>14,
@@ -29,11 +29,12 @@ function harness(){
   const cityList=[{code:"",name:"제주도",raw:"39"},{code:"25",name:"대전광역시",raw:"25"}];
   const catalogJobs=[],catalogJobOptions=[],catalogLoads=[],cityCatalogs={};let catalogFile=null,catalogState={state:"idle",error:"",done:0,total:1999,found:0,busy:false};
   const fakeApi={...api,
+    loadTripData(){return Promise.resolve(tripData);},
     loadCatalog(options={}){catalogLoads.push(options.city || "");return Promise.resolve(options.city?cityCatalogs[options.city] || null:catalogFile);},
     catalogJob(action,options={}){catalogJobs.push(action);catalogJobOptions.push(options);return Promise.resolve(catalogState);},
     request(kind,value,options){requests.push({kind,value,options});
     if(kind==="routes")return Promise.resolve([{id:"1",number:"201",from:"A",to:"B",type:"간선"},{id:"2",number:"201",from:"B",to:"A",type:"간선"}]);
-    if(kind==="route")return Promise.resolve([{id:"s",name:"stop",at:[33.3,126.5]}]);
+    if(kind==="route")return Promise.resolve(routeStops || [{id:"s",name:"stop",at:[33.3,126.5]}]);
     if(kind==="cities")return Promise.resolve(cityList);
     const task=deferred();pending.push({task,request:requests.at(-1)});return task.promise;}};
   const confirms=[];let confirmAnswer=true;
@@ -198,4 +199,54 @@ test("도착 정보 키가 거절되면 버스도착정보 활용신청을 안�
   list.children[0].click();h.pending.at(-1).task.reject(new Error("bus-key-invalid"));await flush();
   assert.match(arrivalBox.children[2].textContent,/버스도착정보/);
   h.controller.destroy();
+});
+
+const tripStops=[1,2,3].map(i=>({id:"s"+i,stId:"node"+i,name:"stop"+i,order:i,at:[37.55+i/1000,126.97]}));
+const tripStats={version:1,unit:"seconds",from:"2026-09-07",to:"2026-09-13",routes:{"1":[
+  ["node1","node2",1,2,...Array(25).fill(65)],["node2","node3",2,3,...Array(25).fill(65)]]}};
+function tripControls(h){
+  const box=h.panel.children[8];
+  return {box,from:box.children[1].children[0].children[0],to:box.children[1].children[2].children[0],result:box.children[3],source:box.children[4],fit:box.children[2].children[1]};
+}
+test("구간 조회는 선택 노선의 시간과 대기만 합산하고 다른 세부 노선은 섞지 않는다",async()=>{
+  const h=harness({routeStops:tripStops,tripData:tripStats,at:Date.parse("2026-09-27T08:00:00+09:00")});await flush();
+  h.citySelect.value="11";await h.citySelect.fire("change");h.input.value="201";await h.form.fire("submit");
+  const c=tripControls(h);c.from.value="stop1";c.to.value="stop3";
+  const queried=c.box.fire("submit");await flush();
+  const arrival=h.pending.at(-1);assert.equal(arrival.request.value,"s1");assert.equal(arrival.request.options.city,"11");
+  arrival.task.resolve({fetchedAt:h.now(),items:[{routeId:"2",seconds:1},{routeId:"1",seconds:300}]});await queried;
+  assert.match(c.result.textContent,/탑승 후 예상 소요시간: 약 2분/);
+  assert.match(c.result.textContent,/버스 도착: 약 5분 후/);
+  assert.match(c.result.textContent,/대기 포함 예상시간: 약 7분/);
+  assert.match(c.result.textContent,/2026-09-07/);assert.equal(c.source.hidden,false);assert.equal(c.fit.disabled,false);
+  assert.equal(h.groups[3].items.length,3);h.controller.destroy();assert.equal(h.groups[3].items.length,0);
+});
+test("서울 외 지역도 구간과 버스 대기는 제공하고 소요시간은 추정하지 않는다",async()=>{
+  const h=harness({routeStops:tripStops});await h.form.fire("submit");const c=tripControls(h);
+  c.from.value="stop1";c.to.value="stop3";const queried=c.box.fire("submit");await flush();
+  h.pending.at(-1).task.resolve({fetchedAt:h.now(),items:[{routeId:"1",seconds:180}]});await queried;
+  assert.match(c.result.textContent,/이 지역은 구간 운행시간 자료가 연결되어 있지 않아/);
+  assert.match(c.result.textContent,/버스 도착: 약 3분 후/);assert.doesNotMatch(c.result.textContent,/대기 포함/);h.controller.destroy();
+});
+test("정류장을 바꾸거나 패널을 닫으면 늦은 구간 조회 결과를 버린다",async()=>{
+  const h=harness({routeStops:tripStops});await h.form.fire("submit");const c=tripControls(h);
+  c.from.value="stop1";c.to.value="stop3";const queried=c.box.fire("submit");await flush();const old=h.pending.at(-1);
+  c.from.value="stop2";c.from.fire("input");assert.equal(old.request.options.signal.aborted,true);
+  old.task.resolve({fetchedAt:h.now(),items:[{routeId:"1",seconds:100}]});await queried;
+  assert.match(c.result.textContent,/정류장을 변경/);assert.equal(h.groups[3].items.length,0);
+  const second=c.box.fire("submit");await flush();const pending=h.pending.at(-1);h.panel.children[0].children[2].click();
+  assert.equal(pending.request.options.signal.aborted,true);pending.task.resolve({fetchedAt:h.now(),items:[]});await second;h.controller.destroy();
+});
+test("역방향·동일 정류장·중복 이름·누락 순번은 조회 전에 안내한다",async()=>{
+  const h=harness({routeStops:[...tripStops,{...tripStops[2],id:"s4",order:5,name:"stop1"}]});await h.form.fire("submit");const c=tripControls(h);
+  c.from.value="stop1";c.to.value="stop3";await c.box.fire("submit");assert.match(c.result.textContent,/같은 이름이 여러 개/);
+  c.from.value=api.tripStopLabel(tripStops[2],2);c.to.value="stop2";await c.box.fire("submit");assert.match(c.result.textContent,/출발보다 앞/);
+  c.from.value="stop2";await c.box.fire("submit");assert.match(c.result.textContent,/같아요/);
+  c.to.value=api.tripStopLabel({id:"s4",order:5,name:"stop1"},3);await c.box.fire("submit");assert.match(c.result.textContent,/중간 정류장 정보가 빠져/);
+  assert.equal(h.pending.length,0);h.controller.destroy();
+});
+test("도착정보가 없거나 실패해도 통계로 계산한 소요시간을 보존한다",async()=>{
+  const h=harness({routeStops:tripStops,tripData:tripStats,at:Date.parse("2026-09-27T08:00:00+09:00")});await flush();h.citySelect.value="11";await h.citySelect.fire("change");h.input.value="201";await h.form.fire("submit");const c=tripControls(h);
+  c.from.value="stop1";c.to.value="stop3";const queried=c.box.fire("submit");await flush();h.pending.at(-1).task.reject(new Error("bus-key-invalid"));await queried;
+  assert.match(c.result.textContent,/탑승 후 예상 소요시간: 약 2분/);assert.match(c.result.textContent,/정류소정보조회/);assert.doesNotMatch(c.result.textContent,/대기 포함/);h.controller.destroy();
 });
