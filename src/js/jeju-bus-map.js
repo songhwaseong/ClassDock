@@ -131,16 +131,17 @@ const MNJejuBusMap = (() => {
         if(!view){if(marker){vehicles.removeLayer(marker);markers.delete(id);}continue;}
         shown++;moving=moving || view.moving;
         if(!marker){
-          const icon=el("span","map-jeju-bus-icon");icon.style.backgroundColor=routeColor();icon.append(el("span","","🚌"),el("span","map-jeju-bus-number",active.number));
+          const icon=el("span","map-live-vehicle-icon map-jeju-bus-icon");icon.style.color=routeColor();
+          const image=el("img","map-live-vehicle-image");image.src=mapVehicleIconUrl("bus",routeColor());image.alt="";image.setAttribute("aria-hidden","true");image.width=20;image.height=20;
+          icon.append(image);
           marker=L.marker(view.at,{pane:"mapJejuBusPane",keyboard:true,title:active.number+" · "+vehicle.label,
-            icon:L.divIcon({html:icon,className:"map-jeju-bus-marker",iconSize:[44,26],iconAnchor:[22,13]})});
+            icon:L.divIcon({html:icon,className:"map-jeju-bus-marker",iconSize:[24,24],iconAnchor:[12,12]})});
           const tip=el("div","");marker.bindTooltip(tip,{direction:"top",offset:[0,-14]});marker._busTip=tip;
           markers.set(id,marker);vehicles.addLayer(marker);
         }
         marker.setLatLng(view.at);marker.setOpacity(view.dim?0.45:1);
         const markerEl=marker.getElement();
-        if(markerEl){markerEl.classList.toggle("bus-relocated",!reduced.matches && vehicle.relocatedAt>now-1000);
-          markerEl.classList.toggle("bus-wide-label",map.getZoom()>=12);}
+        if(markerEl)markerEl.classList.toggle("bus-relocated",!reduced.matches && vehicle.relocatedAt>now-1000);
         const content=[active.number+" · "+vehicle.label,active.type,vehicle.stationName,
           t(view.status),t("마지막 수신")+" "+clock(vehicle.lastSeenAt)].filter(Boolean).join(" · ");
         if(marker._busTip.textContent!==content)marker._busTip.textContent=content;

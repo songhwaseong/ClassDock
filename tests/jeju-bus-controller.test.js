@@ -43,7 +43,12 @@ function harness({routeStops=null,tripData=null,at=1000000}={}){
     confirmDialog(message){confirms.push(message);return Promise.resolve(confirmAnswer);},
     window:{matchMedia:()=>({matches:false})},localStorage:{getItem(){return null;},setItem(){}},fetch:async()=>({ok:true,text:async()=>"yes"}),
     setInterval(fn){intervals.add(fn);return fn;},clearInterval(fn){intervals.delete(fn);},requestAnimationFrame(fn){frames.set(++frameId,fn);return frameId;},cancelAnimationFrame(id){frames.delete(id);}};
-  vm.createContext(context);vm.runInContext(fs.readFileSync("src/js/jeju-bus-map.js","utf8")+"\nglobalThis.busModule=MNJejuBusMap;",context);
+  vm.createContext(context);
+  const viewerSource=fs.readFileSync("src/js/map-viewer.js","utf8");
+  const vehicleIcons=/const MAP_TOOL_ICONS = \{[\s\S]*?\n\};/.exec(viewerSource)[0];
+  const vehicleUrl=/function mapVehicleIconUrl\(kind, color\)\{[\s\S]*?\n\}/.exec(viewerSource)[0];
+  vm.runInContext(vehicleIcons+"\n"+vehicleUrl,context);
+  vm.runInContext(fs.readFileSync("src/js/jeju-bus-map.js","utf8")+"\nglobalThis.busModule=MNJejuBusMap;",context);
   const stage=new Element("stage"),toolRow=new Element("tools"),documentModel={cleanupFns:[]};
   const controller=context.busModule.mount({map,stage,toolRow,doc:documentModel});
   const panel=stage.children[0],form=panel.children[1],catalogRow=panel.children[2],select=panel.children[3],actions=panel.children[5];

@@ -8836,8 +8836,10 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .leaflet-marker-icon.map-weather-tag{display:inline-flex;align-items:center;gap:3px;width:auto!important;height:auto!important;padding:2px 8px 2px 4px;border:2px solid #fff;border-radius:999px;background:#1d4f73;color:#fff;box-shadow:0 1px 5px #0006;font:700 12px/18px sans-serif;white-space:nowrap}
 .leaflet-marker-icon.map-weather-tag.is-here{background:#b45309}
 .map-weather-tag-glyph{font-size:15px;line-height:1;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
-.map-jeju-bus-icon{display:inline-flex;align-items:center;gap:3px;padding:2px 5px;border:2px solid white;border-radius:8px;background:#087f8c;color:white;box-shadow:0 1px 4px #0006;font:bold 11px/18px sans-serif;white-space:nowrap}
-.map-jeju-bus-number{display:none}.bus-wide-label .map-jeju-bus-number{display:inline}
+/* 차량 그림의 중심을 실제 좌표에 맞추고 크기를 24px로 고정한다. */
+.map-live-vehicle-icon{position:relative;display:grid;place-items:center;box-sizing:border-box;width:24px;height:24px;border:1px solid currentColor;border-radius:6px;background:#fff;box-shadow:0 0 0 1px #fff,0 1px 4px #0006}
+.map-live-vehicle-image{display:block;width:20px;height:20px;max-width:none;pointer-events:none}
+.map-subway-train-icon{border-radius:8px}
 .map-jeju-bus-marker.bus-relocated .map-jeju-bus-icon{animation:jejuBusAppear .7s ease-out}
 @keyframes jejuBusAppear{from{opacity:.25}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.map-jeju-bus-marker.bus-relocated .map-jeju-bus-icon{animation:none}}

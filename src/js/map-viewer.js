@@ -5107,6 +5107,15 @@ function mapToolIconUrl(name){
     'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
   return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
 }
+// 지도 차량은 기존 도구 아이콘의 SVG를 사용한다. 색을 SVG 안에 고정해 PNG·인쇄에도 그대로 남긴다.
+function mapVehicleIconUrl(kind, color){
+  const name = kind === "bus" ? "bus" : "train";
+  const ink = /^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i.test(color) ? color : "#087f8c";
+  const inner = MAP_TOOL_ICONS[name].replace(/fill="#000"/g, 'fill="' + ink + '"');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="' + ink + '" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
 function mapSetToolIcon(element, name){
   const url = mapToolIconUrl(name);
   if (!element || !url) return element;
@@ -6061,9 +6070,18 @@ async function mountMapEditor(doc){
         }
         shown++;
         if (!marker){
-          marker = L.circleMarker(at, { pane:"mapSubwayPane", radius:6, weight:2,
-            color:"#ffffff", fillColor:subwayColor(), fillOpacity:1, className:"map-subway-train" });
-          marker.bindTooltip("", { direction:"top", offset:[0, -8], className:"map-subway-train-tip" });
+          const icon = document.createElement("span");
+          icon.className = "map-live-vehicle-icon map-subway-train-icon";
+          icon.style.color = subwayColor();
+          const image = document.createElement("img");
+          image.className = "map-live-vehicle-image";
+          image.src = mapVehicleIconUrl("train", subwayColor());
+          image.alt = ""; image.setAttribute("aria-hidden", "true"); image.width = 20; image.height = 20;
+          icon.appendChild(image);
+          marker = L.marker(at, { pane:"mapSubwayPane", keyboard:true,
+            title:mapTf("{line} {no}호", { line:train.line, no:train.no }),
+            icon:L.divIcon({ html:icon, className:"map-subway-train", iconSize:[24,24], iconAnchor:[12,12] }) });
+          marker.bindTooltip("", { direction:"top", offset:[0, -14], className:"map-subway-train-tip" });
           subwayLayer.addLayer(marker);
           subwayMarkers.set(key, marker);
         } else {
