@@ -94,6 +94,80 @@ test("사진을 붙이면 스티커가 되고, 끌면 옮겨지며 Ctrl+Z 로 �
   await expect(sticker).toHaveCount(0);
 });
 
+test("글 아래에 둔 사진은 글이 늘고 줄 때 함께 내려가고 올라간다(글 위 사진은 그대로)", async ({ page }) => {
+  await boot(page);
+  const area = page.locator(".diary-text");
+  await area.click();
+  await page.keyboard.type("첫째 줄");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("둘째 줄");
+  const png = solidPng(200, 100, [80, 140, 220]);
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles([
+    { name:"위.png", mimeType:"image/png", buffer:png },
+    { name:"아래.png", mimeType:"image/png", buffer:png }
+  ]);
+  await expect(page.locator(".diary-sticker")).toHaveCount(2);
+  // 하나는 종이 오른쪽 맨 위(글 옆), 하나는 글 아래 멀찍이 — 자리만 바꾸고 다시 잰다.
+  const ids = await page.evaluate(() => {
+    const d = docs.find(x => x.kind === "diary");
+    const entry = d.diary.entries.find(e => e.stickers.length === 2);
+    const [top, low] = entry.stickers;
+    Object.assign(top, { x:0.7, y:0.02, w:0.2 });
+    Object.assign(low, { x:0.1, y:0.5, w:0.3 });
+    return [top.id, low.id];
+  });
+  await area.click();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type(" ");                                   // 한 번 다시 재서 옮긴 자리를 화면에 올린다(글 끝은 그대로)
+  const top = page.locator(`.diary-sticker[data-id="${ids[0]}"]`);
+  const low = page.locator(`.diary-sticker[data-id="${ids[1]}"]`);
+  const topBox = await stableBox(top), lowBox = await stableBox(low);
+
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => Math.round(((await low.boundingBox()) || {}).y - lowBox.y)).toBe(68);   // 두 줄(34px×2)
+  expect(Math.round((await stableBox(top)).y)).toBe(Math.round(topBox.y));
+
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await expect.poll(async () => Math.round(((await low.boundingBox()) || {}).y - lowBox.y)).toBe(0);
+  expect(Math.round((await stableBox(top)).y)).toBe(Math.round(topBox.y));
+});
+
+test("맨 아래 사진 밑으로 종이가 두 줄씩 더 늘지 않고, 끄는 동안 종이 밖으로 나가면 따라 늘어난다", async ({ page }) => {
+  await boot(page);
+  await page.locator(".diary-bar input[type=file]").first().setInputFiles({ name:"낮은.png", mimeType:"image/png", buffer:solidPng(200, 100, [80, 140, 220]) });
+  const sticker = page.locator(".diary-sticker");
+  await expect(sticker).toHaveCount(1);
+  // 한 쪽(24줄) 아래로 내려 두고 방향키로 한 번 다시 잰다.
+  await page.evaluate(() => {
+    const s = docs.find(x => x.kind === "diary").diary.entries.find(e => e.stickers.length).stickers[0];
+    Object.assign(s, { x:0.2, y:1.3, w:0.3 });
+  });
+  await sticker.focus();
+  await page.keyboard.press("ArrowDown");
+  const paper = page.locator(".diary-paper");
+  const gapBelow = async () => {
+    const [p, s] = [await paper.boundingBox(), await sticker.boundingBox()];
+    return Math.round(p.y + p.height - (s.y + s.height));
+  };
+  await expect.poll(gapBelow).toBeGreaterThanOrEqual(6);
+  expect(await gapBelow()).toBeLessThan(6 + 34);                 // 여유는 한 줄이 안 된다(예전엔 두 줄 넘게)
+
+  await sticker.scrollIntoViewIfNeeded();
+  const box = await stableBox(sticker);
+  const before = (await paper.boundingBox()).height;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 40, { steps:8 });   // 종이 끝이 화면 아래라 조금만
+  // 아직 놓지 않았는데 종이가 늘어 사진이 잘리지 않는다.
+  expect((await paper.boundingBox()).height).toBeGreaterThan(before + 20);
+  expect(await gapBelow()).toBeGreaterThanOrEqual(0);
+  await page.mouse.up();
+  await expect.poll(gapBelow).toBeGreaterThanOrEqual(6);
+  expect(await gapBelow()).toBeLessThan(6 + 34);
+});
+
 test("종이에 떨어뜨린 사진은 새 탭이 아니라 그 자리의 스티커가 된다", async ({ page }) => {
   await boot(page);
   const tabsBefore = await page.locator("#docTabs .tab").count();

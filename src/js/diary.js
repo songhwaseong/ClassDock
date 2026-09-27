@@ -1573,6 +1573,32 @@ function diaryStickerBottom(s){
   const boxH = Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad));
   return s.y + h / 2 + boxH / 2;
 }
+/* 종이가 맨 아래 스티커보다 더 내려가는 여유(px) — 그림자(drop-shadow 0 2px 4px)가 잘리지 않을 만큼만.
+   예전엔 두 줄을 더 늘려서, 사진을 글 아래에 놓으면 종이가 엔터를 친 것처럼 늘어났다. 끄는 동안 종이 밖으로 나가면
+   그때그때 늘린다(startStickerDrag). */
+const DIARY_STICKER_PAD = 6;
+// 스티커 위 끝(종이 폭 단위) — diaryStickerBottom 과 같은 상자로 잰다.
+function diaryStickerTop(s){
+  const w = s.w, h = s.w * s.ar;
+  const rad = (Number(s.rot) || 0) * Math.PI / 180;
+  const boxH = Math.abs(w * Math.sin(rad)) + Math.abs(h * Math.cos(rad));
+  return s.y + h / 2 - boxH / 2;
+}
+/* 글 따라 움직이기 — 글 끝이 before 에서 after 로 바뀌었을 때(종이 폭 단위), 글 끝보다 아래에 놓인 스티커를
+   바뀐 만큼 함께 옮긴다. 늘면 내려가고 줄면 올라가서 글과 사진 사이 틈이 그대로 남는다.
+   글 위·옆에 놓은 것(그림일기 그림 칸 안 사진 포함)은 위 끝이 글 끝보다 위라 그대로다.
+   slack = 마지막 줄에 살짝 걸쳐 놓은 것도 '아래'로 칠 여유. 옮긴 스티커 수를 돌려준다. */
+function diaryFlowStickers(stickers, before, after, slack = 0){
+  const d = after - before;
+  if (!Number.isFinite(d) || !d) return 0;
+  let moved = 0;
+  for (const s of stickers || []){
+    if (diaryStickerTop(s) < before - slack) continue;
+    s.y += d;
+    moved++;
+  }
+  return moved;
+}
 
 /* ---------- 사진 여러 장 정렬 ----------
    좌표 단위는 스티커와 같다 — x·y·w 모두 '종이 폭에 대한 비율'이다(높이도 폭으로 나눈 값). 그래서
@@ -2354,27 +2380,43 @@ function mountDiaryPaper(els, paperEnv){
     syncPanel();
   }
   // 종이 높이 = 글 높이·스티커 아래 끝·최소 한 쪽 중 큰 값(줄 간격의 배수로 맞춰 마지막 줄이 잘리지 않게).
-  function layout(){
+  // opts.flow = 사용자가 본문을 고쳤다(본문 input) — 글 끝 아래 스티커를 글 따라 옮긴다(flowWithText).
+  function layout(opts){
     const width = paper.clientWidth;
     if (!width) return;
     paperWidth = width;
     measureTextStickers(width);            // 글상자 높이를 먼저 채워야 아래의 stickerBottom 이 맞는다
+    const flow = !!(opts && opts.flow);
     const effective = diaryEffectiveStyle(model, entryOf(paperEnv.current()));
-    if (diaryUsesGenko(effective)){ layoutGenko(width, effective); positionStickers(); return; }
+    if (diaryUsesGenko(effective)){ layoutGenko(width, effective, flow); positionStickers(); return; }
     const m = diaryLineMetrics(effective, width);
     area.style.paddingTop = m.padTop + "px";
     placePictureBox(m);
     const top = main.scrollTop;
     area.style.height = "0px";
     const textH = area.scrollHeight;
+    flowWithText(textH - m.gap, width, m.gap / 2, flow);      // 아래 여백(paddingBottom = 한 줄)을 뺀 자리가 글 끝
     let stickerBottom = 0;
     const entry = entryOf(paperEnv.current());
     for (const s of (entry ? entry.stickers : [])) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(s) * width);
     const minH = m.gap * 24;
-    const height = Math.ceil(Math.max(textH, stickerBottom + m.gap * 2, minH) / m.gap) * m.gap;
+    const height = Math.ceil(Math.max(textH, stickerBottom + DIARY_STICKER_PAD, minH) / m.gap) * m.gap;
     area.style.height = height + "px";
     main.scrollTop = top;
     positionStickers();
+  }
+  /* 글 따라 움직이기(diaryFlowStickers) — 사진을 글 아래에 두고 이어 쓰면 글이 사진 밑으로 파고들던 것을 막는다.
+     글 끝을 잴 때마다 기억해 두고, 본문을 고친 때(flow)만 달라진 만큼 옮긴다. 글꼴을 불러오거나 창 폭이 바뀌어
+     줄바꿈이 달라질 때까지 옮기면 파일을 열기만 해도 사진 자리가 바뀌기 때문이다.
+     글 끝은 종이 폭 비율로 기억해 창 폭이 바뀌어도 그대로 비교되고, 다른 날로 넘어가면 새로 잰다.
+     s.y 를 바로 고치므로 인쇄·내보내기·되돌리기(글칸 Ctrl+Z 도 input 이라 거꾸로 옮겨진다)가 따로 할 일이 없다. */
+  let textEnd = null;                       // { key, at } — 지난번 잰 글 끝(종이 폭 비율)
+  function flowWithText(bottomPx, width, slackPx, flow){
+    const key = paperEnv.current();
+    const at = bottomPx / width;
+    const entry = entryOf(key);
+    if (flow && entry && textEnd && textEnd.key === key) diaryFlowStickers(entry.stickers, textEnd.at, at, slackPx / width);
+    textEnd = { key, at };
   }
   /* 글상자 높이는 글에서 나온다 — 파일에 담지 않고 그릴 때마다 잰다.
      글자 크기가 종이 폭에 대한 비율이라 어느 폭에서도 줄바꿈 자리가 같고, 잰 높이를 ar 에 채워 두면
@@ -2424,15 +2466,16 @@ function mountDiaryPaper(els, paperEnv){
     }
   }
   let genkoLay = null, genkoGm = null;
-  function layoutGenko(width, style){
+  function layoutGenko(width, style, flow){
     placePictureBox(diaryLineMetrics(style, width));
     const gm = diaryGenkoMetrics(style, width);
     const lay = diaryGenkoLayout(area.value, gm.cols);
+    flowWithText(gm.padTop + lay.rows * gm.pitch, width, gm.pitch / 2, flow);
     const entry = entryOf(paperEnv.current());
     let stickerBottom = 0;
     for (const st of (entry ? entry.stickers : [])) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(st) * width);
     // 한 쪽(줄 간격 26줄쯤)을 채우되, 그림일기는 그림 칸이 차지한 만큼 줄 수를 줄인다.
-    const minRows = Math.max(4, Math.ceil((gm.pageH - gm.padTop) / gm.pitch), Math.ceil((stickerBottom - gm.padTop) / gm.pitch) + 1);
+    const minRows = Math.max(4, Math.ceil((gm.pageH - gm.padTop) / gm.pitch), Math.ceil((stickerBottom - gm.padTop) / gm.pitch));
     const focused = document.activeElement === area;
     const rows = diaryRenderGenko(genkoGrid, lay, gm, { minRows, selStart:focused ? area.selectionStart : 0, selEnd:focused ? area.selectionEnd : 0 });
     genkoLayer.style.height = (gm.padTop + rows * gm.pitch + gm.cell) + "px";
@@ -2501,7 +2544,7 @@ function mountDiaryPaper(els, paperEnv){
     const entry = ensureEntry(paperEnv.current());
     const wasEmpty = diaryEntryIsEmpty(entry);
     entry.text = area.value;
-    layout();
+    layout({ flow:true });
     onEntryChange();
     refreshCurrentLabel(wasEmpty);
     touch();
@@ -2890,6 +2933,9 @@ function mountDiaryPaper(els, paperEnv){
         sticker.y = Math.max(-0.02, start.sy + dy);
       }
       positionStickers();
+      // 종이 아래로 끌고 가면 종이를 늘려 준다(종이는 overflow:hidden 이라 안 늘리면 잘려 보인다). 줄이기는 놓을 때.
+      const dragged = groupStart ? groupStart.map(g => g.s) : [sticker];
+      if (dragged.some(s => diaryStickerBottom(s) * w + DIARY_STICKER_PAD > paper.clientHeight)) layout();
     };
     const onUp = () => {
       node.removeEventListener("pointermove", onMove);
@@ -4103,7 +4149,7 @@ function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
     const grid = document.createElement("div");
     grid.className = "diary-genko-grid";
     layer.append(grid);
-    const rows = diaryRenderGenko(grid, lay, gm, { minRows:Math.ceil((stickerBottom - gm.padTop) / gm.pitch) + 1 });
+    const rows = diaryRenderGenko(grid, lay, gm, { minRows:Math.ceil((stickerBottom - gm.padTop) / gm.pitch) });
     layer.style.height = (gm.padTop + rows * gm.pitch + gm.cell / 2) + "px";
     paperEl.append(layer);
     const pm = diaryLineMetrics(style, width);
@@ -4123,7 +4169,7 @@ function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
       backgroundImage:bgc.image, backgroundSize:bgc.size, backgroundPosition:bgc.position, backgroundRepeat:bgc.repeat,
       lineHeight:m.gap + "px", fontSize:m.fontSize + "px", fontFamily:font,
       paddingTop:m.padTop + "px", paddingBottom:m.gap + "px", paddingLeft:m.padLeft + "px", paddingRight:m.padRight + "px",
-      minHeight:Math.ceil((stickerBottom + m.gap) / m.gap) * m.gap + "px"
+      minHeight:Math.ceil((stickerBottom + DIARY_STICKER_PAD) / m.gap) * m.gap + "px"
     });
     paperEl.append(text);
   }
@@ -6578,7 +6624,7 @@ if (typeof module !== "undefined" && module.exports){
     DIARY_ART, DIARY_ART_IDS, DIARY_TEXT_SIZES, DIARY_TEXT_ALIGNS, DIARY_TEXT_MAX, DIARY_ART_DEFAULT_COLOR, DIARY_TEXT_DEFAULT_COLOR,
     diaryArtInfo, diaryArtName, diaryArtSvg, diaryStickerKind, diaryCleanSticker, diaryStickerText, diaryStickerCountLabel,
     diaryReorder, DIARY_ARRANGE_MODES, DIARY_ARRANGE_GAP, DIARY_ARRANGE_ROW_H, diaryArrangeAutoCols, diaryArrangeStickers, diaryArrangeInBox,
-    DIARY_GENKO_COLS, diaryGenkoGrid, diaryPictureBox, diaryUsesGenko, diaryStickerBottom, diaryGenkoMetrics, diaryGenkoLayout, diaryGenkoIndexAt,
+    DIARY_GENKO_COLS, diaryGenkoGrid, diaryPictureBox, diaryUsesGenko, diaryStickerBottom, diaryStickerTop, diaryFlowStickers, diaryGenkoMetrics, diaryGenkoLayout, diaryGenkoIndexAt,
     diaryUiDateLabel, diaryUiHeadDate, diaryUiMonthLabel, diaryUiWeekday, diaryT, diaryTf,
     diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryReviewStats, diaryYearMoods, diaryMoodColor, diaryNormalizeUserPrompts, DIARY_USER_PROMPT_MAX, diaryEntriesMarkdown, diaryEntriesHtml, diaryBytesToDataUrl, diaryExportFileName, DIARY_PHOTO_FRAMES, DIARY_AUDIO_RE, DIARY_AUDIO_AR, diaryAudioExt, diaryFormatSeconds, diaryNormalizeAnniversaries, diaryCleanAnniversaries, diaryAnniversariesOn, diaryAnniversaryCountdown, diaryEstimateTextHeight, diaryLineMetrics, diaryLineBackground,
     diaryCrc32, diaryZipBuild, diaryZipRead, diaryPack, diaryUnpack, diaryScratchFileName, diaryStarterBytes,

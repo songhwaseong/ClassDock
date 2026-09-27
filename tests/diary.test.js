@@ -380,6 +380,29 @@ test("돌린 스티커의 아래 끝은 돌린 뒤 상자로 잰다", () => {
   assert.ok(Math.abs(diary.diaryStickerBottom(flat) - 0.2) < 1e-9);
   const turned = { ...flat, rot:90 };
   assert.ok(Math.abs(diary.diaryStickerBottom(turned) - 0.3) < 1e-9);  // 가운데 0.1 + 세운 높이 0.4 의 절반
+  assert.ok(Math.abs(diary.diaryStickerTop(flat) - 0) < 1e-9);
+  assert.ok(Math.abs(diary.diaryStickerTop(turned) - (-0.1)) < 1e-9);
+});
+
+test("글 따라 움직이기: 글 끝 아래 스티커만 글이 늘고 준 만큼 옮긴다", () => {
+  const above = { id:"a", x:0.1, y:0.05, w:0.2, ar:1, rot:0 };        // 글 위(그림 칸 자리)
+  const beside = { id:"b", x:0.7, y:0.3, w:0.2, ar:1, rot:0 };        // 글 옆 — 위 끝 0.3 < 글 끝 0.4
+  const below = { id:"c", x:0.1, y:0.45, w:0.3, ar:0.6, rot:0 };      // 글 아래
+  const hugging = { id:"d", x:0.5, y:0.39, w:0.2, ar:1, rot:0 };      // 마지막 줄에 살짝 걸친 것
+  const list = [above, beside, below, hugging];
+  assert.equal(diary.diaryFlowStickers(list, 0.4, 0.45, 0.02), 2);
+  assert.equal(above.y, 0.05);
+  assert.equal(beside.y, 0.3);
+  assert.ok(Math.abs(below.y - 0.5) < 1e-9);
+  assert.ok(Math.abs(hugging.y - 0.44) < 1e-9);
+  // 글이 도로 줄면 같은 스티커가 같은 만큼 올라간다(틈이 그대로 남는다).
+  assert.equal(diary.diaryFlowStickers(list, 0.45, 0.4, 0.02), 2);
+  assert.ok(Math.abs(below.y - 0.45) < 1e-9);
+  assert.ok(Math.abs(hugging.y - 0.39) < 1e-9);
+  // 여유가 없으면 걸친 것은 '아래'가 아니다. 글 끝이 그대로면 아무것도 안 옮긴다.
+  assert.equal(diary.diaryFlowStickers(list, 0.4, 0.45), 1);
+  assert.equal(diary.diaryFlowStickers(list, 0.4, 0.4, 0.02), 0);
+  assert.equal(diary.diaryFlowStickers(null, 0.4, 0.5), 0);
 });
 
 /* ---------- 3단계: 원고지 · 인쇄 · 영어 화면 ---------- */
