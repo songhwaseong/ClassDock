@@ -1326,3 +1326,20 @@ test("기념일은 일기장에 담겨 저장·비교되고, 옛 파일은 빈 �
   const old = diary.diaryNormalize({ format:"classdock-diary", version:14, title:"옛 일기장", entries:[] });
   assert.deepEqual(old.anniversaries, []);
 });
+
+
+test("일기 찾기에서 특정 태그와 기분을 고를 수 있다", () => {
+  const entries = [
+    { date:"2026-05-01", tags:["학교"], mood:"happy", weather:"sunny", text:"수업" },
+    { date:"2026-05-02", tags:["여행"], mood:"tired", weather:"rain", text:"산책" },
+    { date:"2026-05-03", tags:["학교"], mood:"", weather:"cloudy", text:"체육" }
+  ];
+  assert.deepEqual(diary.diaryFilterEntries(entries, "", "tag", "학교", "").map(e => e.date),
+    ["2026-05-01", "2026-05-03"]);
+  assert.deepEqual(diary.diaryFilterEntries(entries, "", "mood", "", "happy").map(e => e.date),
+    ["2026-05-01"]);
+  assert.deepEqual(diary.diaryFilterEntries(entries, "", "mood", "", "").map(e => e.date),
+    ["2026-05-01", "2026-05-02", "2026-05-03"]);
+  assert.deepEqual(diary.diaryFilterEntries(entries, "산책", "tag", "여행", "").map(e => e.date),
+    ["2026-05-02"]);
+});

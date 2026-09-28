@@ -8905,6 +8905,7 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .trip-still-note.is-stale{color:var(--warn,#d97706);font-weight:600}
 .trip-map-note{margin:0;padding:8px 10px;color:var(--muted);font-size:12px}
 .trip-spot-pick.is-on{color:var(--accent)}
+.trip-spot-pick.is-picking{outline:2px solid var(--accent);outline-offset:2px}
 @media (max-width:1100px){.trip-body{grid-template-columns:var(--trip-rail,240px) minmax(0,1fr)}
   .trip-map-divider,.trip-map-pane{display:none}}
 @media (max-width:760px){.trip-body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
@@ -9880,3 +9881,25 @@ a.diary-school-card-value{color:var(--accent)}
 .map-jeju-bus-trip-fields input{width:100%;min-width:0;box-sizing:border-box}
 .map-jeju-bus-trip-result{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
 .map-jeju-bus-trip a[hidden]{display:none}
+
+
+/* 여행일지: 여정 안 찾기와 좁은 화면 지도 열기 */
+.trip-search-box{padding:0 2px 6px}
+.trip-search-input{box-sizing:border-box;width:100%;height:34px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--field);color:var(--ink);font:inherit}
+.trip-search-input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.trip-search-results{display:flex;flex-direction:column;gap:5px}
+.trip-search-results[hidden],.trip-rail-list[hidden],.trip-add-day[hidden],.trip-checklist[hidden]{display:none}
+.trip-search-count,.trip-search-empty{margin:2px 4px 6px;color:var(--muted);font-size:12px}
+.trip-search-result{display:flex;flex-direction:column;gap:2px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--field);color:var(--ink);text-align:left;cursor:pointer}
+.trip-search-result:hover,.trip-search-result:focus-visible{border-color:var(--accent);outline:0}
+.trip-search-result strong{font-size:12px}
+.trip-search-result span{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.trip-bar-actions .trip-tool-button.trip-map-mobile-btn.diary-ico,.trip-map-head .trip-map-close-btn{display:none}
+.diary-search-filters{flex-wrap:wrap}
+.diary-search-filters .diary-select{flex:1 1 125px;min-width:0;width:auto}
+@media (max-width:1100px){
+  .trip-bar-actions .trip-tool-button.trip-map-mobile-btn.diary-ico{display:flex}
+  .trip-map-head .trip-map-close-btn{display:inline-flex}
+  .trip-body.is-map-open .trip-map-pane{display:flex;position:absolute;inset:0;z-index:40;margin:0;min-height:0;border-radius:12px}
+  .trip-body.is-map-open .trip-map-stage{min-height:0}
+}

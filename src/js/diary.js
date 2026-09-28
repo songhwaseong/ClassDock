@@ -1316,6 +1316,15 @@ function diaryEntryMatches(entry, query){
   if (!q || !entry) return false;
   return [entry.date, diaryDateLabel(entry.date), diaryWeatherMoodLabel(entry), ...(entry.tags || []), entry.title, entry.text, diaryStickerText(entry)].join("\n").toLowerCase().includes(q);
 }
+function diaryFilterEntries(entries, query, filter, tag, mood){
+  let rows = (entries || []).slice();
+  if (String(query || "").trim()) rows = rows.filter(e => diaryEntryMatches(e, query));
+  if (filter === "favorite") rows = rows.filter(e => e.favorite);
+  if (filter === "photo") rows = rows.filter(e => (e.stickers || []).some(s => diaryStickerKind(s) === "photo"));
+  if (filter === "tag") rows = rows.filter(e => (e.tags || []).length && (!tag || e.tags.includes(tag)));
+  if (filter === "mood") rows = rows.filter(e => (e.mood || e.weather) && (!mood || e.mood === mood));
+  return rows;
+}
 // 검색·목록용 "날씨 맑음 · 기분 기쁨" — 그림 글자 없이 이름만.
 function diaryWeatherMoodLabel(entry){
   const weather = diaryWeatherInfo(entry && entry.weather), mood = diaryMoodInfo(entry && entry.mood);
@@ -4382,7 +4391,13 @@ function mountDiaryEditor(doc){
   const searchFilter = document.createElement("select");
   searchFilter.className = "diary-select";
   searchFilter.setAttribute("aria-label", "검색 조건");
-  searchFilters.append(searchFilter);
+  const searchTag = document.createElement("select");
+  searchTag.className = "diary-select diary-search-detail";
+  searchTag.hidden = true;
+  const searchMood = document.createElement("select");
+  searchMood.className = "diary-select diary-search-detail";
+  searchMood.hidden = true;
+  searchFilters.append(searchFilter, searchTag, searchMood);
   const searchResults = document.createElement("div");
   searchResults.className = "diary-search-results ui-keep-symbols";
   searchPane.append(searchInput, searchFilters, searchResults);
@@ -5079,6 +5094,23 @@ function mountDiaryEditor(doc){
     }));
     searchFilter.value = labels.some(([id]) => id === value) ? value : "all";
   }
+  function syncSearchDetailOptions(entries){
+    const en = diaryIsEn(), filter = searchFilter.value;
+    const tagValue = searchTag.value, moodValue = searchMood.value;
+    const tags = [...new Set(entries.flatMap(e => e.tags || []))].sort((a, b) => a.localeCompare(b));
+    searchTag.replaceChildren(...[["", en ? "All tags" : "모든 태그"], ...tags.map(tag => [tag, "#" + tag])].map(([value, label]) => {
+      const option = document.createElement("option"); option.value = value; option.textContent = label; return option;
+    }));
+    searchTag.value = tags.includes(tagValue) ? tagValue : "";
+    searchMood.replaceChildren(...[["", en ? "All moods" : "모든 기분"], ...DIARY_MOODS.map(info => [info[0], en ? info[3] : info[2]])].map(([value, label]) => {
+      const option = document.createElement("option"); option.value = value; option.textContent = label; return option;
+    }));
+    searchMood.value = DIARY_MOODS.some(info => info[0] === moodValue) ? moodValue : "";
+    searchTag.hidden = filter !== "tag";
+    searchMood.hidden = filter !== "mood";
+    searchTag.setAttribute("aria-label", en ? "Choose tag" : "태그 고르기");
+    searchMood.setAttribute("aria-label", en ? "Choose mood" : "기분 고르기");
+  }
   function setSideTab(id, focus){
     activeSideTab = ["calendar", "search", "photos", "review"].includes(id) ? id : "calendar";
     for (const tab of sideTabs.querySelectorAll(".diary-side-tab")){
@@ -5195,12 +5227,10 @@ function mountDiaryEditor(doc){
   }
   function renderSearchResults(){
     const query = searchInput.value.trim(), filter = searchFilter.value || "all";
-    let rows = diaryCleanEntries(model).slice().sort((a, b) => a.date < b.date ? 1 : -1);
-    if (query) rows = rows.filter(e => diaryEntryMatches(e, query));
-    if (filter === "favorite") rows = rows.filter(e => e.favorite);
-    if (filter === "photo") rows = rows.filter(e => e.stickers && e.stickers.length);
-    if (filter === "tag") rows = rows.filter(e => e.tags && e.tags.length);
-    if (filter === "mood") rows = rows.filter(e => e.mood || e.weather);
+    const entries = diaryCleanEntries(model);
+    syncSearchDetailOptions(entries);
+    let rows = diaryFilterEntries(entries.sort((a, b) => a.date < b.date ? 1 : -1),
+      query, filter, searchTag.value, searchMood.value);
     if (!query && filter === "all") rows = rows.slice(0, 30);
     const countText = query || filter !== "all"
       ? (diaryIsEn() ? rows.length + " results" : rows.length + "개의 일기")
@@ -5395,11 +5425,14 @@ function mountDiaryEditor(doc){
     entryRail.setAttribute("aria-label", diaryIsEn() ? "Diary card list" : "일기 카드 목록");
     sideMobileToggle.querySelector("span:last-child").textContent = diaryIsEn() ? "Calendar · Find" : "달력·검색";
     syncSearchFilterOptions();
+    if (activeSideTab === "search") renderSearchResults();
   }
   sideTabs.addEventListener("click", (event) => { const tab = event.target.closest(".diary-side-tab"); if (tab) setSideTab(tab.dataset.sideTab, true); });
   sideMobileToggle.addEventListener("click", () => side.classList.toggle("is-mobile-collapsed"));
   searchInput.addEventListener("input", renderSearchResults);
   searchFilter.addEventListener("change", renderSearchResults);
+  searchTag.addEventListener("change", renderSearchResults);
+  searchMood.addEventListener("change", renderSearchResults);
   refreshSideLanguage(); setSideTab("calendar");
   if (typeof matchMedia === "function" && matchMedia("(max-width:760px)").matches) side.classList.add("is-mobile-collapsed");
 
@@ -6626,7 +6659,7 @@ if (typeof module !== "undefined" && module.exports){
     diaryReorder, DIARY_ARRANGE_MODES, DIARY_ARRANGE_GAP, DIARY_ARRANGE_ROW_H, diaryArrangeAutoCols, diaryArrangeStickers, diaryArrangeInBox,
     DIARY_GENKO_COLS, diaryGenkoGrid, diaryPictureBox, diaryUsesGenko, diaryStickerBottom, diaryStickerTop, diaryFlowStickers, diaryGenkoMetrics, diaryGenkoLayout, diaryGenkoIndexAt,
     diaryUiDateLabel, diaryUiHeadDate, diaryUiMonthLabel, diaryUiWeekday, diaryT, diaryTf,
-    diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryReviewStats, diaryYearMoods, diaryMoodColor, diaryNormalizeUserPrompts, DIARY_USER_PROMPT_MAX, diaryEntriesMarkdown, diaryEntriesHtml, diaryBytesToDataUrl, diaryExportFileName, DIARY_PHOTO_FRAMES, DIARY_AUDIO_RE, DIARY_AUDIO_AR, diaryAudioExt, diaryFormatSeconds, diaryNormalizeAnniversaries, diaryCleanAnniversaries, diaryAnniversariesOn, diaryAnniversaryCountdown, diaryEstimateTextHeight, diaryLineMetrics, diaryLineBackground,
+    diaryEntryLabel, diaryPlainText, diaryEntryMatches, diaryFilterEntries, diaryReviewStats, diaryYearMoods, diaryMoodColor, diaryNormalizeUserPrompts, DIARY_USER_PROMPT_MAX, diaryEntriesMarkdown, diaryEntriesHtml, diaryBytesToDataUrl, diaryExportFileName, DIARY_PHOTO_FRAMES, DIARY_AUDIO_RE, DIARY_AUDIO_AR, diaryAudioExt, diaryFormatSeconds, diaryNormalizeAnniversaries, diaryCleanAnniversaries, diaryAnniversariesOn, diaryAnniversaryCountdown, diaryEstimateTextHeight, diaryLineMetrics, diaryLineBackground,
     diaryCrc32, diaryZipBuild, diaryZipRead, diaryPack, diaryUnpack, diaryScratchFileName, diaryStarterBytes,
     diaryCryptoReady, diaryIsEncrypted, diaryEncryptedInfo, diaryDeriveProtection, diarySealBytes, diaryOpenSealed, diaryOutputBytes
   };

@@ -832,3 +832,39 @@ test("되돌아보기 장 순서: 날 여는 장 → 장소 사진(없으면 장
   ]);
   assert.deepEqual(trip.tripReplaySlides(trip.tripEmpty()), []);
 });
+
+
+test("여행일지 찾기는 날과 장소를 구분해 정확한 id를 돌린다", () => {
+  const model = { days:[
+    { id:"dy-1", date:"2026-05-01", title:"출발", text:"기차를 탔다", spots:[
+      { id:"sp-1", at:"09:00", name:"서울역", address:"서울", note:"플랫폼" }
+    ] },
+    { id:"dy-2", date:"2026-05-02", title:"도착", text:"바닷가", spots:[
+      { id:"sp-2", at:"10:00", name:"해변", address:"강릉", note:"산책" }
+    ] }
+  ] };
+  assert.deepEqual(trip.tripSearchRows(model, "플랫폼"), [{ dayId:"dy-1", spotId:"sp-1" }]);
+  assert.deepEqual(trip.tripSearchRows(model, "2026-05-02"), [{ dayId:"dy-2", spotId:"" }]);
+  assert.deepEqual(trip.tripSearchRows(model, "  "), []);
+});
+
+test("읽기용 여행 HTML은 날짜·글·장소·사진을 담고 사용자 글을 이스케이프한다", () => {
+  const model = { title:"제주 <여행>", budget:{ currency:"KRW" }, days:[{
+    date:"2026-05-01", title:"첫날", text:"안녕 <script>alert(1)</script>",
+    stickers:[{ kind:"photo", asset:"paper.jpg" }, { kind:"text", text:"기억 <한 줄>" },
+      { kind:"audio", asset:"voice.mp3", label:"현장 소리" }],
+    spots:[{ at:"09:00", name:"해변 & 숲", address:"제주", note:"푸른 바다",
+      photos:["spot.jpg"], videos:[{ p:"poster.jpg", d:12 }], cost:{ amount:5000, currency:"KRW" } }]
+  }] };
+  const html = trip.tripJournalHtml(model, name => "data:image/jpeg;base64," + name);
+  assert.match(html, /<title>제주 &lt;여행&gt;<\/title>/);
+  assert.match(html, /안녕 &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(html, /해변 &amp; 숲/);
+  assert.match(html, /paper\.jpg/);
+  assert.match(html, /spot\.jpg/);
+  assert.match(html, /poster\.jpg/);
+  assert.match(html, /기억 &lt;한 줄&gt;/);
+  assert.match(html, /voice\.mp3/);
+  assert.match(html, /원본은 \.trip 파일에 있음/);
+  assert.doesNotMatch(html, /<script>/);
+});
