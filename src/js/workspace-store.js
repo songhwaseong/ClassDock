@@ -550,6 +550,7 @@ async function restoreLastWorkspace(force=false){
     try {
       restoreSavedWorkspaceWhiteboards();
       restoreSavedWhiteboards(savedTabs);
+      restoreSavedPhotoAlbum(savedTabs);
       applyTabState(savedTabs);
     } finally { tabRestoreInProgress = false; }
     return result;
@@ -698,6 +699,7 @@ async function restoreLastWorkspace(force=false){
     endUiBatch();
     restoreSavedWorkspaceWhiteboards(); // 모든 작업공간의 파일 없는 화이트보드 문서를 먼저 만든다
     restoreSavedWhiteboards(savedTabs); // 파일 바이트가 없는 화이트보드 탭과 마지막 판서를 먼저 되살린다
+    restoreSavedPhotoAlbum(savedTabs); // 사진첩 원본은 별도 저장소에 있고 열린 탭만 되살린다
     applyTabState(savedTabs);   // 파일이 모두 열린 뒤 탭 순서·활성 탭 복원
     restoreStudyState(savedTabs); // 참고·작업 문서 짝도 마지막에 다시 구성
     restoreMemoLinks(savedTabs);  // 지도·악보가 돌아갈 메모 블록 고리도 다시 잇는다

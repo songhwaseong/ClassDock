@@ -73,6 +73,9 @@
     "spreadsheet-chart.js",
     "pptx-viewer.js",
     "image-viewer.js",
+    "gif-encoder.js",
+    "mp4-writer.js",
+    "photo-album.js",
     "image-lightbox.js",
     "board-render.js",
     "board-tools.js",
@@ -252,6 +255,9 @@
         "spreadsheet-chart.js",
         "pptx-viewer.js",
         "image-viewer.js",
+        "gif-encoder.js",
+        "mp4-writer.js",
+        "photo-album.js",
         "image-lightbox.js",
         "board-render.js",
         "board-tools.js",
@@ -452,6 +458,11 @@
     ],
     "image-viewer.js": [
       "documents.js"
+    ],
+    "photo-album.js": [
+      "documents.js",
+      "gif-encoder.js",
+      "mp4-writer.js"
     ],
     "whiteboard.js": [
       "board-render.js",

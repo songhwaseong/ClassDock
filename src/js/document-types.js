@@ -92,6 +92,7 @@ const MNDocumentTypes = (() => {
     if (kind === "zip") return "ZIP";
     if (kind === "pdf") return "PDF";
     if (kind === "image") return "IMG";
+    if (kind === "photo-album") return "앨범";
     if (kind === "image-gallery" || kind === "pdf-gallery") return "▦";
     if (kind === "video") return audioExts.includes(fileExtOf(name)) ? "AUD" : "VID";
     if (kind === "board") return "칠판";
@@ -118,7 +119,7 @@ const MNDocumentTypes = (() => {
     if (kind === "folder") return "dir";
     if (kind === "zip") return "zip";
     if (kind === "pdf") return "pdf";
-    if (kind === "image" || kind === "image-gallery") return "img";
+    if (kind === "image" || kind === "image-gallery" || kind === "photo-album") return "img";
     if (kind === "pdf-gallery") return "pdf";
     if (kind === "video") return "media";
     if (kind === "binary") return "binary";

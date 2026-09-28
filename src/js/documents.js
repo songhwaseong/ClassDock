@@ -1415,6 +1415,7 @@ function unsavedDocumentLabel(doc){
   if (doc.kind === "tier") return "티어표";
   if (doc.kind === "bracket") return "대진표";
   if (doc.kind === "pick") return "복불복 뽑기";
+  if (doc.kind === "photo-album") return "사진첩";
   if (doc.kind === "diary") return "일기장";
   if (doc.kind === "trip") return "여행일지";
   if (doc.kind === "dbconn") return "접속 설정";
@@ -1673,6 +1674,7 @@ function modeBadgeText(doc){
   if (doc.kind === "trip") return "여행 기록";
   if (doc.kind === "replay") return "수업 리플레이";
   if (doc.kind === "diff") return "파일 비교";
+  if (doc.kind === "photo-album") return "사진첩 꾸미기";
   if (doc.kind === "image-gallery") return "이미지 모아보기";
   if (doc.kind === "pdf-gallery") return "PDF 모아보기";
   if (ext === ".py" || ext === ".pyw") return "Python 실습";

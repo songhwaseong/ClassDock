@@ -212,22 +212,22 @@ function wire(){
     if (!wasInternal) queueDroppedItems(e.dataTransfer);
   });
   const draggingFiles = (e) => !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
-  const memoOwnsFileDrop = () => {
+  const activeDocOwnsFileDrop = () => {
     const imageMemo = byId("imageMemo");
     const scratchpad = byId("scratchpad");
     if ((imageMemo && !imageMemo.hidden) || (scratchpad && !scratchpad.hidden)) return true;
-    // 일기장은 종이 위에 떨어뜨린 사진을 그 자리에 스티커로 붙인다 — 오버레이가 종이를 덮으면 안 된다.
+    // 일기장은 종이 위에 사진을 붙이고 사진첩은 미디어를 가져온다 — 오버레이가 해당 화면을 덮으면 안 된다.
     // 종이 밖이나 그림이 아닌 파일은 창의 drop 처리로 흘러가 평소처럼 새 탭으로 열린다.
     // 티어표도 화면에 떨어뜨린 사진을 보유 카드로 받는다(오버레이가 덮으면 사진이 새 탭으로 열려 버린다). 대진표는 참가자로.
-    return typeof state !== "undefined" && !!state && (state.kind === "diary" || state.kind === "trip" || state.kind === "tier" || state.kind === "bracket" || state.kind === "pick");
+    return typeof state !== "undefined" && !!state && (state.kind === "diary" || state.kind === "trip" || state.kind === "tier" || state.kind === "bracket" || state.kind === "pick" || state.kind === "photo-album");
   };
   window.addEventListener("dragenter", (e) => {
     if (!draggingFiles(e) || isInternalDragTransfer(e.dataTransfer, false)) return;
     // 외부 Files 드롭은 이전 내부 드래그 플래그가 남아 있어도 업로드가 우선한다.
     if (internalDrag) resetInternalDragState();
-    // 메모 창이 열렸으면 전역 오버레이가 창 위를 덮지 않게 한다.
-    // 각 메모의 drop 핸들러가 이미지를 받고 stopPropagation 하므로 본문의 새 탭 열기와 중복되지 않는다.
-    if (memoOwnsFileDrop()){ hideOverlay(); return; }
+    // 메모 창이나 자체 파일 드롭 화면이 열렸으면 전역 오버레이가 덮지 않게 한다.
+    // 해당 화면의 drop 핸들러가 stopPropagation 하므로 본문의 새 탭 열기와 중복되지 않는다.
+    if (activeDocOwnsFileDrop()){ hideOverlay(); return; }
     dragDepth++; dropOverlay.classList.add("show"); armOverlayTimer(); // 오버레이가 떠서 iframe 위까지 덮음 → 어디든 드롭 가능
   });
   window.addEventListener("dragleave", (e) => {
@@ -518,6 +518,7 @@ function wire(){
   if (byId("sbNewDbConn")) byId("sbNewDbConn").onclick = () => { if (typeof newDbConnScratch === "function") newDbConnScratch(); };
   if (byId("sbNewConcept")) byId("sbNewConcept").onclick = () => { if (typeof newConceptScratch === "function") newConceptScratch(); };
   if (byId("sbNewDiary")) byId("sbNewDiary").onclick = () => { if (typeof newDiaryScratch === "function") newDiaryScratch(); };
+  if (byId("sbNewPhotoAlbum")) byId("sbNewPhotoAlbum").onclick = () => openPhotoAlbum();
   if (byId("sbNewTrip")) byId("sbNewTrip").onclick = () => { if (typeof newTripScratch === "function") newTripScratch(); };
   if (byId("sbNewStudy")) byId("sbNewStudy").onclick = () => { if (typeof newStudyScratch === "function") newStudyScratch(); };
   if (byId("sbNewTier")) byId("sbNewTier").onclick = () => { if (typeof newTierScratch === "function") newTierScratch(); };

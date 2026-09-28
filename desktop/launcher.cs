@@ -152,6 +152,13 @@ class ClassDockLauncher
     static readonly string AppStatePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "ClassDock", "app-state.json");
+    // 사진첩 원본은 브라우저 origin(포트)이 바뀌어도 찾을 수 있도록 앱 데이터에 보관한다.
+    static readonly object PhotoAlbumLock = new object();
+    static readonly string PhotoAlbumDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ClassDock", "photo-album");
+    const int PhotoAlbumMaxFileBytes = 256 * 1024 * 1024;
+    const int PhotoAlbumMaxMetaBytes = 512 * 1024;
     // 브라우저 화면이 멈추거나 비정상 종료된 뒤에도 다음 실행에서 원인을 볼 수 있는 공통 진단 로그.
     // 문서 본문은 브라우저 로거에서 제외하고, 런처는 크기 제한·순환 보관만 맡는다.
     static readonly string DiagnosticsDir = Path.Combine(
@@ -943,6 +950,7 @@ class ClassDockLauncher
         {
             if (path.StartsWith("/workspace-save", StringComparison.Ordinal)) return true;
             if (path == "/workspace-clear" || path == "/workspace-remove") return true;
+            if (path.StartsWith("/photo-album-", StringComparison.Ordinal)) return true;
             if (path == "/convert-pptx" || path == "/convert-media" || path == "/install-ffmpeg") return true;
             if (path.StartsWith("/shrink-media", StringComparison.Ordinal)) return true;
             // 경로 방식 변환은 디스크의 파일을 읽고 쓴다 → 토큰 대상. 재생 표 발급도 같다
@@ -994,6 +1002,7 @@ class ClassDockLauncher
             if (path.StartsWith("/ssh-file-job?", StringComparison.Ordinal)
                 || path.StartsWith("/ssh-file-content?", StringComparison.Ordinal)) return true;
             if (path == "/workspace-load") return true;
+            if (path.StartsWith("/photo-album-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/diagnostics/", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/exam-receive-status", StringComparison.Ordinal)) return true;
             if (path == "/save-root" || path == "/choose-save-folder-status") return true;
@@ -1514,6 +1523,13 @@ class ClassDockLauncher
                     WriteResponse(stream, "413 Payload Too Large", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("request-body-too-large"));
                     return;
                 }
+                if ((path.StartsWith("/photo-album-file?", StringComparison.Ordinal) && contentLength > PhotoAlbumMaxFileBytes)
+                    || (path.StartsWith("/photo-album-meta?", StringComparison.Ordinal) && contentLength > PhotoAlbumMaxMetaBytes))
+                {
+                    stream.KeepAlive = false;
+                    WriteResponse(stream, "413 Payload Too Large", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("photo-album-item-too-large"));
+                    return;
+                }
                 // 인증 실패 요청은 본문을 읽지 않는다. 큰 무단 요청으로 메모리·I/O를 점유하는 것을 막는다.
                 // 본문이 스트림에 남으므로 연결도 재사용하지 않는다.
                 if (RequiresLocalAuthToken(method, path) && !HasLocalAuthToken(headers))
@@ -1610,6 +1626,60 @@ class ClassDockLauncher
                     catch (Exception ex)
                     {
                         WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("workspace-remove-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "GET" && path == "/photo-album-list")
+                {
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8",
+                        Encoding.UTF8.GetBytes(PhotoAlbumList()));
+                }
+                else if (method == "GET" && path.StartsWith("/photo-album-file?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        string full = PhotoAlbumPath(QueryValue(path, "id"), ".bin");
+                        if (!File.Exists(full)) WriteResponse(stream, "404 Not Found", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("photo-album-file-missing"));
+                        else WriteFileStreamResponse(stream, full, "application/octet-stream", headers);
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("photo-album-file-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/photo-album-file?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        PhotoAlbumSaveFile(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("photo-album-save-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/photo-album-meta?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        PhotoAlbumSaveMeta(QueryValue(path, "id"), body);
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("photo-album-meta-failed: " + FlattenMessage(ex)));
+                    }
+                }
+                else if (method == "POST" && path.StartsWith("/photo-album-delete?", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        PhotoAlbumDelete(QueryValue(path, "id"));
+                        WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("ok"));
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("photo-album-delete-failed: " + FlattenMessage(ex)));
                     }
                 }
                 else if (method == "POST" && path == "/convert-pptx")
@@ -3877,6 +3947,99 @@ class ClassDockLauncher
         {
             HeartbeatClients.Remove(id);
             if (HeartbeatSeen && HeartbeatClients.Count == 0) NoHeartbeatClientsSince = DateTime.UtcNow;
+        }
+    }
+
+    static string PhotoAlbumPath(string rawId, string extension)
+    {
+        Guid id;
+        if (!Guid.TryParse(rawId, out id)) throw new InvalidDataException("photo-album-id");
+        return Path.Combine(PhotoAlbumDir, id.ToString("N") + extension);
+    }
+
+    static string PhotoAlbumList()
+    {
+        lock (PhotoAlbumLock)
+        {
+            if (!Directory.Exists(PhotoAlbumDir)) return "[]";
+            StringBuilder json = new StringBuilder("[");
+            foreach (string full in Directory.GetFiles(PhotoAlbumDir, "*.json"))
+            {
+                if (json.Length > 32 * 1024 * 1024) break;
+                try
+                {
+                    string id = Path.GetFileNameWithoutExtension(full);
+                    FileInfo info = new FileInfo(full);
+                    if (info.Length <= 0 || info.Length > PhotoAlbumMaxMetaBytes) continue;
+                    string item = File.ReadAllText(full, Encoding.UTF8);
+                    var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+                    serializer.MaxJsonLength = PhotoAlbumMaxMetaBytes;
+                    Dictionary<string, object> parsed = serializer.DeserializeObject(item) as Dictionary<string, object>;
+                    if (parsed == null) continue;
+                    // 직접 그린 장식(type "art")은 그림 파일 없이 메타데이터만 있다. 사진·영상은 원본 파일이 있어야 보인다.
+                    object rawType;
+                    bool isArt = parsed.TryGetValue("type", out rawType) && Convert.ToString(rawType, CultureInfo.InvariantCulture) == "art";
+                    if (!isArt && !File.Exists(PhotoAlbumPath(id, ".bin"))) continue;
+                    if (json.Length > 1) json.Append(',');
+                    json.Append(item);
+                }
+                catch { /* 손상된 항목 하나 때문에 나머지 사진첩을 감추지 않는다. */ }
+            }
+            return json.Append(']').ToString();
+        }
+    }
+
+    static void PhotoAlbumSaveFile(string rawId, byte[] body)
+    {
+        if (body == null || body.Length == 0 || body.Length > PhotoAlbumMaxFileBytes)
+            throw new InvalidDataException("photo-album-file-size");
+        string full = PhotoAlbumPath(rawId, ".bin");
+        lock (PhotoAlbumLock)
+        {
+            Directory.CreateDirectory(PhotoAlbumDir);
+            WriteFileAtomically(full, body);
+        }
+    }
+
+    static void PhotoAlbumSaveMeta(string rawId, byte[] body)
+    {
+        if (body == null || body.Length == 0 || body.Length > PhotoAlbumMaxMetaBytes)
+            throw new InvalidDataException("photo-album-meta-size");
+        string full = PhotoAlbumPath(rawId, ".json");
+        string media = PhotoAlbumPath(rawId, ".bin");
+        string item = Encoding.UTF8.GetString(body);
+        var serializer = new System.Web.Script.Serialization.JavaScriptSerializer();
+        serializer.MaxJsonLength = PhotoAlbumMaxMetaBytes;
+        Dictionary<string, object> parsed = serializer.DeserializeObject(item) as Dictionary<string, object>;
+        object rawSavedId, rawType;
+        Guid savedId;
+        if (parsed == null || !parsed.TryGetValue("id", out rawSavedId)
+            || !Guid.TryParse(Convert.ToString(rawSavedId, CultureInfo.InvariantCulture), out savedId)
+            || !string.Equals(savedId.ToString("N"), Path.GetFileNameWithoutExtension(full), StringComparison.OrdinalIgnoreCase)
+            || !parsed.TryGetValue("type", out rawType)
+            || (Convert.ToString(rawType, CultureInfo.InvariantCulture) != "image"
+                && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "video"
+                && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "audio"
+                && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "art"))
+            throw new InvalidDataException("photo-album-meta-invalid");
+        bool isArt = Convert.ToString(rawType, CultureInfo.InvariantCulture) == "art";
+        lock (PhotoAlbumLock)
+        {
+            // 직접 그린 장식은 원본 파일 없이 메타데이터만 저장한다.
+            if (isArt) Directory.CreateDirectory(PhotoAlbumDir);
+            else if (!File.Exists(media)) throw new FileNotFoundException("photo-album-file-missing");
+            WriteFileAtomically(full, body);
+        }
+    }
+
+    static void PhotoAlbumDelete(string rawId)
+    {
+        string meta = PhotoAlbumPath(rawId, ".json");
+        string media = PhotoAlbumPath(rawId, ".bin");
+        lock (PhotoAlbumLock)
+        {
+            if (File.Exists(meta)) File.Delete(meta);
+            if (File.Exists(media)) File.Delete(media);
         }
     }
 
