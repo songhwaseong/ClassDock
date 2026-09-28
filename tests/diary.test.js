@@ -233,7 +233,7 @@ test(".diary 는 파일 열기·새로 만들기 메뉴·manifest·검색에 연
   assert.match(diarySource, /firstSticker[\s\S]{0,300}diary-entry-card-thumb/);
   assert.match(diarySource, /diary-entry-card-drawing/);                    // 카드에서도 펜 그림을 축소 렌더링
   const css = read("src/styles.css");
-  assert.match(css, /--diary-c-side:224px;--diary-c-rail:300px/);                 // 3단 폭은 변수로 두고
+  assert.match(css, /--diary-c-side:264px;--diary-c-rail:300px/);                 // 3단 폭은 변수로 두고
   assert.match(css, /grid-template-columns:var\(--diary-c-side\) var\(--diary-c-rail\) minmax\(0,1fr\)/);
   // 접으면 남은 칸이 앞 칸 폭을 물려받아 짜부라지므로 틀을 다시 정해야 한다
   assert.match(css, /is-side-collapsed \.diary-body\{grid-template-columns:var\(--diary-c-rail\) minmax\(0,1fr\)\}/);

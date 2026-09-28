@@ -9324,7 +9324,7 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .diary-screen-lock-icon .ui-icon{width:30px;height:30px}.diary-screen-lock strong{font-size:18px}.diary-screen-lock p{margin:0;color:var(--muted);font-size:13px}
 .diary-doc.is-screen-locked>.diary-bar,.diary-doc.is-screen-locked>.diary-body,.diary-doc.is-screen-locked>.diary-style-panel,.diary-doc.is-screen-locked>.diary-art-panel,.diary-doc.is-screen-locked>.diary-pick-pop,.diary-doc.is-screen-locked>.diary-template-panel,.diary-doc.is-screen-locked>.diary-school-panel{visibility:hidden}
 /* 칸 폭을 변수로 둔다 — 접으면 칸 수가 줄어드는데, 틀을 그대로 두면 남은 칸이 앞 칸의 폭을 물려받아 짜부라진다. */
-.diary-body{--diary-c-side:224px;--diary-c-rail:300px;position:relative;isolation:isolate;display:grid;
+.diary-body{--diary-c-side:264px;--diary-c-rail:300px;position:relative;isolation:isolate;display:grid;
   grid-template-columns:var(--diary-c-side) var(--diary-c-rail) minmax(0,1fr);flex:1;min-height:0;background-color:var(--bg)}
 /* 일기 쓰는 종이와 별개의 바탕. 사진을 골라도 달력·목록·종이 둘레에만 나타난다. */
 .diary-body[data-backdrop="blossom"],.trip-root[data-backdrop="blossom"]{background-color:#f6e8ed;background-image:
@@ -9384,7 +9384,7 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .diary-side-pane{display:flex;flex-direction:column;gap:10px;min-height:0}
 .diary-side-pane[hidden]{display:none}
 .diary-cal-head{display:flex;align-items:center;gap:4px}
-.diary-cal-month{flex:1;text-align:center;font-size:15px}
+.diary-cal-month{flex:1;min-width:0;text-align:center;font-size:15px;white-space:nowrap}
 .diary-cal-nav{width:30px;min-height:30px;padding:0}
 .diary-cal-today{min-height:30px;padding:3px 9px;font-size:12.5px}
 .diary-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
@@ -9721,7 +9721,7 @@ a.diary-school-card-value{color:var(--accent)}
 .diary-doc.is-focus>.diary-bar:hover,.diary-doc.is-focus>.diary-bar:focus-within{opacity:1}
 @media(prefers-reduced-motion:reduce){ .diary-doc.is-focus>.diary-bar{transition:none} }
 @media(max-width:1180px) and (min-width:761px){
-  .diary-body{--diary-c-side:210px;--diary-c-rail:258px}
+  .diary-body{--diary-c-side:248px;--diary-c-rail:258px}
   .diary-entry-card-thumb{flex-basis:66px;width:66px;height:66px}
   .diary-month-item{min-height:86px;padding:8px}
 }
