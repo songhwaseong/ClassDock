@@ -1721,10 +1721,25 @@ function mountTripEditor(doc){
   if (typeof window.uiIcon === "function") railIcon.innerHTML = window.uiIcon("calendar");
   const railHead = document.createElement("div");
   railHead.className = "trip-rail-head";
-  const railChevron = document.createElement("span");
+  // 여정 띠 접기 — 머리 줄만 남기고 검색·날 목록·날 추가·준비물을 감춘다. 보는 사람 편의라 이 브라우저에만 남긴다.
+  const railChevron = document.createElement("button");
+  railChevron.type = "button";
   railChevron.className = "trip-rail-chevron";
-  railChevron.setAttribute("aria-hidden", "true");
-  if (typeof window.uiIcon === "function") railChevron.innerHTML = window.uiIcon("chevronUp");
+  let railFolded = false;
+  try { railFolded = localStorage.getItem("mn.tripRailFolded") === "1"; } catch(_){}
+  function applyRailFold(){
+    rail.classList.toggle("is-folded", railFolded);
+    railChevron.setAttribute("aria-expanded", String(!railFolded));
+    const tip = tripIsEn() ? (railFolded ? "Show day list" : "Hide day list") : (railFolded ? "날 목록 펼치기" : "날 목록 접기");
+    railChevron.title = tip;
+    railChevron.setAttribute("aria-label", tip);
+    railChevron.innerHTML = typeof window.uiIcon === "function" ? window.uiIcon(railFolded ? "chevronDown" : "chevronUp") : (railFolded ? "▾" : "▴");
+  }
+  railChevron.addEventListener("click", () => {
+    railFolded = !railFolded;
+    try { localStorage.setItem("mn.tripRailFolded", railFolded ? "1" : "0"); } catch(_){}
+    applyRailFold();
+  });
   // 여행 요약 — 여정 띠 머리에 둔다(여정 전체를 보는 자리).
   const summaryBtn = diaryButton("", "", "diary-btn trip-summary-btn", "chart");
   const summaryTip = tripIsEn() ? "Trip summary — period, distance, spending, regions" : "여행 요약 — 기간·이동 거리·경비·다녀온 지역";
@@ -1758,6 +1773,7 @@ function mountTripEditor(doc){
   checkBody.className = "trip-check-body";
   checkBox.append(checkHead, checkBody);
   rail.append(railTitlebar, searchBox, searchResults, railList, addDayBtn, checkBox);
+  applyRailFold();
 
   /* 지도 칸 — 좌표가 있는 장소를 표시로 찍고 목록 차례대로 잇는다(설계 2.3).
      칸은 접을 수 있다. 접기는 보는 사람 편의라 파일이 아니라 이 브라우저에만 남긴다. */

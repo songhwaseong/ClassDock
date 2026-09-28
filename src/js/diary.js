@@ -4410,7 +4410,33 @@ function mountDiaryEditor(doc){
   const reviewPane = document.createElement("div");
   reviewPane.className = "diary-side-pane diary-review-pane ui-keep-symbols";
   reviewPane.dataset.sidePane = "review"; reviewPane.hidden = true;
-  side.append(sideMobileToggle, sideTabs, calendarPane, searchPane, photoPane, reviewPane);
+  /* 달력 칸 접기 — 탭 줄만 남기고 아래 칸을 감춘다(여행일지 여정 띠 접기와 같은 모양).
+     칸 전체를 치우는 sideToggleBtn 과 따로 논다. 보는 사람 편의라 이 브라우저에만 남긴다. */
+  const sideFoldBtn = document.createElement("button");
+  sideFoldBtn.type = "button";
+  sideFoldBtn.className = "diary-side-fold";
+  let sideFolded = false;
+  try { sideFolded = localStorage.getItem("mn.diarySideFolded") === "1"; } catch(_){}
+  function applySideFold(){
+    side.classList.toggle("is-folded", sideFolded);
+    sideFoldBtn.setAttribute("aria-expanded", String(!sideFolded));
+    const tip = diaryIsEn() ? (sideFolded ? "Unfold the panel" : "Fold the panel") : (sideFolded ? "칸 펼치기" : "칸 접기");
+    sideFoldBtn.title = tip;
+    sideFoldBtn.setAttribute("aria-label", tip);
+    sideFoldBtn.innerHTML = typeof window.uiIcon === "function" ? window.uiIcon(sideFolded ? "chevronDown" : "chevronUp") : (sideFolded ? "▾" : "▴");
+  }
+  function setSideFolded(on){
+    if (sideFolded === on) return;
+    sideFolded = on;
+    try { localStorage.setItem("mn.diarySideFolded", on ? "1" : "0"); } catch(_){}
+    applySideFold();
+  }
+  sideFoldBtn.addEventListener("click", () => setSideFolded(!sideFolded));
+  const sideTop = document.createElement("div");
+  sideTop.className = "diary-side-top";
+  sideTop.append(sideTabs, sideFoldBtn);
+  side.append(sideMobileToggle, sideTop, calendarPane, searchPane, photoPane, reviewPane);
+  applySideFold();
 
   const entryRail = document.createElement("section");
   entryRail.className = "diary-entry-rail";
@@ -5424,10 +5450,12 @@ function mountDiaryEditor(doc){
     searchInput.placeholder = diaryIsEn() ? "Search this diary" : "이 일기장에서 찾기";
     entryRail.setAttribute("aria-label", diaryIsEn() ? "Diary card list" : "일기 카드 목록");
     sideMobileToggle.querySelector("span:last-child").textContent = diaryIsEn() ? "Calendar · Find" : "달력·검색";
+    applySideFold();
     syncSearchFilterOptions();
     if (activeSideTab === "search") renderSearchResults();
   }
-  sideTabs.addEventListener("click", (event) => { const tab = event.target.closest(".diary-side-tab"); if (tab) setSideTab(tab.dataset.sideTab, true); });
+  // 접힌 채로 탭을 누르면 그 탭 칸을 보려는 것이라 먼저 편다.
+  sideTabs.addEventListener("click", (event) => { const tab = event.target.closest(".diary-side-tab"); if (tab){ setSideFolded(false); setSideTab(tab.dataset.sideTab, true); } });
   sideMobileToggle.addEventListener("click", () => side.classList.toggle("is-mobile-collapsed"));
   searchInput.addEventListener("input", renderSearchResults);
   searchFilter.addEventListener("change", renderSearchResults);
