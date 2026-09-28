@@ -4944,10 +4944,13 @@ function mapSearchTextFrom(raw){
   return text && text.length <= MAP_SEARCH_TEXT_MAX ? text : "";
 }
 /* 어느 지도로 보낼지 — 열어 둔 지도 중 가장 최근에 본 것. 한 번도 활성화한 적 없는 탭(파일을
-   여럿 열어 두기만 한 경우)은 뒤로 민다. 열린 지도가 없으면 부르는 쪽이 새로 만든다. */
+   여럿 열어 두기만 한 경우)은 뒤로 민다. 열린 지도가 없으면 부르는 쪽이 새로 만든다.
+   다른 작업공간의 지도는 고르지 않는다 — setActiveDoc 이 그 탭으로 건너가지 않아서, 보이지 않는
+   지도만 옮기고 화면에는 아무 일도 없던 것처럼 보인다. */
 function mapRecentMapDoc(){
   const open = (typeof docs !== "undefined" && Array.isArray(docs) ? docs : [])
-    .filter(item => item && item.kind === "map" && !item.closed);
+    .filter(item => item && item.kind === "map" && !item.closed
+      && (typeof documentInActiveWorkspace !== "function" || documentInActiveWorkspace(item)));
   if (open.length < 2) return open[0] || null;
   const mru = typeof activeMru !== "undefined" && Array.isArray(activeMru) ? activeMru : [];
   const rank = (item) => {

@@ -2009,14 +2009,14 @@ let tabScrollStart = 0;
 let tabBarResizeObserver = null;
 function tabLimitForWidth(width){
   // width 는 작업공간 버튼을 뺀 문서 탭 칸(#docTabs)의 폭이다.
-  // 오른쪽 끝에 항상 붙는 칠판 버튼(새 화이트보드, 32px)과 숨은 탭 버튼(82px) 자리를 미리 빼둔다.
-  const usable = Math.max(210, (width || window.innerWidth || 800) - 114);
+  // 오른쪽 끝에 항상 붙는 칠판·지도 버튼(각 32px)과 숨은 탭 버튼(82px) 자리를 미리 빼둔다.
+  const usable = Math.max(210, (width || window.innerWidth || 800) - 146);
   return Math.max(1, Math.min(6, Math.floor(usable / 210)));
 }
 
 // 헤더 아래 탭바: tabOrder(선택한 문서 순서) 중 현재 열려있는 것만 표시(1개여도 보인다)
 // 문서 탭은 #tabBar 안의 #docTabs 칸에만 그린다. 같은 줄 왼쪽 끝의 작업공간 버튼(workspaces.js)은
-// 건드리지 않고, 탭이 하나도 없어도 줄은 그대로 둔다(빈 작업공간에서도 전환 버튼과 칠판 버튼이 보여야 한다).
+// 건드리지 않고, 탭이 하나도 없어도 줄은 그대로 둔다(빈 작업공간에서도 전환 버튼과 칠판·지도 버튼이 보여야 한다).
 function renderTabs(){
   if (typeof closeTabMenu === "function") closeTabMenu();          // 다시 그릴 때 떠 있던 우클릭 메뉴 정리
   tabOrder = tabOrder.filter(id => docs.some(d => d.id === id && workspaceHasDoc(d)));   // 닫힌 문서·다른 작업공간 정리
@@ -2110,10 +2110,9 @@ function renderTabs(){
     tab.append(ic, nm, tail);
     bar.appendChild(tab);
   });
-  // 마지막 탭 옆 칠판 버튼 (브라우저 새 탭과 같은 자리) — 문서를 설명하다 바로 판서할 화이트보드를 연다.
-  // 사이드바가 접혀 있거나 드롭존이 문서에 가려진 상태에서도 늘 보이는 유일한 새로 만들기 진입점이다.
+  // 마지막 탭 옆 칠판·지도 버튼 — 사이드바가 접혀 있어도 바로 새 문서를 열 수 있다.
   const newBoardBtn = document.createElement("button");
-  newBoardBtn.type = "button"; newBoardBtn.className = "tab-new-board";
+  newBoardBtn.type = "button"; newBoardBtn.className = "tab-new-board tab-new-tool";
   // ＋ 대신 칠판 아이콘 — 눌렀을 때 무엇이 열리는지 기호만 봐도 알 수 있게 한다(엑셀 시트 탭의 ＋ 와도 구분된다).
   if (typeof setUiIcon === "function") setUiIcon(newBoardBtn, "board"); else newBoardBtn.textContent = "＋";
   newBoardBtn.dataset.shortcutAction = "newBoard";
@@ -2121,6 +2120,14 @@ function renderTabs(){
   newBoardBtn.dataset.shortcutAria = "true";
   newBoardBtn.onclick = () => { if (typeof newWhiteboard === "function") newWhiteboard(); };
   bar.appendChild(newBoardBtn);
+  const newMapBtn = document.createElement("button");
+  newMapBtn.type = "button"; newMapBtn.className = "tab-new-map tab-new-tool";
+  const newMapLabel = typeof window.t === "function" ? window.t("새 지도 (.map)") : "새 지도 (.map)";
+  if (typeof setUiIcon === "function") setUiIcon(newMapBtn, "map", newMapLabel); else newMapBtn.textContent = "지도";
+  newMapBtn.title = newMapLabel;
+  newMapBtn.setAttribute("aria-label", newMapLabel);
+  newMapBtn.onclick = () => { if (typeof newMapScratch === "function") newMapScratch(); };
+  bar.appendChild(newMapBtn);
   if (typeof syncShortcutHints === "function") syncShortcutHints(bar);   // 제목·aria 에 현재 단축키 표기 반영
   if (hiddenIds.length){
     const wrap = document.createElement("div"); wrap.className = "tab-overflow";

@@ -1899,6 +1899,22 @@ test("일정의 좌표는 주소 검색 없이 열린 지도에 표시 요청을
   assert.equal(doc._mapPendingCoordinate, null);
   assert.equal(await api.showMapCoordinate(91, 126.942, "잘못된 좌표"), null);
 });
+test("다른 작업공간의 지도는 고르지 않고 지금 작업공간에 새 지도를 연다", async () => {
+  const api = loadMapViewer();
+  const context = api.__context;
+  const shown = [];
+  const other = { id:17, kind:"map", closed:false, mapShowCoordinate:() => { throw new Error("다른 작업공간 지도"); } };
+  const made = { id:18, kind:"map", closed:false, mapShowCoordinate:point => shown.push(point) };
+  context.docs = [other];
+  context.activeMru = [17];
+  context.documentInActiveWorkspace = doc => doc !== other;
+  context.File = class { constructor(parts, name){ this.name = name; } };
+  context.handleFiles = async () => { context.docs.push(made); return made; };
+  context.setActiveDoc = id => { assert.equal(id, 18); };
+  context.ensureRendered = async () => {};
+  assert.equal(await api.showMapCoordinate(33.458, 126.942, "성산일출봉"), made);
+  assert.equal(shown.length, 1);
+});
 test("지도 탭은 검색칸이 준비된 자리에서 다른 문서의 부탁을 받는다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   assert.match(source, /closeResults\.searchFor = \(text\) => \{/);
