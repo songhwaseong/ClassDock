@@ -10,6 +10,8 @@
        keyframes:[ {t, s:[...items]} | {t, a:item} ] }
      - s: 그 시점의 전체 항목(초기 상태·지우기·되돌리기·이동처럼 배열이 통째로 바뀔 때)
      - a: 직전 상태에 항목 하나 추가(대부분의 판서). 파일 크기를 줄이고 획 성장 애니메이션의 단서가 된다.
+     - audio(선택): { mime, src:"data:audio/...;base64,...", duration } — 녹화와 함께 받은 마이크 소리.
+       소리의 0초가 타임라인 0초다. 판 번호는 그대로 1 — 옛 앱은 이 칸을 모르고 판서만 재생한다.
    확장 여지: PDF 잉크·파이썬 실행을 keyframe kind(track)로 추가하면 같은 타임라인에 얹을 수 있다. */
 
 const LESSON_FORMAT = "classdock-lesson";
@@ -24,6 +26,9 @@ const LESSON_MAX_STROKE_POINTS = 100000;
 const LESSON_MAX_PAGES = 10000;
 const LESSON_MAX_PY_EVENTS = 100000;
 const LESSON_MAX_TEXT_CHARS = 8 * 1024 * 1024;
+// 녹음은 말소리라 32kbps(1시간 ≈ 14MB, base64 로 ≈ 19MB)면 충분하다. 파일 상한(128MB) 안에 들어오게 글자 수도 막는다.
+const LESSON_AUDIO_BITS = 32000;
+const LESSON_MAX_AUDIO_CHARS = 120 * 1024 * 1024;
 
 function lessonValidationError(message){ return { ok:false, message }; }
 function lessonFinite(value){ return typeof value === "number" && Number.isFinite(value); }
@@ -82,6 +87,13 @@ function validateLessonPayload(lesson){
     if (!lesson.pages || typeof lesson.pages !== "object" || Array.isArray(lesson.pages) || Object.keys(lesson.pages).length > LESSON_MAX_PAGES)
       return lessonValidationError("PDF 페이지 정보가 올바르지 않아요.");
   }
+  if (lesson.audio != null){
+    const audio = lesson.audio;
+    if (!audio || typeof audio !== "object" || typeof audio.src !== "string" || audio.src.length > LESSON_MAX_AUDIO_CHARS ||
+        !/^data:audio\/[\w.+-]+(;[^,]*)?;base64,/i.test(audio.src.slice(0, 200)) ||
+        (audio.duration != null && (!lessonFinite(audio.duration) || audio.duration < 0)))
+      return lessonValidationError("녹음된 소리 정보가 올바르지 않아요.");
+  }
   if (lesson.python != null){
     if (!Array.isArray(lesson.python) || lesson.python.length > LESSON_MAX_PY_EVENTS) return lessonValidationError("파이썬 리플레이 장면 수가 올바르지 않아요.");
     let pyLastTime = 0;
@@ -125,8 +137,10 @@ function lessonSerializeItems(items){
 // 녹화기. 커밋(획/도형/텍스트/이미지/지우기/되돌리기)마다 capture() 로 스냅샷을 남긴다.
 // 반환 객체를 doc.recorder 에 붙여 whiteboard.js 가 호출한다.
 // layers = { pattern, image } — 배경색 밑에 깔리는 무늬·그림. 색과 함께 마지막 상태 하나만 들고 간다.
-function LessonRecorder(items, bg, dim, layers){
-  const t0 = performance.now();
+// opts.t0 = 타임라인 0초로 삼을 performance.now() 값 — 마이크 녹음이 시작된 순간에 맞추면 소리와 판서가 같은 시계를 쓴다.
+// opts.audio = startLessonAudio() 가 돌려준 녹음기. 정지할 때 whiteboard.js 가 꺼내 소리를 붙인다.
+function LessonRecorder(items, bg, dim, layers, opts){
+  const t0 = (opts && lessonFinite(opts.t0)) ? opts.t0 : performance.now();
   const keyframes = [];
   let last = items.slice();                       // 마지막으로 기록한 항목 배열(참조 비교용)
   let maxW = (dim && dim.W) || 0, maxH = (dim && dim.H) || 0;
@@ -146,6 +160,7 @@ function LessonRecorder(items, bg, dim, layers){
 
   return {
     active: true,
+    audio: (opts && opts.audio) || null,
     get bg(){ return bg; },
     // 녹화 도중 보드 배경색·무늬를 바꾸면 재생도 그 배경을 따라야 한다. 키프레임마다 배경을 담지는 않으므로
     // 마지막으로 고른 배경 하나로 전체를 재생한다(배경은 판서와 달리 도중에 자주 바뀌지 않는다).
@@ -178,6 +193,85 @@ function LessonRecorder(items, bg, dim, layers){
         keyframes
       };
     }
+  };
+}
+
+// ----- 마이크 녹음(녹화와 함께) -----
+// 성공하면 { ok:true, startedAt, stop(), cancel() }, 못 쓰면 { ok:false, message } 를 돌려준다.
+// startedAt 은 녹음이 실제로 시작된 performance.now() — LessonRecorder 의 t0 로 넘겨 두 시계를 맞춘다.
+// stop() 은 { mime, src(dataURL), duration } 또는 소리가 없으면 null 로 풀린다.
+async function startLessonAudio(){
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function" || typeof MediaRecorder === "undefined")
+    return { ok:false, message:"여기서는 마이크 녹음을 할 수 없어요." };
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true } }); }
+  catch(e){
+    const name = e && e.name;
+    return { ok:false, message: name === "NotAllowedError" || name === "SecurityError" ? "마이크 권한이 없어요." :
+      name === "NotFoundError" ? "연결된 마이크를 찾지 못했어요." : "마이크를 쓸 수 없어요." };
+  }
+  const stopTracks = () => { try { stream.getTracks().forEach((t) => t.stop()); } catch(_){} };
+  const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"]
+    .find((type) => typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(type)) || "";
+  let recorder;
+  try { recorder = new MediaRecorder(stream, Object.assign({ audioBitsPerSecond:LESSON_AUDIO_BITS }, mime ? { mimeType:mime } : {})); }
+  catch(_){ stopTracks(); return { ok:false, message:"여기서는 마이크 녹음을 할 수 없어요." }; }
+  const chunks = [];
+  recorder.addEventListener("dataavailable", (e) => { if (e.data && e.data.size) chunks.push(e.data); });
+  // start 이벤트가 오는 순간을 0초로 삼는다(안 오는 환경을 위해 1초 뒤엔 그냥 간다).
+  await new Promise((resolve) => {
+    recorder.addEventListener("start", resolve, { once:true });
+    setTimeout(resolve, 1000);
+    try { recorder.start(1000); } catch(_){ resolve(); }
+  });
+  if (recorder.state === "inactive"){ stopTracks(); return { ok:false, message:"마이크 녹음을 시작하지 못했어요." }; }
+  const startedAt = performance.now();
+  let finished = null;
+  const finish = (keep) => finished || (finished = new Promise((resolve) => {
+    const endedAt = performance.now();
+    const done = async () => {
+      stopTracks();
+      if (!keep) return resolve(null);
+      const blob = new Blob(chunks, { type:(recorder.mimeType || mime || "audio/webm").split(";")[0] });
+      if (!blob.size) return resolve(null);
+      try {
+        const src = await new Promise((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result || "")); fr.onerror = fail; fr.readAsDataURL(blob); });
+        resolve({ mime:blob.type, src, duration:Math.max(0, Math.round(endedAt - startedAt)) });
+      } catch(_){ resolve(null); }
+    };
+    if (recorder.state === "inactive") return void done();
+    recorder.addEventListener("stop", done, { once:true });
+    try { recorder.stop(); } catch(_){ done(); }
+  }));
+  return { ok:true, startedAt, stop:() => finish(true), cancel:() => { finish(false); } };
+}
+
+// 재생기에서 쓸 <audio>. data URL 을 그대로 src 로 두면 긴 녹음에서 되감기가 느려 Blob URL 로 바꾼다.
+// MediaRecorder 로 만든 webm 은 길이가 Infinity 로 와서 되감기가 안 먹는 일이 있어, 처음에 끝으로 한 번 건너뛰어 길이를 알아 둔다.
+function lessonAudioPlayer(audio, onReady){
+  const el = new Audio(); el.preload = "auto";
+  let url = "";
+  try {
+    const comma = audio.src.indexOf(",");
+    const bin = atob(audio.src.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    url = URL.createObjectURL(new Blob([bytes], { type:audio.mime || "audio/webm" }));
+  } catch(_){ url = ""; }
+  let ready = false;
+  const markReady = () => { if (ready) return; ready = true; if (typeof onReady === "function") onReady(); };
+  el.addEventListener("loadedmetadata", () => {
+    if (el.duration !== Infinity) return markReady();
+    const back = () => { if (!Number.isFinite(el.duration)) return; el.removeEventListener("durationchange", back); el.currentTime = 0; markReady(); };
+    el.addEventListener("durationchange", back);
+    try { el.currentTime = 1e7; } catch(_){ markReady(); }
+  }, { once:true });
+  el.addEventListener("error", markReady, { once:true });
+  el.src = url || audio.src;
+  return {
+    el,
+    get ready(){ return ready; },
+    dispose(){ try { el.pause(); el.removeAttribute("src"); el.load(); } catch(_){} if (url) URL.revokeObjectURL(url); }
   };
 }
 
@@ -372,6 +466,8 @@ function lessonPdfToggleRecord(){
 // 재생기 공용 타임라인/컨트롤(보드·PDF잉크·파이썬이 공유). opts.draw(ctx,CW,CH,dpr,playT) 가 한 프레임을 그린다.
 // opts.side = 캔버스 옆에 붙일 DOM 패널(파이썬 트랙), opts.hideStage = 캔버스 없이 패널만(파이썬 전용 리플레이),
 // opts.onTime(playT) = 프레임마다 DOM 패널을 갱신할 콜백. 반환 { redraw } 로 이미지 로드 완료 등에서 다시 그릴 수 있다.
+// opts.audio = 함께 녹음한 소리(lesson.audio). 소리가 나오는 동안에는 소리의 재생 위치가 시계가 된다 —
+// 따로 흐르는 두 시계를 맞추려 들면 소리가 튀므로, 판서가 소리를 따라가게 한다.
 function mountReplayPlayer(doc, host, opts){
   host.classList.add("lr-doc");
   const duration = opts.duration || 0;
@@ -405,7 +501,24 @@ function mountReplayPlayer(doc, host, opts){
   const speedSel = document.createElement("select"); speedSel.className = "lr-speed"; speedSel.title = "재생 속도";
   [["0.5", "0.5×"], ["1", "1×"], ["1.5", "1.5×"], ["2", "2×"], ["4", "4×"]].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; if (v === "1") o.selected = true; speedSel.appendChild(o); });
   const saveBtn = mk("💾 저장", ".lesson 파일로 저장", "lr-btn lr-save");
-  bar.append(playBtn, restartBtn, seek, timeLabel, speedSel, saveBtn);
+  bar.append(playBtn, restartBtn, seek, timeLabel, speedSel);
+  let sound = null, soundBtn = null;
+  const soundEnd = () => (opts.audio && lessonFinite(opts.audio.duration) && opts.audio.duration > 0) ? opts.audio.duration
+    : (sound && Number.isFinite(sound.el.duration) ? sound.el.duration * 1000 : Infinity);
+  if (opts.audio && opts.audio.src){
+    sound = lessonAudioPlayer(opts.audio, () => { if (playing) syncSound(); });
+    soundBtn = mk("🔊", "소리 끄기", "lr-btn lr-sound");
+    soundBtn.setAttribute("aria-pressed", "false");
+    soundBtn.addEventListener("click", () => {
+      sound.el.muted = !sound.el.muted;
+      soundBtn.textContent = sound.el.muted ? "🔇" : "🔊";
+      soundBtn.title = sound.el.muted ? "소리 켜기" : "소리 끄기";
+      soundBtn.setAttribute("aria-label", soundBtn.title);
+      soundBtn.setAttribute("aria-pressed", String(sound.el.muted));
+    });
+    bar.appendChild(soundBtn);
+  }
+  bar.appendChild(saveBtn);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
 
   const draw = () => {
@@ -423,24 +536,35 @@ function mountReplayPlayer(doc, host, opts){
   };
   const syncUI = () => { seek.value = String(Math.round(playT)); timeLabel.textContent = lessonFmtTime(playT) + " / " + lessonFmtTime(duration); };
   const setPlayIcon = () => { playBtn.textContent = playing ? "⏸" : "▶"; playBtn.title = playing ? "일시정지 (스페이스)" : "재생 (스페이스)"; };
+  // 소리를 지금 재생 위치로 옮겨 틀거나(녹음 길이 안) 멈춘다(녹음이 끝난 뒤).
+  const syncSound = () => {
+    if (!sound || !sound.ready) return;
+    const el = sound.el;
+    el.playbackRate = speed;
+    if (!playing || playT >= soundEnd()){ el.pause(); return; }
+    try { el.currentTime = playT / 1000; } catch(_){}
+    const started = el.play(); if (started && typeof started.catch === "function") started.catch(() => {});
+  };
+  const soundRunning = () => !!(sound && sound.ready && !sound.el.paused && !sound.el.ended);
   const tick = (ts) => {
     if (!playing){ return; }
     if (typeof activeId !== "undefined" && activeId !== doc.id){ pause(); return; }   // 다른 탭으로 가면 멈춤
     if (!lastTick) lastTick = ts;
     const dt = ts - lastTick; lastTick = ts;
-    playT += dt * speed;
-    if (playT >= duration){ playT = duration; playing = false; setPlayIcon(); }
+    if (soundRunning()) playT = sound.el.currentTime * 1000;   // 소리가 나오는 동안은 소리가 시계
+    else playT += dt * speed;                                   // 소리가 없거나 끝난 뒤엔 화면 시계
+    if (playT >= duration){ playT = duration; playing = false; setPlayIcon(); if (sound) sound.el.pause(); }
     syncUI(); draw();
     if (playing) raf = requestAnimationFrame(tick);
   };
-  const play = () => { if (playing) return; if (playT >= duration) playT = 0; playing = true; lastTick = 0; setPlayIcon(); raf = requestAnimationFrame(tick); };
-  const pause = () => { playing = false; setPlayIcon(); };
+  const play = () => { if (playing) return; if (playT >= duration) playT = 0; playing = true; lastTick = 0; setPlayIcon(); syncSound(); raf = requestAnimationFrame(tick); };
+  const pause = () => { playing = false; setPlayIcon(); if (sound) sound.el.pause(); };
   const toggle = () => { playing ? pause() : play(); };
 
   playBtn.addEventListener("click", toggle);
-  restartBtn.addEventListener("click", () => { playT = 0; syncUI(); draw(); });
+  restartBtn.addEventListener("click", () => { playT = 0; syncSound(); syncUI(); draw(); });
   seek.addEventListener("input", () => { pause(); playT = Number(seek.value) || 0; syncUI(); draw(); });
-  speedSel.addEventListener("change", () => { speed = Number(speedSel.value) || 1; });
+  speedSel.addEventListener("change", () => { speed = Number(speedSel.value) || 1; if (sound) sound.el.playbackRate = speed; });
   saveBtn.addEventListener("click", () => { if (typeof opts.onSave === "function") opts.onSave(); });
 
   // 이 재생 화면이 활성일 때 스페이스로 재생/정지
@@ -459,7 +583,7 @@ function mountReplayPlayer(doc, host, opts){
   setPlayIcon(); syncUI();
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { playing = false; if (raf) cancelAnimationFrame(raf); if (ro) ro.disconnect(); offScreenRatio(); document.removeEventListener("keydown", onKey); });
+  doc.cleanupFns.push(() => { playing = false; if (raf) cancelAnimationFrame(raf); if (sound) sound.dispose(); if (ro) ro.disconnect(); offScreenRatio(); document.removeEventListener("keydown", onKey); });
 
   return { redraw: draw };
 }
@@ -498,7 +622,7 @@ function renderReplay(doc, host, lesson){
     MNBoardRenderer.paintBackground(ctx, { x:0, y:0, w:lesson.W, h:lesson.H }, { bg:boardBg, pattern:lesson.bgPattern, image:boardImage });
     ctx.restore();
   };
-  const player = mountReplayPlayer(doc, host, { duration, draw, onSave: () => saveLessonFile(lesson, doc.name) });
+  const player = mountReplayPlayer(doc, host, { duration, draw, audio:lesson.audio, onSave: () => saveLessonFile(lesson, doc.name) });
   preloadLessonImages(pb.kfs, player.redraw);
   if (boardImage){
     const img = new Image();
@@ -636,6 +760,7 @@ function renderPythonReplay(doc, host, lesson){
     side: pySide ? pySide.side : null,
     hideStage: true,
     onTime: pySide ? pySide.onTime : undefined,
+    audio: lesson.audio,
     onSave: () => saveLessonFile(lesson, doc.name)
   });
 }
@@ -683,6 +808,7 @@ function renderPdfInkReplay(doc, host, lesson){
     duration, draw,
     side: pySide ? pySide.side : null,
     onTime: pySide ? pySide.onTime : undefined,
+    audio: lesson.audio,
     onSave: () => saveLessonFile(lesson, doc.name)
   });
   for (const k in pages){ if (pages[k] && pages[k].src){ const im = new Image(); im.onload = () => player.redraw(); im.src = pages[k].src; imgs[k] = im; } }

@@ -3497,6 +3497,8 @@ function renderWhiteboard(doc, host){
     ["#f59e0b", "주황"], ["#7c3aed", "보라"], ["#ffffff", "흰색"]
   ];
   const WB_ICONS = {
+    mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>',
+    micOff: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6M4 4l16 16"/>',
     select: '<path d="M5 3l12 9-6.2 1.2L8 19.5z"/><path d="m11 13 4.5 6.5"/>',
     pen: '<path d="m4 20 4.4-1 10.8-10.8a2.1 2.1 0 0 0-3-3L5.4 16z"/><path d="m14.7 6.7 3 3M5.4 16l3 3"/>',
     highlighter: '<path d="m7 14 7.8-7.8 3 3L10 17z"/><path d="m13.3 7.7 3 3M7 14l3 3M4 20h12"/>',
@@ -4033,7 +4035,8 @@ function renderWhiteboard(doc, host){
   const contextRecordSection=makeContextSection("수업 기록","wb-context-record-section");
   const contextRecordActions=document.createElement("div"); contextRecordActions.className="wb-context-actions wb-context-record-actions";
   const contextRecordBtn=contextAction("● 녹화 시작","수업 리플레이 녹화 시작","wb-context-record",toggleRecord);
-  contextRecordActions.appendChild(contextRecordBtn); contextRecordSection.appendChild(contextRecordActions);
+  const contextMicBtn=contextAction("마이크 함께 녹음","녹화할 때 마이크 소리도 함께 녹음","wb-context-mic",toggleRecordMic);
+  contextRecordActions.append(contextRecordBtn,contextMicBtn); contextRecordSection.appendChild(contextRecordActions);
 
   const contextToolbarSection=makeContextSection("도구막대","wb-context-toolbar-section");
   const contextToolbarActions=document.createElement("div"); contextToolbarActions.className="wb-context-actions wb-context-toolbar-actions";
@@ -6573,31 +6576,75 @@ function renderWhiteboard(doc, host){
   // ● 녹화 → 판서를 시간순으로 기록, ■ 정지 → 리플레이(되감아 보기) 화면을 만든다.
   const recGroup = grp();
   const recBtn = mkBtn("● 녹화", "수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요", "wb-act wb-rec wb-toolvis-record", () => toggleRecord());
-  recGroup.appendChild(recBtn);
+  // 🎤 = 녹화할 때 마이크 소리도 함께 담을지. 모든 화이트보드에서 이어 쓰는 환경설정이고, 처음엔 꺼 둔다(묻지 않고 마이크를 켜지 않게).
+  const readRecordMic = () => { try { return localStorage.getItem("wbRecordMic") === "true"; } catch(_){ return false; } };
+  let recordMic = readRecordMic();
+  const micBtn = mkBtn("", "", "wb-act wb-rec-mic wb-toolvis-record", () => toggleRecordMic());
+  recGroup.append(recBtn, micBtn);
+  let recBusy = false;          // 마이크 권한을 묻는 중이거나 소리를 정리하는 중
+  let boardClosed = false;
+  function toggleRecordMic(){
+    if (recBusy || (doc.recorder && doc.recorder.active)) return;
+    recordMic = !recordMic;
+    try { localStorage.setItem("wbRecordMic", String(recordMic)); } catch(_){}
+    syncRecordButtons();
+    if (typeof toast === "function") toast(recordMic ? "녹화할 때 마이크 소리도 함께 녹음해요." : "마이크 없이 판서만 녹화해요.", 1800);
+  }
   function syncRecordButtons(){
     const recording=!!(doc.recorder&&doc.recorder.active);
+    const withMic=recording?!!doc.recorder.audio:recordMic;
     recBtn.classList.toggle("recording",recording);
-    recBtn.textContent=recording?"■ 정지":"● 녹화";
+    recBtn.disabled=recBusy;
+    recBtn.textContent=recBusy?"… 준비 중":recording?"■ 정지":"● 녹화";
     recBtn.title=recording?"녹화 정지 — 지금까지 판서를 리플레이로 만들기":"수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요";
+    micBtn.replaceChildren(mkIcon(withMic?"mic":"micOff"));
+    micBtn.classList.toggle("on",withMic);
+    micBtn.disabled=recBusy||recording;
+    micBtn.title=recording?(withMic?"마이크 소리를 함께 녹음하는 중":"마이크 없이 판서만 녹화하는 중"):(withMic?"마이크 함께 녹음 켜짐 — 누르면 판서만 녹화":"마이크 함께 녹음 꺼짐 — 누르면 녹화할 때 목소리도 담아요");
+    micBtn.setAttribute("aria-label",micBtn.title); micBtn.setAttribute("aria-pressed",String(withMic));
     contextRecordBtn.classList.toggle("recording",recording); contextRecordBtn.classList.toggle("wb-context-danger",recording);
+    contextRecordBtn.disabled=recBusy;
     contextRecordBtn.textContent=recording?"■ 녹화 정지":"● 녹화 시작";
     contextRecordBtn.title=recording?"녹화를 정지하고 수업 리플레이 만들기":"수업 리플레이 녹화 시작";
     contextRecordBtn.setAttribute("aria-label",contextRecordBtn.title);
+    contextMicBtn.textContent=(withMic?"✓ ":"")+"마이크 함께 녹음";
+    contextMicBtn.classList.toggle("active",withMic); contextMicBtn.setAttribute("aria-pressed",String(withMic));
+    contextMicBtn.disabled=recBusy||recording;
   }
-  function toggleRecord(){
+  async function toggleRecord(){
+    if (recBusy) return;
     if (typeof LessonRecorder !== "function"){ if (typeof toast === "function") toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
     if (doc.recorder && doc.recorder.active){
       const lesson = doc.recorder.stop(visibleItems(), wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
+      const audioRec = doc.recorder.audio;
+      recBusy = !!audioRec;       // 소리를 파일에 담는 동안 버튼을 잠근다
       doc.recorder = null;
       syncRecordButtons();
-      if (lesson && lesson.keyframes.length > 1 && typeof finishLessonRecording === "function") finishLessonRecording(lesson, doc.name);
-      else if (typeof toast === "function") toast("녹화된 판서가 없어요.", 2000);
+      let audio = null;
+      try { if (audioRec) audio = await audioRec.stop(); } finally { recBusy = false; syncRecordButtons(); }
+      if (audio){
+        lesson.audio = audio;
+        lesson.duration = Math.max(lesson.duration || 0, audio.duration || 0);   // 판서를 멈춘 뒤 말한 부분까지 재생되게
+      }
+      if (lesson && (lesson.keyframes.length > 1 || lesson.audio) && typeof finishLessonRecording === "function") finishLessonRecording(lesson, doc.name);
+      else if (typeof toast === "function") toast(audioRec ? "녹화된 판서와 소리가 없어요." : "녹화된 판서가 없어요.", 2000);
     } else {
-      doc.recorder = LessonRecorder(visibleItems(), wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage });
+      let audioRec = null;
+      if (recordMic && typeof startLessonAudio === "function"){
+        recBusy = true; syncRecordButtons();
+        let started;
+        try { started = await startLessonAudio(); } finally { recBusy = false; }
+        if (boardClosed){ if (started && started.ok) started.cancel(); return; }
+        if (started && started.ok) audioRec = started;
+        else if (typeof toast === "function") toast(((started && started.message) || "마이크를 쓸 수 없어요.") + " 판서만 녹화할게요.", 3400);
+      }
+      const recOpts = audioRec ? { t0:audioRec.startedAt, audio:audioRec } : undefined;
+      doc.recorder = LessonRecorder(visibleItems(), wb.bg, { W, H }, { pattern:wb.bgPattern, image:wb.bgImage }, recOpts);
       syncRecordButtons();
-      if (typeof toast === "function") toast("녹화를 시작했어요. 판서한 뒤 ■ 정지를 누르면 리플레이가 만들어져요.", 3000);
+      if (typeof toast === "function" && (audioRec || !recordMic)) toast(audioRec ? "판서와 마이크 소리를 함께 녹화해요. ■ 정지를 누르면 리플레이가 만들어져요." : "녹화를 시작했어요. 판서한 뒤 ■ 정지를 누르면 리플레이가 만들어져요.", 3000);
     }
   }
+  syncRecordButtons();
 
   // 도구막대 표시 여부와 위치는 모든 화이트보드에서 이어 쓰는 화면 환경설정으로 기억한다.
   const readToolbarVisible = () => { try { return localStorage.getItem("wbToolbarVisible") !== "false"; } catch(_){ return true; } };
@@ -6778,7 +6825,7 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); if (doc.recorder) doc.recorder.active = false; stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); offScreenRatio(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); boardClosed = true; if (doc.recorder){ doc.recorder.active = false; if (doc.recorder.audio) doc.recorder.audio.cancel(); } stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); offScreenRatio(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){

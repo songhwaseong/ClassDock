@@ -3005,6 +3005,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .wb-clear{color:var(--danger)}
   .wb-rec{color:var(--danger);font-weight:600;white-space:nowrap}
   .wb-rec.recording{background:var(--danger);color:#fff;border-color:var(--danger);animation:lr-recpulse 1.3s ease-in-out infinite}
+  .wb-rec-mic{color:var(--muted,var(--ink))}
+  .wb-rec-mic.on{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 55%,var(--border))}
   @keyframes lr-recpulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.55)}50%{box-shadow:0 0 0 5px rgba(220,38,38,0)}}
   /* 안쪽 실선 하나로 어느 테마에서든 흰 점·검은 점이 도구막대에 묻히지 않게 한다.
      (테두리 자리는 .active 표시가 쓰므로 inset 그림자로 그린다) */

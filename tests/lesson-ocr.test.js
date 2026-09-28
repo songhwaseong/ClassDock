@@ -83,3 +83,25 @@ test("OCR 캐시는 전체 SHA-256과 버전으로 동일 크기 PDF를 구분�
   assert.notEqual(firstKey, secondKey);
   assert.equal(firstKey, renamedKey);
 });
+
+test(".lesson 의 녹음 소리는 data:audio base64 만 받고, 녹화기는 녹음 시작 시각을 0초로 쓴다", () => {
+  const { validateLessonPayload, LessonRecorder } = loadBrowserScript("lesson-replay.js", { performance:{ now:() => 1500 } });
+  const valid = {
+    format:"classdock-lesson", version:1, kind:"board", duration:120, W:1280, H:720,
+    keyframes:[{ t:0, s:[] }, { t:120, a:pen() }]
+  };
+  const audio = { mime:"audio/webm", src:"data:audio/webm;codecs=opus;base64,GkXfow==", duration:3000 };
+  assert.equal(validateLessonPayload({ ...valid, duration:3000, audio }).ok, true);
+  assert.equal(validateLessonPayload({ ...valid, audio:{ ...audio, src:"data:text/html;base64,PGI+" } }).ok, false);
+  assert.equal(validateLessonPayload({ ...valid, audio:{ ...audio, src:"https://example.com/a.webm" } }).ok, false);
+  assert.equal(validateLessonPayload({ ...valid, audio:{ ...audio, duration:-1 } }).ok, false);
+  assert.equal(validateLessonPayload({ ...valid, audio:"data:audio/webm;base64,GkXfow==" }).ok, false);
+
+  const mic = { stop(){}, cancel(){} };
+  const rec = LessonRecorder([], "#fff", { W:100, H:80 }, null, { t0:1000, audio:mic });
+  assert.equal(rec.audio, mic);
+  rec.capture([pen()], "#fff", { W:100, H:80 });
+  const lesson = rec.stop([pen()], "#fff", { W:100, H:80 });
+  assert.equal(lesson.keyframes[1].t, 500);   // 1500 - 1000: 녹음이 시작된 때부터 잰다
+  assert.equal(LessonRecorder([], "#fff", { W:100, H:80 }).audio, null);
+});
