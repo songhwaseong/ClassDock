@@ -531,6 +531,13 @@ const PhotoAlbum = (() => {
     const hit = DUCK_PRESETS.find(([, , values]) => Math.abs(values.a - duck.a) < 1e-6 && Math.abs(values.r - duck.r) < 1e-6);
     return hit ? hit[0] : "custom";
   }
+  // 프리셋 단추의 음량 곡선 그림: 효과음이 울리는 칸(옅은 띠) 동안 음악이 얼마나 꺼지고(a) 끝난 뒤 얼마 만에(r) 돌아오는지.
+  // 실제 값으로 그리므로 들리는 모양과 같다. 가로는 2.3초, 내려가는 기울기만 눈에 보이게 조금 늘렸다.
+  function duckCurveSvg(a, r){
+    const W = 48, H = 22, span = 2.3, start = .35, end = 1.05, sx = W/span, y = v => 2 + (H - 4)*(1 - v), fall = Math.max(DUCK_ATTACK, .08);
+    const points = [[0,1],[start - fall,1],[start,1 - a],[end,1 - a],[end + r,1],[span,1]].map(([t,v]) => (t*sx).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
+    return `<svg class="pa-duck-curve" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><rect x="${(start*sx).toFixed(1)}" y="1" width="${((end - start)*sx).toFixed(1)}" height="${H - 2}" rx="2" fill="currentColor" opacity=".13"/><polyline points="${points}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
   function applyDuckPreset(item, id){
     const preset = DUCK_PRESETS.find(row => row[0] === id); if (!preset) return false;
     item.duck = { on:true, ...preset[2] }; return true;
@@ -564,16 +571,17 @@ const PhotoAlbum = (() => {
   }
   const clockText = seconds => { if (!Number.isFinite(seconds)) return "끝"; const whole = Math.max(0, seconds); return Math.floor(whole/60) + ":" + (whole % 60).toFixed(1).padStart(4, "0"); };
   // 음악 기록의 곡 길이(초). 한 번 재면 기록에 적어 둔다.
-  const durationLoads = new Map();
+  const durationLoads = new Map(), durationFailed = new Set();
   function ensureMusicDuration(record){
     if (!record || Number.isFinite(record.dur)) return Promise.resolve(record && record.dur);
+    if (durationFailed.has(record.id)) return Promise.resolve(NaN); // 못 재는 파일을 그릴 때마다 다시 재지 않게
     if (durationLoads.has(record.id)) return durationLoads.get(record.id);
     const pending = getBlob(record).then(blob => new Promise(resolve => {
       const probe = new Audio(), url = URL.createObjectURL(blob);
       const done = value => { URL.revokeObjectURL(url); probe.removeAttribute("src"); resolve(value); };
       probe.preload = "metadata"; probe.onloadedmetadata = () => done(probe.duration); probe.onerror = () => done(NaN); probe.src = url;
-    })).then(duration => { if (Number.isFinite(duration) && duration > 0){ record.dur = duration; persistMetadata(record).catch(() => {}); } durationLoads.delete(record.id); paintMusic(); return record.dur; })
-      .catch(() => { durationLoads.delete(record.id); return NaN; });
+    })).then(duration => { if (Number.isFinite(duration) && duration > 0){ record.dur = duration; persistMetadata(record).catch(() => {}); } else durationFailed.add(record.id); durationLoads.delete(record.id); paintMusic(); return record.dur; })
+      .catch(() => { durationLoads.delete(record.id); durationFailed.add(record.id); return NaN; });
     durationLoads.set(record.id, pending);
     return pending;
   }
@@ -809,7 +817,7 @@ const PhotoAlbum = (() => {
   function loopRow(item, track, single){
     const row = document.createElement("div"); row.className = "pa-sfx-fades pa-music-loop";
     const record = audioById(track.id), duration = record && record.dur, word = single ? "반복 구간" : "재생 구간";
-    if (!Number.isFinite(duration)){ const wait = document.createElement("small"); wait.className = "pa-crossfade-note"; wait.textContent = word + ": 곡 길이 재는 중…"; row.appendChild(wait); ensureMusicDuration(record); return row; }
+    if (!Number.isFinite(duration)){ const wait = document.createElement("small"); wait.className = "pa-crossfade-note"; wait.textContent = word + (durationFailed.has(track.id) ? ": 곡 길이를 알 수 없어 고칠 수 없습니다" : ": 곡 길이 재는 중…"); row.appendChild(wait); ensureMusicDuration(record); return row; }
     const loop = musicLoop(track, duration), live = () => musicTracks(item.music).find(other => other.id === track.id) || track;
     const onField = document.createElement("label"); onField.className = "pa-sfx-fade";
     onField.title = single ? "곡 전체 대신 정한 구간만 되풀이합니다(감상 모드·미리 듣기·MP4)" : "이 곡은 정한 부분만 틀고 다음 곡으로 넘어갑니다";
@@ -889,48 +897,101 @@ const PhotoAlbum = (() => {
     const pick = button(label, () => input.click(), "pa-music-button"); pick.title = title;
     return [pick, input];
   }
+  // 배경음악 칸(민트 패널 오른쪽): 머리(▶·곡 추가) + 재생목록. 아래 '재생 설정' 줄(.pa-music-play)에 순서·페이드·넘길 때 겹침·전체 볼륨,
+  // 나머지(곡 사이 겹침·구간·곡별 페이드·속도·반복·덕킹)는 '세부 설정' 칸(.pa-music-more)에 둔다. 세부 설정 칸은 틀에 있어 다시 그려도 열림 상태가 남는다.
+  let musicMoreOpen = false;
+  const durationText = seconds => { const whole = Math.round(seconds); return String(Math.floor(whole/60)).padStart(2, "0") + ":" + String(whole % 60).padStart(2, "0"); };
+  function musicMoreToggle(){
+    const toggle = button(musicMoreOpen ? "세부 설정 ▴" : "세부 설정 ▾", () => { musicMoreOpen = !musicMoreOpen; paintMusic(); }, "pa-more-toggle" + (musicMoreOpen ? " active" : ""));
+    toggle.setAttribute("aria-expanded", String(musicMoreOpen)); toggle.title = "곡 사이 겹침·반복 구간·곡별 페이드·속도·효과음 날 때 줄이기·효과음 전체 크기";
+    return toggle;
+  }
   function paintMusic(){
     paintSfxMaster();
     const host = root && root.querySelector(".pa-music"); if (!host) return;
-    host.replaceChildren();
-    const item = selected(); if (!item || item.type !== "image") return;
-    const label = document.createElement("strong"); label.textContent = "♪ 배경음악"; host.appendChild(label);
+    const play = root.querySelector(".pa-music-play"), more = root.querySelector(".pa-music-more"), moreBox = root.querySelector(".pa-more");
+    [host, play, more].forEach(el => { if (el) el.replaceChildren(); });
+    const item = selected(), image = !!item && item.type === "image";
+    if (moreBox) moreBox.hidden = !image || !musicMoreOpen;
+    if (!image) return;
+    const head = document.createElement("div"); head.className = "pa-music-head";
+    const label = document.createElement("strong"); label.textContent = "♫ 배경음악"; label.title = "이 사진에만 붙는 음악입니다(사진마다 따로 정해요)";
+    head.appendChild(label); host.appendChild(head);
+    const playTitle = document.createElement("strong"); playTitle.className = "pa-play-title"; playTitle.textContent = "재생 설정";
     const music = musicOf(item);
-    if (!music){ host.append(...musicPicker(item, "음악 넣기", "감상 모드와 MP4 영상에 함께 나올 음악을 고릅니다(여러 곡을 한꺼번에 골라 재생목록으로 만들 수 있어요)"), crossfadeRow()); return; }
+    if (!music){
+      const [pick, input] = musicPicker(item, "+ 음악 넣기", "감상 모드와 MP4 영상에 함께 나올 음악을 고릅니다(여러 곡을 한꺼번에 골라 재생목록으로 만들 수 있어요)");
+      pick.classList.add("pa-music-add"); head.append(pick, input);
+      const empty = document.createElement("p"); empty.className = "pa-music-empty"; empty.textContent = "이 사진에 흐를 음악을 넣어 보세요. 여러 곡을 한꺼번에 고르면 재생목록이 됩니다.";
+      host.appendChild(empty);
+      if (play) play.append(playTitle, crossfadeRow(), musicMoreToggle());
+      return;
+    }
     const tracks = musicTracks(music), single = tracks.length === 1, playing = musicPlaying(item), nowId = playingTrackId(item);
-    const toggle = button(playing ? "⏸" : "▶", () => { if (musicPlaying(item)) stopMusic(); else playMusic(item); }, "pa-music-button"); toggle.title = playing ? "멈춤" : "미리 듣기";
-    const volume = document.createElement("input"); volume.type = "range"; volume.min = 0; volume.max = 100; volume.value = Math.round(musicVolume(music)*100); volume.title = "소리 크기"; volume.setAttribute("aria-label","배경음악 소리 크기");
-    volume.oninput = () => { playlistMusic(item).v = Number(volume.value)/100; if (musicSession && musicSession.item === item) tickMusic(musicSession); };
-    volume.onchange = () => save(item);
-    const [add, addInput] = musicPicker(item, "+ 곡 추가", "재생목록 끝에 곡을 더합니다(여러 곡 한꺼번에 가능)");
-    const clear = button("✕", () => removeMusic(item), "pa-music-button"); clear.title = "배경음악 모두 빼기";
-    host.append(toggle, volume, add, clear, addInput);
-    // 재생목록: 줄을 누르면 그 곡의 구간을 고친다. ↑↓ 로 순서, ✕ 로 빼기. 지금 나오는 곡엔 ♪.
+    const toggle = button(playing ? "⏸" : "▶", () => { if (musicPlaying(item)) stopMusic(); else playMusic(item); }, "pa-music-play-button" + (playing ? " playing" : "")); toggle.title = playing ? "멈춤" : "미리 듣기"; toggle.setAttribute("aria-label", toggle.title);
+    const [add, addInput] = musicPicker(item, "+ 곡 추가", "재생목록 끝에 곡을 더합니다(여러 곡 한꺼번에 가능)"); add.classList.add("pa-music-add");
+    const clear = button("✕", () => removeMusic(item), "pa-playlist-action pa-music-clear"); clear.title = "배경음악 모두 빼기";
+    head.append(toggle, add, clear, addInput);
+    // 재생목록: 곡 이름을 누르면 세부 설정에서 그 곡을 고친다. 막대는 곡별 크기, 오른쪽은 곡 길이. ↑↓ 로 순서, ✕ 로 빼기. 지금 나오는 곡엔 ♪.
     if (!tracks.some(track => track.id === musicEditTrack)) musicEditTrack = tracks[0].id;
     const list = document.createElement("ol"); list.className = "pa-playlist";
     tracks.forEach((track, index) => {
-      const row = document.createElement("li"); row.className = "pa-playlist-row" + (track.id === musicEditTrack ? " active" : "") + (track.id === nowId ? " playing" : "");
-      const name = button((track.id === nowId ? "♪ " : (index + 1) + ". ") + (track.name || "음악") + (trackRepeats(track) > 1 ? " ×" + trackRepeats(track) : "") + (trackSpeed(track) !== 1 ? " · " + Math.round(trackSpeed(track)*100) + "%" : ""), () => { musicEditTrack = track.id; paintMusic(); }, "pa-playlist-name");
-      name.title = (track.name || "") + (single ? "" : " — 눌러서 이 곡의 재생 구간 고치기");
+      const row = document.createElement("li"); row.className = "pa-playlist-row" + (track.id === musicEditTrack && !single ? " active" : "") + (track.id === nowId ? " playing" : "");
+      const number = document.createElement("span"); number.className = "pa-playlist-num"; number.textContent = track.id === nowId ? "♪" : String(index + 1);
+      const name = button((track.name || "음악") + (trackRepeats(track) > 1 ? " ×" + trackRepeats(track) : "") + (trackSpeed(track) !== 1 ? " · " + Math.round(trackSpeed(track)*100) + "%" : ""), () => { musicEditTrack = track.id; paintMusic(); }, "pa-playlist-name");
+      name.title = (track.name || "") + (single ? "" : " — 눌러서 세부 설정에서 이 곡 고치기");
       const level = document.createElement("input"); level.type = "range"; level.className = "pa-playlist-volume"; level.min = 0; level.max = 100; level.step = 5; level.value = Math.round(trackVolume(track)*100);
-      level.title = "이 곡 크기 " + level.value + "% (전체 음량에 곱함)"; level.setAttribute("aria-label", (track.name || "곡") + " 크기");
-      level.oninput = () => { setTrack(item, track.id, { tv:Number(level.value)/100 }); level.title = "이 곡 크기 " + level.value + "% (전체 음량에 곱함)"; if (musicSession && musicSession.item === item) tickMusic(musicSession); };
+      level.title = "이 곡 크기 " + level.value + "% (전체 볼륨에 곱함)"; level.setAttribute("aria-label", (track.name || "곡") + " 크기");
+      level.oninput = () => { setTrack(item, track.id, { tv:Number(level.value)/100 }); level.title = "이 곡 크기 " + level.value + "% (전체 볼륨에 곱함)"; if (musicSession && musicSession.item === item) tickMusic(musicSession); };
       level.onchange = () => save(item);
+      const record = audioById(track.id), duration = record && record.dur;
+      if (!Number.isFinite(duration)) ensureMusicDuration(record);
+      const length = document.createElement("span"); length.className = "pa-playlist-time"; length.textContent = Number.isFinite(duration) ? durationText(duration) : "--:--";
       const up = button("↑", () => moveTrack(item, track.id, -1), "pa-playlist-action"); up.disabled = index === 0; up.title = "앞으로";
       const down = button("↓", () => moveTrack(item, track.id, 1), "pa-playlist-action"); down.disabled = index === tracks.length - 1; down.title = "뒤로";
       const remove = button("✕", () => removeTrack(item, track.id), "pa-playlist-action"); remove.title = "이 곡 빼기";
-      row.append(name, level, up, down, remove); list.appendChild(row);
+      row.append(number, name, level, length, up, down, remove); list.appendChild(row);
     });
-    if (!single) host.appendChild(list); else { const only = document.createElement("span"); only.className = "pa-music-name"; only.textContent = tracks[0].name || "음악"; only.title = tracks[0].name || ""; host.insertBefore(only, add); }
-    if (!single){
-      const options = document.createElement("div"); options.className = "pa-sfx-fades pa-playlist-options";
-      const orderField = document.createElement("div"); orderField.className = "pa-duck-presets";
-      [["seq","순서대로"],["shuffle","섞어서"]].forEach(([id,text]) => {
-        const on = (music.order === "shuffle" ? "shuffle" : "seq") === id;
-        const choice = button(text, () => { playlistMusic(item).order = id; save(item); paintMusic(); }, "pa-duck-preset" + (on ? " active" : "")); choice.setAttribute("aria-pressed", String(on));
-        choice.title = id === "shuffle" ? "곡 순서를 섞어서 틉니다(사진마다 정해진 순서라 MP4 에도 같게 담김)" : "목록 순서대로 틉니다";
-        orderField.appendChild(choice);
+    host.appendChild(list);
+    // 재생 설정 줄
+    if (play){
+      play.appendChild(playTitle);
+      if (!single){
+        const orderField = document.createElement("div"); orderField.className = "pa-order-switch";
+        [["seq","순서대로"],["shuffle","섞어서"]].forEach(([id,text]) => {
+          const on = (music.order === "shuffle" ? "shuffle" : "seq") === id;
+          const choice = button(text, () => { playlistMusic(item).order = id; save(item); paintMusic(); }, on ? "active" : ""); choice.setAttribute("aria-pressed", String(on));
+          choice.title = id === "shuffle" ? "곡 순서를 섞어서 틉니다(사진마다 정해진 순서라 MP4 에도 같게 담김)" : "목록 순서대로 틉니다";
+          orderField.appendChild(choice);
+        });
+        play.appendChild(orderField);
+      }
+      [["페이드 인","fi","i","감상 모드를 시작하거나 이 사진으로 넘어올 때, 미리 듣기와 MP4 영상 처음에 음악이 서서히 커지는 시간"],["페이드 아웃","fo","o","감상 모드를 끝내거나 다른 사진으로 넘길 때, MP4 영상 끝에 음악이 서서히 줄어드는 시간"]].forEach(([text,key,short,title]) => {
+        const field = document.createElement("label"); field.className = "pa-sfx-fade"; field.title = title;
+        const fadeLabel = document.createElement("span"); fadeLabel.textContent = text;
+        const slider = document.createElement("input"); slider.type = "range"; slider.min = 0; slider.max = MUSIC_FADE_MAX; slider.step = .5; slider.value = musicFades(music)[short]; slider.setAttribute("aria-label","배경음악 " + text + " 시간(초)");
+        const shown = document.createElement("span"); shown.className = "pa-range-value"; shown.textContent = musicFades(music)[short] + "초";
+        slider.oninput = () => { playlistMusic(item)[key] = Number(slider.value); shown.textContent = slider.value + "초"; };
+        slider.onchange = () => save(item);
+        field.append(fadeLabel, slider, shown); play.appendChild(field);
       });
+      play.appendChild(crossfadeRow());
+      const volumeField = document.createElement("label"); volumeField.className = "pa-sfx-fade pa-music-volume"; volumeField.title = "이 사진 배경음악 전체 소리 크기";
+      const volumeLabel = document.createElement("span"); volumeLabel.textContent = "전체 볼륨";
+      const volume = document.createElement("input"); volume.type = "range"; volume.min = 0; volume.max = 100; volume.value = Math.round(musicVolume(music)*100); volume.setAttribute("aria-label","배경음악 전체 볼륨");
+      const volumeShown = document.createElement("span"); volumeShown.className = "pa-range-value"; volumeShown.textContent = volume.value + "%";
+      volume.oninput = () => { playlistMusic(item).v = Number(volume.value)/100; volumeShown.textContent = volume.value + "%"; if (musicSession && musicSession.item === item) tickMusic(musicSession); };
+      volume.onchange = () => save(item);
+      volumeField.append(volumeLabel, volume, volumeShown); play.append(volumeField, musicMoreToggle());
+    }
+    if (!more) return;
+    // 세부 설정 칸
+    const moreHead = document.createElement("div"); moreHead.className = "pa-more-head";
+    const moreTitle = document.createElement("strong"); moreTitle.textContent = "♫ 음악 세부 설정";
+    moreHead.appendChild(moreTitle);
+    if (!single){ const hint = document.createElement("small"); hint.className = "pa-crossfade-note"; hint.textContent = "재생목록에서 곡 이름을 누르면 그 곡을 고칩니다"; moreHead.appendChild(hint); }
+    more.appendChild(moreHead);
+    if (!single){
       const gapField = document.createElement("label"); gapField.className = "pa-sfx-fade"; gapField.title = "한 곡이 끝날 때 다음 곡과 겹쳐 넘어가는 시간(0초면 바로 이어짐)";
       const gapLabel = document.createElement("span"); gapLabel.textContent = "곡 사이 겹침";
       const gap = document.createElement("input"); gap.type = "range"; gap.min = 0; gap.max = TRACK_GAP_MAX; gap.step = .5; gap.value = trackGap(music); gap.setAttribute("aria-label","곡 사이 겹침(초)");
@@ -938,18 +999,8 @@ const PhotoAlbum = (() => {
       gap.oninput = () => { playlistMusic(item).tx = Number(gap.value); gapShown.textContent = gap.value + "초"; };
       gap.onchange = () => save(item);
       gapField.append(gapLabel, gap, gapShown);
-      options.append(orderField, gapField); host.appendChild(options);
+      const options = document.createElement("div"); options.className = "pa-sfx-fades pa-playlist-options"; options.appendChild(gapField); more.appendChild(options);
     }
-    const fades = document.createElement("div"); fades.className = "pa-sfx-fades pa-music-fades";
-    [["페이드인","fi","i","감상 모드를 시작하거나 이 사진으로 넘어올 때, 미리 듣기와 MP4 영상 처음에 음악이 서서히 커지는 시간"],["페이드아웃","fo","o","감상 모드를 끝내거나 다른 사진으로 넘길 때, MP4 영상 끝에 음악이 서서히 줄어드는 시간"]].forEach(([text,key,short,title]) => {
-      const field = document.createElement("label"); field.className = "pa-sfx-fade"; field.title = title;
-      const fadeLabel = document.createElement("span"); fadeLabel.textContent = text;
-      const slider = document.createElement("input"); slider.type = "range"; slider.min = 0; slider.max = MUSIC_FADE_MAX; slider.step = .5; slider.value = musicFades(music)[short]; slider.setAttribute("aria-label","배경음악 " + text + " 시간(초)");
-      const shown = document.createElement("span"); shown.className = "pa-range-value"; shown.textContent = musicFades(music)[short] + "초";
-      slider.oninput = () => { playlistMusic(item)[key] = Number(slider.value); shown.textContent = slider.value + "초"; };
-      slider.onchange = () => save(item);
-      field.append(fadeLabel, slider, shown); fades.appendChild(field);
-    });
     const ducking = document.createElement("div"); ducking.className = "pa-sfx-fades pa-duck";
     const duck = duckSettings(item), setDuck = (key, value) => { item.duck = { ...duckSettings(item), [key]:value }; if (musicSession && musicSession.item === item) tickMusic(musicSession); };
     const duckField = document.createElement("label"); duckField.className = "pa-sfx-fade"; duckField.title = "효과음이 울리는 동안 배경음악을 잠깐 줄였다가 되돌립니다(감상 모드·MP4)";
@@ -957,11 +1008,15 @@ const PhotoAlbum = (() => {
     const duckText = document.createElement("span"); duckText.textContent = "효과음 날 때 줄이기";
     duckField.append(duckToggle, duckText); ducking.appendChild(duckField);
     const presets = document.createElement("div"); presets.className = "pa-duck-presets";
+    const group = document.createElement("div"); group.className = "pa-duck-group"; group.setAttribute("role","group"); group.setAttribute("aria-label","줄이기 강도");
     const current = duckPresetOf(item);
     DUCK_PRESETS.forEach(([id,presetLabel,values]) => {
-      const preset = button(presetLabel, () => { applyDuckPreset(item, id); if (musicSession && musicSession.item === item) tickMusic(musicSession); save(item); paintMusic(); }, "pa-duck-preset" + (current === id ? " active" : ""));
-      preset.title = `줄이기 ${Math.round(values.a*100)}% · 복귀 ${values.r}초`; preset.setAttribute("aria-pressed", String(current === id)); presets.appendChild(preset);
+      const preset = button("", () => { applyDuckPreset(item, id); if (musicSession && musicSession.item === item) tickMusic(musicSession); save(item); paintMusic(); }, "pa-duck-preset" + (current === id ? " active" : ""));
+      preset.innerHTML = duckCurveSvg(values.a, values.r);
+      const name = document.createElement("span"); name.textContent = presetLabel; preset.appendChild(name);
+      preset.title = `${presetLabel} — 줄이기 ${Math.round(values.a*100)}% · 복귀 ${values.r}초`; preset.setAttribute("aria-pressed", String(current === id)); group.appendChild(preset);
     });
+    presets.appendChild(group);
     if (current === "custom"){ const custom = document.createElement("small"); custom.className = "pa-crossfade-note"; custom.textContent = "직접 맞춤"; presets.appendChild(custom); }
     ducking.appendChild(presets);
     [["줄이기","a",0,90,5,100,"%","효과음이 나는 동안 음악을 얼마나 줄일지"],["복귀","r",.1,2,.1,1,"초","효과음이 끝난 뒤 음악이 원래 크기로 돌아오는 시간"]].forEach(([text,key,min,max,step,scale,unit,title]) => {
@@ -975,7 +1030,7 @@ const PhotoAlbum = (() => {
     });
     duckToggle.onchange = () => { setDuck("on", duckToggle.checked); save(item); paintMusic(); };
     const editing = tracks.find(track => track.id === musicEditTrack) || tracks[0];
-    host.append(fades, loopRow(item, editing, single), trackFadeRow(item, editing, single), ducking, crossfadeRow());
+    more.append(loopRow(item, editing, single), trackFadeRow(item, editing, single), ducking);
   }
   // 효과음 sfx = { k:소리, v:크기 0~1 }. 파일 없이 Web Audio 로 그때그때 만든다(실시간 재생과 MP4 굽기가 같은 함수를 써서 소리가 같다).
   // 움직임마다 소리가 나는 순간(한 바퀴 안의 비율): 통통은 땅에 닿을 때, 두근은 박동마다, 흔들흔들은 양 끝에서.
@@ -1220,8 +1275,104 @@ const PhotoAlbum = (() => {
     updateStickerElements(); saveSoon(item);
   }
   function refreshPicked(){ updateStickerElements(); paintAdjust(); }
+  // 감상 모드: ←/→ 로 지금 목록(필터) 차례대로 넘기고 끝에서는 반대쪽 끝으로 되돌아간다. Esc 는 꾸미기 모드로.
+  // 영상 컨트롤에 포커스가 있어도 되감기·빨리감기 대신 사진 넘기기로 쓴다.
+  function onViewingKey(event){
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const target = event.target, inside = selector => !!(target && target.closest && target.closest(selector));
+    // 전체화면이면 Esc 는 앱(app.js)에 맡겨 전체화면만 풀고, 한 번 더 누르면 꾸미기 모드로.
+    if (event.key === "Escape"){ if (viewerFullscreenOn()){ viewFullscreen = false; return; } event.preventDefault(); setViewing(false); return; }
+    // Space = 슬라이드쇼 켜고 끄기. 단추·고르개·영상에 포커스가 있으면 그쪽 기본 동작(누르기·재생)에 맡긴다.
+    if (event.key === " "){ if (inside("button,select,video")) return; event.preventDefault(); setSlideshow(!slideshow); return; }
+    if ((event.key !== "ArrowLeft" && event.key !== "ArrowRight") || inside("select")) return;
+    event.preventDefault(); stepViewing(event.key === "ArrowLeft" ? -1 : 1);
+  }
+  function stepViewing(step){
+    const shown = shownRecords(); if (shown.length < 2) return;
+    const index = shown.findIndex(item => item.id === selectedId);
+    const next = index < 0 ? shown[step > 0 ? 0 : shown.length - 1] : shown[(index + step + shown.length) % shown.length];
+    const ghost = viewGhost(); selectItem(next.id); viewSwitchIn(ghost, step); scheduleSlide();
+  }
+  // 슬라이드쇼: 사진은 정한 간격마다, 영상은 끝까지 튼 뒤 다음 장으로(재생이 막히면 사진처럼 간격만큼). 끝에서는 처음으로 되돌아간다.
+  // 손으로 넘기면 그 장부터 다시 잰다. 탭이 가려져 있으면 넘기지 않고 기다린다. 간격만 브라우저에 기억하고 켜짐은 기억하지 않는다.
+  const SLIDE_KEY = "classdock.photoAlbum.slideSeconds", SLIDE_SECONDS = [3,5,8,10,15,30];
+  let slideshow = false, slideTimer = null;
+  function slideSeconds(){ try { const value = Number(localStorage.getItem(SLIDE_KEY)); if (SLIDE_SECONDS.includes(value)) return value; } catch { /* 기본값 */ } return 5; }
+  function setSlideshow(on){
+    slideshow = !!on && viewing;
+    const toggle = root && root.querySelector(".pa-slide-toggle");
+    if (toggle){ toggle.textContent = slideshow ? "❚❚ 멈춤" : "▶ 슬라이드쇼"; toggle.setAttribute("aria-pressed", String(slideshow)); }
+    scheduleSlide();
+  }
+  function scheduleSlide(){
+    clearTimeout(slideTimer); slideTimer = null;
+    if (!slideshow || !viewing || !root) return;
+    const item = selected(), ms = slideSeconds()*1000;
+    const video = item && item.type === "video" ? root.querySelector(".pa-stage video") : null;
+    if (video){
+      video.onended = () => { if (slideshow && video.isConnected) advanceSlide(); };
+      video.play().catch(() => { if (slideshow && video.isConnected) slideTimer = setTimeout(advanceSlide, ms); });
+      return;
+    }
+    slideTimer = setTimeout(advanceSlide, ms);
+  }
+  function advanceSlide(){
+    slideTimer = null;
+    if (!slideshow || !viewing || !root) return;
+    if (document.hidden || root.closest("[hidden]")){ slideTimer = setTimeout(advanceSlide, 1000); return; }
+    stepViewing(1);
+  }
+  // 넘기기 전환: 앞 사진의 요소를 그대로 떼어 무대 위 겹침 층(.pa-view-ghost)으로 옮겨 두고(복제하면 이미 풀어 버린
+  // blob 주소를 다시 읽어 깨진다), 새 사진이 준비되면 앞 사진은 넘기는 쪽으로 밀리며 사라지고 새 사진은 반대쪽에서 들어온다.
+  // 움직임 줄이기 설정이면 밀지 않고 겹쳐 흐려지기만 한다. 겹침 층은 무대 뒤에 둬서 root.querySelector 가 새 무대를 먼저 찾는다.
+  let viewSwitchToken = 0;
+  const VIEW_SWITCH_MS = 380;
+  function dropViewGhosts(){ if (root) root.querySelectorAll(".pa-view-ghost").forEach(el => el.remove()); }
+  function viewGhost(){
+    const stage = root && root.querySelector(".pa-stage"); dropViewGhosts();
+    if (!stage || !stage.children.length || typeof stage.animate !== "function") return null;
+    stage.getAnimations({ subtree:true }).forEach(animation => { if (animation.id === "pa-view-switch") animation.finish(); });
+    const ghost = document.createElement("div"); ghost.className = "pa-view-ghost"; ghost.setAttribute("aria-hidden","true"); ghost.inert = true;
+    Object.assign(ghost.style, { left:stage.offsetLeft + "px", top:stage.offsetTop + "px", width:stage.offsetWidth + "px", height:stage.offsetHeight + "px" });
+    ghost.append(...stage.children); ghost.querySelectorAll("video").forEach(video => video.pause());
+    stage.after(ghost); return ghost;
+  }
+  async function viewSwitchIn(ghost, step){
+    const stage = root && root.querySelector(".pa-stage"); if (!ghost || !stage) return;
+    const token = ++viewSwitchToken, reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const shift = reduced ? 0 : 48*step, timing = { duration:VIEW_SWITCH_MS, easing:"cubic-bezier(.22,.7,.3,1)", fill:"both", id:"pa-view-switch" };
+    // 새 사진을 다 풀기 전에 흐려지기 시작하면 중간에 툭 나타나므로 잠깐(최대 0.4초) 기다린다. 그동안은 앞 사진이 그대로 보인다.
+    const img = stage.querySelector(".pa-photo-surface > img");
+    if (img && !img.complete){
+      stage.classList.add("pa-view-wait");
+      await Promise.race([img.decode().catch(() => {}), new Promise(resolve => setTimeout(resolve, 400))]);
+      if (stage.isConnected) stage.classList.remove("pa-view-wait");
+      if (token !== viewSwitchToken || !ghost.isConnected) return;
+    }
+    ghost.animate([{ opacity:1, transform:"translateX(0)" }, { opacity:0, transform:`translateX(${-shift}px)` }], timing).finished.then(() => ghost.remove(), () => ghost.remove());
+    Array.from(stage.children).forEach(el => el.animate([{ opacity:0, transform:`translateX(${shift}px)` }, { opacity:1, transform:"none" }], timing).finished.then(animation => animation.cancel(), () => {}));
+  }
+  // 감상 모드 휠: 아래(오른쪽)=다음, 위(왼쪽)=이전. 터치패드는 작은 값이 잇달아 오므로 모아서 한 칸을 넘기고,
+  // 넘긴 뒤 잠깐은 남은 관성 스크롤(작은 값)을 버린다. 마우스 휠 한 칸(큰 값)은 0.2초만 지나면 곧바로 다음 장으로.
+  // Ctrl+휠(확대)은 건드리지 않는다.
+  let wheelSum = 0, wheelQuietUntil = 0, wheelSteppedAt = 0;
+  function onViewingWheel(event){
+    if (!viewing || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    const now = performance.now(), delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    const px = event.deltaMode === 1 ? delta*40 : event.deltaMode === 2 ? delta*800 : delta;
+    if (now < wheelQuietUntil){
+      if (Math.abs(px) < 50){ wheelQuietUntil = now + 250; wheelSum = 0; return; }
+      if (now - wheelSteppedAt < 200) return;
+      wheelSum = 0;
+    }
+    wheelSum += px;
+    if (Math.abs(wheelSum) < 60) return;
+    stepViewing(wheelSum > 0 ? 1 : -1); wheelSum = 0; wheelSteppedAt = now; wheelQuietUntil = now + 250;
+  }
   function onHistoryKey(event){
-    if (!root || !root.isConnected || root.closest("[hidden]") || viewing || drawing || event.altKey) return;
+    if (!root || !root.isConnected || root.closest("[hidden]") || drawing || event.altKey) return;
+    if (viewing){ onViewingKey(event); return; }
     const target = event.target;
     if (target && target.closest && target.closest("textarea,select,[contenteditable=true],input:not([type=range])")) return;
     const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
@@ -1262,13 +1413,52 @@ const PhotoAlbum = (() => {
     const host = root.querySelector(".pa-filters"); if (!host) return; host.replaceChildren();
     [["all","▦ 전체"],["image","▧ 사진"],["video","▷ 동영상"],["favorite","♡ 즐겨찾기"]].forEach(([id,label]) => host.appendChild(button(label, () => { filter = id; paintFilters(); paintList(); }, filter === id ? "active" : "")));
   }
+  const shownRecords = () => records.filter(item => filter === "all" || (filter === "favorite" ? item.favorite : item.type === filter));
+  function selectItem(id){ selectedId = id; picked = new Set(); syncMusic({ switching:true }); paintList(); paintStage(); paintBackgrounds(); paintStickers(); }
+  // 감상 모드는 사진만 남긴다(머리 줄·목록·아래 줄은 CSS 가 감춤). 끌 때는 목록에서 보던 사진이 보이게 굴린다.
+  // 감상 모드에서 마우스가 2.5초 가만히 있으면 커서와 위쪽 조작 줄을 감춘다. 움직이거나 누르면 다시 보인다.
+  // 조작 줄 위에 올려 둔 동안은 감추지 않는다. 화면이 바뀌며 생기는 제자리 이동(좌표가 그대로)은 움직임으로 치지 않는다.
+  const CURSOR_IDLE_MS = 2500;
+  let cursorTimer = null, cursorAt = "";
+  function wakeCursor(event){
+    if (!root) return;
+    if (event && event.type === "pointermove"){ const at = event.screenX + "," + event.screenY; if (at === cursorAt) return; cursorAt = at; }
+    root.classList.remove("pa-cursor-idle"); clearTimeout(cursorTimer); cursorTimer = null;
+    if (!viewing || (event && event.target && event.target.closest && event.target.closest(".pa-view-bar"))) return;
+    cursorTimer = setTimeout(() => { if (root && viewing) root.classList.add("pa-cursor-idle"); }, CURSOR_IDLE_MS);
+  }
+  // 감상 모드 더블클릭 = 전체화면 켜고 끄기. 앱 공용 문서 영역 전체화면(documents.js)을 써서 Esc·확인창·종료 단추를
+  // 다른 문서와 똑같이 다룬다. 더블클릭으로 들어간 전체화면은 꾸미기 모드로 돌아갈 때 함께 푼다.
+  let viewFullscreen = false;
+  const viewerFullscreenOn = () => typeof isViewerFullscreen === "function" ? isViewerFullscreen() : !!document.fullscreenElement;
+  function toggleViewFullscreen(){
+    if (viewerFullscreenOn()){
+      viewFullscreen = false;
+      if (typeof exitViewerFullscreen === "function") exitViewerFullscreen(); else if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    } else {
+      viewFullscreen = true;
+      if (typeof enterViewerFullscreen === "function") enterViewerFullscreen(); else if (root && root.requestFullscreen) root.requestFullscreen().catch(() => { viewFullscreen = false; });
+    }
+  }
+  function onViewingDblClick(event){
+    if (!viewing || event.button !== 0 || (event.target && event.target.closest && event.target.closest(".pa-view-bar"))) return;
+    event.preventDefault();   // 영상 기본 동작(영상만 전체화면)을 막고 사진첩 전체화면으로
+    toggleViewFullscreen();
+  }
+  function setViewing(on){
+    if (!root || viewing === on) return;
+    dropViewGhosts(); if (!on) setSlideshow(false);
+    if (!on && viewFullscreen){ viewFullscreen = false; if (viewerFullscreenOn()) toggleViewFullscreen(); } viewing = on; root.classList.toggle("pa-viewing",viewing); wakeCursor(); root.querySelector(".pa-view").textContent = viewing ? "✎ 꾸미기 모드" : "▣ 감상 모드";
+    requestAnimationFrame(fitArtboard); syncMusic(); syncSfx();
+    if (!viewing){ const card = root.querySelector(".pa-media-card.active"); if (card) card.scrollIntoView({ block:"nearest" }); }
+  }
   function paintList(){
     const host = root.querySelector(".pa-list"); if (!host) return; host.replaceChildren(); listUrls.forEach(url => URL.revokeObjectURL(url)); listUrls = [];
-    const shown = records.filter(item => filter === "all" || (filter === "favorite" ? item.favorite : item.type === filter));
+    const shown = shownRecords();
     root.querySelector(".pa-count").textContent = shown.length + "개";
     if (!shown.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = records.length ? "이 항목에 미디어가 없습니다." : "사진·영상을 가져와 시작하세요."; host.appendChild(p); }
     shown.forEach(item => {
-      const card = button("", () => { selectedId = item.id; picked = new Set(); syncMusic({ switching:true }); paintList(); paintStage(); paintBackgrounds(); paintStickers(); }, "pa-media-card" + (selectedId === item.id ? " active" : ""));
+      const card = button("", () => selectItem(item.id), "pa-media-card" + (selectedId === item.id ? " active" : ""));
       const thumb = document.createElement("span"); thumb.className = "pa-thumb";
       if (item.thumbnail || (item.type === "image" && item.blob)){
         const img = document.createElement("img"); img.alt = ""; img.loading = "lazy";
@@ -2431,10 +2621,12 @@ const PhotoAlbum = (() => {
     surface.addEventListener("pointermove",move); surface.addEventListener("pointerup",end); surface.addEventListener("pointercancel",end);
   }
   function fitArtboard(){
-    if (!root) return; const board = root.querySelector(".pa-artboard"), stage = root.querySelector(".pa-stage"); if (!board || !stage) return;
+    if (!root) return; const board = root.querySelector(".pa-stage .pa-artboard"), stage = root.querySelector(".pa-stage"); if (!board || !stage) return;
     const ratio = Number(board.dataset.ratio) || 1;
     const pad = parseFloat(getComputedStyle(board).paddingLeft) || 0;
-    const width = Math.max(100, Math.min(stage.clientWidth - 54, (stage.clientHeight - 114 - 2*pad) * ratio + 2*pad));
+    // 꾸미기 모드는 아래 이름 줄 자리를 비워 두고, 감상 모드는 사진이 무대를 거의 다 채운다.
+    const spareX = viewing ? 24 : 54, spareY = viewing ? 24 : 114;
+    const width = Math.max(100, Math.min(stage.clientWidth - spareX, (stage.clientHeight - spareY - 2*pad) * ratio + 2*pad));
     board.style.width = width + "px"; board.style.height = ((width - 2*pad) / ratio + 2*pad) + "px";
     updateStickerElements();
   }
@@ -2734,12 +2926,20 @@ const PhotoAlbum = (() => {
     } catch(error){ console.error(error); notice("PNG를 만들지 못했습니다."); }
   }
   function makeUi(host){
-    host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album";
-    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-layout"><aside class="pa-sidebar"><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-stage"></div><section class="pa-bg-section"><div><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div><div class="pa-music"></div><div class="pa-sfx-master"></div></section></div><aside class="pa-tools"><div class="pa-tools-title"><strong>꾸미기</strong><small>사진 위에 올려 보세요</small></div><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></aside></div><footer class="pa-footer"><span class="pa-status" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
+    host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
+    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-layout"><aside class="pa-sidebar"><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div><section class="pa-bg-section"><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div><div class="pa-music"></div><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></div><aside class="pa-tools"><div class="pa-tools-title"><strong>꾸미기</strong><small>사진 위에 올려 보세요</small></div><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></aside></div><footer class="pa-footer"><span class="pa-status" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
     host.appendChild(root);
     root.querySelector(".pa-import").onclick = () => root.querySelector(".pa-input").click();
     root.querySelector(".pa-input").onchange = async event => { await importFiles(event.target.files); event.target.value = ""; };
-    root.querySelector(".pa-view").onclick = () => { viewing = !viewing; root.classList.toggle("pa-viewing",viewing); root.querySelector(".pa-view").textContent = viewing ? "✎ 꾸미기 모드" : "▣ 감상 모드"; requestAnimationFrame(fitArtboard);  syncMusic(); syncSfx(); };
+    root.querySelector(".pa-view").onclick = () => setViewing(!viewing);
+    root.querySelector(".pa-view-exit").onclick = () => setViewing(false);
+    root.querySelector(".pa-slide-toggle").onclick = () => setSlideshow(!slideshow);
+    root.addEventListener("pointermove", wakeCursor); root.addEventListener("pointerdown", wakeCursor);
+    const seconds = root.querySelector(".pa-slide-seconds"), chosen = slideSeconds();
+    SLIDE_SECONDS.forEach(value => { const option = document.createElement("option"); option.value = String(value); option.textContent = value + "초"; option.selected = value === chosen; seconds.appendChild(option); });
+    seconds.onchange = () => { try { localStorage.setItem(SLIDE_KEY, seconds.value); } catch { /* 이번 화면에만 적용 */ } seconds.blur(); scheduleSlide(); };
+    root.querySelector(".pa-center").addEventListener("wheel", onViewingWheel, { passive:false });
+    root.querySelector(".pa-center").addEventListener("dblclick", onViewingDblClick);
     root.ondragover = event => {
       if (!event.dataTransfer) return;
       const types = Array.from(event.dataTransfer.types);
@@ -2829,7 +3029,7 @@ const PhotoAlbum = (() => {
     makeUi(host); applyMotionSetting();
     window.addEventListener("keydown", onHistoryKey);
   }
-  function cleanup(){ stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null; root = null; }
+  function cleanup(){ slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null; root = null; }
   return { mount, cleanup };
 })();
 

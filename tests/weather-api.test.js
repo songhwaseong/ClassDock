@@ -75,6 +75,31 @@ test("단기예보 → 시간별·날짜별(TMN/TMX 는 날짜 쪽으로, 강수
   assert.equal(shower.days[0].diary, "partly");
 });
 
+test("중기예보를 발표일 기준 날짜로 읽고 7일 예보에 합친다", () => {
+  const land = envelope({ wf3Am:"맑음", wf3Pm:"구름많음", rnSt3Am:10, rnSt3Pm:30,
+    wf4Am:"흐리고 비", wf4Pm:"흐림", rnSt4Am:70, rnSt4Pm:40,
+    wf5Am:"구름많고 눈", wf5Pm:"맑음", rnSt5Am:60, rnSt5Pm:10,
+    wf6Am:"맑음", wf6Pm:"맑음", rnSt6Am:0, rnSt6Pm:0,
+    wf7Am:"흐림", wf7Pm:"흐림", rnSt7Am:30, rnSt7Pm:30 });
+  const temp = envelope({ taMin4:"12", taMax4:"21", taMin5:"-2", taMax5:"6",
+    taMin6:"", taMax6:"-", taMin7:"9", taMax7:"17" });
+  const mid = api.parseMidForecast(land, temp, "202609281800", "수도권", "서울");
+  assert.deepEqual(mid.map(d => d.date), ["20261001", "20261002", "20261003", "20261004", "20261005"]);
+  assert.equal(mid[1].diary, "rainy");
+  assert.equal(mid[1].popMax, 70);
+  assert.equal(mid[1].min, 12);
+  assert.equal(mid[2].pty, 3);
+  assert.equal(mid[3].min, null);
+  assert.equal(mid[4].temperatureName, "서울");
+  const short = { days:["20260928", "20260929", "20260930", "20261001"].map(date => ({ date, source:"short" })) };
+  const seven = api.sevenDayForecast(short, { days:mid }, "20260928");
+  assert.deepEqual(seven.map(d => d.date), ["20260928", "20260929", "20260930", "20261001", "20261002", "20261003", "20261004"]);
+  assert.equal(seven[3].source, "short");
+  assert.equal(seven[4].source, "mid");
+  assert.equal(api.midTemperatureStation("11B00000", 37.57, 126.97).name, "서울");
+  assert.equal(api.midTemperatureStation("11G00000", 33.25, 126.56).name, "서귀포");
+});
+
 test("지난 날 관측 → 일기장 날씨(강수량 0.0mm의 비 기록은 하루를 비로 바꾸지 않는다)", () => {
   const day = (extra) => envelope([{ stnId:"108", stnNm:"서울", tm:"2026-09-15", avgTa:"20.4", minTa:"14.6", maxTa:"26.7",
     sumRn:"", avgTca:"0.0", iscs:"", maxWs:"4.0", ddMes:"", sumDpthFhsc:"", ...extra }]);
@@ -122,7 +147,7 @@ test("특일: 숫자 날짜·단건 객체·중복을 정리한다", () => {
 test("오류 안내는 신청할 서비스를 짚고, 문구는 모두 영어 사전에 있다", () => {
   const i18n = fs.readFileSync(path.join(__dirname, "../src/js/i18n.js"), "utf8");
   const reasons = ["bus-key-required", "bus-key-invalid", "bus-quota", "weather-out-of-range", "weather-no-data", "weather-fetch-failed"];
-  for (const service of ["forecast", "day", "special"]) for (const reason of reasons){
+  for (const service of ["forecast", "mid", "day", "special"]) for (const reason of reasons){
     const message = api.failureText(new Error(reason), service);
     assert.ok(message, reason);
     assert.ok(i18n.includes(JSON.stringify(message) + ":") || i18n.includes(JSON.stringify(message) + " :"), "번역 누락: " + message);
@@ -134,7 +159,7 @@ test("오류 안내는 신청할 서비스를 짚고, 문구는 모두 영어 �
 test("지도 날씨 패널·일기장·런처가 같은 조회 길을 쓴다", () => {
   const read = file => fs.readFileSync(path.join(__dirname, "..", file), "utf8");
   const launcher = read("desktop/launcher.cs"), map = read("src/js/weather-map.js"), diary = read("src/js/diary.js");
-  for (const route of ["/weather-now", "/weather-ultra", "/weather-forecast", "/weather-day", "/weather-holidays", "/weather-terms", "/can-proxy-weather"])
+  for (const route of ["/weather-now", "/weather-ultra", "/weather-forecast", "/weather-mid-land", "/weather-mid-temp", "/weather-day", "/weather-holidays", "/weather-terms", "/can-proxy-weather"])
     assert.ok(launcher.includes('"' + route), "런처에 " + route);
   // 토큰이 필요한 길로 등록되어 있다.
   assert.match(launcher, /path == "\/can-proxy-weather" \|\| path\.StartsWith\("\/weather-"/);

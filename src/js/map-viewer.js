@@ -3023,6 +3023,37 @@ function mapChoroRegions(level, vintage, scope){
   }
   return (set.sgg || []).map(([sido, sgg, geom]) => ({ key:sido + "|" + sgg, sido, sgg, name:sido + " " + sgg, geom }));
 }
+/* 누른 좌표가 속한 중기예보 광역구역. 행정경계를 사용해 도 경계에서도 가까운 도시의
+   잘못된 예보를 붙이지 않는다. 영동·영서만 시군구를 한 번 더 가른다. */
+async function mapWeatherAreaAt(lat, lng){
+  if (!mapChoroData()) await MNLazy.need("koreaRegions");
+  const vintage = MAP_CHORO_VINTAGES[0];
+  const province = mapChoroRegions("sido", vintage).find(region => mapChoroContains(mapChoroGeometry(region.geom), lat, lng));
+  if (!province) return null;
+  const district = mapChoroRegions("sgg", vintage).find(region => region.sido === province.sido
+    && mapChoroContains(mapChoroGeometry(region.geom), lat, lng));
+  const sido = province.sido, sgg = district ? district.sgg : "";
+  // 공공데이터포털 중기육상예보는 서해5도·울릉도를 제공하지 않는다.
+  if ((sido === "인천광역시" && sgg === "옹진군" && lng < 126)
+      || (sido === "경상북도" && sgg === "울릉군")) return null;
+  const areas = {
+    "서울특별시":["11B00000","수도권"], "인천광역시":["11B00000","수도권"], "경기도":["11B00000","수도권"],
+    "충청북도":["11C10000","충북"], "충청남도":["11C20000","충남권"],
+    "대전광역시":["11C20000","충남권"], "세종특별자치시":["11C20000","충남권"],
+    "전북특별자치도":["11F10000","전북"], "전남광주통합특별시":["11F20000","전남권"],
+    "전라남도":["11F20000","전남권"], "광주광역시":["11F20000","전남권"],
+    "대구광역시":["11H10000","경북권"], "경상북도":["11H10000","경북권"],
+    "부산광역시":["11H20000","경남권"], "울산광역시":["11H20000","경남권"], "경상남도":["11H20000","경남권"],
+    "제주특별자치도":["11G00000","제주도"]
+  };
+  let area = areas[sido];
+  if (sido === "강원특별자치도"){
+    if (!sgg) return null;
+    const east = new Set(["강릉시","동해시","태백시","속초시","삼척시","고성군","양양군"]);
+    area = east.has(sgg) ? ["11D20000","강원영동"] : ["11D10000","강원영서"];
+  }
+  return area ? { code:area[0], name:area[1] } : null;
+}
 /* 한 시점의 읍면동 전부(범위 없이). 표 한 줄마다 찾으므로 이름 → 지역 색인과 시도별 시군구 이름을 함께 만들어 둔다.
    배열에 붙인 byName·sggs 는 JSON 으로 옮기면 사라지는 곁자료다. */
 const mapChoroEmdCache = new Map();
@@ -6336,7 +6367,7 @@ async function mountMapEditor(doc){
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   // 기상청 날씨(지도 가운데·전국 주요 도시). 같은 공공데이터포털 키를 쓴다.
   const weather = typeof MNWeatherMap !== "undefined" ? MNWeatherMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
-    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+    resolveArea:mapWeatherAreaAt, movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
 
   /* ── 되돌리기 ──
      내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이
@@ -8562,6 +8593,8 @@ async function mountMapEditor(doc){
     (at) => runNearby(at, { atPoint:true }));
   nearbyButtons.push(contextNearbyBtn);
   contextNearbyBtn.classList.toggle("is-unavailable", !nearbyReady);
+  const contextWeatherBtn = contextItem("🌤️ 이 자리 날씨 보기", "누른 자리의 현재 날씨와 약 7일 예보를 봅니다",
+    (at) => weather.openAt(at.lat, at.lng));
 
   contextSep();
   contextItem("📋 이 자리 좌표 복사", "위도, 경도를 클립보드로 복사", async (at) => {
@@ -8671,6 +8704,7 @@ async function mountMapEditor(doc){
     contextLatLng = L.latLng(mapClampLat(e.latlng.lat), mapClampLng(e.latlng.lng));
     contextHead.textContent = contextLatLng.lat.toFixed(5) + ", " + contextLatLng.lng.toFixed(5);
     contextZoomBtn.disabled = map.getZoom() >= maxViewZoom();
+    contextWeatherBtn.disabled = !weather || !weather.isAvailable();
     syncContextMirrors();
     contextMenu.hidden = false;
     // 화면 밖으로 넘치지 않게 보정(탭 우클릭 메뉴와 같은 방식).

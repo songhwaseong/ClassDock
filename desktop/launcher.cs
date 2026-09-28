@@ -3481,10 +3481,12 @@ class ClassDockLauncher
                     string kind = route == "/flight-board" ? "flights" : route == "/flight-search" ? "flight"
                         : route == "/ship-ports" ? "ports" : route == "/ship-schedule" ? "ships"
                         : route == "/weather-now" ? "wx-ncst" : route == "/weather-ultra" ? "wx-ultra" : route == "/weather-forecast" ? "wx-fcst"
+                        : route == "/weather-mid-land" ? "wx-mid-land" : route == "/weather-mid-temp" ? "wx-mid-temp"
                         : route == "/weather-day" ? "wx-day" : route == "/weather-holidays" ? "holidays" : route == "/weather-terms" ? "terms"
                         : route.StartsWith("/jeju-bus-", StringComparison.Ordinal) ? route.Substring("/jeju-bus-".Length) : "";
                     string value = kind == "cities" ? "all"
-                        : kind.StartsWith("wx-", StringComparison.Ordinal) && kind != "wx-day" ? (QueryValue(path, "nx") ?? "").Trim() + "," + (QueryValue(path, "ny") ?? "").Trim()
+                        : (kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst") ? (QueryValue(path, "nx") ?? "").Trim() + "," + (QueryValue(path, "ny") ?? "").Trim()
+                        : kind == "wx-mid-land" || kind == "wx-mid-temp" ? (QueryValue(path, "reg") ?? "").Trim()
                         : kind == "wx-day" ? (QueryValue(path, "stn") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : kind == "holidays" || kind == "terms" ? (QueryValue(path, "year") ?? "").Trim() + (QueryValue(path, "month") ?? "").Trim().PadLeft(2, '0')
                         : kind == "nearby" ? (QueryValue(path, "lat") ?? "").Trim() + "," + (QueryValue(path, "lng") ?? "").Trim()
@@ -3493,7 +3495,8 @@ class ClassDockLauncher
                         : kind == "ports" ? "all"
                         : kind == "ships" ? (QueryValue(path, "port") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : (QueryValue(path, kind == "routes" ? "keyword" : kind == "arrivals" ? "nodeId" : "routeId") ?? "").Trim();
-                    bool weather = kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst" || kind == "wx-day" || kind == "holidays" || kind == "terms";
+                    bool weather = kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp"
+                        || kind == "wx-day" || kind == "holidays" || kind == "terms";
                     bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather;
                     string busCity = noCity ? "" : (QueryValue(path, "city") ?? "").Trim();
                     if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby"
@@ -3505,7 +3508,8 @@ class ClassDockLauncher
                         WriteResponse(stream, "200 OK", "application/json; charset=utf-8", result,
                             "X-ClassDock-Bus-Fetched-At: " + fetchedAt.ToString("o", CultureInfo.InvariantCulture) + "\r\n"
                             + "X-ClassDock-Bus-Stale: " + (stale ? "1" : "0") + "\r\n"
-                            + (stale ? "Retry-After: " + retry.ToString(CultureInfo.InvariantCulture) + "\r\n" : ""));
+                            + (stale ? "Retry-After: " + retry.ToString(CultureInfo.InvariantCulture) + "\r\n" : "")
+                            + ((kind == "wx-mid-land" || kind == "wx-mid-temp") ? "X-ClassDock-Weather-Issued-At: " + KmaMidBaseTime(KmaKstNow()) + "\r\n" : ""));
                     else
                     {
                         int bar = busError.IndexOf('|');
@@ -5861,6 +5865,11 @@ class ClassDockLauncher
             int nx = Int32.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), ny = Int32.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
             return nx >= 1 && nx <= 149 && ny >= 1 && ny <= 253;
         }
+        if (kind == "wx-mid-land")
+            return new[] { "11B00000", "11D10000", "11D20000", "11C10000", "11C20000", "11F10000",
+                "11F20000", "11H10000", "11H20000", "11G00000" }.Contains(value);
+        if (kind == "wx-mid-temp")
+            return System.Text.RegularExpressions.Regex.IsMatch(value, "^(11|21)[A-H][0-9]{5}$");
         if (kind == "wx-day")
         {
             var match = System.Text.RegularExpressions.Regex.Match(value, "^([0-9]{2,3})-([0-9]{8})$");
@@ -5946,6 +5955,12 @@ class ClassDockLauncher
                 value = value + "@" + baseDate + baseTime;
                 break;
             }
+            case "wx-mid-land": case "wx-mid-temp":
+                service = KmaBase + "MidFcstInfoService/"; needsCity = false;
+                operation = kind == "wx-mid-land" ? "getMidLandFcst" : "getMidTa";
+                query = "dataType=JSON&pageNo=1&numOfRows=10&regId=" + value + "&tmFc=" + KmaMidBaseTime(KmaKstNow());
+                value = value + "@" + KmaMidBaseTime(KmaKstNow());
+                break;
             case "wx-day":
             {
                 string[] day = value.Split('-');
@@ -5986,7 +6001,7 @@ class ClassDockLauncher
         // 실황·초단기예보는 한 시간마다, 단기예보는 세 시간마다 발표된다(캐시 열쇠에 발표 시각이 들어 있다).
         // 지난 날 관측·특일은 바뀌지 않는다.
         int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600
-            : kind == "wx-ncst" || kind == "wx-ultra" ? 600 : kind == "wx-fcst" ? 1800 : 86400;
+            : kind == "wx-ncst" || kind == "wx-ultra" ? 600 : kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp" ? 1800 : 86400;
         lock (JejuBusGates[(cacheKey.GetHashCode() & Int32.MaxValue) % JejuBusGates.Length])
         {
             JejuBusCacheEntry entry;
@@ -6105,6 +6120,13 @@ class ClassDockLauncher
     const string KmaBase = "https://apis.data.go.kr/1360000/";
     const string KasiBase = "https://apis.data.go.kr/B090041/openapi/service/";
     static DateTime KmaKstNow() { return DateTime.UtcNow.AddHours(9); }
+    // 중기예보는 매일 06·18시 발표. 공개 처리 시간을 감안해 한 시간 지난 발표를 사용한다.
+    static string KmaMidBaseTime(DateTime kst)
+    {
+        DateTime at = kst.AddHours(-1);
+        if (at.Hour < 6) return at.AddDays(-1).ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "1800";
+        return at.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + (at.Hour < 18 ? "0600" : "1800");
+    }
     // 가장 최근에 나와 있을 발표 시각. 실황은 매시 정각 발표를 40분 뒤에, 초단기예보는 매시 30분 발표를 45분 뒤에,
     // 단기예보는 02·05·08·11·14·17·20·23시 발표를 10분 뒤에 준다(넉넉히 15분).
     static void KmaBaseTime(string kind, DateTime kst, out string baseDate, out string baseTime)

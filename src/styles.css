@@ -8823,12 +8823,13 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-weather-hour-time,.map-weather-hour-pop{font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
 .map-weather-hour-glyph{font-size:18px;line-height:1.2}
 .map-weather-hour-temp{font-variant-numeric:tabular-nums}
-.map-weather-days{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:6px}
+.map-weather-days{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-bottom:6px}
 .map-weather-day{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 4px;border:1px solid #98b9bd66;border-radius:8px}
 .map-weather-day-name{font-weight:700}
 .map-weather-day-glyph{font-size:22px;line-height:1.2}
 .map-weather-day-range{font-variant-numeric:tabular-nums}
-.map-weather-day-pop{font-size:11px;opacity:.8}
+.map-weather-day-pop,.map-weather-day-source{font-size:11px;opacity:.8}
+.map-weather-day.is-mid{border-style:dashed}
 .map-weather-status{margin:6px 0 0;font-size:12px}.map-weather-note{font-size:12px;opacity:.8}.map-weather-panel a{color:#087f8c}
 /* 지도 위 날씨 딱지 — 점 자리에서 오른쪽 위로 붙는다. */
 .map-weather-tag{background:none;border:0}
@@ -10145,37 +10146,87 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-caption-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 .pa-caption-actions button{padding:6px 8px;font-size:10px}
 .pa-caption-actions .pa-delete{color:#cf5361}
-.pa-bg-section{flex:none;padding:12px;border:1px solid var(--pa-line);border-radius:12px;background:var(--pa-panel)}
-.pa-bg-section>div:first-child{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
-.pa-music{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:10px;padding-top:9px;border-top:1px solid var(--pa-line);min-width:0}
+/* 배경 템플릿·배경음악 칸 — 민트 네이처 패널. 이 칸에서만 --pa-* 를 민트로 바꿔 안쪽 조절기(슬라이더·프리셋)가 모두 민트를 따른다. */
+.pa-center{container-type:inline-size}
+.pa-bg-section{--pa-accent:#1f9d74;--pa-soft:#e4f5ec;--pa-line:#cde8da;--pa-panel:#fbfefc;--pa-muted:#5d7b6f;--pa-glass:rgba(255,255,255,.7);--pa-leaf:#4fb384;position:relative;isolation:isolate;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:8px;flex:none;padding:10px;overflow:hidden;border:1px solid var(--pa-line);border-radius:16px;background:linear-gradient(135deg,#f3fcf7 0%,#e6f7ed 55%,#d8f0e3 100%);box-shadow:0 10px 26px rgba(31,157,116,.1)}
+[data-theme="dark"] .photo-album .pa-bg-section{--pa-accent:#3cc393;--pa-soft:#173127;--pa-line:#244538;--pa-panel:#0f211a;--pa-muted:#8db6a5;--pa-glass:rgba(15,33,26,.72);--pa-leaf:#2e7a59;background:linear-gradient(135deg,#0e1e18 0%,#12281f 60%,#0c1a15 100%);box-shadow:0 12px 30px #0006}
+.pa-leaves{position:absolute;z-index:-1;width:130px;height:130px;color:var(--pa-leaf);opacity:.3;pointer-events:none}
+.pa-leaves.is-left{left:-16px;bottom:-20px}
+.pa-leaves.is-right{right:-16px;top:-20px;transform:rotate(180deg)}
+.pa-bg-card,.pa-music{min-width:0;padding:9px 11px;border:1px solid var(--pa-line);border-radius:12px;background:var(--pa-glass);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.pa-bg-card{grid-column:1}
+.pa-music{grid-column:2;display:flex;flex-direction:column;gap:6px}
 .pa-music:empty{display:none}
-.pa-music strong{flex:none;font-size:12px}
-.pa-music-name{flex:1;min-width:0;overflow:hidden;color:var(--pa-muted);font-size:11px;white-space:nowrap;text-overflow:ellipsis}
-.pa-music input[type=range]{flex:0 1 90px;min-width:50px;accent-color:var(--pa-accent)}
-.pa-music-button{flex:none;padding:5px 9px;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-soft);color:var(--pa-text);font-size:11px}
-.pa-music-button:hover{border-color:var(--pa-accent)}
+.pa-bg-section:has(>.pa-music:empty) .pa-bg-card{grid-column:1/-1}
+.pa-bg-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.pa-bg-section strong{font-size:12px}.pa-bg-section small{color:var(--pa-muted);font-size:10px}
+.pa-backgrounds{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}
+.photo-album .pa-bg-choice{position:relative;min-width:0;padding:3px;border:2px solid transparent;border-radius:10px;background:transparent;color:var(--pa-text)}
+.pa-bg-choice span{position:relative;display:block;height:40px;border-radius:7px;box-shadow:0 2px 6px rgba(20,70,50,.14),inset 0 0 0 1px rgba(255,255,255,.55)}
+.pa-bg-choice small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:4px 0 0;font-size:9px}
+.photo-album .pa-bg-choice:hover:not(:disabled){border-color:var(--pa-line);background:var(--pa-soft)}
+.photo-album .pa-bg-choice.active{border-color:var(--pa-accent);background:var(--pa-soft)}
+.pa-bg-choice.active span::after{content:"✓";position:absolute;left:50%;top:50%;display:grid;place-items:center;width:20px;height:20px;border:2px solid #fff;border-radius:50%;background:var(--pa-accent);color:#fff;font-size:11px;font-weight:900;line-height:1;transform:translate(-50%,-50%);box-shadow:0 2px 6px #0003}
+.pa-bg-section .pa-bg-choice.active small{color:var(--pa-accent);font-weight:800}
+.pa-music-head{display:flex;align-items:center;gap:8px;min-width:0}
+.pa-bg-section .pa-music-head strong{font-size:13px}
+.photo-album .pa-music-button{flex:none;padding:5px 9px;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-soft);color:var(--pa-text);font-size:11px}
+.photo-album .pa-music-button:hover{border-color:var(--pa-accent)}
+.photo-album .pa-music-play-button{flex:none;display:grid;place-items:center;width:30px;height:30px;padding:0 0 0 2px;border:0;border-radius:50%;background:var(--pa-accent);color:#fff;font-size:12px;line-height:1;box-shadow:0 4px 10px rgba(31,157,116,.3)}
+.photo-album .pa-music-play-button.playing{padding:0}
+.photo-album .pa-music-add{margin-left:auto;padding:6px 13px;border:0;border-radius:999px;background:var(--pa-accent);color:#fff;font-size:11px;font-weight:700;box-shadow:0 3px 9px rgba(31,157,116,.25)}
+.photo-album .pa-music-play-button:hover,.photo-album .pa-music-add:hover{border-color:transparent;filter:brightness(1.08)}
+.pa-music-empty{margin:0;color:var(--pa-muted);font-size:11px;line-height:1.5}
+.pa-playlist{display:flex;flex-direction:column;gap:2px;max-height:112px;margin:0;padding:4px;overflow:auto;list-style:none;border:1px solid var(--pa-line);border-radius:10px;background:var(--pa-panel)}
+.pa-playlist-row{display:flex;align-items:center;gap:6px;min-width:0;padding:1px 4px;border:1px solid transparent;border-radius:7px}
+.pa-playlist-row.active{border-color:var(--pa-accent);background:var(--pa-soft)}
+.pa-playlist-row.playing .pa-playlist-name,.pa-playlist-row.playing .pa-playlist-num{color:var(--pa-accent);font-weight:800}
+.pa-playlist-num{flex:none;width:16px;color:var(--pa-muted);font-size:11px;text-align:center}
+.photo-album .pa-playlist-name{flex:1;min-width:0;overflow:hidden;padding:3px 2px;border:0;background:transparent;color:var(--pa-text);font-size:11px;text-align:left;white-space:nowrap;text-overflow:ellipsis}
+.pa-playlist-volume{flex:0 1 110px;min-width:48px;accent-color:var(--pa-accent)}
+.pa-playlist-time{flex:none;min-width:34px;color:var(--pa-muted);font-size:10px;font-variant-numeric:tabular-nums;text-align:right}
+.photo-album .pa-playlist-action{flex:none;width:22px;height:22px;padding:0;border:1px solid var(--pa-line);border-radius:6px;background:var(--pa-panel);color:var(--pa-text);font-size:11px;line-height:1}
+.photo-album .pa-playlist .pa-playlist-action,.photo-album .pa-music-clear{border-color:transparent;background:transparent;color:var(--pa-muted)}
+.photo-album .pa-playlist-action:hover:not(:disabled){border-color:var(--pa-line);background:var(--pa-soft);color:var(--pa-accent)}
+.pa-playlist-action:disabled{opacity:.35;cursor:default}
+.pa-music-play{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;min-width:0;padding:7px 11px;border:1px solid var(--pa-line);border-radius:12px;background:var(--pa-glass)}
+.pa-music-play:empty{display:none}
+.pa-bg-section .pa-play-title{flex:none;font-size:12px}
+.pa-music-play .pa-sfx-fades{flex-basis:auto;margin:0}
+.pa-music-play .pa-sfx-fade input[type=range]{width:72px}
+.pa-music-play .pa-music-volume input[type=range]{width:110px}
+.pa-order-switch{display:inline-flex;padding:2px;border:1px solid var(--pa-line);border-radius:999px;background:var(--pa-panel)}
+.photo-album .pa-order-switch button{padding:4px 12px;border:0;border-radius:999px;background:transparent;color:var(--pa-text);font-size:11px}
+.photo-album .pa-order-switch button.active{background:var(--pa-accent);color:#fff;font-weight:700}
+.photo-album .pa-more-toggle{margin-left:auto;padding:4px 10px;border:1px solid var(--pa-line);border-radius:999px;background:var(--pa-panel);color:var(--pa-muted);font-size:11px}
+.photo-album .pa-more-toggle:hover,.photo-album .pa-more-toggle.active{border-color:var(--pa-accent);color:var(--pa-accent)}
+.pa-more{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;max-height:190px;overflow:auto;padding:9px 11px;border:1px dashed var(--pa-line);border-radius:12px;background:var(--pa-glass)}
+.pa-more[hidden]{display:none}
+.pa-more-head{display:flex;align-items:baseline;gap:10px}
+.pa-music-more{display:flex;flex-direction:column;gap:6px}
+.pa-music-more:empty{display:none}
+.pa-more .pa-sfx-master{margin-top:0;padding-top:8px;border-top:1px solid var(--pa-line)}
+.pa-music-more:empty+.pa-sfx-master{padding-top:0;border-top:0}
+@container (max-width:720px){.pa-bg-section{grid-template-columns:minmax(0,1fr)}.pa-bg-card,.pa-music{grid-column:1}}
 .pa-sfx-master{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;min-width:0}
 .pa-sfx-master:empty{display:none}
 .pa-sfx-master strong{flex:none;font-size:12px}
 .pa-sfx-master input[type=range]{flex:0 1 140px;min-width:60px;accent-color:var(--pa-accent)}
 .pa-sfx-master input[type=range]:disabled{opacity:.35}
-.pa-sfx-value{flex:none;min-width:36px}
+.pa-sfx-value{flex:none;min-width:36px;color:var(--pa-muted);font-size:11px}
 .pa-sfx-fades{display:flex;flex-basis:100%;flex-wrap:wrap;gap:4px 14px}
 .pa-sfx-fade{display:flex;align-items:center;gap:5px;min-width:0;color:var(--pa-muted);font-size:11px}
 .pa-sfx-fade input[type=range]{width:90px;accent-color:var(--pa-accent)}
 .pa-sfx-fade input[type=range]:disabled{opacity:.35}
-.pa-duck-presets{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
-.pa-duck-preset{padding:3px 8px;border:1px solid var(--pa-line);border-radius:999px;background:var(--pa-soft);color:var(--pa-text);font-size:11px}
-.pa-duck-preset:hover{border-color:var(--pa-accent)}
-.pa-duck-preset.active{border-color:var(--pa-accent);background:var(--pa-accent);color:#fff}
-.pa-playlist{display:flex;flex-direction:column;flex-basis:100%;gap:2px;max-height:150px;margin:4px 0 0;padding:0;overflow:auto;list-style:none}
-.pa-playlist-row{display:flex;align-items:center;gap:3px;min-width:0;padding:1px 3px;border:1px solid transparent;border-radius:7px}
-.pa-playlist-row.active{border-color:var(--pa-accent);background:var(--pa-soft)}
-.pa-playlist-row.playing .pa-playlist-name{color:var(--pa-accent);font-weight:800}
-.pa-playlist-name{flex:1;min-width:0;overflow:hidden;padding:3px 4px;border:0;background:transparent;color:var(--pa-text);font-size:11px;text-align:left;white-space:nowrap;text-overflow:ellipsis}
-.pa-playlist-volume{flex:none;width:56px;accent-color:var(--pa-accent)}
-.pa-playlist-action{flex:none;width:22px;height:22px;padding:0;border:1px solid var(--pa-line);border-radius:6px;background:var(--pa-panel);color:var(--pa-text);font-size:11px;line-height:1}
-.pa-playlist-action:disabled{opacity:.35;cursor:default}
+/* 줄이기 강도 프리셋 — 음량 곡선 그림을 붙인 한 덩어리 단추 묶음. 곡선은 currentColor 라 글자색을 따른다. */
+.pa-duck-presets{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pa-duck-group{display:inline-flex;overflow:hidden;border:1px solid var(--pa-line);border-radius:9px;background:var(--pa-panel)}
+.photo-album .pa-duck-preset{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:58px;padding:5px 8px 4px;border:0;border-right:1px solid var(--pa-line);border-radius:0;background:transparent;color:var(--pa-muted);font-size:10px;line-height:1.2}
+.photo-album .pa-duck-preset:last-child{border-right:0}
+.photo-album .pa-duck-preset:hover{background:var(--pa-soft);color:var(--pa-text)}
+.photo-album .pa-duck-preset.active{background:var(--pa-accent);color:#fff}
+.photo-album .pa-duck-preset:focus-visible{outline:2px solid var(--pa-accent);outline-offset:-2px}
+.pa-duck-curve{display:block}
 .pa-track-repeat{gap:4px}
 .pa-track-repeat .pa-range-value{min-width:26px;text-align:center}
 .pa-playlist-options{align-items:center}
@@ -10186,12 +10237,6 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-sfx-master.is-empty .pa-sfx-hint{display:inline}
 .pa-sfx-master.is-empty .pa-sfx-value,.pa-sfx-master.is-empty .pa-range-value{display:none}
 .pa-range-value{flex:none;min-width:34px;color:var(--pa-muted);font-size:10px;text-align:right}
-.pa-bg-section strong{font-size:12px}.pa-bg-section small{color:var(--pa-muted);font-size:10px}
-.pa-backgrounds{display:flex;gap:8px;overflow:auto;padding-bottom:3px}
-.pa-bg-choice{flex:none;width:75px;padding:4px;border:2px solid transparent;border-radius:8px;background:var(--pa-soft);color:var(--pa-text)}
-.pa-bg-choice.active,.pa-bg-choice:hover:not(:disabled){border-color:var(--pa-accent)}
-.pa-bg-choice span{display:block;height:43px;border-radius:4px}
-.pa-bg-choice small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:4px 0 0;font-size:9px}
 .pa-tools-title{display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:16px}
 .pa-tools-title strong{font-size:16px}.pa-tools-title small{font-size:10px;color:var(--pa-muted)}
 .pa-categories{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:13px}
@@ -10215,12 +10260,23 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-remove-part{width:100%;margin-top:6px;padding:7px;border:1px solid var(--pa-line);border-radius:7px;color:#cf5361;background:var(--pa-panel)}
 .pa-footer{display:flex;justify-content:space-between;gap:10px;padding:7px 18px;border-top:1px solid var(--pa-line);background:var(--pa-panel);color:var(--pa-muted);font-size:10px}
 .pa-drag{outline:4px dashed var(--pa-accent);outline-offset:-7px}
-.pa-viewing .pa-layout{grid-template-columns:160px minmax(0,1fr)}
-.pa-viewing .pa-tools,.pa-viewing .pa-bg-section{display:none}
-.pa-viewing .pa-center{padding:10px}
-.pa-viewing .pa-stage{border-radius:8px}
-.pa-viewing .pa-part{pointer-events:none}
+/* 감상 모드 = 사진만. 머리 줄·목록·이름 줄·상태 줄을 감추고, 돌아가는 단추는 무대 구석에 흐리게 띄운다(Esc 로도 돌아감). */
+.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}
+.pa-viewing .pa-header,.pa-viewing .pa-sidebar,.pa-viewing .pa-caption,.pa-viewing .pa-footer,.pa-viewing .pa-tools,.pa-viewing .pa-bg-section{display:none}
+.pa-viewing .pa-center{position:relative;padding:10px}
+.pa-viewing .pa-stage{padding-bottom:0;border-radius:8px}
+.pa-viewing .pa-video-wrap{width:100%;height:100%}
+.pa-view-ghost{position:absolute;z-index:4;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;border-radius:8px}
+.pa-view-wait>*{opacity:0}
+.pa-view-bar{display:none}
+.pa-viewing .pa-view-bar{display:flex;align-items:center;gap:6px;position:absolute;top:20px;right:20px;z-index:5;opacity:.3;transition:opacity .2s}
+.pa-viewing .pa-view-bar:hover,.pa-viewing .pa-view-bar:has(:focus-visible){opacity:1}
+.pa-viewing.pa-cursor-idle,.pa-viewing.pa-cursor-idle *{cursor:none!important}
+.pa-viewing.pa-cursor-idle .pa-view-bar:not(:has(:focus-visible)){opacity:0}
+.pa-view-bar button,.pa-view-bar select{padding:6px 10px;border:1px solid #fff6;border-radius:8px;background:#0008;color:#fff;font-size:11px}
+.pa-view-bar select{padding:6px 4px}.pa-view-bar option{background:#1b2430;color:#fff}
+.pa-view-bar .pa-slide-toggle[aria-pressed="true"]{border-color:var(--pa-accent);background:color-mix(in srgb,var(--pa-accent) 70%,#000)}.pa-viewing .pa-part{pointer-events:none}
 .pa-viewing .pa-part.selected{border-color:transparent;box-shadow:none}.pa-viewing .pa-handle,.pa-viewing .pa-part-bar,.pa-viewing .pa-group-box{display:none!important}
-.pa-viewing .pa-artboard{max-height:calc(100% - 95px)}
+.pa-viewing .pa-artboard{max-width:calc(100% - 20px);max-height:calc(100% - 20px)}
 @media(max-width:900px){.pa-layout{grid-template-columns:145px minmax(0,1fr) 180px}.pa-sidebar{padding:10px 7px}.pa-tools{padding:12px 8px}.pa-sticker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-flip-row{grid-template-columns:1fr}.pa-header{padding:10px 14px}.pa-header h2{font-size:21px}.pa-header p{display:none}.pa-caption{display:block}.pa-caption-actions{justify-content:flex-start;margin-top:4px}.pa-artboard{max-height:calc(100% - 115px)}}
-@media(max-width:650px){.pa-layout,.pa-viewing .pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.pa-tools{display:none}.pa-header-actions button{font-size:10px;padding:6px}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}
+@media(max-width:650px){.pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.pa-tools{display:none}.pa-header-actions button{font-size:10px;padding:6px}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}

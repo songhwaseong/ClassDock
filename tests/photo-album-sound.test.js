@@ -223,6 +223,14 @@ test("덕킹: 효과음 구간을 묶고, 감상 모드와 MP4 가 같은 곡선
   album.DUCK_PRESETS.forEach(([id, , values]) => { album.applyDuckPreset(photo, id); assert.equal(album.duckPresetOf(photo), id); assert.deepEqual(plain(album.duckSettings(photo)), { on:true, ...values }); });
 });
 
+test("줄이기 프리셋 곡선 그림: 더 세게 줄이면 더 깊이, 복귀가 길면 더 늦게 올라온다", () => {
+  const album = loadAlbum(), curve = (a, r) => album.duckCurveSvg(a, r).match(/points="([^"]+)"/)[1].split(" ").map(pair => pair.split(",").map(Number));
+  const soft = curve(.3, .8), strong = curve(.85, .35), mute = curve(.9, 1);
+  assert.ok(strong[2][1] > soft[2][1], "강하게가 살짝보다 아래로 꺼진다");
+  assert.ok(mute[4][0] > strong[4][0], "복귀 1초가 0.35초보다 늦게 제자리로");
+  [soft, strong, mute].forEach(points => { assert.equal(points[0][1], points[points.length - 1][1], "처음과 끝은 원래 크기"); points.forEach(([x, y]) => assert.ok(x >= 0 && x <= 48 && y >= 0 && y <= 22, "그림 칸 안")); });
+});
+
 test("반복 구간: 값 규칙(0.5초 이상, 곡 길이 안, 처음부터 옵션)", () => {
   const album = loadAlbum(), loop = (music, duration) => plain(album.musicLoop(music, duration));
   assert.equal(loop({}, 60).on, false, "구간이 없으면 곡 전체 반복");

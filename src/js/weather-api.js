@@ -40,6 +40,25 @@ const MNWeatherApi = (() => {
   ].map(([id, name, lat, lng]) => ({ id, name, lat, lng }));
   const DEFAULT_STATION = 108;
   const station = id => STATIONS.find(s => s.id === Number(id)) || null;
+  /* 중기기온 예보지점 코드: 기상청 기상기후데이터위키 지점별 예보구역코드.
+     육상예보의 광역 코드와 구분하고, 같은 광역 구역에서 가장 가까운 지점을 고른다. */
+  const MID_TEMPERATURE_STATIONS = {
+    "11B00000":[[108,"11B10101"],[112,"11B20201"],[119,"11B20601"],[201,"11B20101"],[202,"11B20503"],[203,"11B20701"]],
+    "11D10000":[[101,"11D10301"],[114,"11D10401"],[95,"11D10101"],[121,"11D10501"],[211,"11D10201"],[212,"11D10302"]],
+    "11D20000":[[90,"11D20401"],[105,"11D20501"],[106,"11D20601"],[100,"11D20201"],[216,"11D20301"]],
+    "11C10000":[[131,"11C10301"],[127,"11C10101"],[221,"11C10201"],[226,"11C10302"]],
+    "11C20000":[[133,"11C20401"],[239,"11C20404"],[129,"11C20101"],[232,"11C20301"],[235,"11C20201"],[236,"11C20501"],[238,"11C20601"]],
+    "11F10000":[[146,"11F10201"],[245,"11F10203"],[247,"11F10401"],[248,"11F10301"]],
+    "11F20000":[[156,"11F20501"],[168,"11F20401"],[170,"11F20301"],[169,"11F20701"],[259,"11F20303"],[261,"11F20302"]],
+    "11H10000":[[143,"11H10701"],[136,"11H10501"],[138,"11H10201"],[130,"11H10101"],[137,"11H10302"],[279,"11H10602"]],
+    "11H20000":[[159,"11H20201"],[152,"11H20101"],[155,"11H20301"],[162,"11H20401"],[192,"11H20701"],[253,"11H20304"],[294,"11H20403"]],
+    "11G00000":[[184,"11G00201"],[185,"11G00501"],[188,"11G00101"],[189,"11G00401"]]
+  };
+  function midTemperatureStation(areaCode, lat, lng){
+    const choices = MID_TEMPERATURE_STATIONS[areaCode] || [];
+    return choices.map(([id, code]) => ({ ...station(id), code }))
+      .sort((a, b) => metres([lat, lng], [a.lat, a.lng]) - metres([lat, lng], [b.lat, b.lng]))[0] || null;
+  }
   function metres(a, b){
     const rad = Math.PI / 180, dy = (b[0] - a[0]) * rad, dx = (b[1] - a[1]) * rad;
     const h = Math.sin(dy / 2) ** 2 + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dx / 2) ** 2;
@@ -186,6 +205,48 @@ const MNWeatherApi = (() => {
     return { hours:list, days:dayList };
   }
 
+  function midWeather(raw){
+    const value = text(raw);
+    const sky = value.includes("흐림") ? 4 : value.includes("구름") ? 3 : value.includes("맑음") ? 1 : null;
+    const pty = value.includes("눈") ? 3 : value.includes("소나기") ? 4 : value.includes("비") ? 1 : 0;
+    return { sky, pty };
+  }
+  // 중기예보의 N일 후는 발표 날짜 + N일이다. UTC로 계산해 PC 시간대의 영향을 피한다.
+  function midDate(issuedAt, ahead){
+    if (!/^[0-9]{12}$/.test(issuedAt)) throw new Error("weather-invalid-data");
+    const d = new Date(Date.UTC(Number(issuedAt.slice(0, 4)), Number(issuedAt.slice(4, 6)) - 1,
+      Number(issuedAt.slice(6, 8)) + ahead));
+    return d.toISOString().slice(0, 10).replace(/-/g, "");
+  }
+  function parseMidForecast(landBody, temperatureBody, issuedAt, areaName, temperatureName){
+    const land = rows(landBody)[0];
+    if (!land) throw new Error("weather-no-data");
+    const temperature = temperatureBody ? rows(temperatureBody)[0] || {} : {};
+    const days = [];
+    for (let ahead = 3; ahead <= 7; ahead++){
+      const morning = midWeather(land["wf" + ahead + "Am"]), afternoon = midWeather(land["wf" + ahead + "Pm"]);
+      if (morning.sky == null && afternoon.sky == null && !morning.pty && !afternoon.pty) continue;
+      const pops = [num(land["rnSt" + ahead + "Am"]), num(land["rnSt" + ahead + "Pm"])].filter(v => v != null);
+      const out = { date:midDate(issuedAt, ahead), min:num(temperature["taMin" + ahead]), max:num(temperature["taMax" + ahead]),
+        popMax:pops.length ? Math.max(...pops) : null, sky:afternoon.sky ?? morning.sky,
+        pty:afternoon.pty || morning.pty || 0, source:"mid", areaName, temperatureName };
+      out.diary = diaryWeatherOf(out);
+      days.push(out);
+    }
+    return days;
+  }
+  function sevenDayForecast(shortForecast, midForecast, today){
+    const shortDays = new Map((shortForecast && shortForecast.days || []).map(day => [day.date, day]));
+    const midDays = new Map((midForecast && midForecast.days || []).map(day => [day.date, day]));
+    const out = [];
+    for (let ahead = 0; ahead < 7; ahead++){
+      const date = midDate(today + "0000", ahead);
+      const day = (ahead <= 3 ? shortDays.get(date) || midDays.get(date) : midDays.get(date) || shortDays.get(date));
+      if (day) out.push(day);
+    }
+    return out;
+  }
+
   // 지난 날 관측(ASOS 일자료) → 하루 날씨.
   function phenomena(iscs){
     const found = new Set();
@@ -238,7 +299,8 @@ const MNWeatherApi = (() => {
       throw error;
     }
     const at = Date.parse(response.headers.get("X-ClassDock-Bus-Fetched-At") || "");
-    return { body:await response.json(), fetchedAt:Number.isFinite(at) ? at : Date.now() };
+    return { body:await response.json(), fetchedAt:Number.isFinite(at) ? at : Date.now(),
+      issuedAt:response.headers.get("X-ClassDock-Weather-Issued-At") || "" };
   }
   let capabilityTask = null;
   function available(){
@@ -265,6 +327,16 @@ const MNWeatherApi = (() => {
     const g = gridOf(lat, lng);
     const result = await get("/weather-forecast?nx=" + g.nx + "&ny=" + g.ny, signal);
     return { ...parseForecast(result.body), grid:g, fetchedAt:result.fetchedAt };
+  }
+  async function loadMidForecast(lat, lng, area, { signal } = {}){
+    if (!area || !MID_TEMPERATURE_STATIONS[area.code]) throw new Error("weather-out-of-range");
+    const near = midTemperatureStation(area.code, lat, lng);
+    const land = await get("/weather-mid-land?reg=" + area.code, signal);
+    let temperature = null;
+    try { temperature = await get("/weather-mid-temp?reg=" + near.code, signal); }
+    catch(error){ if (signal && signal.aborted) throw error; }
+    return { days:parseMidForecast(land.body, temperature && temperature.body, land.issuedAt, area.name, near.name),
+      area, temperatureStation:near, temperatureMissing:!temperature, fetchedAt:land.fetchedAt };
   }
   // dateKey = "YYYY-MM-DD"(어제까지).
   async function loadDay(stationId, dateKey, { signal } = {}){
@@ -320,6 +392,7 @@ const MNWeatherApi = (() => {
   // 오류 → 안내 글(한국어 원문 그대로 — 화면이 번역기에 넘긴다). service 는 신청할 서비스 갈래.
   const KEY_INVALID = {
     forecast:"인증키가 날씨 조회에 쓰일 수 없어요. 공공데이터포털에서 '기상청_단기예보 조회서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요.",
+    mid:"7일 예보를 보려면 공공데이터포털에서 '기상청_중기예보 조회서비스'를 추가로 활용신청해 주세요.",
     day:"인증키가 지난 날씨 조회에 쓰일 수 없어요. 공공데이터포털에서 '기상청_지상(종관, ASOS) 일자료 조회서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요.",
     special:"인증키가 공휴일 조회에 쓰일 수 없어요. 공공데이터포털에서 '한국천문연구원_특일 정보' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요."
   };
@@ -334,7 +407,8 @@ const MNWeatherApi = (() => {
   }
 
   return { STATIONS, DEFAULT_STATION, station, nearestStation, savedStation, saveStation, toGrid, gridOk, rows,
-    skyName, ptyName, diaryWeatherOf, parseNow, parseForecast, phenomena, parseDay, parseSpecialDays,
-    available, loadNow, loadForecast, loadDay, loadSpecialDays, cachedSpecialDays, failureText, KEY_INVALID, metres };
+    skyName, ptyName, diaryWeatherOf, parseNow, parseForecast, parseMidForecast, sevenDayForecast, midTemperatureStation,
+    phenomena, parseDay, parseSpecialDays, available, loadNow, loadForecast, loadMidForecast, loadDay,
+    loadSpecialDays, cachedSpecialDays, failureText, KEY_INVALID, metres };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = MNWeatherApi;
