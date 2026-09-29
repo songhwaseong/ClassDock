@@ -97,6 +97,53 @@ test("조각이 없거나 설정이 없으면 거절한다", () => {
 });
 
 const FFMPEG = path.join(ROOT, "ffmpeg.exe");
+// Annex B(.h264) → 장면별 { key, nals } 와 SPS·PPS. 장면 경계는 AUD(9)로 가른다.
+function readAnnexB(b){
+  const nals = [];
+  for (let i = 0, start = -1; i <= b.length; i++){
+    const atStart = i < b.length && b[i] === 0 && b[i + 1] === 0 && (b[i + 2] === 1 || (b[i + 2] === 0 && b[i + 3] === 1));
+    if (atStart || i === b.length){ if (start >= 0) nals.push(b.subarray(start, i)); if (atStart){ const length = b[i + 2] === 1 ? 3 : 4; start = i + length; i += length - 1; } }
+  }
+  let sps, pps; const units = [];
+  for (const nal of nals){ const type = nal[0] & 31; if (type === 9){ units.push({ nals:[], key:false }); continue; } if (type === 7){ sps = sps || nal; continue; } if (type === 8){ pps = pps || nal; continue; } if (type === 5) units[units.length - 1].key = true; units[units.length - 1].nals.push(nal); }
+  const avcc = access => Uint8Array.from(access.nals.flatMap(nal => [nal.length >>> 24, nal.length >>> 16 & 255, nal.length >>> 8 & 255, nal.length & 255, ...nal]));
+  const config = Uint8Array.from([1, sps[1], sps[2], sps[3], 0xff, 0xe1, sps.length >> 8, sps.length & 255, ...sps, 1, pps.length >> 8, pps.length & 255, ...pps]);
+  return { units:units.filter(access => access.nals.length).map(access => ({ key:access.key, data:avcc(access) })), config };
+}
+
+test("조각마다 duration 이 있으면 장면 길이가 제각각인 stts 로 적고, 영상 길이는 그 합이다", () => {
+  const at = [0, 100e3, 150e3, 2e6, 2.05e6];   // 마이크로초 — 화면이 바뀔 때만 구운 장면들
+  const samples = at.map((timestamp, i) => ({ ...sample(6, i), key:i === 0 || i === 3, timestamp, duration:i === at.length - 1 ? 950e3 : 1 }));
+  const bytes = MNMp4Writer.mux({ width:32, height:32, fps:30, samples, avcC });
+  const top = boxes(bytes), trak = find(top, "moov", "trak"), stbl = find(trak, "mdia", "minf", "stbl");
+  const stts = stbl.children.find(box => box.type === "stts"), runs = u32(bytes, stts.body + 4), lengths = [];
+  for (let i = 0; i < runs; i++){ const n = u32(bytes, stts.body + 8 + i*8), ticks = u32(bytes, stts.body + 12 + i*8); for (let k = 0; k < n; k++) lengths.push(ticks); }
+  assert.deepEqual(lengths, [9000, 4500, 166500, 4500, 85500], "다음 장면까지(90kHz), 마지막은 제 duration");
+  assert.equal(stbl.children.some(box => box.type === "ctts"), false);
+  assert.equal(u32(bytes, find(top, "moov", "mvhd").body + 16), 3000, "0초~3초");
+  // duration 이 하나라도 없으면 예전처럼 fps 고정 길이
+  const fixed = MNMp4Writer.mux({ width:32, height:32, fps:30, samples:samples.map(({ duration, ...rest }, i) => ({ ...rest, timestamp:i*1e6/30 })), avcC });
+  const fixedStts = find(find(boxes(fixed), "moov", "trak"), "mdia", "minf", "stbl").children.find(box => box.type === "stts");
+  assert.equal(u32(fixed, fixedStts.body + 4), 1); assert.equal(u32(fixed, fixedStts.body + 12), 3000);
+});
+
+test("장면 길이가 제각각인 실제 H.264 를 담으면 ffmpeg 가 그 시각 그대로 읽는다", { skip:!fs.existsSync(FFMPEG) && "ffmpeg.exe 가 없어 건너뜀", timeout:120000 }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "classdock-vfr-"));
+  const run = (...args) => execFileSync(FFMPEG, ["-v", "error", "-y", ...args], { cwd:dir, maxBuffer:64*1024*1024 }).toString();
+  const md5 = (...args) => execFileSync(FFMPEG, ["-v", "error", ...args, "-f", "framemd5", "-"], { cwd:dir, maxBuffer:64*1024*1024 }).toString().split(/\r?\n/).filter(line => line && !line.startsWith("#")).map(line => line.split(",").pop().trim());
+  try {
+    run("-f", "lavfi", "-i", "testsrc=size=160x120:rate=30", "-frames:v", "6", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-profile:v", "baseline", "-threads", "1", "-bf", "0", "-g", "3", "-bsf:v", "h264_metadata=aud=insert", "-f", "h264", "v.h264");
+    const { units, config } = readAnnexB(fs.readFileSync(path.join(dir, "v.h264")));
+    assert.equal(units.length, 6);
+    const at = [0, 0.4, 0.45, 2, 2.1, 5];   // 초
+    const samples = units.map((unit, i) => ({ ...unit, timestamp:at[i]*1e6, duration:500e3 }));
+    fs.writeFileSync(path.join(dir, "out.mp4"), MNMp4Writer.mux({ width:160, height:120, fps:30, samples, avcC:config }));
+    const pts = execFileSync(FFMPEG, ["-v", "error", "-i", "out.mp4", "-c", "copy", "-f", "framecrc", "-"], { cwd:dir }).toString()
+      .split(/\r?\n/).filter(line => line && !line.startsWith("#")).map(line => Number(line.split(",")[2]));
+    assert.deepEqual(pts, at.map(sec => Math.round(sec*90000)), "장면 시각(90kHz)이 넣은 그대로");
+    assert.deepEqual(md5("-i", "out.mp4", "-vsync", "passthrough"), md5("-i", "v.h264"), "장면 그림은 원본과 같다");
+  } finally { fs.rmSync(dir, { recursive:true, force:true }); }
+});
 test("실제 H.264(B 프레임 포함)·AAC 를 담아 ffmpeg 로 풀면 원본과 장면·소리가 같다", { skip:!fs.existsSync(FFMPEG) && "ffmpeg.exe 가 없어 건너뜀", timeout:120000 }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "classdock-mp4-"));
   const run = (...args) => execFileSync(FFMPEG, ["-v", "error", "-y", ...args], { cwd:dir, maxBuffer:64*1024*1024 }).toString();

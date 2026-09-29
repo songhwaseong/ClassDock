@@ -1455,18 +1455,42 @@ function ensurePenBar(){
   bar.appendChild(Object.assign(document.createElement("span"), { className: "pen-sep" }));
   // 수업 리플레이 녹화 — PDF 위 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있다.
   // 파이썬 실행바의 ● 녹화와 같은 녹화기를 공유 — lesson-rec-changed 로 양쪽 버튼 상태를 맞춘다.
-  const syncPenRecBtn = (on) => {
+  // 🎤 = 녹화할 때 마이크 소리도 함께 담을지(화이트보드와 같은 설정을 쓴다). 녹화 중엔 바꿀 수 없다.
+  let recOn = false, recBusy = false, recMic = false;
+  const syncPenRecBtn = () => {
     const _T = (s) => (typeof window.t === "function" ? window.t(s) : s);
-    recBtn.classList.toggle("recording", on);
-    recBtn.textContent = _T(on ? "■ 정지" : "● 녹화");
-    recBtn.title = _T(on ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기" : "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요");
+    recBtn.classList.toggle("recording", recOn);
+    recBtn.disabled = recBusy;
+    recBtn.textContent = _T(recBusy ? "… 준비 중" : recOn ? "■ 정지" : "● 녹화");
+    recBtn.title = _T(recOn ? "녹화 정지 — 지금까지 기록을 리플레이로 만들기" : "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요");
+    const withMic = recOn ? recMic : (typeof lessonRecordMicWanted === "function" && lessonRecordMicWanted());
+    const micTitle = _T(recOn ? (withMic ? "마이크 소리를 함께 녹음하는 중" : "마이크 없이 필기만 녹화하는 중")
+      : (withMic ? "마이크 함께 녹음 켜짐 — 누르면 필기만 녹화" : "마이크 함께 녹음 꺼짐 — 누르면 녹화할 때 목소리도 담아요"));
+    if (typeof window.setUiIcon === "function") window.setUiIcon(micBtn, withMic ? "mic" : "micOff", micTitle);
+    else micBtn.textContent = withMic ? "마이크 켬" : "마이크 끔";
+    micBtn.title = micTitle; micBtn.setAttribute("aria-pressed", String(withMic));
+    micBtn.classList.toggle("on", withMic);
+    micBtn.disabled = recBusy || recOn;
   };
   const recBtn = mk("● 녹화", "수업 리플레이 녹화 — 필기(+파이썬 코드·실행)를 시간순으로 기록해 되감아 볼 수 있어요", "pen-act pen-rec", () => {
     if (typeof lessonPdfToggleRecord !== "function"){ toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
-    syncPenRecBtn(lessonPdfToggleRecord());
+    lessonPdfToggleRecord();   // 상태는 lesson-rec-changed 로 돌아온다(마이크 권한을 묻는 동안은 busy)
   });
-  document.addEventListener("lesson-rec-changed", (e) => syncPenRecBtn(!!(e.detail && e.detail.on)));   // 펜바는 싱글턴이라 해제 불필요
-  bar.appendChild(recBtn);
+  const micBtn = mk("", "", "pen-act pen-rec-mic", () => {
+    if (recOn || recBusy || typeof lessonSetRecordMicWanted !== "function") return;
+    const next = !lessonRecordMicWanted();
+    lessonSetRecordMicWanted(next);
+    toast(next ? "녹화할 때 마이크 소리도 함께 녹음해요." : "마이크 없이 필기만 녹화해요.", 1800);
+  });
+  // 펜바는 싱글턴이라 해제 불필요
+  document.addEventListener("lesson-rec-changed", (e) => {
+    const d = e.detail || {};
+    recOn = !!d.on; recBusy = !!d.busy; recMic = !!d.mic;
+    syncPenRecBtn();
+  });
+  document.addEventListener("lesson-mic-changed", () => syncPenRecBtn());
+  bar.append(recBtn, micBtn);
+  syncPenRecBtn();
   setTool("pen"); setColor("#e11d48"); setWidth(3);
   byId("content").appendChild(bar);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);

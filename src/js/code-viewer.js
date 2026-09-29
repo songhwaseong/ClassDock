@@ -2175,9 +2175,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   syncRecBtn(typeof lessonPdfRecording === "function" && lessonPdfRecording());
   recBtn.addEventListener("click", () => {
     if (typeof lessonPdfToggleRecord !== "function"){ toast("리플레이 기능을 불러오지 못했어요.", 2400); return; }
-    syncRecBtn(lessonPdfToggleRecord());
+    lessonPdfToggleRecord();   // 상태는 lesson-rec-changed 로 돌아온다(마이크 권한을 묻는 동안은 busy)
   });
-  const onRecChanged = (e) => syncRecBtn(!!(e.detail && e.detail.on));
+  const onRecChanged = (e) => { const d = e.detail || {}; recBtn.disabled = !!d.busy; syncRecBtn(!!d.on); };
   document.addEventListener("lesson-rec-changed", onRecChanged);
   if (ownerDoc){ if (!ownerDoc.cleanupFns) ownerDoc.cleanupFns = []; ownerDoc.cleanupFns.push(() => document.removeEventListener("lesson-rec-changed", onRecChanged)); }
   // 코드 따라치기(타자 연습) — 지금 코드를 흐린 교본으로 깔고 그 위에 똑같이 쳐 본다.

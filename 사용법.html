@@ -804,14 +804,25 @@ cd myOffice</code></pre>
       <li>녹화 중에는 마이크를 켜고 끌 수 없습니다(녹화를 멈춘 뒤 바꾸기)</li>
     </ul>
   </li>
-  <li>다 쓰면 <strong>■ 정지</strong> → 자동으로 <strong>리플레이 화면</strong>이 열림</li>
+  <li>다 쓰면 <strong>■ 정지</strong> → 자동으로 <strong>리플레이 화면</strong>이 열림
+    <ul>
+      <li>리플레이는 <code>칠판 리플레이 09-29 14.05.lesson</code>처럼 녹화 시각이 붙은 이름으로 열리고, 앱을 껐다 켜도 다른 문서처럼 <strong>자동 복원</strong>됩니다. 다른 컴퓨터로 옮기거나 오래 보관하려면 <strong>💾 저장</strong>으로 파일을 남기세요</li>
+    </ul>
+  </li>
   <li>재생 바에서 <strong>▶/⏸ 재생·정지</strong>(스페이스), <strong>탐색 슬라이더</strong>로 원하는 순간으로 이동, <strong>0.5~4× 속도</strong>, <strong>⟲ 처음부터</strong>
     <ul>
       <li>재생 중 마지막 획은 실제로 <strong>그려지는 것처럼</strong> 나타납니다</li>
       <li>소리가 담긴 리플레이는 판서와 목소리가 함께 재생되고, 재생 바의 <strong>🔊 / 🔇</strong>로 소리만 끌 수 있습니다. 빠르게 재생해도 목소리 높이는 그대로입니다</li>
     </ul>
   </li>
-  <li><strong>💾 저장</strong>으로 <code>.lesson</code> 파일 저장 → 결석한 학생에게 전달하거나 다음 수업에서 다시 재생</li>
+  <li><strong>💾 저장</strong>으로 <code>.lesson</code> 파일 저장 → 결석한 학생에게 전달하거나 다음 수업에서 다시 재생
+    <ul>
+      <li><strong>🎬 MP4</strong>를 누르면 리플레이를 <strong>MP4 영상</strong>으로 저장합니다. 녹음한 목소리도 함께 들어가 ClassDock이 없는 사람도 휴대폰·유튜브·학급 게시판에서 볼 수 있습니다</li>
+      <li>실제 시간만큼 기다리지 않고 빠르게 만듭니다. 판서가 없는 설명 구간은 거의 시간이 들지 않아, 걸리는 시간은 판서 양에 비례합니다. 만드는 동안 버튼에 진행률이 보이고, 한 번 더 누르면 멈춥니다</li>
+      <li>영상 크기는 화이트보드 비율 그대로 최대 1920×1080이고, PDF 필기는 첫 쪽 비율을 따릅니다. 파이썬 코드·결과 패널은 영상에 들어가지 않습니다</li>
+      <li>크롬·엣지(및 EXE)에서 됩니다. 이 컴퓨터에서 소리를 넣지 못하면 알림과 함께 소리 없이 저장합니다</li>
+    </ul>
+  </li>
   <li>저장한 <code>.lesson</code>은 <strong>더블클릭·드래그</strong>하거나 사이드바 <strong>새로 만들기 → 리플레이 열기(.lesson)</strong>로 다시 엽니다</li>
 </ol>
 
@@ -824,7 +835,11 @@ cd myOffice</code></pre>
 <p><strong>PDF 교재 위 필기 녹화</strong>도 같은 방식입니다.</p>
 
 <ol>
-  <li>PDF를 열고 <strong>✏️ 필기</strong>로 필기바를 켠 뒤, 필기바 오른쪽 <strong>● 녹화</strong>를 누릅니다</li>
+  <li>PDF를 열고 <strong>✏️ 필기</strong>로 필기바를 켠 뒤, 필기바 오른쪽 <strong>● 녹화</strong>를 누릅니다
+    <ul>
+      <li>목소리도 담으려면 녹화 전에 옆의 <strong>🎤 마이크</strong> 버튼을 켭니다. 화이트보드의 🎤와 <strong>같은 설정</strong>이라 한쪽에서 켜면 다른 쪽도 켜지고, 파이썬 실행 바의 ● 녹화도 이 설정을 따릅니다</li>
+    </ul>
+  </li>
   <li>교재에 펜·형광펜으로 설명하며 판서(페이지를 넘겨 가며 여러 쪽도 가능)</li>
   <li><strong>■ 정지</strong>를 누르면 <strong>교재 페이지 위에서 필기가 되살아나는</strong> 리플레이가 열립니다 — 페이지 전환·지우기까지 순서대로 재생</li>
   <li>화이트보드 리플레이와 똑같이 <strong>💾 저장</strong>으로 <code>.lesson</code>을 남깁니다</li>
@@ -2299,7 +2314,7 @@ npm.cmd run test:e2e       # 화면 흐름 테스트(Playwright, npm install 필
 <tr><td><strong>PDF 텍스트 요소</strong></td><td>저장 시 이미지로 들어가 선택·검색 불가 (서명·기입용)</td></tr>
 <tr><td><strong>Pyodide 패키지</strong></td><td><code>selenium</code>·<code>konlpy</code>·<code>subprocess</code> 등 일부 불가</td></tr>
 <tr><td><strong>PPTX 정확 변환</strong></td><td>기본은 설치 여부와 관계없이 즉시 간이 미리보기. 문서 위 버튼 또는 설정의 자동 정확 변환을 사용하려면 EXE + 설치된 PowerPoint 필요</td></tr>
-<tr><td><strong>수업 리플레이</strong></td><td>시간 제한 없음(용량은 판서·코드·실행 결과량에 비례). <strong>화이트보드·PDF 필기·Python 코드/실행 결과</strong> 녹화 지원. PDF 필기는 페이지 배경 이미지를 담아 파일이 더 큼. <strong>마이크 녹음은 화이트보드 녹화에서만</strong>(1분 약 0.3MB)</td></tr>
+<tr><td><strong>수업 리플레이</strong></td><td>시간 제한 없음(용량은 판서·코드·실행 결과량에 비례). <strong>화이트보드·PDF 필기·Python 코드/실행 결과</strong> 녹화 지원. PDF 필기는 페이지 배경 이미지를 담아 파일이 더 큼. <strong>마이크 녹음</strong>은 화이트보드·PDF 필기·파이썬 녹화 모두(1분 약 0.3MB, 🎤 설정 하나를 같이 씀). <strong>MP4 내보내기</strong>는 크롬·엣지에서, 파이썬 패널은 영상에 안 들어감</td></tr>
 <tr><td><strong>대기 화면(화면보호기)</strong></td><td>기본 꺼짐(설정에서 켤 때만). 영상은 브라우저 저장소에 보관(용량 큰 영상은 저장 실패할 수 있음 → 짧은 영상 권장). <strong>유휴 자동 표시는 브라우저 창 안 오버레이</strong>(브라우저 보안상 전체화면 자동 전환 불가) — 모니터 전체는 설정의 <strong>▶ 지금 시작</strong> 버튼 또는 F11·⛶ 전체화면 상태에서 가능</td></tr>
 <tr><td><strong>대기 화면 웹 주소(URL)</strong></td><td>인터넷 연결 필요. <strong>삽입을 막아 둔 사이트가 많아</strong> 주소마다 되는지 다름(저장 전 <code>미리보기 · 테스트</code> 필수). <strong>로그인 상태가 그대로 보이므로 공개 페이지만</strong> 사용. 페이지 조작은 불가(보기 전용). 안 열리면 영상 → 시계 애니메이션으로 자동 대체</td></tr>
 <tr><td><strong>메모의 노트북 셀</strong></td><td>최대 200개. 실행 결과·실행 번호·세션 필기는 제외하고 코드·마크다운 첨부·일반 메타데이터만 보관</td></tr>

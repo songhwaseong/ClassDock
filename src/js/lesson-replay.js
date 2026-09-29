@@ -71,7 +71,8 @@ function validateLessonPayload(lesson){
     lastTime = frame.t;
     if (lesson.kind === "board"){
       if (Array.isArray(frame.s)){
-        if (frame.s.length > LESSON_MAX_ITEMS_PER_SNAPSHOT || !frame.s.every(lessonValidItem)) return lessonValidationError("화이트보드 장면 데이터가 올바르지 않아요.");
+        // every 에 함수를 그대로 넘기면 배열 번호가 depth 로 들어가, 9번째 뒤의 그룹(그래프·차트)이 '너무 깊다'로 걸린다.
+        if (frame.s.length > LESSON_MAX_ITEMS_PER_SNAPSHOT || !frame.s.every((item) => lessonValidItem(item))) return lessonValidationError("화이트보드 장면 데이터가 올바르지 않아요.");
       } else if (!lessonValidItem(frame.a)) return lessonValidationError("화이트보드 장면 데이터가 올바르지 않아요.");
     } else if (lesson.kind === "pdf-ink"){
       if (!Number.isInteger(frame.p) || frame.p < 0 || frame.p >= LESSON_MAX_PAGES || (!frame.c && !lessonValidStroke(frame.a)))
@@ -204,7 +205,7 @@ async function startLessonAudio(){
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function" || typeof MediaRecorder === "undefined")
     return { ok:false, message:"여기서는 마이크 녹음을 할 수 없어요." };
   let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true } }); }
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, channelCount:1 } }); }
   catch(e){
     const name = e && e.name;
     return { ok:false, message: name === "NotAllowedError" || name === "SecurityError" ? "마이크 권한이 없어요." :
@@ -248,16 +249,19 @@ async function startLessonAudio(){
 
 // 재생기에서 쓸 <audio>. data URL 을 그대로 src 로 두면 긴 녹음에서 되감기가 느려 Blob URL 로 바꾼다.
 // MediaRecorder 로 만든 webm 은 길이가 Infinity 로 와서 되감기가 안 먹는 일이 있어, 처음에 끝으로 한 번 건너뛰어 길이를 알아 둔다.
+// lesson.audio 의 data URL → 바이트.
+function lessonAudioBytes(audio){
+  const comma = audio.src.indexOf(",");
+  const bin = atob(audio.src.slice(comma + 1));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
 function lessonAudioPlayer(audio, onReady){
   const el = new Audio(); el.preload = "auto";
   let url = "";
-  try {
-    const comma = audio.src.indexOf(",");
-    const bin = atob(audio.src.slice(comma + 1));
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    url = URL.createObjectURL(new Blob([bytes], { type:audio.mime || "audio/webm" }));
-  } catch(_){ url = ""; }
+  try { url = URL.createObjectURL(new Blob([lessonAudioBytes(audio)], { type:audio.mime || "audio/webm" })); }
+  catch(_){ url = ""; }
   let ready = false;
   const markReady = () => { if (ready) return; ready = true; if (typeof onReady === "function") onReady(); };
   el.addEventListener("loadedmetadata", () => {
@@ -273,6 +277,161 @@ function lessonAudioPlayer(audio, onReady){
     get ready(){ return ready; },
     dispose(){ try { el.pause(); el.removeAttribute("src"); el.load(); } catch(_){} if (url) URL.revokeObjectURL(url); }
   };
+}
+
+// ----- MP4 로 내보내기 -----
+// 재생 화면을 그리는 함수(draw)로 장면을 한 장씩 그려 H.264 로 굽고, 녹음이 있으면 AAC 로 바꿔 mp4-writer.js 로 묶는다.
+// 판서는 대부분 가만히 있으므로 초당 30번 '화면이 바뀌었나(frameKey)'만 보고 바뀐 때만 장면을 굽는다(길이가 제각각인 장면).
+// 그래서 설명만 하는 구간은 거의 공짜이고, 만드는 데 걸리는 시간은 판서량에 비례한다.
+const LESSON_VIDEO_FPS = 30;
+const LESSON_VIDEO_MAX_GAP = 2000;      // 화면이 그대로여도 이 간격(ms)마다 장면을 하나 둔다 — 플레이어 탐색이 부드럽게
+const LESSON_VIDEO_KEY_GAP = 10000;     // 열쇠 장면 간격(ms) — 되감기 때 여기부터 다시 푼다
+const LESSON_VIDEO_CODECS = ["avc1.42E028", "avc1.4D0028", "avc1.640028", "avc1.42E01F"];
+
+// 가로·세로 비율(aw:ah)을 maxW×maxH 안에 넣은 짝수 크기(H.264 는 짝수여야 한다).
+function lessonVideoSize(aw, ah, maxW=1920, maxH=1080){
+  const w0 = lessonFinite(aw) && aw > 0 ? aw : 16, h0 = lessonFinite(ah) && ah > 0 ? ah : 9;
+  const scale = Math.min(maxW / w0, maxH / h0);
+  const even = (v) => Math.max(2, Math.floor(v * scale / 2) * 2);
+  return { width:even(w0), height:even(h0) };
+}
+
+// 초당 fps 번 화면 열쇠를 보고, 바뀌었거나 오래 그대로였던 순간만 고른다. { t, key } 목록(ms)과 영상 끝 시각을 돌려준다.
+function lessonVideoSchedule(duration, frameKey, fps=LESSON_VIDEO_FPS){
+  const step = 1000 / fps, total = Math.max(0, Math.ceil(duration / step));
+  const frames = [];
+  let lastKey, lastT = -Infinity, lastKeyT = -Infinity;
+  for (let i = 0; i <= total; i++){
+    const t = Math.min(duration, i * step), key = frameKey(t);
+    if (frames.length && key === lastKey && t - lastT < LESSON_VIDEO_MAX_GAP) continue;
+    const isKey = !frames.length || t - lastKeyT >= LESSON_VIDEO_KEY_GAP;
+    frames.push({ t, key:isKey });
+    lastKey = key; lastT = t; if (isKey) lastKeyT = t;
+  }
+  return { frames, end:Math.max(duration, (frames.length ? frames[frames.length - 1].t : 0) + step) };
+}
+
+// 녹음(webm/opus) → AAC 조각. 음성이라 24kHz 로 풀어 메모리를 아끼고(한 시간 ≈ 350MB), 부호기가 받는 48kHz 로 늘려 넣는다.
+async function lessonEncodeAudioAac(audio, isCancelled){
+  if (!audio || !audio.src || typeof AudioEncoder === "undefined" || typeof AudioData === "undefined" || typeof OfflineAudioContext === "undefined") return null;
+  const rate = 48000;
+  let config = null;
+  for (const candidate of [{ codec:"mp4a.40.2", sampleRate:rate, numberOfChannels:1, bitrate:64000 }, { codec:"mp4a.40.2", sampleRate:rate, numberOfChannels:2, bitrate:96000 }]){
+    try { if ((await AudioEncoder.isConfigSupported(candidate)).supported){ config = candidate; break; } } catch(_){}
+  }
+  if (!config) return null;
+  const decoded = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(lessonAudioBytes(audio).buffer);
+  const src = decoded.getChannelData(0), ratio = rate / decoded.sampleRate, length = Math.floor(src.length * ratio);
+  const channels = config.numberOfChannels, samples = [];
+  let asc = null, failure = null;
+  const encoder = new AudioEncoder({
+    output:(chunk, meta) => {
+      const description = meta && meta.decoderConfig && meta.decoderConfig.description;
+      if (description && !asc) asc = ArrayBuffer.isView(description) ? new Uint8Array(description.buffer, description.byteOffset, description.byteLength).slice() : new Uint8Array(description).slice();
+      const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data); samples.push({ data });
+    },
+    error:(error) => { failure = error; }
+  });
+  try {
+    encoder.configure(config);
+    const block = 4800;
+    for (let at = 0, n = 0; at < length && !failure; at += block, n++){
+      if (isCancelled && isCancelled()) return null;
+      const frames = Math.min(block, length - at), planes = new Float32Array(frames * channels);
+      for (let j = 0; j < frames; j++){
+        const pos = (at + j) / ratio, i = Math.floor(pos), frac = pos - i;
+        const v = src[i] + (src[Math.min(src.length - 1, i + 1)] - src[i]) * frac;   // 곧은 보간
+        for (let c = 0; c < channels; c++) planes[c * frames + j] = v;
+      }
+      const data = new AudioData({ format:"f32-planar", sampleRate:rate, numberOfFrames:frames, numberOfChannels:channels, timestamp:Math.round(at * 1e6 / rate), data:planes });
+      encoder.encode(data); data.close();
+      while (encoder.encodeQueueSize > 8 && !failure) await new Promise((resolve) => setTimeout(resolve, 2));
+      if (n % 50 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await encoder.flush();
+  } finally { if (encoder.state !== "closed") try { encoder.close(); } catch(_){} }
+  if (failure) throw failure;
+  return asc && samples.length ? { samples, asc, sampleRate:rate, channels } : null;
+}
+
+// opts = { duration, width, height, draw(ctx,W,H,dpr,t), frameKey(t), images:[Image], audio, onProgress(0~1, 단계), isCancelled() }
+// 돌려주는 값: { bytes, seconds, width, height, withAudio, audioFailed } · 취소면 null.
+async function exportLessonVideo(opts){
+  if (typeof MNMp4Writer === "undefined" || typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined")
+    throw Object.assign(new Error("no-encoder"), { userMessage:"이 브라우저는 영상 만들기를 지원하지 않아요. 크롬이나 엣지에서 해 주세요." });
+  const { width, height } = opts;
+  const cancelled = () => !!(opts.isCancelled && opts.isCancelled());
+  const progress = (value, stage) => { if (typeof opts.onProgress === "function") opts.onProgress(value, stage); };
+  let config = null;
+  for (const codec of LESSON_VIDEO_CODECS){
+    // 판서는 가만한 장면이 많아 비트 예산을 넉넉히 잡아도 파일은 작다 — 글씨가 뭉개지지 않는 쪽으로.
+    const candidate = { codec, width, height, framerate:LESSON_VIDEO_FPS, bitrate:Math.round(Math.min(8e6, Math.max(2e6, width * height * 3))), latencyMode:"quality", avc:{ format:"avc" } };
+    try { if ((await VideoEncoder.isConfigSupported(candidate)).supported){ config = candidate; break; } } catch(_){}
+  }
+  if (!config) throw Object.assign(new Error("no-h264"), { userMessage:"이 컴퓨터에서 MP4(H.264) 영상을 만들 수 없어요." });
+
+  // 판서 속 그림·배경·PDF 쪽 그림이 다 불러와진 뒤에 굽는다(안 그러면 첫 장면들에 그림이 빠진다).
+  await Promise.all((opts.images || []).filter(Boolean).map((img) => (img.complete ? null : new Promise((resolve) => {
+    img.addEventListener("load", resolve, { once:true }); img.addEventListener("error", resolve, { once:true }); setTimeout(resolve, 10000);
+  }))));
+
+  const { frames, end } = lessonVideoSchedule(opts.duration, opts.frameKey);
+  const canvas = document.createElement("canvas"); canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  const samples = []; let avcC = null, failure = null;
+  const encoder = new VideoEncoder({
+    output:(chunk, meta) => {
+      const description = meta && meta.decoderConfig && meta.decoderConfig.description;
+      if (description && !avcC) avcC = ArrayBuffer.isView(description) ? new Uint8Array(description.buffer, description.byteOffset, description.byteLength).slice() : new Uint8Array(description).slice();
+      const data = new Uint8Array(chunk.byteLength); chunk.copyTo(data);
+      samples.push({ data, key:chunk.type === "key", timestamp:chunk.timestamp });
+    },
+    error:(error) => { failure = error; }
+  });
+  try {
+    encoder.configure(config);
+    let lastYield = performance.now();
+    for (let i = 0; i < frames.length && !failure; i++){
+      if (cancelled()) return null;
+      const frame = frames[i];
+      // 재생 화면과 같은 차례로 — 투명하게 비우고 그린 뒤, 남은 빈 곳(판 둘레 여백)만 검게 밑에 깐다.
+      // 먼저 검게 칠하면 판 배경이 '빈 곳에만 밑에 까는'(destination-over) 방식이라 깔릴 자리가 없어 판 전체가 검게 나온다.
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, width, height);
+      opts.draw(ctx, width, height, 1, frame.t);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "source-over";
+      const next = i + 1 < frames.length ? frames[i + 1].t : end;
+      const video = new VideoFrame(canvas, { timestamp:Math.round(frame.t * 1000), duration:Math.max(1, Math.round((next - frame.t) * 1000)) });
+      encoder.encode(video, { keyFrame:frame.key }); video.close();
+      while (encoder.encodeQueueSize > 6 && !failure) await new Promise((resolve) => setTimeout(resolve, 4));
+      if (performance.now() - lastYield > 60){ progress(frame.t / Math.max(1, end), "video"); await new Promise((resolve) => setTimeout(resolve, 0)); lastYield = performance.now(); }
+    }
+    if (failure) throw failure;
+    await encoder.flush();
+    if (failure) throw failure;
+  } finally { if (encoder.state !== "closed") try { encoder.close(); } catch(_){} }
+  if (cancelled()) return null;
+
+  // 조각의 길이 = 다음 장면까지. 마지막 장면은 영상 끝까지 늘인다(mp4-writer 가 duration 을 보고 길이가 제각각인 영상으로 적는다).
+  // 길이가 제각각인 영상은 B 프레임(표시 순서가 뒤바뀐 장면)을 담을 수 없다. Baseline 부터 고르므로 보통 없지만, 섞여 나오면 깨진 파일 대신 알린다.
+  if (samples.some((sample, i) => i && sample.timestamp <= samples[i - 1].timestamp))
+    throw Object.assign(new Error("reordered-frames"), { userMessage:"이 컴퓨터의 영상 부호기와 맞지 않아 MP4 를 만들 수 없어요." });
+  samples.forEach((sample, i) => { sample.duration = Math.max(1, (i + 1 < samples.length ? samples[i + 1].timestamp : Math.round(end * 1000)) - sample.timestamp); });
+
+  let audio = null, audioFailed = false;
+  if (opts.audio && opts.audio.src){
+    progress(1, "audio");
+    try { audio = await lessonEncodeAudioAac(opts.audio, cancelled); } catch(error){ console.warn("녹음을 영상에 넣지 못했어요:", error); }
+    if (cancelled()) return null;
+    audioFailed = !audio;
+  }
+  progress(1, "mux");
+  const bytes = MNMp4Writer.mux({ width, height, fps:LESSON_VIDEO_FPS, samples, avcC, audio });
+  return { bytes, seconds:end / 1000, width, height, withAudio:!!audio, audioFailed };
 }
 
 // keyframes → 재생 상태(메모리 O(N)). 프레임을 미리 전부 펼치지 않고(옛 방식은 O(N²)),
@@ -323,6 +482,7 @@ function preloadLessonImages(kfs, onReady){
   };
   for (const kf of kfs){ if (kf.s) kf.s.forEach(attach); if (kf.a) attach(kf.a); }
   if (typeof onReady === "function") cache.forEach((img) => { img.onload = onReady; });
+  return [...cache.values()];
 }
 
 // t 이하인 마지막 keyframe 인덱스(이진 탐색). times = 오름차순 시각 배열.
@@ -367,8 +527,9 @@ function lessonPdfCaptureBackdrop(pdfDoc, pageIndex){
   let src = null; try { if (p.canvas) src = p.canvas.toDataURL("image/png"); } catch(_){}
   return { src, w: p.cssW || 1000, h: p.cssH || 1400 };
 }
-function LessonPdfInkRecorder(){
-  const t0 = performance.now();
+// opts = { t0, audio } — LessonRecorder 와 같다(마이크 녹음이 시작된 순간을 0초로, 정지 때 소리를 붙인다).
+function LessonPdfInkRecorder(opts){
+  const t0 = (opts && lessonFinite(opts.t0)) ? opts.t0 : performance.now();
   const keyframes = []; const pages = {};
   const py = [];                                  // 파이썬 트랙: {t,f,code} 코드 스냅샷 | {t,run:1} 실행 시작 | {t,out:{o,e,x,img}} 출력
   let lastCode = null, lastLiveAt = -1;
@@ -391,6 +552,7 @@ function LessonPdfInkRecorder(){
   sampleCode();                                   // 시작 시점 코드(초기 상태)
   return {
     active: true,
+    audio: (opts && opts.audio) || null,
     onStroke(pdfDoc, pageIndex, stroke){
       if (!this.active || !stroke) return;
       if (!pages[pageIndex]){ const b = lessonPdfCaptureBackdrop(pdfDoc, pageIndex); if (b) pages[pageIndex] = b; }
@@ -439,26 +601,59 @@ function lessonPyHasContent(py){
   if (!Array.isArray(py) || !py.length) return false;
   return py.some((ev, i) => ev.run || ev.out || (i > 0 && ev.code != null));
 }
-// PDF 필기바·파이썬 실행바의 ● 녹화 버튼이 호출. 시작이면 true, 정지면 false 를 돌려준다.
-// 어느 쪽 버튼으로 시작/정지하든 상태가 맞도록 document 에 "lesson-rec-changed" 이벤트를 쏜다.
-function lessonRecNotify(on){
-  try { document.dispatchEvent(new CustomEvent("lesson-rec-changed", { detail: { on: !!on } })); } catch(_){}
+// ----- '녹화할 때 마이크도 함께' 설정 — 화이트보드·PDF 필기·파이썬 녹화가 하나를 같이 쓴다 -----
+// 처음엔 꺼 둔다(묻지 않고 마이크를 켜지 않게). 바뀌면 "lesson-mic-changed" 로 모든 🎤 단추를 맞춘다.
+const LESSON_MIC_KEY = "wbRecordMic";
+function lessonRecordMicWanted(){ try { return localStorage.getItem(LESSON_MIC_KEY) === "true"; } catch(_){ return false; } }
+function lessonSetRecordMicWanted(on){
+  try { localStorage.setItem(LESSON_MIC_KEY, String(!!on)); } catch(_){}
+  try { document.dispatchEvent(new CustomEvent("lesson-mic-changed", { detail:{ on:!!on } })); } catch(_){}
 }
-function lessonPdfToggleRecord(){
+
+// PDF 필기바·파이썬 실행바의 ● 녹화 버튼이 호출. 끝나면 녹화 중인지(true/false)로 풀린다.
+// 마이크 권한을 묻는 동안·소리를 정리하는 동안은 busy 로 알린다. 어느 쪽 버튼으로 시작/정지하든
+// 상태가 맞도록 document 에 "lesson-rec-changed"({on, busy, mic}) 이벤트를 쏜다.
+let _lessonPdfBusy = false;
+function lessonRecNotify(on){
+  const mic = !!(on && _lessonPdfRec && _lessonPdfRec.audio);
+  try { document.dispatchEvent(new CustomEvent("lesson-rec-changed", { detail: { on: !!on, busy:_lessonPdfBusy, mic } })); } catch(_){}
+}
+async function lessonPdfToggleRecord(){
+  if (_lessonPdfBusy) return lessonPdfRecording();
   if (lessonPdfRecording()){
-    const lesson = _lessonPdfRec.stop(); _lessonPdfRec = null;
+    const rec = _lessonPdfRec, lesson = rec.stop(); _lessonPdfRec = null;
+    let audio = null;
+    if (rec.audio){
+      _lessonPdfBusy = true; lessonRecNotify(false);
+      try { audio = await rec.audio.stop(); } catch(_){ audio = null; } finally { _lessonPdfBusy = false; }
+    }
+    if (audio){
+      lesson.audio = audio;
+      lesson.duration = Math.max(lesson.duration || 0, audio.duration || 0);   // 필기를 멈춘 뒤 말한 부분까지 재생되게
+    }
     const hasInk = lesson.keyframes.length && Object.keys(lesson.pages).length;
     const hasPy = lessonPyHasContent(lesson.python);
     if (!hasPy) delete lesson.python;
-    if ((hasInk || hasPy) && typeof finishLessonRecording === "function"){
-      finishLessonRecording(lesson, hasInk && hasPy ? "수업" : hasInk ? "PDF 필기" : "파이썬");
+    if ((hasInk || hasPy || audio) && typeof finishLessonRecording === "function"){
+      finishLessonRecording(lesson, hasInk && hasPy ? "수업" : hasInk ? "PDF 필기" : hasPy ? "파이썬" : "수업");
     }
     else if (typeof toast === "function") toast("녹화된 내용이 없어요.", 2000);
     lessonRecNotify(false);
     return false;
   }
-  _lessonPdfRec = LessonPdfInkRecorder();
-  if (typeof toast === "function") toast("수업 녹화를 시작했어요. PDF 필기와 파이썬 코드·실행이 기록됩니다. ■ 정지로 끝내세요.", 3400);
+  let audioRec = null;
+  const wantMic = lessonRecordMicWanted();
+  if (wantMic && typeof startLessonAudio === "function"){
+    _lessonPdfBusy = true; lessonRecNotify(false);
+    let started = null;
+    try { started = await startLessonAudio(); } finally { _lessonPdfBusy = false; }
+    if (started && started.ok) audioRec = started;
+    else if (typeof toast === "function") toast(((started && started.message) || "마이크를 쓸 수 없어요.") + " 필기만 녹화할게요.", 3400);
+  }
+  _lessonPdfRec = LessonPdfInkRecorder(audioRec ? { t0:audioRec.startedAt, audio:audioRec } : undefined);
+  if (typeof toast === "function" && (audioRec || !wantMic)) toast(audioRec
+    ? "수업 녹화를 시작했어요. PDF 필기·파이썬 코드와 마이크 소리가 함께 기록됩니다. ■ 정지로 끝내세요."
+    : "수업 녹화를 시작했어요. PDF 필기와 파이썬 코드·실행이 기록됩니다. ■ 정지로 끝내세요.", 3400);
   lessonRecNotify(true);
   return true;
 }
@@ -466,6 +661,7 @@ function lessonPdfToggleRecord(){
 // 재생기 공용 타임라인/컨트롤(보드·PDF잉크·파이썬이 공유). opts.draw(ctx,CW,CH,dpr,playT) 가 한 프레임을 그린다.
 // opts.side = 캔버스 옆에 붙일 DOM 패널(파이썬 트랙), opts.hideStage = 캔버스 없이 패널만(파이썬 전용 리플레이),
 // opts.onTime(playT) = 프레임마다 DOM 패널을 갱신할 콜백. 반환 { redraw } 로 이미지 로드 완료 등에서 다시 그릴 수 있다.
+// opts.video = { width, height, frameKey(t), images() } — 있으면 MP4 내보내기 단추를 단다(frameKey 가 같으면 화면도 같다).
 // opts.audio = 함께 녹음한 소리(lesson.audio). 소리가 나오는 동안에는 소리의 재생 위치가 시계가 된다 —
 // 따로 흐르는 두 시계를 맞추려 들면 소리가 튀므로, 판서가 소리를 따라가게 한다.
 function mountReplayPlayer(doc, host, opts){
@@ -500,23 +696,78 @@ function mountReplayPlayer(doc, host, opts){
   const timeLabel = document.createElement("span"); timeLabel.className = "lr-time"; timeLabel.textContent = "0:00 / " + lessonFmtTime(duration);
   const speedSel = document.createElement("select"); speedSel.className = "lr-speed"; speedSel.title = "재생 속도";
   [["0.5", "0.5×"], ["1", "1×"], ["1.5", "1.5×"], ["2", "2×"], ["4", "4×"]].forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; if (v === "1") o.selected = true; speedSel.appendChild(o); });
-  const saveBtn = mk("💾 저장", ".lesson 파일로 저장", "lr-btn lr-save");
+  const saveBtn = mk("저장", ".lesson 파일로 저장", "lr-btn lr-save");
+  // 앱 UI 는 색 이모지를 지운다(icons.js) — 그림은 같은 단색 SVG 아이콘으로 단다.
+  const setIcon = (button, icon, label) => {
+    if (typeof setUiIconLabel === "function" && label) setUiIconLabel(button, icon, label);
+    else if (typeof setUiIcon === "function") setUiIcon(button, icon, button.title);
+  };
+  setIcon(saveBtn, "save", "저장");
   bar.append(playBtn, restartBtn, seek, timeLabel, speedSel);
   let sound = null, soundBtn = null;
   const soundEnd = () => (opts.audio && lessonFinite(opts.audio.duration) && opts.audio.duration > 0) ? opts.audio.duration
     : (sound && Number.isFinite(sound.el.duration) ? sound.el.duration * 1000 : Infinity);
   if (opts.audio && opts.audio.src){
     sound = lessonAudioPlayer(opts.audio, () => { if (playing) syncSound(); });
-    soundBtn = mk("🔊", "소리 끄기", "lr-btn lr-sound");
-    soundBtn.setAttribute("aria-pressed", "false");
-    soundBtn.addEventListener("click", () => {
-      sound.el.muted = !sound.el.muted;
-      soundBtn.textContent = sound.el.muted ? "🔇" : "🔊";
-      soundBtn.title = sound.el.muted ? "소리 켜기" : "소리 끄기";
+    soundBtn = mk("", "소리 끄기", "lr-btn lr-sound");
+    const paintSound = () => {
+      const muted = sound.el.muted;
+      soundBtn.title = muted ? "소리 켜기" : "소리 끄기";
+      setIcon(soundBtn, muted ? "mute" : "volume");
       soundBtn.setAttribute("aria-label", soundBtn.title);
-      soundBtn.setAttribute("aria-pressed", String(sound.el.muted));
-    });
+      soundBtn.setAttribute("aria-pressed", String(muted));
+    };
+    soundBtn.addEventListener("click", () => { sound.el.muted = !sound.el.muted; paintSound(); });
+    paintSound();
     bar.appendChild(soundBtn);
+  }
+  // MP4 내보내기 — 만드는 동안 단추가 진행률이 되고, 다시 누르면 취소한다.
+  let videoBtn = null, exporting = null;
+  const paintVideoBtn = (text) => {
+    if (text){ videoBtn.textContent = text; videoBtn.title = "누르면 영상 만들기를 멈춰요"; videoBtn.setAttribute("aria-label", videoBtn.title); return; }
+    videoBtn.title = "MP4 영상으로 저장 — 판서" + (opts.audio ? "와 녹음한 목소리" : "") + "를 영상 파일로 만들어요";
+    setIcon(videoBtn, "video", "MP4");
+    videoBtn.setAttribute("aria-label", videoBtn.title);
+  };
+  const runVideoExport = async () => {
+    if (exporting){ exporting.cancelled = true; paintVideoBtn("멈추는 중…"); return; }
+    if (typeof exportLessonVideo !== "function") return;
+    pause();
+    const job = exporting = { cancelled:false };
+    videoBtn.classList.add("busy");
+    paintVideoBtn("영상 0%");
+    try {
+      const result = await exportLessonVideo({
+        duration, width:opts.video.width, height:opts.video.height,
+        draw:opts.draw, frameKey:opts.video.frameKey,
+        images:typeof opts.video.images === "function" ? opts.video.images() : [],
+        audio:opts.audio,
+        isCancelled:() => job.cancelled,
+        onProgress:(value, stage) => {
+          if (job.cancelled) return;
+          paintVideoBtn(stage === "audio" ? "소리 넣는 중…" : stage === "mux" ? "파일 묶는 중…" : "영상 " + Math.min(99, Math.round(value * 100)) + "%");
+        }
+      });
+      if (!result){ if (typeof toast === "function") toast("영상 만들기를 멈췄어요.", 1800); return; }
+      const fileName = String(doc.name || "수업").replace(/\.lesson$/i, "") + ".mp4";
+      MNDownload.saveBlob(new Blob([result.bytes], { type:"video/mp4" }), fileName);
+      const mb = Math.max(0.1, Math.round(result.bytes.length / 1048576 * 10) / 10);
+      if (typeof toast === "function") toast("MP4 영상을 저장했어요 (" + lessonFmtTime(result.seconds * 1000) + ", " + result.width + "×" + result.height + ", " + mb + "MB" +
+        (result.withAudio ? ", 목소리 포함" : "") + ")." + (result.audioFailed ? " 이 컴퓨터에서는 소리를 넣지 못해 소리 없이 저장했어요." : ""), 4200);
+    } catch(error){
+      console.error(error);
+      if (typeof toast === "function") toast((error && error.userMessage) || "MP4 영상을 만들지 못했어요.", 3400, { type:"error" });
+    } finally {
+      if (exporting === job) exporting = null;
+      videoBtn.classList.remove("busy");
+      paintVideoBtn();
+    }
+  };
+  if (opts.video){
+    videoBtn = mk("", "", "lr-btn lr-video", "");
+    videoBtn.addEventListener("click", runVideoExport);
+    paintVideoBtn();
+    bar.appendChild(videoBtn);
   }
   bar.appendChild(saveBtn);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(bar);
@@ -583,7 +834,7 @@ function mountReplayPlayer(doc, host, opts){
   setPlayIcon(); syncUI();
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { playing = false; if (raf) cancelAnimationFrame(raf); if (sound) sound.dispose(); if (ro) ro.disconnect(); offScreenRatio(); document.removeEventListener("keydown", onKey); });
+  doc.cleanupFns.push(() => { playing = false; if (exporting) exporting.cancelled = true; if (raf) cancelAnimationFrame(raf); if (sound) sound.dispose(); if (ro) ro.disconnect(); offScreenRatio(); document.removeEventListener("keydown", onKey); });
 
   return { redraw: draw };
 }
@@ -596,20 +847,23 @@ function renderReplay(doc, host, lesson){
   const boardImage = (lesson.bgImage && typeof lesson.bgImage === "object" && /^data:image\//i.test(String(lesson.bgImage.src || "")))
     ? { ...lesson.bgImage } : null;
   const duration = lesson.duration || pb.times[pb.n - 1] || 0;
-  const draw = (ctx, CW, CH, dpr, playT) => {
-    const idx = lessonIndexAt(pb.times, playT);
-    const baseItems = lessonItemsAt(pb, idx);         // idx 시점까지 커밋된 판서
-    // 다음 keyframe 이 "획 추가"면, 그 획을 진행도만큼 성장시켜 별도로 덧그린다(공용 렌더러 재사용).
-    let grow = null, growLimit = 0;
+  // 다음 keyframe 이 "획 추가"면, 그 획을 진행도만큼 성장시켜 별도로 덧그린다(공용 렌더러 재사용).
+  const growAt = (idx, playT) => {
     const ni = idx + 1;
     if (ni < pb.n && pb.append[ni]){
       const cand = pb.kfs[ni].a;
       if (cand && cand.points && cand.points.length){
         const span = Math.max(1, pb.times[ni] - pb.times[idx]);
         const prog = Math.min(1, Math.max(0, (playT - pb.times[idx]) / span));
-        grow = cand; growLimit = Math.max(1, Math.round(cand.points.length * prog));
+        return { grow:cand, growLimit:Math.max(1, Math.round(cand.points.length * prog)) };
       }
     }
+    return { grow:null, growLimit:0 };
+  };
+  const draw = (ctx, CW, CH, dpr, playT) => {
+    const idx = lessonIndexAt(pb.times, playT);
+    const baseItems = lessonItemsAt(pb, idx);         // idx 시점까지 커밋된 판서
+    const { grow, growLimit } = growAt(idx, playT);
     const scale = Math.min(CW / lesson.W, CH / lesson.H) || 1;
     const dw = lesson.W * scale, dh = lesson.H * scale, ox = (CW - dw) / 2, oy = (CH - dh) / 2;
     ctx.save();
@@ -622,12 +876,18 @@ function renderReplay(doc, host, lesson){
     MNBoardRenderer.paintBackground(ctx, { x:0, y:0, w:lesson.W, h:lesson.H }, { bg:boardBg, pattern:lesson.bgPattern, image:boardImage });
     ctx.restore();
   };
-  const player = mountReplayPlayer(doc, host, { duration, draw, audio:lesson.audio, onSave: () => saveLessonFile(lesson, doc.name) });
-  preloadLessonImages(pb.kfs, player.redraw);
+  let images = [];
+  const video = Object.assign(lessonVideoSize(lesson.W, lesson.H), {
+    frameKey:(t) => { const idx = lessonIndexAt(pb.times, t); return idx + ":" + growAt(idx, t).growLimit; },
+    images:() => images
+  });
+  const player = mountReplayPlayer(doc, host, { duration, draw, video, audio:lesson.audio, onSave: () => saveLessonFile(lesson, doc.name) });
+  images = preloadLessonImages(pb.kfs, player.redraw);
   if (boardImage){
     const img = new Image();
     img.onload = () => { boardImage.img = img; player.redraw(); };
     img.src = boardImage.src;
+    images.push(img);
   }
 }
 
@@ -803,9 +1063,22 @@ function renderPdfInkReplay(doc, host, lesson){
     ctx.restore();
   };
 
+  // 화면이 같은지: 지금 장면 번호 + 자라는 획의 길이. pdfInkStateAt 은 처음부터 훑어 느리므로 여기서는 번호만 본다.
+  const frameKey = (t) => {
+    const idx = lessonIndexAt(times, t), ni = idx + 1, page = kfs[idx] ? kfs[idx].p : firstPage;
+    let growLimit = 0;
+    if (ni < kfs.length && kfs[ni].a && kfs[ni].p === page && kfs[ni].a.points && kfs[ni].a.points.length){
+      const span = Math.max(1, times[ni] - times[idx]);
+      growLimit = Math.max(1, Math.round(kfs[ni].a.points.length * Math.min(1, Math.max(0, (t - times[idx]) / span))));
+    }
+    return idx + ":" + growLimit;
+  };
+  // 영상 크기는 첫 쪽 비율로 — 다른 크기의 쪽은 그 안에 맞춰 그린다(재생 화면과 같다).
+  const firstPg = pages[firstPage] || { w:1000, h:1400 };
+  const video = Object.assign(lessonVideoSize(firstPg.w, firstPg.h), { frameKey, images:() => Object.values(imgs) });
   const pySide = lessonPySideFor(lesson);            // 파이썬 트랙이 함께 녹화됐으면 오른쪽 패널로 재생
   const player = mountReplayPlayer(doc, host, {
-    duration, draw,
+    duration, draw, video,
     side: pySide ? pySide.side : null,
     onTime: pySide ? pySide.onTime : undefined,
     audio: lesson.audio,
@@ -821,10 +1094,74 @@ function saveLessonFile(lesson, name){
   } catch(e){ if (typeof toast === "function") toast("리플레이를 저장하지 못했어요.", 2400, { type: "error" }); }
 }
 
-// 녹화 종료 후 재생 화면을 열고 안내한다. whiteboard.js 가 호출.
-function finishLessonRecording(lesson, name){
-  const doc = openLessonReplay(lesson, (name ? name + " " : "") + "리플레이");
-  if (typeof toast === "function") toast("수업 리플레이가 만들어졌어요. ▶ 재생하거나 💾로 저장하세요.", 3400);
+// 녹화마다 겹치지 않는 파일 이름 — 같은 이름이면 '이미 열린 파일'로 보고 새로 열지 않고, 자동 복원 저장도 덮어쓴다.
+function lessonRecordingFileName(name, now=new Date()){
+  const base = String(name || "").replace(/\.[^./\\]+$/, "").trim();
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = `${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}.${pad(now.getMinutes())}`;
+  const stem = (base ? base + " " : "") + "리플레이 " + stamp;
+  // 열린 리플레이는 이름에서 .lesson 을 떼므로 이름·작업공간 경로를 모두 본다.
+  const taken = new Set();
+  (typeof docs !== "undefined" && Array.isArray(docs) ? docs : []).forEach((d) => {
+    if (!d) return;
+    const docName = String(d.name || "");
+    taken.add(docName); taken.add(docName + ".lesson");
+    if (d.workspacePath) taken.add(String(d.workspacePath).split("/").pop());
+  });
+  let fileName = stem + ".lesson";
+  for (let n = 2; taken.has(fileName); n++) fileName = `${stem} (${n}).lesson`;
+  return fileName;
+}
+
+// 녹화 종료 후 재생 화면을 열고 안내한다. whiteboard.js·PDF/파이썬 녹화가 호출.
+// 파일을 연 것처럼 .lesson 을 거쳐 열어야 작업공간 경로가 생기고, 다음 실행 때 자동 복원된다
+// (예전엔 메모리에서 바로 열어 앱을 껐다 켜면 사라졌다).
+async function finishLessonRecording(lesson, name){
+  const fileName = lessonRecordingFileName(name);
+  const started = performance.now();
+  // 자동 복원이 되는지는 화면으로 안 보여 로그(logs/events.jsonl)에 단계마다 남긴다.
+  const trace = { file:fileName, route:"direct", bytes:0, saved:null, reason:"", ms:0 };
+  const report = () => {
+    trace.ms = Math.round(performance.now() - started);
+    if (typeof MNDiagnostics === "undefined") return;
+    if (trace.saved === true) MNDiagnostics.info("lesson_recording_kept", "녹화 리플레이를 자동 복원에 저장했습니다.", trace);
+    else MNDiagnostics.warn("lesson_recording_kept", "녹화 리플레이를 자동 복원에 저장하지 못했습니다.", trace);
+  };
+  let doc = null, file = null;
+  if (typeof File !== "undefined" && typeof handleFiles === "function"){
+    try {
+      const text = JSON.stringify(lesson);
+      trace.bytes = text.length;
+      // 다시 열 때(자동 복원 포함) 거치는 검사를 미리 해 본다 — 여기서 걸리면 복원도 안 되니 까닭을 남긴다.
+      const checked = validateLessonPayload(JSON.parse(text));
+      if (text.length > LESSON_MAX_FILE_BYTES) trace.reason = "too-large";
+      else if (!checked.ok) trace.reason = "invalid: " + checked.message;
+      else {
+        file = new File([text], fileName, { type:"application/json" });
+        doc = await handleFiles([file], {});
+        if (doc && doc.kind === "replay"){
+          trace.route = "file";
+          if (typeof setActiveDoc === "function" && typeof activeId !== "undefined" && activeId !== doc.id) setActiveDoc(doc.id);
+        } else { trace.reason = doc ? "opened-as-" + doc.kind : "not-opened"; doc = null; }
+      }
+    } catch(error){ trace.reason = "open-error: " + String(error && error.message || error); doc = null; }
+  } else trace.reason = "no-file-pipeline";
+  // 파일 파이프라인을 못 쓰면(너무 크거나 오류) 예전처럼 바로 연다 — 이때는 자동 복원되지 않으니 저장을 권한다.
+  if (!doc) doc = openLessonReplay(lesson, fileName.replace(/\.lesson$/i, ""));
+  if (trace.route === "file"){
+    if (typeof toast === "function") toast("수업 리플레이가 만들어졌어요. ▶ 재생하거나 저장 버튼으로 .lesson 파일을 남기세요.", 3400);
+    // 자동 복원 저장을 끝까지 기다려 결과를 확인한다 — 실패하면 앱을 다시 켤 때 사라지므로 알린다.
+    try {
+      trace.saved = typeof rememberWorkspace === "function" ? !!(await rememberWorkspace([file], false, { silent:true })) : false;
+      if (!trace.saved) trace.reason = "remember-returned-false";
+    } catch(error){ trace.saved = false; trace.reason = "remember-error: " + String(error && error.message || error); }
+    doc.savedInWorkspace = trace.saved;
+    if (!trace.saved && typeof toast === "function") toast("리플레이를 자동 복원 목록에 저장하지 못했어요. 앱을 다시 켜기 전에 저장 버튼으로 .lesson 파일을 남겨 두세요.", 5000, { type:"error" });
+  } else {
+    trace.saved = false;
+    if (typeof toast === "function") toast("수업 리플레이가 만들어졌어요. 앱을 다시 켜면 사라지니 저장 버튼으로 .lesson 파일을 남겨 두세요. (" + trace.reason + ")", 6000);
+  }
+  report();
   return doc;
 }
 

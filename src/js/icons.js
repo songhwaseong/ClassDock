@@ -102,6 +102,9 @@
        (이모지 🔊/🔇 는 UI 정리가 지우기만 하고 대신 그릴 그림이 없어 빈 단추가 됐다.) */
     ,volume: '<path d="M4 9.3h3.4L12 5.2v13.6l-4.6-4.1H4z" fill="currentColor" stroke="none"/><path d="M15.4 9.5a3.6 3.6 0 0 1 0 5"/><path d="M18.1 6.9a7.4 7.4 0 0 1 0 10.2"/>'
     ,mute: '<path d="M4 9.3h3.4L12 5.2v13.6l-4.6-4.1H4z" fill="currentColor" stroke="none"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>'
+    // 녹화할 때 마이크도 함께 — 켬/끔은 빗금 하나로 가른다(화이트보드 도구막대의 🎤 와 같은 모양).
+    ,mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"/>'
+    ,micOff: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6M4 4l16 16"/>'
     // 파이썬 실행 바 — 단계 실행은 ▶ 실행(채운 삼각형)과 갈라 보이게 '속 빈 삼각형 + 멈춤 막대'로 그린다.
     ,stepRun: '<path d="M6 5.5v13l9-6.5z"/><path d="M18.5 5.5v13"/>'
     ,recordRing: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>'

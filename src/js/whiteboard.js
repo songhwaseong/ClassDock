@@ -6576,20 +6576,21 @@ function renderWhiteboard(doc, host){
   // ● 녹화 → 판서를 시간순으로 기록, ■ 정지 → 리플레이(되감아 보기) 화면을 만든다.
   const recGroup = grp();
   const recBtn = mkBtn("● 녹화", "수업 리플레이 녹화 — 판서 과정을 시간순으로 기록해 되감아 볼 수 있어요", "wb-act wb-rec wb-toolvis-record", () => toggleRecord());
-  // 🎤 = 녹화할 때 마이크 소리도 함께 담을지. 모든 화이트보드에서 이어 쓰는 환경설정이고, 처음엔 꺼 둔다(묻지 않고 마이크를 켜지 않게).
-  const readRecordMic = () => { try { return localStorage.getItem("wbRecordMic") === "true"; } catch(_){ return false; } };
+  // 🎤 = 녹화할 때 마이크 소리도 함께 담을지. PDF 필기·파이썬 녹화와 같은 설정(lesson-replay.js)을 쓰고,
+  // 처음엔 꺼 둔다(묻지 않고 마이크를 켜지 않게). 다른 곳에서 바꾸면 lesson-mic-changed 로 따라 바뀐다.
+  const readRecordMic = () => (typeof lessonRecordMicWanted === "function" ? lessonRecordMicWanted() : false);
   let recordMic = readRecordMic();
   const micBtn = mkBtn("", "", "wb-act wb-rec-mic wb-toolvis-record", () => toggleRecordMic());
   recGroup.append(recBtn, micBtn);
   let recBusy = false;          // 마이크 권한을 묻는 중이거나 소리를 정리하는 중
   let boardClosed = false;
   function toggleRecordMic(){
-    if (recBusy || (doc.recorder && doc.recorder.active)) return;
-    recordMic = !recordMic;
-    try { localStorage.setItem("wbRecordMic", String(recordMic)); } catch(_){}
-    syncRecordButtons();
+    if (recBusy || (doc.recorder && doc.recorder.active) || typeof lessonSetRecordMicWanted !== "function") return;
+    lessonSetRecordMicWanted(!recordMic);   // lesson-mic-changed → onRecordMicChanged 가 recordMic·단추를 맞춘다
     if (typeof toast === "function") toast(recordMic ? "녹화할 때 마이크 소리도 함께 녹음해요." : "마이크 없이 판서만 녹화해요.", 1800);
   }
+  const onRecordMicChanged = () => { recordMic = readRecordMic(); syncRecordButtons(); };
+  document.addEventListener("lesson-mic-changed", onRecordMicChanged);
   function syncRecordButtons(){
     const recording=!!(doc.recorder&&doc.recorder.active);
     const withMic=recording?!!doc.recorder.audio:recordMic;
@@ -6825,7 +6826,7 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
-  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); boardClosed = true; if (doc.recorder){ doc.recorder.active = false; if (doc.recorder.audio) doc.recorder.audio.cancel(); } stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); offScreenRatio(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
+  doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); boardClosed = true; document.removeEventListener("lesson-mic-changed", onRecordMicChanged); if (doc.recorder){ doc.recorder.active = false; if (doc.recorder.audio) doc.recorder.audio.cancel(); } stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); offScreenRatio(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 
 if (typeof module !== "undefined" && module.exports){
