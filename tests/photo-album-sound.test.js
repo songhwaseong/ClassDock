@@ -432,3 +432,42 @@ test("MP3 를 사진첩에 끌어 놓거나 가져오기로 넣으면 고른 사
   await empty.importFiles([{ name:"a.mp3", type:"audio/mpeg", size:1000 }]);
   assert.equal(empty.audioRecords.length, 0, "고른 사진이 없으면 넣지 않고 알린다");
 });
+
+test("사진첩 전체 배경음악: 사진 음악이 먼저, 없으면 전체 음악이 넘겨도 끊기지 않고 이어지고, 돌아오면 멈춘 자리부터, 쓰는 곡은 지우지 않는다", async () => {
+  const clock = { now:0 }, album = loadAlbum({ context:{ Audio:FakeAudioElement, performance:{ now:() => clock.now }, setInterval:() => 1, clearInterval(){}, URL:{ createObjectURL:() => "blob:x", revokeObjectURL(){} } } });
+  const p1 = { id:"P1", type:"image", stickers:[] }, p2 = { id:"P2", type:"image", stickers:[] }, p3 = { id:"P3", type:"image", stickers:[], music:{ v:1, tracks:[{ id:"own" }] } }, v1 = { id:"V1", type:"video" };
+  album.set("audioRecords", [{ id:"all", type:"audio", blob:{} }, { id:"own", type:"audio", blob:{} }]);
+  const whole = album.albumItem; whole.music = { v:1, tracks:[{ id:"all" }] };
+  assert.equal(whole.type, "album");
+  assert.equal(album.musicSource(p1), whole, "음악 없는 사진 → 전체 음악");
+  assert.equal(album.musicSource(p3), p3, "사진 음악 우선");
+  assert.equal(album.musicSource(v1), null, "동영상엔 전체 음악을 틀지 않는다");
+  album.useRecords([p1, p2, p3, v1], "P1").set("viewing", true); album.syncMusic(); await tick();
+  const first = album.musicSession; assert.equal(first.item, whole);
+  album.set("selectedId", "P2"); album.syncMusic({ switching:true }); await tick();
+  assert.equal(album.musicSession, first, "음악 없는 사진끼리는 같은 세션이 이어진다");
+  first.audio.currentTime = 42;
+  album.set("selectedId", "P3"); album.syncMusic({ switching:true }); await tick();
+  assert.equal(album.musicSession.item, p3, "음악 있는 사진에선 그 음악");
+  album.set("selectedId", "P2"); album.syncMusic({ switching:true }); await tick();
+  assert.equal(album.musicSession.item, whole, "다시 전체 음악으로");
+  assert.equal(album.musicSession.audio.currentTime, 42, "멈춘 자리에서 잇는다");
+  album.set("selectedId", "P3"); album.syncMusic({ switching:true }); await tick();
+  whole.music.tracks = [{ id:"own" }];
+  album.set("selectedId", "P2"); album.syncMusic({ switching:true }); await tick();
+  assert.equal(album.musicSession.audio.currentTime, 0, "곡이 바뀌었으면 처음부터");
+  album.musicSession.audio.currentTime = 7; album.set("viewing", false); album.syncMusic();
+  album.set("viewing", true); album.syncMusic(); await tick();
+  assert.equal(album.musicSession.audio.currentTime, 0, "감상 모드를 새로 시작하면 처음부터");
+  whole.music.tracks = [{ id:"all" }];
+  album.stopAllMusic();
+  // 사진첩 설정 기록 불러오기: 저장된 것이 있으면 그 음악을, 없으면 빈 기록.
+  assert.deepEqual(plain(album.albumRecord([{ id:album.ALBUM_ID, type:"album", music:{ tracks:[{ id:"all" }] } }]).music), { tracks:[{ id:"all" }] });
+  assert.equal(album.albumRecord([]).music, undefined);
+  // 사진 음악에서 빠져도 전체 음악이 쓰는 곡이면 파일을 지우지 않는다.
+  p3.music = { v:1, tracks:[{ id:"all" }] };
+  await album.removeMusic(p3);
+  assert.deepEqual(album.launcher.deleted(), [], "전체 음악이 쓰는 곡은 남긴다");
+  await album.removeMusic(whole);
+  assert.deepEqual(album.launcher.deleted(), ["all"]);
+});

@@ -3980,10 +3980,11 @@ class ClassDockLauncher
                     serializer.MaxJsonLength = PhotoAlbumMaxMetaBytes;
                     Dictionary<string, object> parsed = serializer.DeserializeObject(item) as Dictionary<string, object>;
                     if (parsed == null) continue;
-                    // 직접 그린 장식(type "art")은 그림 파일 없이 메타데이터만 있다. 사진·영상은 원본 파일이 있어야 보인다.
+                    // 직접 그린 장식(type "art")·사진첩 전체 설정(type "album")은 원본 파일 없이 메타데이터만 있다. 사진·영상은 원본 파일이 있어야 보인다.
                     object rawType;
-                    bool isArt = parsed.TryGetValue("type", out rawType) && Convert.ToString(rawType, CultureInfo.InvariantCulture) == "art";
-                    if (!isArt && !File.Exists(PhotoAlbumPath(id, ".bin"))) continue;
+                    string listedType = parsed.TryGetValue("type", out rawType) ? Convert.ToString(rawType, CultureInfo.InvariantCulture) : "";
+                    bool metaOnly = listedType == "art" || listedType == "album";
+                    if (!metaOnly && !File.Exists(PhotoAlbumPath(id, ".bin"))) continue;
                     if (json.Length > 1) json.Append(',');
                     json.Append(item);
                 }
@@ -4024,13 +4025,15 @@ class ClassDockLauncher
             || (Convert.ToString(rawType, CultureInfo.InvariantCulture) != "image"
                 && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "video"
                 && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "audio"
-                && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "art"))
+                && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "art"
+                && Convert.ToString(rawType, CultureInfo.InvariantCulture) != "album"))
             throw new InvalidDataException("photo-album-meta-invalid");
-        bool isArt = Convert.ToString(rawType, CultureInfo.InvariantCulture) == "art";
+        string savedType = Convert.ToString(rawType, CultureInfo.InvariantCulture);
+        bool metaOnly = savedType == "art" || savedType == "album";
         lock (PhotoAlbumLock)
         {
-            // 직접 그린 장식은 원본 파일 없이 메타데이터만 저장한다.
-            if (isArt) Directory.CreateDirectory(PhotoAlbumDir);
+            // 직접 그린 장식·사진첩 전체 설정은 원본 파일 없이 메타데이터만 저장한다.
+            if (metaOnly) Directory.CreateDirectory(PhotoAlbumDir);
             else if (!File.Exists(media)) throw new FileNotFoundException("photo-album-file-missing");
             WriteFileAtomically(full, body);
         }

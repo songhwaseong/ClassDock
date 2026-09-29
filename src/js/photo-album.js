@@ -397,6 +397,15 @@ const PhotoAlbum = (() => {
     return list.filter(track => track && typeof track.id === "string" && audioById(track.id));
   }
   const musicOf = item => item && item.music && typeof item.music === "object" && musicTracks(item.music).length ? item.music : null;
+  // 사진첩 전체 배경음악: 원본 파일 없는 type "album" 기록 하나(고정 id)에 사진과 같은 꼴(music)로 둔다. 재생 엔진은 이것도 사진처럼 다룬다.
+  // 사진 음악 우선: 사진에 음악이 있으면 그 음악, 없으면 전체 음악. 전체 음악끼리 넘길 땐 같은 세션이라 끊기지 않고 이어진다.
+  const ALBUM_ID = "c1a55d0c-a1b0-4a1b-8000-000000000001";
+  let albumItem = { id:ALBUM_ID, type:"album", created:0 };
+  function albumRecord(list){
+    const found = list.find(record => record && record.type === "album" && record.id === ALBUM_ID);
+    return found ? { ...found, id:ALBUM_ID, type:"album" } : { id:ALBUM_ID, type:"album", created:0 };
+  }
+  const musicSource = item => musicOf(item) ? item : item && item.type === "image" && musicOf(albumItem) ? albumItem : null;
   // 고칠 때 예전 한 곡짜리를 목록 꼴로 바꿔 둔다.
   function playlistMusic(item){
     const music = item.music && typeof item.music === "object" ? item.music : {};
@@ -550,11 +559,12 @@ const PhotoAlbum = (() => {
     });
   }
   // 감상 모드에서 지금 음악에 곱할 값. 같은 사진의 효과음이 실제로 울리는 중일 때만(효과음 재생 시계로 잰다).
+  // 전체 음악이 흐를 때는 지금 효과음이 나는 사진의 덕킹 설정을 따른다.
   function liveDuck(session){
-    const duck = duckSettings(session.item);
-    if (!duck.on || !sfxSession || sfxSession.item !== session.item) return { gain:1, active:false };
+    const owner = session.item === albumItem ? sfxSession && sfxSession.item : session.item, duck = duckSettings(owner);
+    if (!duck.on || !sfxSession || sfxSession.item !== owner) return { gain:1, active:false };
     const t = sfxSession.ctx.currentTime - sfxSession.origin;
-    return { gain:duckGain(duckBlocks(session.item, t - 3, t + 1, duck.r), t, duck), active:true };
+    return { gain:duckGain(duckBlocks(owner, t - 3, t + 1, duck.r), t, duck), active:true };
   }
   // 반복 구간 music.ls(시작 초)·music.le(끝 초, 없으면 곡 끝)·music.li(처음엔 곡 처음부터). 구간은 0.5초 이상이어야 한다.
   // 곡 길이(duration)를 알아야 끝을 맞출 수 있다. 모르면(아직 안 잼) 시작만 지키고 끝은 곡 끝으로 본다.
@@ -610,7 +620,8 @@ const PhotoAlbum = (() => {
     if (player.url) URL.revokeObjectURL(player.url);
   }
   // tracks[index] 를 새 플레이어로 튼다. 첫 곡이 아니면 "곡 사이 겹침" 동안 커진다.
-  async function startPlayer(session, index){
+  // place: 전체 음악을 이어 틀 자리(albumPlace). 곡 안 위치·반복 차례를 되살린다.
+  async function startPlayer(session, index, place = null){
     const tracks = musicTracks(session.item.music), track = tracks[index]; if (!track) return;
     const player = { track, audio:new Audio(), url:null, born:performance.now(), dying:0, fadeLen:0, first:!session.players.length, repeat:0 };
     session.players.push(player); session.audio = player.audio;
@@ -621,6 +632,7 @@ const PhotoAlbum = (() => {
     // 구간이 있으면 그 시작(한 곡이면 "처음엔 곡 처음부터" 도 따름)에서 튼다. 곡 길이는 메타데이터를 읽은 뒤에 안다.
     const single = tracks.length <= 1, span = trackSpan(track, audioById(track.id).dur, single);
     if (span.from > 0) player.audio.currentTime = span.from;
+    if (place && place.t > 0){ player.audio.currentTime = place.t; player.repeat = place.repeat; player.looped = place.looped; player.lastTime = place.t; }
     player.audio.addEventListener("loadedmetadata", () => { const again = trackSpan(liveTrack(session, player), player.audio.duration, musicTracks(session.item.music).length <= 1); if (again.from > 0 && player.audio.currentTime < again.from - .05) player.audio.currentTime = again.from; }, { once:true });
     player.born = performance.now(); tickMusic(session);
     await player.audio.play();
@@ -690,16 +702,29 @@ const PhotoAlbum = (() => {
     paintMusic();
   }
   function stopAllMusic(){ stopMusic(0); [...fadingMusic].forEach(endMusic); }
-  // fadeIn·fadeOut 을 주면(크로스페이드) 사진별 페이드 대신 그 시간을 쓴다.
-  async function playMusic(item, { fadeIn, fadeOut } = {}){
+  // 전체 음악이 사진 음악에 자리를 내줄 때 멈춘 자리를 적어 두고, 다시 돌아오면 거기서 잇는다(감상 모드를 끝내면 잊는다).
+  // 곡 목록이 바뀌어 그 곡이 그 차례에 없으면 처음부터.
+  let albumResume = null;
+  function albumPlace(session){
+    const current = currentPlayer(session); if (!current || !current.url) return null;
+    return { pos:session.pos, cycle:session.cycle, id:current.track.id, t:current.audio.currentTime || 0, repeat:current.repeat || 0, looped:!!current.looped };
+  }
+  function resumeIndex(item, place){
+    if (!place) return -1;
+    const index = playlistOrder(item, place.cycle)[place.pos], track = musicTracks(item.music)[index];
+    return track && track.id === place.id ? index : -1;
+  }
+  // fadeIn·fadeOut 을 주면(크로스페이드) 사진별 페이드 대신 그 시간을 쓴다. resume 이면 전체 음악을 멈춘 자리에서 잇는다.
+  async function playMusic(item, { fadeIn, fadeOut, resume = false } = {}){
     const music = musicOf(item); if (!music) return;
     if (musicPlaying(item)) return;
     stopMusic(musicSession ? (Number.isFinite(fadeOut) ? fadeOut : musicFades(musicSession.item.music).o) : 0);
-    const session = { item, players:[], audio:null, started:performance.now(), stopping:0, fadeOut:0, fadeIn, timer:0, pos:0, cycle:0 };
+    const place = resume && item === albumItem ? albumResume : null, resumeAt = resumeIndex(item, place); if (item === albumItem) albumResume = null;
+    const session = { item, players:[], audio:null, started:performance.now(), stopping:0, fadeOut:0, fadeIn, timer:0, pos:resumeAt >= 0 ? place.pos : 0, cycle:resumeAt >= 0 ? place.cycle : 0 };
     musicSession = session;
     try {
       session.started = performance.now();
-      await startPlayer(session, playlistOrder(item, 0)[0]);
+      await startPlayer(session, resumeAt >= 0 ? resumeAt : playlistOrder(item, 0)[0], resumeAt >= 0 ? place : null);
     } catch(error){ console.warn("배경음악을 틀지 못했습니다:", error); if (musicSession === session){ musicSession = null; endMusic(session); } notice("배경음악을 재생하지 못했습니다."); }
     paintMusic();
   }
@@ -707,13 +732,16 @@ const PhotoAlbum = (() => {
   const playingTrackId = item => { const current = musicSession && musicSession.item === item && currentPlayer(musicSession); return current ? current.track.id : null; };
   // 사진이 바뀌거나 감상 모드를 오갈 때: 감상 중이고 음악이 있으면 틀고(앞 음악은 줄어들며 끝남), 아니면 줄이며 멈춘다.
   // switching: 감상 중에 다른 사진으로 넘어가는 경우(크로스페이드 길이를 정해 뒀으면 그 길이로 겹쳐 넘긴다).
+  // 사진 음악 우선: 사진에 음악이 없으면 전체 음악(이미 흐르면 playMusic 이 그대로 둔다).
   function syncMusic({ switching = false } = {}){
-    const item = selected(), cross = switching && viewing ? crossfadeSetting() : null, timing = cross === null ? {} : { fadeIn:cross, fadeOut:cross };
-    if (viewing && musicOf(item)) playMusic(item, timing);
+    const source = musicSource(selected()), cross = switching && viewing ? crossfadeSetting() : null, timing = cross === null ? { resume:true } : { fadeIn:cross, fadeOut:cross, resume:true };
+    if (!viewing) albumResume = null;
+    else if (musicSession && musicSession.item === albumItem && source !== albumItem) albumResume = albumPlace(musicSession);
+    if (viewing && source) playMusic(source, timing);
     else if (musicSession) stopMusic(cross !== null ? cross : musicFades(musicSession.item.music).o);
   }
   async function dropAudioRecord(id){
-    if (!id || records.some(item => musicTracks(item.music).some(track => track.id === id))) return;
+    if (!id || [albumItem, ...records].some(item => musicTracks(item.music).some(track => track.id === id))) return;
     const record = audioById(id); if (!record) return;
     audioRecords = audioRecords.filter(other => other.id !== id);
     try { await deleteItem(record); } catch(error){ console.warn("배경음악 파일을 지우지 못했습니다:", error); }
@@ -721,7 +749,7 @@ const PhotoAlbum = (() => {
   // 음악 파일(한 개 또는 여러 개)을 재생목록 끝에 더한다. 음악이 아니거나 너무 큰 파일은 알리고 건너뛴다.
   async function importMusic(item, files){
     const list = (Array.isArray(files) ? files : [files]).filter(Boolean);
-    if (!item || item.type !== "image" || !list.length) return;
+    if (!item || (item.type !== "image" && item !== albumItem) || !list.length) return;
     let added = 0;
     for (const file of list){
       if (!/^audio\//.test(file.type) && !/\.(mp3|m4a|aac|wav|ogg|oga|flac|opus|webm)$/i.test(file.name)){ notice(`"${file.name}" 은(는) 음악 파일이 아닙니다(mp3·m4a·wav·ogg 등).`); continue; }
@@ -735,7 +763,7 @@ const PhotoAlbum = (() => {
     }
     if (!added) return;
     await save(item); paintMusic();
-    status(musicTracks(item.music).length > 1 ? `배경음악 ${added}곡을 재생목록에 더했습니다 (모두 ${musicTracks(item.music).length}곡).` : "배경음악을 넣었습니다. ▶ 로 들어 보거나 감상 모드에서 들을 수 있습니다.");
+    status(musicTracks(item.music).length > 1 ? `${item === albumItem ? "전체 " : ""}배경음악 ${added}곡을 재생목록에 더했습니다 (모두 ${musicTracks(item.music).length}곡).` : item === albumItem ? "전체 배경음악을 넣었습니다. 음악이 없는 사진에서 흐릅니다." : "배경음악을 넣었습니다. ▶ 로 들어 보거나 감상 모드에서 들을 수 있습니다.");
   }
   async function removeTrack(item, id){
     const music = playlistMusic(item); if (!music.tracks.some(track => track.id === id)) return;
@@ -899,7 +927,7 @@ const PhotoAlbum = (() => {
   }
   // 배경음악 칸(민트 패널 오른쪽): 머리(▶·곡 추가) + 재생목록. 아래 '재생 설정' 줄(.pa-music-play)에 순서·페이드·넘길 때 겹침·전체 볼륨,
   // 나머지(곡 사이 겹침·구간·곡별 페이드·속도·반복·덕킹)는 '세부 설정' 칸(.pa-music-more)에 둔다. 세부 설정 칸은 틀에 있어 다시 그려도 열림 상태가 남는다.
-  let musicMoreOpen = false;
+  let musicMoreOpen = false, musicScope = "photo";
   const durationText = seconds => { const whole = Math.round(seconds); return String(Math.floor(whole/60)).padStart(2, "0") + ":" + String(whole % 60).padStart(2, "0"); };
   function musicMoreToggle(){
     const toggle = button(musicMoreOpen ? "세부 설정 ▴" : "세부 설정 ▾", () => { musicMoreOpen = !musicMoreOpen; paintMusic(); }, "pa-more-toggle" + (musicMoreOpen ? " active" : ""));
@@ -914,23 +942,34 @@ const PhotoAlbum = (() => {
     const item = selected(), image = !!item && item.type === "image";
     if (moreBox) moreBox.hidden = !image || !musicMoreOpen;
     if (!image) return;
+    const album = musicScope === "album", owner = album ? albumItem : item;
     const head = document.createElement("div"); head.className = "pa-music-head";
-    const label = document.createElement("strong"); label.textContent = "♫ 배경음악"; label.title = "이 사진에만 붙는 음악입니다(사진마다 따로 정해요)";
+    const label = document.createElement("strong"); label.textContent = "♫ 배경음악"; label.title = "사진 음악이 먼저 나오고, 음악이 없는 사진에서는 전체 음악이 흐릅니다";
     head.appendChild(label); host.appendChild(head);
-    const playTitle = document.createElement("strong"); playTitle.className = "pa-play-title"; playTitle.textContent = "재생 설정";
-    const music = musicOf(item);
+    // 이 사진 / 전체: 어느 쪽 음악을 고칠지. 음악이 들어 있는 쪽엔 ♪ 를 붙인다.
+    const scope = document.createElement("div"); scope.className = "pa-order-switch pa-music-scope"; scope.setAttribute("role","group"); scope.setAttribute("aria-label","배경음악 적용 범위");
+    [["photo","이 사진",item,"이 사진에만 흐르는 음악(있으면 전체 음악보다 먼저 나옵니다)"],["album","전체",albumItem,"음악이 없는 모든 사진에 흐르는 음악. 사진을 넘겨도 끊기지 않고 이어집니다"]].forEach(([id,text,target,title]) => {
+      const on = musicScope === id, choice = button(text + (musicOf(target) ? " ♪" : ""), () => { musicScope = id; musicEditTrack = null; paintMusic(); }, on ? "active" : "");
+      choice.title = title; choice.setAttribute("aria-pressed", String(on)); scope.appendChild(choice);
+    });
+    host.appendChild(scope);
+    const playTitle = document.createElement("strong"); playTitle.className = "pa-play-title"; playTitle.textContent = album ? "재생 설정 · 전체" : "재생 설정";
+    const music = musicOf(owner);
     if (!music){
-      const [pick, input] = musicPicker(item, "+ 음악 넣기", "감상 모드와 MP4 영상에 함께 나올 음악을 고릅니다(여러 곡을 한꺼번에 골라 재생목록으로 만들 수 있어요)");
+      const [pick, input] = musicPicker(owner, "+ 음악 넣기", album ? "음악이 없는 사진에 흐를 음악을 고릅니다(여러 곡을 한꺼번에 골라 재생목록으로 만들 수 있어요)" : "감상 모드와 MP4 영상에 함께 나올 음악을 고릅니다(여러 곡을 한꺼번에 골라 재생목록으로 만들 수 있어요)");
       pick.classList.add("pa-music-add"); head.append(pick, input);
-      const empty = document.createElement("p"); empty.className = "pa-music-empty"; empty.textContent = "이 사진에 흐를 음악을 넣어 보세요. 여러 곡을 한꺼번에 고르면 재생목록이 됩니다.";
+      const empty = document.createElement("p"); empty.className = "pa-music-empty";
+      empty.textContent = album ? "모든 사진에 흐를 전체 음악을 넣어 보세요. 음악이 없는 사진에서 흐르고, 사진을 넘겨도 끊기지 않고 이어집니다."
+        : musicOf(albumItem) ? "이 사진엔 따로 넣은 음악이 없어 전체 음악이 흐릅니다. 여기에 음악을 넣으면 이 사진에선 그 음악이 먼저 나옵니다."
+        : "이 사진에 흐를 음악을 넣어 보세요. 여러 곡을 한꺼번에 고르면 재생목록이 됩니다.";
       host.appendChild(empty);
       if (play) play.append(playTitle, crossfadeRow(), musicMoreToggle());
       return;
     }
-    const tracks = musicTracks(music), single = tracks.length === 1, playing = musicPlaying(item), nowId = playingTrackId(item);
-    const toggle = button(playing ? "⏸" : "▶", () => { if (musicPlaying(item)) stopMusic(); else playMusic(item); }, "pa-music-play-button" + (playing ? " playing" : "")); toggle.title = playing ? "멈춤" : "미리 듣기"; toggle.setAttribute("aria-label", toggle.title);
-    const [add, addInput] = musicPicker(item, "+ 곡 추가", "재생목록 끝에 곡을 더합니다(여러 곡 한꺼번에 가능)"); add.classList.add("pa-music-add");
-    const clear = button("✕", () => removeMusic(item), "pa-playlist-action pa-music-clear"); clear.title = "배경음악 모두 빼기";
+    const tracks = musicTracks(music), single = tracks.length === 1, playing = musicPlaying(owner), nowId = playingTrackId(owner);
+    const toggle = button(playing ? "⏸" : "▶", () => { if (musicPlaying(owner)) stopMusic(); else playMusic(owner); }, "pa-music-play-button" + (playing ? " playing" : "")); toggle.title = playing ? "멈춤" : "미리 듣기"; toggle.setAttribute("aria-label", toggle.title);
+    const [add, addInput] = musicPicker(owner, "+ 곡 추가", "재생목록 끝에 곡을 더합니다(여러 곡 한꺼번에 가능)"); add.classList.add("pa-music-add");
+    const clear = button("✕", () => removeMusic(owner), "pa-playlist-action pa-music-clear"); clear.title = "배경음악 모두 빼기";
     head.append(toggle, add, clear, addInput);
     // 재생목록: 곡 이름을 누르면 세부 설정에서 그 곡을 고친다. 막대는 곡별 크기, 오른쪽은 곡 길이. ↑↓ 로 순서, ✕ 로 빼기. 지금 나오는 곡엔 ♪.
     if (!tracks.some(track => track.id === musicEditTrack)) musicEditTrack = tracks[0].id;
@@ -942,14 +981,14 @@ const PhotoAlbum = (() => {
       name.title = (track.name || "") + (single ? "" : " — 눌러서 세부 설정에서 이 곡 고치기");
       const level = document.createElement("input"); level.type = "range"; level.className = "pa-playlist-volume"; level.min = 0; level.max = 100; level.step = 5; level.value = Math.round(trackVolume(track)*100);
       level.title = "이 곡 크기 " + level.value + "% (전체 볼륨에 곱함)"; level.setAttribute("aria-label", (track.name || "곡") + " 크기");
-      level.oninput = () => { setTrack(item, track.id, { tv:Number(level.value)/100 }); level.title = "이 곡 크기 " + level.value + "% (전체 볼륨에 곱함)"; if (musicSession && musicSession.item === item) tickMusic(musicSession); };
-      level.onchange = () => save(item);
+      level.oninput = () => { setTrack(owner, track.id, { tv:Number(level.value)/100 }); level.title = "이 곡 크기 " + level.value + "% (전체 볼륨에 곱함)"; if (musicSession && musicSession.owner === owner) tickMusic(musicSession); };
+      level.onchange = () => save(owner);
       const record = audioById(track.id), duration = record && record.dur;
       if (!Number.isFinite(duration)) ensureMusicDuration(record);
       const length = document.createElement("span"); length.className = "pa-playlist-time"; length.textContent = Number.isFinite(duration) ? durationText(duration) : "--:--";
-      const up = button("↑", () => moveTrack(item, track.id, -1), "pa-playlist-action"); up.disabled = index === 0; up.title = "앞으로";
-      const down = button("↓", () => moveTrack(item, track.id, 1), "pa-playlist-action"); down.disabled = index === tracks.length - 1; down.title = "뒤로";
-      const remove = button("✕", () => removeTrack(item, track.id), "pa-playlist-action"); remove.title = "이 곡 빼기";
+      const up = button("↑", () => moveTrack(owner, track.id, -1), "pa-playlist-action"); up.disabled = index === 0; up.title = "앞으로";
+      const down = button("↓", () => moveTrack(owner, track.id, 1), "pa-playlist-action"); down.disabled = index === tracks.length - 1; down.title = "뒤로";
+      const remove = button("✕", () => removeTrack(owner, track.id), "pa-playlist-action"); remove.title = "이 곡 빼기";
       row.append(number, name, level, length, up, down, remove); list.appendChild(row);
     });
     host.appendChild(list);
@@ -960,7 +999,7 @@ const PhotoAlbum = (() => {
         const orderField = document.createElement("div"); orderField.className = "pa-order-switch";
         [["seq","순서대로"],["shuffle","섞어서"]].forEach(([id,text]) => {
           const on = (music.order === "shuffle" ? "shuffle" : "seq") === id;
-          const choice = button(text, () => { playlistMusic(item).order = id; save(item); paintMusic(); }, on ? "active" : ""); choice.setAttribute("aria-pressed", String(on));
+          const choice = button(text, () => { playlistMusic(owner).order = id; save(owner); paintMusic(); }, on ? "active" : ""); choice.setAttribute("aria-pressed", String(on));
           choice.title = id === "shuffle" ? "곡 순서를 섞어서 틉니다(사진마다 정해진 순서라 MP4 에도 같게 담김)" : "목록 순서대로 틉니다";
           orderField.appendChild(choice);
         });
@@ -971,23 +1010,23 @@ const PhotoAlbum = (() => {
         const fadeLabel = document.createElement("span"); fadeLabel.textContent = text;
         const slider = document.createElement("input"); slider.type = "range"; slider.min = 0; slider.max = MUSIC_FADE_MAX; slider.step = .5; slider.value = musicFades(music)[short]; slider.setAttribute("aria-label","배경음악 " + text + " 시간(초)");
         const shown = document.createElement("span"); shown.className = "pa-range-value"; shown.textContent = musicFades(music)[short] + "초";
-        slider.oninput = () => { playlistMusic(item)[key] = Number(slider.value); shown.textContent = slider.value + "초"; };
-        slider.onchange = () => save(item);
+        slider.oninput = () => { playlistMusic(owner)[key] = Number(slider.value); shown.textContent = slider.value + "초"; };
+        slider.onchange = () => save(owner);
         field.append(fadeLabel, slider, shown); play.appendChild(field);
       });
       play.appendChild(crossfadeRow());
-      const volumeField = document.createElement("label"); volumeField.className = "pa-sfx-fade pa-music-volume"; volumeField.title = "이 사진 배경음악 전체 소리 크기";
+      const volumeField = document.createElement("label"); volumeField.className = "pa-sfx-fade pa-music-volume"; volumeField.title = album ? "전체 배경음악 소리 크기" : "이 사진 배경음악 전체 소리 크기";
       const volumeLabel = document.createElement("span"); volumeLabel.textContent = "전체 볼륨";
       const volume = document.createElement("input"); volume.type = "range"; volume.min = 0; volume.max = 100; volume.value = Math.round(musicVolume(music)*100); volume.setAttribute("aria-label","배경음악 전체 볼륨");
       const volumeShown = document.createElement("span"); volumeShown.className = "pa-range-value"; volumeShown.textContent = volume.value + "%";
-      volume.oninput = () => { playlistMusic(item).v = Number(volume.value)/100; volumeShown.textContent = volume.value + "%"; if (musicSession && musicSession.item === item) tickMusic(musicSession); };
-      volume.onchange = () => save(item);
+      volume.oninput = () => { playlistMusic(owner).v = Number(volume.value)/100; volumeShown.textContent = volume.value + "%"; if (musicSession && musicSession.owner === owner) tickMusic(musicSession); };
+      volume.onchange = () => save(owner);
       volumeField.append(volumeLabel, volume, volumeShown); play.append(volumeField, musicMoreToggle());
     }
     if (!more) return;
     // 세부 설정 칸
     const moreHead = document.createElement("div"); moreHead.className = "pa-more-head";
-    const moreTitle = document.createElement("strong"); moreTitle.textContent = "♫ 음악 세부 설정";
+    const moreTitle = document.createElement("strong"); moreTitle.textContent = album ? "♫ 전체 음악 세부 설정" : "♫ 음악 세부 설정";
     moreHead.appendChild(moreTitle);
     if (!single){ const hint = document.createElement("small"); hint.className = "pa-crossfade-note"; hint.textContent = "재생목록에서 곡 이름을 누르면 그 곡을 고칩니다"; moreHead.appendChild(hint); }
     more.appendChild(moreHead);
@@ -996,8 +1035,8 @@ const PhotoAlbum = (() => {
       const gapLabel = document.createElement("span"); gapLabel.textContent = "곡 사이 겹침";
       const gap = document.createElement("input"); gap.type = "range"; gap.min = 0; gap.max = TRACK_GAP_MAX; gap.step = .5; gap.value = trackGap(music); gap.setAttribute("aria-label","곡 사이 겹침(초)");
       const gapShown = document.createElement("span"); gapShown.className = "pa-range-value"; gapShown.textContent = trackGap(music) + "초";
-      gap.oninput = () => { playlistMusic(item).tx = Number(gap.value); gapShown.textContent = gap.value + "초"; };
-      gap.onchange = () => save(item);
+      gap.oninput = () => { playlistMusic(owner).tx = Number(gap.value); gapShown.textContent = gap.value + "초"; };
+      gap.onchange = () => save(owner);
       gapField.append(gapLabel, gap, gapShown);
       const options = document.createElement("div"); options.className = "pa-sfx-fades pa-playlist-options"; options.appendChild(gapField); more.appendChild(options);
     }
@@ -1030,7 +1069,10 @@ const PhotoAlbum = (() => {
     });
     duckToggle.onchange = () => { setDuck("on", duckToggle.checked); save(item); paintMusic(); };
     const editing = tracks.find(track => track.id === musicEditTrack) || tracks[0];
-    more.append(loopRow(item, editing, single), trackFadeRow(item, editing, single), ducking);
+    more.append(loopRow(owner, editing, single), trackFadeRow(owner, editing, single));
+    // 효과음 날 때 줄이기는 효과음이 붙은 사진마다 정한다(전체 음악이 흐를 때도 그 사진 설정을 따른다).
+    if (!album) more.appendChild(ducking);
+    else { const note = document.createElement("small"); note.className = "pa-crossfade-note"; note.textContent = "효과음 날 때 줄이기는 '이 사진' 쪽에서 사진마다 정합니다."; more.appendChild(note); }
   }
   // 효과음 sfx = { k:소리, v:크기 0~1 }. 파일 없이 Web Audio 로 그때그때 만든다(실시간 재생과 MP4 굽기가 같은 함수를 써서 소리가 같다).
   // 움직임마다 소리가 나는 순간(한 바퀴 안의 비율): 통통은 땅에 닿을 때, 두근은 박동마다, 흔들흔들은 양 끝에서.
@@ -1169,8 +1211,9 @@ const PhotoAlbum = (() => {
     }
     return placed;
   }
+  // 음악은 사진 음악 우선(없으면 전체 음악), 덕킹·효과음은 그 사진 것.
   async function encodeMusic(item, seconds){
-    const music = musicOf(item), effects = soundParts(item);
+    const source = musicSource(item), music = source && source.music, effects = soundParts(item);
     if ((!music && !effects.length) || typeof AudioEncoder === "undefined" || typeof AudioData === "undefined" || typeof OfflineAudioContext === "undefined") return null;
     const rate = 48000, channels = 2, length = Math.ceil(seconds*rate);
     const config = { codec:"mp4a.40.2", sampleRate:rate, numberOfChannels:channels, bitrate:160000 };
@@ -1199,7 +1242,7 @@ const PhotoAlbum = (() => {
           }
         }
         source.connect(level).connect(laps).connect(envelope); source.start(0, span.from);
-      } else schedulePlaylist(offline, item, tracks, buffers, envelope, seconds);
+      } else schedulePlaylist(offline, source, tracks, buffers, envelope, seconds);
     }
     const master = sfxMaster(item), sfxBus = offline.createGain(); sfxBus.connect(offline.destination);
     applySfxFade(sfxBus.gain, sfxFade(item), 0, seconds);
@@ -2960,7 +3003,7 @@ const PhotoAlbum = (() => {
     if (songs.length) await importSongs(songs, records.find(item => item.type === "image" && files.some(entry => entry.file === item.blob)));
   }
   async function importSongs(songs, fallback){
-    const current = selected(), target = current && current.type === "image" ? current : fallback;
+    const current = selected(), target = musicScope === "album" && current && current.type === "image" ? albumItem : current && current.type === "image" ? current : fallback;
     if (!target){ notice("배경음악은 사진에 붙습니다. 사진을 먼저 고른 뒤 음악 파일을 넣어 주세요."); return; }
     await importMusic(target, songs);
   }
@@ -3062,7 +3105,7 @@ const PhotoAlbum = (() => {
       await encoder.flush();
       if (failure) throw failure;
       let audio = null, soundNote = "";
-      if (musicOf(item) || soundParts(item).length){
+      if (musicSource(item) || soundParts(item).length){
         status("영상 만드는 중… 소리 넣는 중");
         try { audio = await encodeMusic(item, total/fps); } catch(error){ console.warn("배경음악을 영상에 넣지 못했습니다:", error); }
         if (!audio) soundNote = " 이 컴퓨터에서는 소리를 넣지 못해 소리 없이 저장했습니다.";
@@ -3157,6 +3200,7 @@ const PhotoAlbum = (() => {
         if (!Array.isArray(listed)) throw new Error("사진첩 목록 형식이 잘못됐습니다.");
         customArts = listed.map(normalizeArt).filter(Boolean).sort((a, b) => a.created - b.created);
         audioRecords = listed.filter(item => item && typeof item.id === "string" && item.type === "audio");
+        albumItem = albumRecord(listed);
         records = listed.filter(item => item && typeof item.id === "string" && (item.type === "image" || item.type === "video"))
           .map(item => ({ ...item, stickers:Array.isArray(item.stickers) ? item.stickers : [] }));
         // 이전 버전의 같은 접속 주소에 남은 사진은 한 번만 앱 저장소로 옮긴다.
@@ -3179,6 +3223,7 @@ const PhotoAlbum = (() => {
         const stored = await query("readonly", store => store.getAll());
         customArts = stored.map(normalizeArt).filter(Boolean).sort((a, b) => a.created - b.created);
         audioRecords = stored.filter(item => item && item.type === "audio");
+        albumItem = albumRecord(stored);
         records = stored.filter(item => item && (item.type === "image" || item.type === "video"));
       }
       for (const item of records){
