@@ -9946,6 +9946,40 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-sidebar,.pa-tools{background:var(--pa-panel);min-height:0;overflow:auto}
 .pa-sidebar{border-right:1px solid var(--pa-line);padding:16px 12px}
 .pa-tools{border-left:1px solid var(--pa-line);padding:18px 14px}
+/* 목록 칸 위 '넘기기 효과' 단추와 고르는 창(감상 모드 넘기기 움직임). 창은 사진첩(.photo-album) 기준으로 띄운다. */
+.photo-album{position:relative}
+.photo-album .pa-fx-open{display:flex;align-items:center;gap:9px;width:100%;margin-bottom:12px;padding:9px 10px;border:1px solid var(--pa-line);border-radius:10px;background:var(--pa-soft);color:var(--pa-text);text-align:left}
+.pa-fx-open:hover,.pa-fx-open[aria-expanded="true"]{border-color:var(--pa-accent)}
+.pa-fx-open svg{flex:none;width:22px;height:22px;color:var(--pa-accent)}
+.pa-fx-open span{display:grid;min-width:0}
+.pa-fx-open small{color:var(--pa-muted);font-size:10px;font-weight:650}
+.pa-fx-open b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.pa-fx-panel{position:absolute;z-index:30;width:300px;max-width:calc(100% - 12px);padding:14px;border:1px solid var(--pa-line);border-radius:14px;background:var(--pa-panel);color:var(--pa-text);box-shadow:0 18px 44px #1a263a38;box-sizing:border-box}
+.pa-fx-head{display:grid;gap:2px;margin-bottom:10px}
+.pa-fx-head strong{font-size:14px}
+.pa-fx-head small,.pa-fx-foot small{color:var(--pa-muted);font-size:10.5px;line-height:1.4}
+.pa-fx-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.photo-album .pa-fx-tile{display:grid;gap:5px;padding:5px 5px 6px;border:2px solid transparent;border-radius:10px;background:var(--pa-soft);color:var(--pa-text);font-size:11px;font-weight:650;text-align:center}
+.pa-fx-tile:hover{border-color:color-mix(in srgb,var(--pa-accent) 45%,transparent)}
+.pa-fx-tile[aria-pressed="true"]{border-color:var(--pa-accent);background:#e8f0ff;color:#2565d6}
+.pa-fx-demo{--fx-bg:#dfe7f3;position:relative;display:block;overflow:hidden;height:44px;border-radius:6px;background:var(--fx-bg)}
+.pa-fx-layer{position:absolute;inset:0;z-index:1;display:grid;place-items:center}
+.pa-fx-layer.is-top{z-index:2}.pa-fx-layer.is-off{visibility:hidden}
+.pa-fx-demo.is-box .pa-fx-layer{background:var(--fx-bg)}
+.pa-fx-card{position:relative;width:58%;height:70%;border-radius:3px;box-shadow:0 1px 4px #0003;overflow:hidden}
+.pa-fx-card.is-a{background:linear-gradient(#ffb36b,#f06a6a)}
+.pa-fx-card.is-b{background:linear-gradient(#7fd3f5,#3f7fe0)}
+.pa-fx-card::before{content:"";position:absolute;right:18%;top:18%;width:22%;aspect-ratio:1;border-radius:50%;background:#fff9}
+.pa-fx-card::after{content:"";position:absolute;left:-10%;right:-10%;bottom:-30%;height:60%;border-radius:50% 50% 0 0;background:#0003}
+.pa-fx-speed{display:flex;align-items:center;gap:4px;margin-top:12px;font-size:11px}
+.pa-fx-speed>span{margin-right:auto;color:var(--pa-muted);font-weight:700}
+.photo-album .pa-fx-speed button{padding:5px 10px;border:1px solid var(--pa-line);border-radius:999px;background:var(--pa-panel);color:var(--pa-text);font-size:11px}
+.pa-fx-speed button[aria-pressed="true"]{border-color:var(--pa-accent);background:var(--pa-accent);color:#fff}
+.pa-fx-foot{display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid var(--pa-line)}
+.photo-album .pa-fx-foot button{flex:none;padding:7px 11px;border:0;border-radius:8px;background:var(--pa-accent);color:#fff;font-size:11px;font-weight:700}
+[data-theme="dark"] .photo-album .pa-fx-tile[aria-pressed="true"]{background:#233959;color:#a8cbff}
+[data-theme="dark"] .photo-album .pa-fx-demo{--fx-bg:#0e1620}
+[data-theme="dark"] .photo-album .pa-fx-panel{box-shadow:0 18px 44px #0009}
 .pa-filters{display:grid;gap:4px;margin-bottom:22px}
 .pa-filters button{text-align:left;padding:11px 12px;border:0;border-radius:9px;color:var(--pa-muted);background:transparent;font-weight:650;font-size:13px}
 .pa-filters button:hover,.pa-filters button.active{background:#e8f0ff;color:#2565d6}
@@ -10287,4 +10321,4 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-viewing .pa-part.selected{border-color:transparent;box-shadow:none}.pa-viewing .pa-handle,.pa-viewing .pa-part-bar,.pa-viewing .pa-group-box{display:none!important}
 .pa-viewing .pa-artboard{max-width:calc(100% - 20px);max-height:calc(100% - 20px)}
 @media(max-width:900px){.pa-layout{grid-template-columns:145px minmax(0,1fr) 180px}.pa-sidebar{padding:10px 7px}.pa-tools{padding:12px 8px}.pa-sticker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-flip-row{grid-template-columns:1fr}.pa-header{padding:10px 14px}.pa-header h2{font-size:21px}.pa-header p{display:none}.pa-caption{display:block}.pa-caption-actions{justify-content:flex-start;margin-top:4px}.pa-artboard{max-height:calc(100% - 115px)}}
-@media(max-width:650px){.pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.pa-tools{display:none}.pa-header-actions button{font-size:10px;padding:6px}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}
+@media(max-width:650px){.pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.photo-album .pa-fx-open{padding:6px 4px;gap:0;justify-content:center}.pa-fx-open svg{display:none}.pa-fx-open small{font-size:9px}.pa-fx-open b{font-size:10px}.pa-tools{display:none}.pa-header-actions button{font-size:10px;padding:6px}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}

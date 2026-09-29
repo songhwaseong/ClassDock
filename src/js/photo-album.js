@@ -1322,11 +1322,57 @@ const PhotoAlbum = (() => {
     if (document.hidden || root.closest("[hidden]")){ slideTimer = setTimeout(advanceSlide, 1000); return; }
     stepViewing(1);
   }
+  // 넘기기 효과(감상 모드). 앞 사진(ghost)과 새 사진(stage)에 줄 움직임을 d(다음=1·이전=-1)·w·h(무대 크기)로 만든다.
+  // box 가 없는 효과는 두 사진의 알맹이(액자)를 움직이고 앞 사진 층이 위에 온다. box 효과는 층 전체를 움직이며
+  // 새 사진 층이 앞 사진 층을 덮는다(앞 층은 무대 바탕을 칠해 뒤가 비치지 않게). 목록 칸의 미리 보기도 같은 정의를 쓴다.
+  const VIEW_EFFECT_KEY = "classdock.photoAlbum.viewEffect", VIEW_SPEED_KEY = "classdock.photoAlbum.viewEffectSpeed";
+  const VIEW_SPEEDS = [["fast","빠르게",.6],["normal","보통",1],["slow","느리게",1.8]];
+  const EASE_OUT = "cubic-bezier(.22,.7,.3,1)", EASE_BOTH = "cubic-bezier(.65,0,.35,1)";
+  const tx = px => `translateX(${px}px)`, flip = deg => `perspective(1200px) rotateY(${deg}deg)`;
+  const VIEW_EFFECTS = [
+    { id:"slide", label:"밀기", ms:380, old:d => [{ opacity:1, transform:"none" }, { opacity:0, transform:tx(-48*d) }], in:d => [{ opacity:0, transform:tx(48*d) }, { opacity:1, transform:"none" }] },
+    { id:"fade", label:"흐려지기", ms:420, old:() => [{ opacity:1 }, { opacity:0 }], in:() => [{ opacity:0 }, { opacity:1 }] },
+    { id:"push", label:"밀어내기", ms:460, easing:EASE_BOTH, old:(d,w) => [{ transform:"none" }, { transform:tx(-w*d) }], in:(d,w) => [{ transform:tx(w*d) }, { transform:"none" }] },
+    { id:"cover", label:"덮기", ms:480, easing:EASE_BOTH, box:true, in:(d,w) => [{ transform:tx(w*d), clipPath:d > 0 ? `inset(0 ${w}px 0 0)` : `inset(0 0 0 ${w}px)` }, { transform:"none", clipPath:"inset(0 0 0 0)" }] },
+    { id:"zoom", label:"확대", ms:420, old:() => [{ opacity:1, transform:"none" }, { opacity:0, transform:"scale(1.12)" }], in:() => [{ opacity:0, transform:"scale(.88)" }, { opacity:1, transform:"none" }] },
+    { id:"rise", label:"떠오르기", ms:420, old:(d,w,h) => [{ opacity:1, transform:"none" }, { opacity:0, transform:`translateY(${-.12*h*d}px)` }], in:(d,w,h) => [{ opacity:0, transform:`translateY(${.12*h*d}px)` }, { opacity:1, transform:"none" }] },
+    { id:"flip", label:"뒤집기", ms:560, easing:"ease-in-out", old:d => [{ opacity:1, transform:flip(0) }, { offset:.5, opacity:1, transform:flip(-90*d) }, { opacity:0, transform:flip(-90*d) }], in:d => [{ opacity:0, transform:flip(90*d) }, { offset:.5, opacity:1, transform:flip(90*d) }, { opacity:1, transform:flip(0) }] },
+    { id:"blur", label:"번지기", ms:480, old:() => [{ opacity:1, filter:"blur(0)" }, { opacity:0, filter:"blur(14px)" }], in:() => [{ opacity:0, filter:"blur(14px)" }, { opacity:1, filter:"blur(0)" }] },
+    { id:"wipe", label:"닦아내기", ms:520, easing:EASE_BOTH, box:true, in:d => [{ clipPath:d > 0 ? "inset(0 0 0 100%)" : "inset(0 100% 0 0)" }, { clipPath:"inset(0 0 0 0)" }] },
+    { id:"circle", label:"동그라미", ms:560, easing:EASE_BOTH, box:true, in:() => [{ clipPath:"circle(0% at 50% 50%)" }, { clipPath:"circle(75% at 50% 50%)" }] },
+    { id:"none", label:"바로 넘기기", ms:0 },
+    { id:"random", label:"무작위", ms:0 }
+  ];
+  const viewEffectById = id => VIEW_EFFECTS.find(effect => effect.id === id);
+  function viewEffectId(){ try { const id = localStorage.getItem(VIEW_EFFECT_KEY); if (viewEffectById(id)) return id; } catch { /* 기본값 */ } return "slide"; }
+  function viewSpeed(){ try { const id = localStorage.getItem(VIEW_SPEED_KEY); const speed = VIEW_SPEEDS.find(row => row[0] === id); if (speed) return speed; } catch { /* 기본값 */ } return VIEW_SPEEDS[1]; }
+  const movingEffects = () => VIEW_EFFECTS.filter(effect => effect.ms > 0);
+  // 실제로 쓸 효과: 무작위면 움직이는 효과 중 하나를 앞과 다르게, 움직임 줄이기 설정이면 흐려지기만(바로 넘기기는 그대로).
+  let lastRandomEffect = "";
+  function resolveViewEffect(id, reduced){
+    let effect = viewEffectById(id) || viewEffectById("slide");
+    if (effect.id === "random"){
+      const pool = movingEffects().filter(other => other.id !== lastRandomEffect);
+      effect = pool[Math.floor(Math.random()*pool.length)]; lastRandomEffect = effect.id;
+    }
+    if (reduced && effect.ms > 0 && effect.id !== "fade") return viewEffectById("fade");
+    return effect;
+  }
+  // ghost 는 앞 사진 층, stage 는 새 사진 층. 끝나면(도중에 끊겨도) 움직임 목록을 돌려준다. 겹침 순서는 부른 쪽이 되돌린다.
+  function playViewEffect(effect, parts){
+    const { ghost, stage, d, w, h } = parts, anims = [];
+    if (!effect || !(effect.ms > 0)) return Promise.resolve(anims);
+    const timing = { duration:Math.round(effect.ms*(parts.speed || 1)), easing:effect.easing || EASE_OUT, fill:"both", id:"pa-view-switch" };
+    if (effect.box){ ghost.style.zIndex = "0"; stage.style.zIndex = "1"; }
+    const run = (targets, frames) => { if (frames) targets.forEach(el => anims.push(el.animate(frames, timing))); };
+    run(effect.box ? [ghost] : Array.from(ghost.children), effect.old && effect.old(d, w, h));
+    run(effect.box ? [stage] : Array.from(stage.children), effect.in && effect.in(d, w, h));
+    return Promise.allSettled(anims.map(animation => animation.finished)).then(() => anims);
+  }
   // 넘기기 전환: 앞 사진의 요소를 그대로 떼어 무대 위 겹침 층(.pa-view-ghost)으로 옮겨 두고(복제하면 이미 풀어 버린
-  // blob 주소를 다시 읽어 깨진다), 새 사진이 준비되면 앞 사진은 넘기는 쪽으로 밀리며 사라지고 새 사진은 반대쪽에서 들어온다.
-  // 움직임 줄이기 설정이면 밀지 않고 겹쳐 흐려지기만 한다. 겹침 층은 무대 뒤에 둬서 root.querySelector 가 새 무대를 먼저 찾는다.
+  // blob 주소를 다시 읽어 깨진다), 새 사진이 준비되면 고른 넘기기 효과로 바꾼다.
+  // 겹침 층은 무대 뒤에 둬서 root.querySelector 가 새 무대를 먼저 찾는다.
   let viewSwitchToken = 0;
-  const VIEW_SWITCH_MS = 380;
   function dropViewGhosts(){ if (root) root.querySelectorAll(".pa-view-ghost").forEach(el => el.remove()); }
   function viewGhost(){
     const stage = root && root.querySelector(".pa-stage"); dropViewGhosts();
@@ -1340,7 +1386,8 @@ const PhotoAlbum = (() => {
   async function viewSwitchIn(ghost, step){
     const stage = root && root.querySelector(".pa-stage"); if (!ghost || !stage) return;
     const token = ++viewSwitchToken, reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const shift = reduced ? 0 : 48*step, timing = { duration:VIEW_SWITCH_MS, easing:"cubic-bezier(.22,.7,.3,1)", fill:"both", id:"pa-view-switch" };
+    const effect = resolveViewEffect(viewEffectId(), reduced);
+    stage.style.zIndex = "";
     // 새 사진을 다 풀기 전에 흐려지기 시작하면 중간에 툭 나타나므로 잠깐(최대 0.4초) 기다린다. 그동안은 앞 사진이 그대로 보인다.
     const img = stage.querySelector(".pa-photo-surface > img");
     if (img && !img.complete){
@@ -1349,8 +1396,125 @@ const PhotoAlbum = (() => {
       if (stage.isConnected) stage.classList.remove("pa-view-wait");
       if (token !== viewSwitchToken || !ghost.isConnected) return;
     }
-    ghost.animate([{ opacity:1, transform:"translateX(0)" }, { opacity:0, transform:`translateX(${-shift}px)` }], timing).finished.then(() => ghost.remove(), () => ghost.remove());
-    Array.from(stage.children).forEach(el => el.animate([{ opacity:0, transform:`translateX(${shift}px)` }, { opacity:1, transform:"none" }], timing).finished.then(animation => animation.cancel(), () => {}));
+    if (!(effect.ms > 0)){ ghost.remove(); return; }
+    if (effect.box){ const paint = getComputedStyle(stage); ghost.style.backgroundColor = paint.backgroundColor; ghost.style.backgroundImage = paint.backgroundImage; }
+    const anims = await playViewEffect(effect, { ghost, stage, d:step < 0 ? -1 : 1, w:stage.offsetWidth, h:stage.offsetHeight, speed:viewSpeed()[2] });
+    ghost.remove(); anims.forEach(animation => animation.cancel());
+    if (token === viewSwitchToken) stage.style.zIndex = "";
+  }
+  // 목록 칸 위 '넘기기 효과' 단추와 고르는 창. 칸마다 작은 두 장짜리 미리 보기가 있고, 올려 두면 되풀이해 넘긴다.
+  // 고른 효과·빠르기는 간격처럼 브라우저에만 기억한다(사진첩 파일과 무관).
+  function paintEffectButton(){
+    const picker = root && root.querySelector(".pa-view-effect"); if (picker) picker.value = viewEffectId();
+    const name = root && root.querySelector(".pa-fx-name"); if (!name) return;
+    const effect = viewEffectById(viewEffectId()), speed = viewSpeed();
+    name.textContent = effect.label + (effect.ms > 0 || effect.id === "random" ? speed[0] === "normal" ? "" : " · " + speed[1] : "");
+  }
+  function fxDemo(){
+    const demo = document.createElement("span"); demo.className = "pa-fx-demo"; demo.setAttribute("aria-hidden","true");
+    ["a","b"].forEach((kind, index) => { const layer = document.createElement("span"); layer.className = "pa-fx-layer" + (index ? " is-off" : ""); const card = document.createElement("i"); card.className = "pa-fx-card is-" + kind; layer.appendChild(card); demo.appendChild(layer); });
+    return demo;
+  }
+  // 미리 보기는 늘 첫 그림(A)에서 쉰다. 한 번 틀면 A→B 로 넘기고 B 에서 멈추며, 멈추거나 새로 틀면 A 로 되돌린다.
+  // 되돌릴 때 움직임을 모두 취소하므로, 끊긴 앞 차례는 fxToken 이 달라 아무것도 건드리지 않고 끝난다.
+  function resetFxDemo(demo){
+    if (!demo) return;
+    demo.fxToken = (demo.fxToken || 0) + 1;
+    if (demo.getAnimations) demo.getAnimations({ subtree:true }).forEach(animation => animation.cancel());
+    Array.from(demo.children).forEach((layer, index) => { layer.style.zIndex = ""; layer.className = "pa-fx-layer" + (index ? " is-off" : ""); });
+    demo.classList.remove("is-box");
+  }
+  async function playFxDemo(demo, id){
+    if (!demo || typeof demo.animate !== "function") return false;
+    resetFxDemo(demo);
+    const token = demo.fxToken, [ghost, stage] = demo.children, effect = resolveViewEffect(id, false);
+    stage.classList.remove("is-off"); ghost.classList.add("is-top"); demo.classList.toggle("is-box", !!effect.box);
+    await playViewEffect(effect, { ghost, stage, d:1, w:demo.offsetWidth, h:demo.offsetHeight, speed:viewSpeed()[2] });
+    if (token !== demo.fxToken) return false;
+    demo.getAnimations({ subtree:true }).forEach(animation => animation.cancel());
+    ghost.style.zIndex = stage.style.zIndex = ""; ghost.className = "pa-fx-layer is-off"; stage.className = "pa-fx-layer"; demo.classList.remove("is-box");
+    return true;
+  }
+  let fxPanel = null;
+  function closeEffectPanel(){
+    if (!fxPanel) return;
+    fxPanel.stopDemo(); fxPanel.remove(); fxPanel = null;
+    document.removeEventListener("pointerdown", onFxOutside, true);
+    const open = root && root.querySelector(".pa-fx-open"); if (open) open.setAttribute("aria-expanded","false");
+  }
+  function onFxOutside(event){ if (fxPanel && !fxPanel.contains(event.target) && !(event.target.closest && event.target.closest(".pa-fx-open"))) closeEffectPanel(); }
+  function openEffectPanel(){
+    const open = root && root.querySelector(".pa-fx-open"); if (!open) return;
+    if (fxPanel){ closeEffectPanel(); return; }
+    const panel = fxPanel = document.createElement("div"); panel.className = "pa-fx-panel"; panel.setAttribute("role","dialog"); panel.setAttribute("aria-label","넘기기 효과");
+    const head = document.createElement("div"); head.className = "pa-fx-head"; head.innerHTML = "<strong>넘기기 효과</strong><small>감상 모드에서 사진을 넘길 때 (←/→·휠·슬라이드쇼)</small>";
+    const grid = document.createElement("div"); grid.className = "pa-fx-grid";
+    // 올려 둔(키보드로 옮겨 간) 칸만 A→B 를 되풀이하고, 떠나면 곧바로 A 로 돌아간다. once 는 한 번만 보여 주고 A 로.
+    let demoTile = null, demoTimer = null;
+    const stopDemo = () => { clearTimeout(demoTimer); demoTimer = null; if (demoTile) resetFxDemo(demoTile.querySelector(".pa-fx-demo")); demoTile = null; };
+    const loopDemo = (tile, once) => {
+      stopDemo(); demoTile = tile;
+      const demo = tile.querySelector(".pa-fx-demo"), id = tile.dataset.effect;
+      const round = async () => {
+        if (demoTile !== tile || !(await playFxDemo(demo, id)) || demoTile !== tile) return;
+        demoTimer = setTimeout(() => {
+          if (demoTile !== tile) return;
+          if (once){ stopDemo(); return; }
+          resetFxDemo(demo); demoTimer = setTimeout(round, 350);
+        }, 800);
+      };
+      round();
+    };
+    const leaveDemo = tile => { if (demoTile === tile) stopDemo(); };
+    panel.stopDemo = stopDemo;
+    VIEW_EFFECTS.forEach(effect => {
+      const tile = button("", () => {
+        try { localStorage.setItem(VIEW_EFFECT_KEY, effect.id); } catch { /* 이번 화면에만 적용 */ }
+        grid.querySelectorAll(".pa-fx-tile").forEach(other => other.setAttribute("aria-pressed", String(other === tile)));
+        paintEffectButton(); loopDemo(tile, !tile.matches(":hover,:focus-visible"));
+      }, "pa-fx-tile");
+      tile.dataset.effect = effect.id; tile.setAttribute("aria-pressed", String(effect.id === viewEffectId()));
+      const label = document.createElement("span"); label.textContent = effect.label;
+      tile.append(fxDemo(), label);
+      tile.onpointerenter = () => loopDemo(tile); tile.onpointerleave = () => leaveDemo(tile);
+      tile.onfocus = () => { if (tile.matches(":focus-visible")) loopDemo(tile); }; tile.onblur = () => leaveDemo(tile);
+      grid.appendChild(tile);
+    });
+    const speedRow = document.createElement("div"); speedRow.className = "pa-fx-speed"; speedRow.setAttribute("role","group"); speedRow.setAttribute("aria-label","빠르기");
+    const speedLabel = document.createElement("span"); speedLabel.textContent = "빠르기"; speedRow.appendChild(speedLabel);
+    VIEW_SPEEDS.forEach(([id,label]) => {
+      const choice = button(label, () => {
+        try { localStorage.setItem(VIEW_SPEED_KEY, id); } catch { /* 이번 화면에만 적용 */ }
+        speedRow.querySelectorAll("button").forEach(other => other.setAttribute("aria-pressed", String(other === choice)));
+        paintEffectButton();
+        const tile = grid.querySelector('.pa-fx-tile[aria-pressed="true"]'); if (tile) loopDemo(tile, true);
+      });
+      choice.setAttribute("aria-pressed", String(id === viewSpeed()[0])); speedRow.appendChild(choice);
+    });
+    const foot = document.createElement("div"); foot.className = "pa-fx-foot";
+    const note = document.createElement("small"); note.textContent = "컴퓨터의 '애니메이션 줄이기'가 켜져 있으면 흐려지기로 넘어갑니다.";
+    const tryIt = button("감상 모드에서 보기", () => { closeEffectPanel(); setViewing(true); }, "primary");
+    tryIt.disabled = shownRecords().length < 1;
+    foot.append(note, tryIt);
+    panel.append(head, grid, speedRow, foot);
+    // 창 안의 키는 사진첩 단축키(되돌리기·장식 옮기기)로 새지 않게 막는다. 방향키로 칸을 옮겨 다닌다(한 줄 3칸).
+    panel.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Escape"){ event.preventDefault(); closeEffectPanel(); open.focus(); return; }
+      const move = { ArrowLeft:-1, ArrowRight:1, ArrowUp:-3, ArrowDown:3 }[event.key], tiles = Array.from(grid.children), at = tiles.indexOf(document.activeElement);
+      if (!move || at < 0) return;
+      event.preventDefault(); const next = tiles[at + move]; if (next) next.focus();
+    });
+    root.appendChild(panel);
+    // 단추 오른쪽(좁으면 아래)에 띄우고 사진첩 밖으로 넘치지 않게 당긴다. 두 사각형이 같은 좌표계라 확대 배율과 무관.
+    const box = root.getBoundingClientRect(), at = open.getBoundingClientRect(), pw = panel.offsetWidth, ph = panel.offsetHeight;
+    const side = at.right - box.left + 8 + pw <= box.width;
+    let left = side ? at.right - box.left + 8 : at.left - box.left, top = side ? at.top - box.top : at.bottom - box.top + 6;
+    left = Math.max(6, Math.min(left, box.width - pw - 6)); top = Math.max(6, Math.min(top, box.height - ph - 6));
+    panel.style.left = left + "px"; panel.style.top = top + "px";
+    open.setAttribute("aria-expanded","true");
+    document.addEventListener("pointerdown", onFxOutside, true);
+    (grid.querySelector('.pa-fx-tile[aria-pressed="true"]') || grid.firstChild).focus();
   }
   // 감상 모드 휠: 아래(오른쪽)=다음, 위(왼쪽)=이전. 터치패드는 작은 값이 잇달아 오므로 모아서 한 칸을 넘기고,
   // 넘긴 뒤 잠깐은 남은 관성 스크롤(작은 값)을 버린다. 마우스 휠 한 칸(큰 값)은 0.2초만 지나면 곧바로 다음 장으로.
@@ -1447,7 +1611,7 @@ const PhotoAlbum = (() => {
   }
   function setViewing(on){
     if (!root || viewing === on) return;
-    dropViewGhosts(); if (!on) setSlideshow(false);
+    dropViewGhosts(); closeEffectPanel(); if (!on) setSlideshow(false);
     if (!on && viewFullscreen){ viewFullscreen = false; if (viewerFullscreenOn()) toggleViewFullscreen(); } viewing = on; root.classList.toggle("pa-viewing",viewing); wakeCursor(); root.querySelector(".pa-view").textContent = viewing ? "✎ 꾸미기 모드" : "▣ 감상 모드";
     requestAnimationFrame(fitArtboard); syncMusic(); syncSfx();
     if (!viewing){ const card = root.querySelector(".pa-media-card.active"); if (card) card.scrollIntoView({ block:"nearest" }); }
@@ -2926,13 +3090,19 @@ const PhotoAlbum = (() => {
     } catch(error){ console.error(error); notice("PNG를 만들지 못했습니다."); }
   }
   function makeUi(host){
-    host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
-    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-layout"><aside class="pa-sidebar"><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div><section class="pa-bg-section"><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div><div class="pa-music"></div><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></div><aside class="pa-tools"><div class="pa-tools-title"><strong>꾸미기</strong><small>사진 위에 올려 보세요</small></div><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></aside></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
+    closeEffectPanel(); host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
+    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div><section class="pa-bg-section"><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div><div class="pa-music"></div><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></div><aside class="pa-tools"><div class="pa-tools-title"><strong>꾸미기</strong><small>사진 위에 올려 보세요</small></div><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></aside></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
     host.appendChild(root);
     root.querySelector(".pa-import").onclick = () => root.querySelector(".pa-input").click();
     root.querySelector(".pa-input").onchange = async event => { await importFiles(event.target.files); event.target.value = ""; };
     root.querySelector(".pa-view").onclick = () => setViewing(!viewing);
     root.querySelector(".pa-view-exit").onclick = () => setViewing(false);
+    root.querySelector(".pa-fx-open").onclick = openEffectPanel;
+    // 감상 모드 단추 줄의 효과 고르개: 목록 위 단추와 같은 값을 쓴다. 고르면 포커스를 풀어 ←/→ 가 다시 사진 넘기기로.
+    const effectPicker = root.querySelector(".pa-view-effect");
+    VIEW_EFFECTS.forEach(effect => { const option = document.createElement("option"); option.value = effect.id; option.textContent = effect.label; effectPicker.appendChild(option); });
+    effectPicker.onchange = () => { try { localStorage.setItem(VIEW_EFFECT_KEY, effectPicker.value); } catch { /* 이번 화면에만 적용 */ } effectPicker.blur(); paintEffectButton(); };
+    paintEffectButton();
     root.querySelector(".pa-slide-toggle").onclick = () => setSlideshow(!slideshow);
     root.addEventListener("pointermove", wakeCursor); root.addEventListener("pointerdown", wakeCursor);
     const seconds = root.querySelector(".pa-slide-seconds"), chosen = slideSeconds();
@@ -3029,7 +3199,7 @@ const PhotoAlbum = (() => {
     makeUi(host); applyMotionSetting();
     window.addEventListener("keydown", onHistoryKey);
   }
-  function cleanup(){ slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null; root = null; }
+  function cleanup(){ closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null; root = null; }
   return { mount, cleanup };
 })();
 
