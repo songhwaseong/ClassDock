@@ -10325,3 +10325,143 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-viewing .pa-artboard{max-width:calc(100% - 20px);max-height:calc(100% - 20px)}
 @media(max-width:900px){.pa-layout{grid-template-columns:145px minmax(0,1fr) 180px}.pa-sidebar{padding:10px 7px}.pa-tools{padding:12px 8px}.pa-sticker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-flip-row{grid-template-columns:1fr}.pa-header{padding:10px 14px}.pa-header h2{font-size:21px}.pa-header p{display:none}.pa-caption{display:block}.pa-caption-actions{justify-content:flex-start;margin-top:4px}.pa-artboard{max-height:calc(100% - 115px)}}
 @media(max-width:650px){.pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.photo-album .pa-fx-open{padding:6px 4px;gap:0;justify-content:center}.pa-fx-open svg{display:none}.pa-fx-open small{font-size:9px}.pa-fx-open b{font-size:10px}.pa-tools{display:none}.pa-header-actions button{font-size:10px;padding:6px}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}
+
+/* 로또 6/45 — 다크 바이올렛, 기존 문서 테마와 독립된 도구 창 */
+.modal.lotto-modal{container:lotto-viewport / inline-size;z-index:1250;padding:20px;background:rgba(2,6,18,.82);color:#f5f5ff;color-scheme:dark}
+.lotto-shell{--lotto-line:#26365b;--lotto-muted:#a4b1d7;display:grid;grid-template-columns:148px minmax(0,1fr) 310px;gap:16px;width:min(1440px,100%);max-width:100%;max-height:calc((100vh / var(--ui-zoom,1)) - 40px);overflow:auto;padding:16px;border:1px solid #26375e;border-radius:18px;background:radial-gradient(ellipse at 48% 4%,#121c42 0,#071025 70%);box-shadow:0 25px 100px #0009;font-size:16px;line-height:1.5;text-align:left}
+.lotto-shell *, .lotto-shell *::before, .lotto-shell *::after{box-sizing:border-box}
+.lotto-shell button,.lotto-shell input,.lotto-shell select,.lotto-shell summary{font:inherit}
+.lotto-shell button{cursor:pointer;color:inherit}
+.lotto-shell button:disabled{cursor:default;opacity:.45}
+.lotto-shell button:focus-visible,.lotto-shell input:focus-visible,.lotto-shell select:focus-visible,.lotto-shell summary:focus-visible{outline:3px solid #9ea4ff;outline-offset:4px}
+.lotto-shell h2,.lotto-shell h3,.lotto-shell p{margin:0}
+.lotto-shell [hidden]{display:none!important}
+.lotto-icon{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:0 0 auto;line-height:0}
+.lotto-icon svg{display:block;vertical-align:0;width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.lotto-rail{display:flex;flex-direction:column;gap:10px;align-self:stretch;border:1px solid var(--lotto-line);border-radius:12px;padding:18px 0;background:#08132d70}
+.lotto-brand{display:flex;flex-direction:column;align-items:center;margin:4px 0 28px;color:#c4c9ff;font-weight:750;letter-spacing:2px}
+.lotto-mark{font-size:48px;line-height:1.1;color:#8da8ff;text-shadow:0 0 22px #7965ff}
+.lotto-brand small{font-size:14px;letter-spacing:1px}
+.lotto-nav{display:flex;white-space:nowrap;gap:8px;align-items:center;min-height:48px;padding:12px 14px;border:0;border-radius:0 9px 9px 0;background:transparent;color:var(--lotto-muted)!important;font-size:14px!important;text-align:left}
+.lotto-nav:hover{background:#24244f}
+.lotto-nav.active{background:linear-gradient(90deg,#6330e7,#282572);box-shadow:inset 3px 0 #a17aff;color:white!important}
+.lotto-exit{margin-top:auto}
+.lotto-main{display:block;min-width:0;padding:20px 8px 8px}
+.lotto-heading{display:flex;justify-content:space-between;align-items:flex-start;margin:0 12px 22px;gap:16px}
+.lotto-eyebrow{color:#a69cff;font-size:17px;font-weight:750;letter-spacing:2px;margin-bottom:8px!important}
+.lotto-heading h2{font-size:clamp(28px,3.2vw,46px);font-weight:850;letter-spacing:-1.8px;line-height:1.3}
+.lotto-subtitle{margin-top:12px!important;color:var(--lotto-muted);font-size:15px}
+.lotto-close{display:grid;place-items:center;width:36px;height:36px;padding:0;line-height:1;border:1px solid var(--lotto-line);border-radius:9px;background:#172044;flex-shrink:0}
+.lotto-close>.lotto-icon{width:20px;height:20px;margin:0}
+.lotto-close:hover{background:#2b3263}
+.lotto-panel{border:1px solid var(--lotto-line);border-radius:13px;background:linear-gradient(145deg,#111b3bd0,#0a142bd9)}
+.lotto-controls{display:flex;gap:20px;align-items:center;justify-content:space-between;padding:18px 20px;margin-bottom:18px;flex-wrap:wrap}
+.lotto-label{display:block;font-size:14px;font-weight:650;margin-bottom:10px}
+.lotto-counts{display:flex;gap:7px}
+.lotto-count{min-width:56px;padding:10px 7px;border:1px solid #3b4977;border-radius:9px;background:#101a36;font-size:14px!important;color:#cbd1ef!important}
+.lotto-count.active{background:linear-gradient(145deg,#7343ff,#4823e1);color:#fff!important;border-color:#aa84ff;box-shadow:0 0 20px #6730ff30}
+.lotto-options{display:flex;flex-direction:column;gap:12px;padding-left:18px;border-left:1px solid #2b3963;font-size:14px}
+.lotto-toggle{display:flex;align-items:center;gap:10px;cursor:pointer;color:#d8ddf8}
+.lotto-toggle input,.lotto-history-line input{width:19px;height:19px;accent-color:#8461ff;flex-shrink:0;margin:0;cursor:pointer}
+.lotto-result{position:relative;overflow:hidden;padding:22px;border-color:#5841b4;background:radial-gradient(ellipse at 48% 16%,#33206155,transparent 70%),linear-gradient(150deg,#13163a,#071329)}
+.lotto-result-caption{display:flex;align-items:center;gap:12px;justify-content:center;color:#b4b7ed;font-size:14px;text-align:center;margin-bottom:20px!important}
+.lotto-result-caption::before,.lotto-result-caption::after{content:"";height:1px;background:#37376d;flex:1;max-width:130px}
+.lotto-result-content{padding-top:4px;min-height:190px}
+.lotto-game{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:18px}
+.lotto-balls{display:flex;align-items:center;justify-content:center;gap:clamp(9px,1.25vw,20px);width:100%;padding:15px 0 18px}
+.lotto-ball{--ball:#ecb720;--ball-light:#fffca7;--ball-dark:#945900;display:grid;place-items:center;position:relative;isolation:isolate;flex:0 1 98px;width:clamp(52px,6.8vw,104px);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 30% 24%,var(--ball-light),var(--ball) 45%,var(--ball-dark) 98%);box-shadow:inset -5px -6px 10px #0004,inset 2px 3px 5px #fff9,0 10px 22px color-mix(in srgb,var(--ball) 25%,transparent);color:#fff;font-size:clamp(26px,3.8vw,54px);font-weight:850;line-height:1;text-shadow:0 2px 3px #0002;border:1px solid color-mix(in srgb,var(--ball-light) 60%,transparent)}
+.lotto-ball::before{content:"";position:absolute;top:10%;left:17%;width:38%;height:16%;border-radius:50%;background:linear-gradient(180deg,#fffc,#fff0);transform:rotate(-30deg);z-index:-1}
+.lotto-ball-yellow{color:#302500}
+.lotto-ball-blue{--ball:#1478f4;--ball-light:#b2e8ff;--ball-dark:#0b2c9b}
+.lotto-ball-purple{--ball:#9251ec;--ball-light:#e0c6ff;--ball-dark:#4a11ab}
+.lotto-ball-green{--ball:#0cb25d;--ball-light:#b1f6ce;--ball-dark:#034e2b}
+.lotto-ball-silver{--ball:#b8bed2;--ball-light:#fff;--ball-dark:#626c83;color:#11182f}
+.lotto-ball-empty{--ball:#263351;--ball-light:#697594;--ball-dark:#14203a;color:#c4cee5;box-shadow:inset -4px -4px 10px #0004}
+.lotto-game-label{font-size:16px;font-weight:700;color:#a8a5e3;width:18px}
+.lotto-balls-small{justify-content:flex-start;gap:8px;padding:0;width:auto}
+.lotto-ball-small{flex:0 0 32px;width:32px;font-size:16px;box-shadow:inset -2px -2px 4px #0004,inset 1px 2px 3px #fff8}
+.lotto-game .lotto-ball-small{flex-basis:clamp(36px,4.5vw,60px);width:clamp(36px,4.5vw,60px);font-size:clamp(18px,2.5vw,28px)}
+.lotto-draw{display:flex;align-items:center;justify-content:center;gap:14px;width:100%;padding:18px;border:1px solid #ac8cff;border-radius:13px;background:linear-gradient(150deg,#7a3bff,#4520dc);font-size:24px!important;font-weight:750;box-shadow:inset 0 1px 1px #ffffff30,0 9px 30px #5c28ff22;transition:filter .18s,transform .18s}
+.lotto-draw:hover:not(:disabled){filter:brightness(1.15);transform:translateY(-1px)}
+.lotto-draw .lotto-icon{width:29px;height:29px}
+.lotto-status{min-height:36px;margin:10px 0 6px!important;color:#aeb9dd;font-size:14px;display:flex;align-items:center;justify-content:center;text-align:center}
+.lotto-status-error{color:#ffb8c7!important}
+.lotto-actions{display:flex;gap:10px;flex-wrap:wrap}
+.lotto-secondary{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;min-width:130px;padding:13px 10px;border:1px solid #42537e;border-radius:10px;background:linear-gradient(140deg,#172341,#101b35);font-size:15px!important;font-weight:650}
+.lotto-secondary:hover:not(:disabled){background:#253159;border-color:#887bc7}
+.lotto-export{flex-basis:100%;padding:9px;font-size:14px!important;color:#bcc5e5!important}
+.lotto-fair{margin:16px 0 5px!important;text-align:center;color:#9aa7cd;font-size:13px}
+.lotto-side{display:flex;flex-direction:column;gap:16px;padding-top:10px;min-width:0}
+.lotto-exclusion,.lotto-history{padding:18px}
+.lotto-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px}
+.lotto-panel-head h3{font-size:19px;letter-spacing:-.5px}
+.lotto-text-button{padding:3px 0;background:none;border:0;color:#b2a3ff!important;font-size:14px!important;white-space:nowrap}
+.lotto-text-button:hover{text-decoration:underline}
+.lotto-chips{display:flex;flex-wrap:wrap;gap:8px;max-height:168px;overflow:auto;padding:2px 0 10px}
+.lotto-chip{display:inline-flex;align-items:center;justify-content:center;min-width:42px;min-height:36px;padding:5px 10px;border:1px solid #495580;border-radius:20px;background:linear-gradient(140deg,#2b3567,#161e40);font-size:15px!important;font-weight:650}
+.lotto-chip-auto{border-style:dashed;color:#bcc7ed}
+.lotto-chip:hover{border-color:#a092e4}
+.lotto-empty{color:#a2b0d3;font-size:14px;padding:10px 0;line-height:1.7}
+.lotto-number-details{margin-top:6px;border:1px solid #3a4c78;border-radius:9px}
+.lotto-number-details summary{padding:10px 12px;cursor:pointer;font-size:14px;color:#cbd4ef}
+.lotto-number-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;padding:0 8px 10px}
+.lotto-number{padding:6px 0;border:1px solid #34466f;border-radius:7px;background:#111c39;font-size:14px!important}
+.lotto-number.active{background:#6337c7;border-color:#b18ef6}
+.lotto-pool-note,.lotto-history-hint{font-size:13px;color:#a2b0d3;margin-top:12px!important;line-height:1.65}
+.lotto-history-hint{margin:0 0 8px!important}
+.lotto-history-row{padding:14px 0;border-top:1px solid #26365b}
+.lotto-history-line{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.lotto-time{font-size:12px;color:#b8c4e7;flex:1}
+.lotto-games-count{font-size:12px;color:#a499e8;white-space:nowrap}
+.lotto-history-numbers{display:flex;gap:6px;align-items:center}
+.lotto-history-game{display:flex;align-items:center;gap:5px;border:0;background:none;padding:0;flex:1;min-width:0}
+.lotto-history-game small{font-size:12px;color:#adb8dc}
+.lotto-row-copy{display:grid;place-items:center;padding:6px;border:1px solid #34476d;border-radius:7px;background:#15203c}
+.lotto-row-copy .lotto-icon{width:17px;height:17px}
+.lotto-history-rows .lotto-ball-small{width:28px;flex-basis:28px;font-size:14px}
+.lotto-history-rows .lotto-balls-small{gap:5px}
+.lotto-list-title{font-size:22px;margin-bottom:20px!important}
+.lotto-full-history{max-height:480px;overflow:auto;padding-right:10px}
+.lotto-reveal .lotto-ball{animation:lotto-arrive .45s ease both}
+.lotto-reveal .lotto-ball:nth-child(2){animation-delay:.04s}.lotto-reveal .lotto-ball:nth-child(3){animation-delay:.08s}.lotto-reveal .lotto-ball:nth-child(4){animation-delay:.12s}.lotto-reveal .lotto-ball:nth-child(5){animation-delay:.16s}.lotto-reveal .lotto-ball:nth-child(6){animation-delay:.2s}
+@keyframes lotto-arrive{from{opacity:0;transform:translateY(16px) scale(.85)}to{opacity:1;transform:none}}
+@container lotto-viewport (max-width:1180px){.lotto-shell{grid-template-columns:110px minmax(0,1fr) 284px;gap:10px;padding:12px}.lotto-main{padding:12px 0}.lotto-result{padding:16px}.lotto-controls{padding:14px}.lotto-nav{padding:12px 9px;gap:6px}.lotto-side{padding-top:0}.lotto-history,.lotto-exclusion{padding:14px}.lotto-count{min-width:48px}}
+@container lotto-viewport (max-width:940px){.lotto-shell{grid-template-columns:88px minmax(0,1fr)}.lotto-side{grid-column:2;display:grid;grid-template-columns:1fr 1fr}.lotto-rail{grid-row:1/3}.lotto-nav{flex-direction:column;text-align:center;gap:5px}.lotto-ball{flex-basis:88px;width:88px;font-size:42px}.lotto-balls{gap:12px}.lotto-heading h2{font-size:36px}.lotto-controls{justify-content:flex-start}.lotto-result-content{min-height:185px}}
+@container lotto-viewport (max-width:650px){.lotto-shell{width:100%;max-height:calc((100vh / var(--ui-zoom,1)) - 40px);grid-template-columns:minmax(0,1fr);padding:10px;border-radius:13px}.lotto-rail{grid-row:auto;flex-direction:row;align-items:center;gap:4px;padding:8px;border-radius:9px;position:sticky;top:0;z-index:2;background:#0b1430}.lotto-brand{margin:0 8px 0 0;letter-spacing:1px;font-size:12px}.lotto-mark{font-size:24px}.lotto-brand small{font-size:12px}.lotto-nav{flex:1;min-width:0;white-space:normal;overflow-wrap:break-word;padding:8px 3px;border-radius:7px;font-size:12px!important}.lotto-exit{margin:0;flex:0 0 26px;font-size:0!important}.lotto-nav .lotto-icon{width:19px;height:19px}.lotto-side{grid-column:auto;grid-template-columns:minmax(0,1fr)}.lotto-main{padding:8px 0}.lotto-heading{margin:0 5px 20px}.lotto-heading h2{font-size:29px}.lotto-eyebrow{font-size:14px}.lotto-subtitle{font-size:14px}.lotto-controls{gap:14px}.lotto-count-group{width:100%}.lotto-counts{width:100%;gap:4px}.lotto-count{min-width:0;flex:1;padding:10px 2px;white-space:nowrap}.lotto-options{border-left:0;padding:0;gap:10px}.lotto-ball{min-width:0;flex-basis:54px;width:54px;font-size:27px}.lotto-balls{gap:7px;padding-top:8px}.lotto-result-content{min-height:140px}.lotto-result{padding:14px}.lotto-draw{font-size:20px!important;padding:16px}.lotto-secondary{font-size:14px!important;min-width:100px}.lotto-ball-small{width:32px;flex-basis:32px;font-size:16px}.lotto-game .lotto-ball-small{width:34px;flex-basis:34px;font-size:17px}.lotto-game{gap:6px}.lotto-game .lotto-balls-small{gap:6px}.lotto-history-rows .lotto-ball-small{width:34px;flex-basis:34px;font-size:16px}.lotto-history-rows .lotto-balls-small{gap:8px}}
+@media(prefers-reduced-motion:reduce){.lotto-reveal .lotto-ball{animation:none}.lotto-draw{transition:none}}
+
+/* 후보/번호 줄은 실제 카드 너비를 나눠 쓴다. 확대·좁은 창에서도 6개 공의 비율과 가독성을 유지한다. */
+.lotto-game>.lotto-balls{display:grid;grid-template-columns:repeat(var(--lotto-cols,6),minmax(0,1fr));max-width:calc(var(--lotto-cols,6) * 113px);margin-inline:auto}
+.lotto-game>.lotto-balls>.lotto-ball{justify-self:center;width:100%;max-width:104px;min-width:0;font-size:clamp(24px,4.1cqi,54px)}
+.lotto-game>.lotto-balls-small{width:100%;max-width:calc(var(--lotto-cols,6) * 75px)}
+.lotto-game>.lotto-balls-small>.lotto-ball-small{max-width:60px;font-size:clamp(18px,2.8cqi,28px)}
+.lotto-history-game>.lotto-balls-small{display:grid;grid-template-columns:repeat(var(--lotto-cols,6),minmax(0,1fr));width:100%;max-width:calc(var(--lotto-cols,6) * 37px);gap:5px}
+.lotto-history-game>.lotto-balls-small>.lotto-ball-small{justify-self:center;width:100%;max-width:30px;min-width:0;font-size:14px}
+
+.lotto-nav-label{display:block;word-break:keep-all;overflow-wrap:normal}
+
+/* 연금복권 720+ — 로또 창에 탭으로 붙는다. 조 공 + 자리별 색 공 6개 */
+.lotto-kinds{display:inline-flex;gap:4px;padding:4px;margin:0 12px 18px;border:1px solid var(--lotto-line);border-radius:11px;background:#0b1430}
+.lotto-kind{padding:8px 16px;border:0;border-radius:8px;background:transparent;color:var(--lotto-muted)!important;font-size:14px!important;font-weight:650;white-space:nowrap}
+.lotto-kind:hover{background:#1c2450}
+.lotto-kind.active{background:linear-gradient(145deg,#7343ff,#4823e1);color:#fff!important;box-shadow:0 0 16px #6730ff30}
+.lotto-ball-orange{--ball:#f07a1a;--ball-light:#ffd3a4;--ball-dark:#8f3a00}
+.lotto-ball-pink{--ball:#e2468f;--ball-light:#ffc4de;--ball-dark:#8c1150}
+.lotto-ball-group{--ball:#f2f4fb;--ball-light:#fff;--ball-dark:#8e97b3;color:#33207f}
+.lotto-ball-face{display:inline-flex;align-items:baseline;line-height:1}
+.lotto-ball-face small{font-size:.5em;margin-left:1px;font-weight:750}
+.lotto-group-box{display:flex;flex-direction:column;min-width:0;padding-left:18px;border-left:1px solid #2b3963}
+.lotto-group-choices{flex-wrap:wrap}
+.lotto-group-choice{min-width:50px}
+.lotto-group-hint,.lotto-fixed-hint{font-size:13px;color:#a2b0d3;line-height:1.6}
+.lotto-group-hint{margin-top:8px!important}
+.lotto-fixed{padding:18px}
+.lotto-fixed-hint{margin:0 0 12px!important}
+.lotto-fixed-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.lotto-fixed-cell{display:flex;flex-direction:column;align-items:stretch;gap:5px;min-width:0;font-size:12px;color:var(--lotto-muted);text-align:center}
+.lotto-fixed-cell select{width:100%;min-width:0;padding:7px 0;border:1px solid #34466f;border-radius:7px;background:#111c39;color:#f5f5ff;font-size:15px;text-align:center;text-align-last:center;cursor:pointer}
+.lotto-fixed-cell select.active{background:#6337c7;border-color:#b18ef6}
+.lotto-fixed-cell option{background:#111c39;color:#f5f5ff}
+.lotto-shell[data-game="pension"] .lotto-game>.lotto-balls:not(.lotto-balls-small)>.lotto-ball{font-size:clamp(22px,3.6cqi,48px)}
+@container lotto-viewport (max-width:1180px){.lotto-fixed{padding:14px}.lotto-controls .lotto-group-box{padding-left:0;border-left:0;width:100%}}
+@container lotto-viewport (max-width:650px){.lotto-kinds{display:flex;margin:0 5px 14px}.lotto-kind{flex:1;min-width:0;padding:8px 4px;font-size:13px!important}.lotto-group-choices .lotto-count{flex:1 0 calc(25% - 4px)}.lotto-shell[data-game="pension"] .lotto-game>.lotto-balls:not(.lotto-balls-small){gap:5px}.lotto-shell[data-game="pension"] .lotto-game>.lotto-balls:not(.lotto-balls-small)>.lotto-ball{font-size:22px}}

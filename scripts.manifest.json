@@ -145,6 +145,7 @@
     "data-convert-ui.js",
     "exchange-rate.js",
     "exchange-rate-ui.js",
+    "lotto.js",
     "scratchpad.js",
     "mnote.js",
     "neis-api.js",
@@ -332,6 +333,7 @@
         "data-convert-ui.js",
         "exchange-rate.js",
         "exchange-rate-ui.js",
+        "lotto.js",
         "scratchpad.js",
         "mnote.js",
         "neis-api.js",
@@ -707,6 +709,10 @@
     ],
     "recent-files.js": [
       "documents.js"
+    ],
+    "lotto.js": [
+      "icons.js",
+      "file-loaders.js"
     ],
     "exchange-rate-ui.js": [
       "exchange-rate.js",

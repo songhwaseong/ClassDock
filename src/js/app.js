@@ -164,6 +164,8 @@ function wire(){
   if (byId("dzNewTier")) byId("dzNewTier").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newTierScratch === "function") newTierScratch(); });
   if (byId("dzNewBracket")) byId("dzNewBracket").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newBracketScratch === "function") newBracketScratch(); });
   if (byId("dzNewPick")) byId("dzNewPick").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newPickScratch === "function") newPickScratch(); });
+  if (byId("dzLottoPicker")) byId("dzLottoPicker").addEventListener("click", (e) => { e.stopPropagation(); if (typeof window.openLottoPicker === "function") window.openLottoPicker({ game:"lotto" }); });
+  if (byId("dzPensionPicker")) byId("dzPensionPicker").addEventListener("click", (e) => { e.stopPropagation(); if (typeof window.openLottoPicker === "function") window.openLottoPicker({ game:"pension" }); });
   if (byId("dzNewExam")) byId("dzNewExam").addEventListener("click", (e) => { e.stopPropagation(); if (typeof newExamPaper === "function") newExamPaper(); });
   if (byId("dzOpenLesson")) byId("dzOpenLesson").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openLessonFilePicker === "function") openLessonFilePicker(); });
   if (byId("dzTaskBatch")) byId("dzTaskBatch").addEventListener("click", (e) => { e.stopPropagation(); if (typeof openTaskBatchReview === "function") openTaskBatchReview(); });
@@ -524,6 +526,8 @@ function wire(){
   if (byId("sbNewTier")) byId("sbNewTier").onclick = () => { if (typeof newTierScratch === "function") newTierScratch(); };
   if (byId("sbNewBracket")) byId("sbNewBracket").onclick = () => { if (typeof newBracketScratch === "function") newBracketScratch(); };
   if (byId("sbNewPick")) byId("sbNewPick").onclick = () => { if (typeof newPickScratch === "function") newPickScratch(); };
+  if (byId("sbLottoPicker")) byId("sbLottoPicker").onclick = () => { if (typeof window.openLottoPicker === "function") window.openLottoPicker({ game:"lotto" }); };
+  if (byId("sbPensionPicker")) byId("sbPensionPicker").onclick = () => { if (typeof window.openLottoPicker === "function") window.openLottoPicker({ game:"pension" }); };
   if (byId("sbOpenLesson")) byId("sbOpenLesson").onclick = () => { if (typeof openLessonFilePicker === "function") openLessonFilePicker(); };
   if (byId("sbTaskBatch")) byId("sbTaskBatch").onclick = () => { if (typeof openTaskBatchReview === "function") openTaskBatchReview(); };
   if (byId("sbNewExam")) byId("sbNewExam").onclick = () => { if (typeof newExamPaper === "function") newExamPaper(); };
