@@ -386,15 +386,29 @@ if (typeof module !== "undefined" && module.exports) module.exports = Object.ass
       try { localStorage.setItem(G().model.KEY, JSON.stringify(S())); storageNotice = ""; }
       catch (_){ storageNotice = "이 컴퓨터에 기록을 저장하지 못했어요. 필요한 번호는 복사하거나 파일로 내보내 주세요."; }
     }
+    // 복사하면 메모에도 글 블록으로 넣는다. 같은 창에서 같은 회차를 또 복사해도 메모에는 한 번만 넣는다.
+    const memoSent = new Set();
+    function sendToMemo(game, round){
+      if (memoSent.has(round.id)) return "already";
+      if (typeof window.appendTextToScratchpad !== "function") return "";
+      try {
+        if (!window.appendTextToScratchpad(game.tab + " · " + dateText(round.time) + "\n" + roundText(game, round))) return "";
+      } catch (_){ return ""; }
+      memoSent.add(round.id);
+      return "added";
+    }
     async function copyRound(round){
       if (!round) return;
-      const game = G();
+      const game = G(), memo = sendToMemo(game, round);
+      const memoText = memo === "added" ? " 메모에도 넣었어요." : memo === "already" ? " 메모에는 이미 넣었어요." : "";
       // 클립보드 대체 경로가 임시 textarea 에 포커스를 옮겼다 지우므로 누른 버튼으로 되돌린다.
       const focused = document.activeElement;
-      try {
-        const ok = typeof copyDocumentMenuText === "function" && await copyDocumentMenuText(roundText(game, round), game.file + " 번호를 복사했어요.");
-        status.textContent = ok ? "번호를 복사했어요." : "복사하지 못했어요. 텍스트로 내보내기를 이용해 주세요.";
-      } catch (_){ status.textContent = "복사하지 못했어요. 텍스트로 내보내기를 이용해 주세요."; }
+      let ok = false;
+      try { ok = typeof copyDocumentMenuText === "function" && await copyDocumentMenuText(roundText(game, round), game.file + " 번호를 복사했어요." + memoText); }
+      catch (_){}
+      status.textContent = ok ? "번호를 복사했어요." + memoText
+        : memo === "added" ? "클립보드 복사는 못 했지만 메모에는 넣었어요."
+        : "복사하지 못했어요. 텍스트로 내보내기를 이용해 주세요.";
       if (opened === card && usable(focused) && document.activeElement !== focused) focused.focus();
     }
     // 다시 그리면 누른 요소가 새로 만들어지거나 비활성이 되어 포커스가 창 밖으로 빠진다.

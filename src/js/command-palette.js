@@ -75,7 +75,7 @@
     C("convertFormat","🔄","형식 변환 (JSON·CSV·표·마크다운)", () => callFn("openDataConvert"),
       { kw:"convert format json csv tsv xml yaml table markdown 변환 형식 포맷 표 바꾸기 데이터" }),
     C("lottoPicker","🎱","로또 번호 뽑기 (6/45)", () => callFn("openLottoPicker", { game:"lotto" }),
-      { kw:"lotto lottery 645 로또 번호 추천 생성 뽑기 제외 공통 게임 추첨" }),
+      { kw:"lotto lottery 645 로또 복권 번호 추천 생성 뽑기 제외 공통 게임 추첨" }),
     C("pensionPicker","🎟️","연금복권 번호 뽑기 (720+)", () => callFn("openLottoPicker", { game:"pension" }),
       { kw:"pension lottery 720 연금복권 연금 복권 번호 추천 생성 뽑기 조 자리 고정 추첨" }),
     C("exchangeRate","💱","환율 (고시환율·환율 계산)", () => callFn("openExchangeRate"),
@@ -182,7 +182,12 @@
     // 화면에는 영어 레이블을 보여 주므로, 검색도 원문·번역문 양쪽을 대상으로 한다.
     const hay = norm(cmd.label + " " + localizedLabel(cmd) + " " + (cmd.kw || ""));
     const i = hay.indexOf(norm(q));
-    return i < 0 ? -1 : (1000 - i);                 // 앞쪽에서 일치할수록 상위
+    if (i >= 0) return 1000 - i;                    // 앞쪽에서 일치할수록 상위
+    // "로또 뽑기"처럼 사이 낱말을 빼고 쳐도 찾도록, 띄어 쓴 낱말이 모두 들어 있으면 통째 일치보다 아래 순위로 보여 준다.
+    const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length < 2) return -1;
+    const at = words.map(word => hay.indexOf(word));
+    return at.some(pos => pos < 0) ? -1 : 500 - Math.min(...at);
   }
   const available = () => COMMANDS.filter(c => { if (!c.when) return true; try { return !!c.when(); } catch(_){ return false; } });
   function shortcutKey(cmd){
