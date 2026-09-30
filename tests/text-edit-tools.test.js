@@ -57,7 +57,7 @@ test("줄 정리 메뉴는 도구막대에 접혀 들어가고 모든 항목이 
 
   // 도구막대에는 버튼 하나(줄 정리)로만 나오고, 예전 '중복 줄 삭제' 단독 버튼은 그 안으로 들어갔다.
   assert.match(viewer, /const tidyMenu = buildLineTidyMenu\(\(\) => editor\);/);
-  assert.match(viewer, /bar\.append\(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, status\);/);
+  assert.match(viewer, /bar\.append\(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, fontPick, status\);/);
   assert.ok(!/dedupeBtn/.test(viewer.slice(viewer.indexOf("const showEdit"), viewer.indexOf("const showPreview"))),
     "편집 도구막대에 중복 줄 삭제 단독 버튼이 남아 있으면 안 된다");
 

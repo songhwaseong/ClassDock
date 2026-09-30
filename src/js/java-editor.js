@@ -1271,10 +1271,10 @@ function renderJavaRunnable(context){
   fontDown.addEventListener("click", () => bumpCodeFont(-1));
   fontUp.addEventListener("click", () => bumpCodeFont(1));
   const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
-  fontPick.title = "코드 글꼴 (시스템에 설치된 글꼴만 · 고정폭/가변폭으로 나눠 표시)";
+  fontPick.title = "코드 글꼴 (고정폭 · 가변폭 · 손글씨로 나눠 표시)";
   fontPick.setAttribute("aria-label", fontPick.title);
   const fontGroups = groupedCodeFontChoices();
-  const installedFonts = [...fontGroups.mono, ...fontGroups.prop];
+  const installedFonts = fontGroups.all;
   if (_codeFontFamily && !installedFonts.some(choice => choice.value === _codeFontFamily)) setCodeFontFamily("");
   const addFontGroup = (label, choices) => {
     if (!choices.length) return;
@@ -1288,6 +1288,7 @@ function renderJavaRunnable(context){
   };
   addFontGroup("고정폭 (코딩용)", fontGroups.mono);
   addFontGroup("가변폭 (읽기용)", fontGroups.prop);
+  addFontGroup("손글씨", fontGroups.hand);
   fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
   if (installedFonts.length <= 1) fontPick.hidden = true;
   fontGroup.append(fontDown, fontUp, fontPick);

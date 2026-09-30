@@ -2856,6 +2856,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     border-radius:2px;box-shadow:0 0 0 1px rgba(202,138,4,.7);mix-blend-mode:normal}
   /* 보기 모드 바와 같은 배치: 왼쪽엔 상태 문구, 버튼들은 오른쪽에 나란히 */
   .text-edit-bar .run-status{order:-1;margin-right:8px}
+  /* 글꼴 고르기 — 겉 칸에 겹친 글자 아이콘 자리만큼 왼쪽을 비운다(아이콘 바가 아니라 .run-bar-icons 규칙이 안 먹는다) */
+  .text-edit-bar .run-fontpick{padding-left:28px}
   /* 문서 정보(줄·낱말·글자 수와 커서 자리): 상태 문구 옆에 붙는 읽을거리라 버튼처럼 보이지 않게.
      왼쪽 묶음의 끝이라 남은 공간을 여기서 먹어 버튼들을 오른쪽으로 민다. */
   .text-edit-stats{order:-1;margin-right:auto;font-size:12px;color:var(--muted);white-space:nowrap;

@@ -1800,8 +1800,8 @@ const MNDbClient = (() => {
     fontPick.className = "db-result-font-pick";
     fontPick.title = "SQL 편집기와 결과 표 글꼴";
     fontPick.setAttribute("aria-label", fontPick.title);
-    const fontGroups = typeof groupedCodeFontChoices === "function" ? groupedCodeFontChoices() : { mono:[], prop:[] };
-    const installedFonts = [...fontGroups.mono, ...fontGroups.prop];
+    const fontGroups = typeof groupedCodeFontChoices === "function" ? groupedCodeFontChoices() : { mono:[], prop:[], hand:[], all:[] };
+    const installedFonts = fontGroups.all;
     const addFontOptions = (label, list) => {
       if (!list.length) return;
       const group = document.createElement("optgroup");
@@ -1815,6 +1815,7 @@ const MNDbClient = (() => {
     };
     addFontOptions("고정폭 (코딩용)", fontGroups.mono);
     addFontOptions("가변폭 (읽기용)", fontGroups.prop);
+    addFontOptions("손글씨", fontGroups.hand);
     if (installedFonts.length <= 1) fontPick.hidden = true;
     const editorColor = input("color", "#0f172a");
     editorColor.className = "db-result-color";

@@ -64,6 +64,9 @@ const DIARY_FONT_STACKS = {
   mago:'"Nanum MaGoCe", "나눔손글씨 마고체", "ClassDock Hand Mago", "ClassDock Nanum Pen", cursive'
 };
 function diaryFontScale(font){ return DIARY_FONT_SCALE[font] || 1; }
+// 코드·텍스트 편집기(code-viewer.js 글꼴 고르기)가 쓰는 이름 — 같은 글꼴을 sizeAdjust 로 미리 키워 한 번 더 올린다.
+// 편집기는 글자 크기와 줄 높이를 한 값(--code-fs)으로 묶어 두어 일기장처럼 font-size 만 따로 키울 수 없다.
+function diaryTextHandFamily(id){ return "ClassDock Text Hand " + id; }
 // 꾸미기 창 칩 견본 — 손글씨마다 "가나다" 세 글자만 담은 작은 글꼴(hand-font-samples.js, 약 15KB).
 // 칩을 보여 주려고 손글씨 일곱 벌(약 5MB)을 다 읽지 않도록 따로 둔다. 한 번만 올린다.
 let _diarySampleLoad = null;
@@ -107,6 +110,11 @@ function diaryEnsureFont(id){
     const face = new FontFace(info.family, bytes.buffer);
     await face.load();
     document.fonts.add(face);
+    try {
+      const textFace = new FontFace(diaryTextHandFamily(id), bytes.slice().buffer, { sizeAdjust:Math.round(diaryFontScale(id) * 100) + "%" });
+      await textFace.load();
+      document.fonts.add(textFace);
+    } catch(_){}                         // 편집기용이 안 올라가도 일기장 글꼴은 쓸 수 있다
     delete store[id];                    // 0.8MB 문자열을 들고 있지 않는다(글꼴은 이미 올라갔다)
     if (fallback) await fallback;
     return true;
@@ -6680,7 +6688,7 @@ if (typeof module !== "undefined" && module.exports){
     diaryDateKey, diaryIsDateKey, diaryAddDays, diaryDateLabel, diaryMonthGrid,
     diaryDefaultStyle, diaryNormalizeStyle, diaryDefaultBackdrop, diaryNormalizeBackdrop, diaryNormalizeSticker, diaryNormalizeTags, diaryNormalizeEntry, diaryEntryIsEmpty,
     diaryEmpty, diaryNormalize, diaryContentKey, diaryModelJson, diaryEffectiveStyle, diaryReferencedAssets,
-    DIARY_FONTS, DIARY_HAND_FONTS, DIARY_FONT_STACKS, diaryFontScale, diaryEnsureFont, DIARY_WEATHERS, DIARY_MOODS, diaryNormalizeAngle, diaryWeatherInfo, diaryMoodInfo, diaryWeatherMoodLabel,
+    DIARY_FONTS, DIARY_HAND_FONTS, DIARY_FONT_STACKS, diaryFontScale, diaryEnsureFont, diaryTextHandFamily, DIARY_WEATHERS, DIARY_MOODS, diaryNormalizeAngle, diaryWeatherInfo, diaryMoodInfo, diaryWeatherMoodLabel,
     DIARY_PENS, DIARY_PEN_SIZES, diaryNormalizeStroke, diaryDrawStrokes,
     DIARY_ART, DIARY_ART_IDS, DIARY_TEXT_SIZES, DIARY_TEXT_ALIGNS, DIARY_TEXT_MAX, DIARY_ART_DEFAULT_COLOR, DIARY_TEXT_DEFAULT_COLOR,
     diaryArtInfo, diaryArtName, diaryArtSvg, diaryStickerKind, diaryCleanSticker, diaryStickerText, diaryStickerCountLabel,

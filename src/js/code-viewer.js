@@ -1800,7 +1800,9 @@ async function renderCode(file, host, ext, profile, runCtx){
       if (editor.setWrap) editor.setWrap(textWrapEnabled());
       fontDown.addEventListener("click", () => bumpCodeFont(-1)); fontUp.addEventListener("click", () => bumpCodeFont(1));
       const status = document.createElement("span"); status.className = "run-status";
-      bar.append(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, status);
+      // 글꼴은 파이썬·자바 편집기와 같은 설정을 쓴다(손글씨 포함) — 여기서 바꾸면 그쪽도 함께 바뀐다.
+      const fontPick = buildCodeFontPicker("글꼴 (고정폭 · 가변폭 · 손글씨 — 코드 편집기와 같은 설정)");
+      bar.append(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, fontPick, status);
       attachTextStats(editor, bar, null);      // 상태 문구 다음 — 왼쪽 묶음(저장 상태·문서 정보)의 끝
       attachSpellcheck(editor, bar, saveName);
       // 대용량 가벼운 편집 모드 안내 — 왜 강조·완성이 없는지 사용자에게 알린다(저장은 정상).
@@ -2219,35 +2221,7 @@ async function renderCode(file, host, ext, profile, runCtx){
   const fontUp = document.createElement("button"); fontUp.className = "run-font"; fontUp.type = "button"; fontUp.textContent = "A+"; fontUp.title = "코드·결과 글자 크게 (Ctrl++)";
   fontDown.addEventListener("click", () => bumpCodeFont(-1));
   fontUp.addEventListener("click", () => bumpCodeFont(1));
-  const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
-  fontPick.title = "코드 글꼴 (시스템에 설치된 글꼴만 · 고정폭/가변폭으로 나눠 표시)";
-  fontPick.setAttribute("aria-label", fontPick.title);
-  const fontGroups = groupedCodeFontChoices();
-  const installed = [...fontGroups.mono, ...fontGroups.prop];
-  // 저장된 폰트가 시스템에서 빠졌으면 기본으로 자동 폴백(드롭다운에 안 나타나는 옵션이 선택돼 보이는 혼란 방지).
-  if (_codeFontFamily && !installed.some(c => c.value === _codeFontFamily)) setCodeFontFamily("");
-  // 고정폭/가변폭을 묶어서 보여준다 — 코드 정렬이 맞는 글꼴을 한눈에 고를 수 있게.
-  const addFontGroup = (label, list) => {
-    if (!list.length) return;
-    const g = document.createElement("optgroup"); g.label = label;
-    for (const c of list){
-      const o = document.createElement("option"); o.value = c.value; o.textContent = c.label;
-      if (c.value === _codeFontFamily) o.selected = true;
-      g.appendChild(o);
-    }
-    fontPick.appendChild(g);
-  };
-  addFontGroup("고정폭 (코딩용)", fontGroups.mono);
-  addFontGroup("가변폭 (읽기용)", fontGroups.prop);
-  fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
-  // 후보가 기본 하나뿐이면(설치된 게 없으면) 드롭다운 자체를 숨겨 자리만 차지하지 않게 한다.
-  // select 안에는 SVG 를 못 넣어서 아이콘은 겉 칸에 겹쳐 둔다(클릭은 select 로 통과).
-  const fontPickWrap = document.createElement("span"); fontPickWrap.className = "run-fontpick-wrap";
-  const fontPickIcon = document.createElement("span"); fontPickIcon.className = "run-fontpick-icon"; fontPickIcon.setAttribute("aria-hidden", "true");
-  if (typeof window.uiIcon === "function") fontPickIcon.innerHTML = window.uiIcon("text");
-  fontPickWrap.append(fontPickIcon, fontPick);
-  if (installed.length <= 1) fontPickWrap.hidden = true;
-  fontGroup.append(fontDown, fontUp, fontPickWrap);
+  fontGroup.append(fontDown, fontUp, buildCodeFontPicker());
   // 편집 흐름상 "고치다가 새로 열기"가 잦아서, 글자 크기 옆에 새 파이썬 코드 버튼을 둔다(사이드바 버튼은 그대로).
   const inFolder = !!(ownerDoc && ownerDoc.archiveCtx && runPathDir(normalizedRunPath(ownerDoc.relPath || ownerDoc.workspacePath || "")));
   const newPyTitle = inFolder ? "이 폴더에 새 파이썬 파일 · 같은 폴더 모듈 import 가능" : "새 파이썬 코드";
@@ -4225,8 +4199,19 @@ const CODE_FONT_CHOICES = [
   { value: "NanumGothic", label: "나눔고딕", stack: '"NanumGothic","나눔고딕",sans-serif' },
   { value: "Gulim", label: "굴림", stack: '"Gulim","굴림",sans-serif' },
   { value: "Batang", label: "바탕", stack: '"Batang","바탕",serif' },
-  { value: "Segoe UI", label: "Segoe UI", stack: '"Segoe UI",sans-serif' }
+  { value: "Segoe UI", label: "Segoe UI", stack: '"Segoe UI",sans-serif' },
+  // 손글씨 — 일기장·여행일지와 같은 앱 안 글꼴(diary.js diaryEnsureFont). 설치 검사 없이 늘 보이고, 고르면 그때 읽는다.
+  // 이름(family)은 diaryTextHandFamily 가 정하므로 stack 은 codeFontStack 이 만든다. 빠진 글자는 펜이 그린다.
+  { value: "hand:pen", label: "손글씨 펜", hand: "pen" },
+  { value: "hand:brush", label: "손글씨 붓", hand: "brush" },
+  { value: "hand:hippie", label: "손글씨 바른히피", hand: "hippie" },
+  { value: "hand:dahaeng", label: "손글씨 다행체", hand: "dahaeng" },
+  { value: "hand:student", label: "손글씨 중학생", hand: "student" },
+  { value: "hand:amsterdam", label: "손글씨 암스테르담", hand: "amsterdam" },
+  { value: "hand:mago", label: "손글씨 마고체", hand: "mago" }
 ];
+// 손글씨는 앱에 담긴 글꼴을 읽어 쓰므로 일기장 코드(diary.js)가 있어야 고를 수 있다.
+function codeHandFontsReady(){ return typeof diaryEnsureFont === "function" && typeof diaryTextHandFamily === "function"; }
 // 시스템에 폰트가 실제로 설치돼 있는지 — 폴백 글꼴과 텍스트 너비를 비교(canvas).
 // 미설치면 브라우저가 폴백을 그대로 쓰므로 폭이 같게 떨어진다.
 // serif 하나만 비교하면 '바탕'처럼 한글 serif 폴백과 같은 글꼴이 미설치로 오판되므로,
@@ -4251,7 +4236,7 @@ function isCodeFontInstalled(family){
   return ok;
 }
 function availableCodeFontChoices(){
-  return CODE_FONT_CHOICES.filter(c => isCodeFontInstalled(c.value));
+  return CODE_FONT_CHOICES.filter(c => c.hand ? codeHandFontsReady() : isCodeFontInstalled(c.value));
 }
 // 고정폭(monospace)인지 — 좁은 글자(i)와 넓은 글자(M)를 같은 개수만큼 재서 폭이 같으면 고정폭.
 // stack 전체로 재기 때문에 폰트가 없어 폴백된 경우에도 '실제로 그려지는 글꼴' 기준으로 판정된다.
@@ -4270,11 +4255,11 @@ function isMonospaceFont(stack){
   _fontMonoCache.set(ff, mono);
   return mono;
 }
-// 드롭다운용 — 설치된 후보를 고정폭/가변폭으로 나눠 돌려준다.
+// 드롭다운용 — 쓸 수 있는 후보를 고정폭/가변폭/손글씨로 나눠 돌려준다. all 은 세 묶음을 합친 것.
 function groupedCodeFontChoices(){
-  const mono = [], prop = [];
-  for (const c of availableCodeFontChoices()) (isMonospaceFont(c.stack) ? mono : prop).push(c);
-  return { mono, prop };
+  const mono = [], prop = [], hand = [];
+  for (const c of availableCodeFontChoices()) (c.hand ? hand : isMonospaceFont(c.stack) ? mono : prop).push(c);
+  return { mono, prop, hand, all:[...mono, ...prop, ...hand] };
 }
 let _codeFontFamily = (() => {
   const v = String(localStorage.getItem("pyCodeFontFamily") || "");
@@ -4282,7 +4267,23 @@ let _codeFontFamily = (() => {
 })();
 function codeFontStack(value){
   const found = CODE_FONT_CHOICES.find(c => c.value === value);
+  if (found && found.hand){
+    if (!codeHandFontsReady()) return "";
+    return '"' + diaryTextHandFamily(found.hand) + '","' + diaryTextHandFamily("pen") + '","Malgun Gothic",sans-serif';
+  }
   return found ? found.stack : "";
+}
+// 손글씨를 골랐으면 글꼴을 읽고, 다 읽히면 편집기들을 다시 맞춘다(강조 층·열 선택 폭 캐시가 새 글꼴을 따르도록).
+// 읽기 전에는 stack 다음 후보(맑은 고딕)로 그려진다. 한 벌마다 한 번만 다시 맞춘다.
+const _codeHandFontApplied = new Set();
+function ensureCodeHandFont(value){
+  const found = CODE_FONT_CHOICES.find(c => c.value === value);
+  if (!found || !found.hand || _codeHandFontApplied.has(found.hand) || !codeHandFontsReady()) return;
+  diaryEnsureFont(found.hand).then(ok => {
+    if (!ok || _codeHandFontApplied.has(found.hand)) return;
+    _codeHandFontApplied.add(found.hand);
+    if (_codeFontFamily === value) reapplyAllEditorFonts();
+  });
 }
 const _editorHosts = new Set();
 function applyCodeFontMetrics(host){
@@ -4293,10 +4294,43 @@ function applyCodeFontMetrics(host){
   const stack = codeFontStack(_codeFontFamily);
   if (stack) host.style.setProperty("--code-ff", stack);
   else host.style.removeProperty("--code-ff");
+  ensureCodeHandFont(_codeFontFamily);
   // 폰트/크기 바뀌면 4칸 폭이 바뀌므로 들여쓰기 가이드도 다시 그린다(buildCodeEditor 가 등록한 콜백).
   if (typeof host.__refreshIndent === "function") host.__refreshIndent();
   if (typeof host.__refreshPins === "function") host.__refreshPins();        // 줄 높이 변화 → 핀 마커도 재배치
   if (typeof host.__refreshFontMetrics === "function") host.__refreshFontMetrics();
+}
+// 코드 글꼴 드롭다운(아이콘을 겹친 겉 칸째) — 파이썬 실행 바·텍스트 편집 바가 함께 쓴다. 고른 값은 모든 편집기 공용.
+function buildCodeFontPicker(title="코드 글꼴 (고정폭 · 가변폭 · 손글씨로 나눠 표시)"){
+  const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
+  fontPick.title = title;
+  fontPick.setAttribute("aria-label", fontPick.title);
+  const fontGroups = groupedCodeFontChoices();
+  // 저장된 폰트가 시스템에서 빠졌으면 기본으로 자동 폴백(드롭다운에 안 나타나는 옵션이 선택돼 보이는 혼란 방지).
+  if (_codeFontFamily && !fontGroups.all.some(c => c.value === _codeFontFamily)) setCodeFontFamily("");
+  // 고정폭/가변폭/손글씨를 묶어서 보여준다 — 코드 정렬이 맞는 글꼴을 한눈에 고를 수 있게.
+  const addFontGroup = (label, list) => {
+    if (!list.length) return;
+    const g = document.createElement("optgroup"); g.label = label;
+    for (const c of list){
+      const o = document.createElement("option"); o.value = c.value; o.textContent = c.label;
+      if (c.value === _codeFontFamily) o.selected = true;
+      g.appendChild(o);
+    }
+    fontPick.appendChild(g);
+  };
+  addFontGroup("고정폭 (코딩용)", fontGroups.mono);
+  addFontGroup("가변폭 (읽기용)", fontGroups.prop);
+  addFontGroup("손글씨", fontGroups.hand);
+  fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
+  // 후보가 기본 하나뿐이면(설치된 게 없으면) 드롭다운 자체를 숨겨 자리만 차지하지 않게 한다.
+  // select 안에는 SVG 를 못 넣어서 아이콘은 겉 칸에 겹쳐 둔다(클릭은 select 로 통과).
+  const fontPickWrap = document.createElement("span"); fontPickWrap.className = "run-fontpick-wrap";
+  const fontPickIcon = document.createElement("span"); fontPickIcon.className = "run-fontpick-icon"; fontPickIcon.setAttribute("aria-hidden", "true");
+  if (typeof window.uiIcon === "function") fontPickIcon.innerHTML = window.uiIcon("text");
+  fontPickWrap.append(fontPickIcon, fontPick);
+  if (fontGroups.all.length <= 1) fontPickWrap.hidden = true;
+  return fontPickWrap;
 }
 function registerEditorFont(host){ _editorHosts.add(host); applyCodeFontMetrics(host); }
 function unregisterEditorFont(host){ _editorHosts.delete(host); }
