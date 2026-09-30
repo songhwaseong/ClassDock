@@ -4255,7 +4255,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     font-family:var(--code-ff,Consolas,"Courier New",monospace);font-size:var(--code-fs,13px);line-height:var(--code-lh,21px)}
   .code-gutter{position:sticky;left:0;flex:0 0 auto;padding:16px 12px;text-align:right;color:var(--code-muted);
     background:var(--code-gutter);white-space:pre;user-select:none;border-right:1px solid var(--code-border)}
-  .code-pre{margin:0;padding:16px 18px;white-space:pre;color:var(--code-text);flex:1 1 auto}
+  /* pre 는 브라우저 기본이 monospace 라 이어받지 않으면 읽기 화면만 고른 글꼴(손글씨 등)을 놓친다(편집 화면은 5762 줄에서 따로 정함). */
+  .code-pre{margin:0;padding:16px 18px;white-space:pre;color:var(--code-text);flex:1 1 auto;font-family:inherit}
   .code-pre code{font:inherit;color:inherit}
   .code-host-readonly{position:relative;outline:none;cursor:default}
   /* 읽기 전용 코드/텍스트: 손바닥(grab) 커서 상속을 끊고 글자엔 텍스트 커서(선택 유도) */
