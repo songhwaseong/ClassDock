@@ -699,7 +699,8 @@ function mountReplayPlayer(doc, host, opts){
   const saveBtn = mk("저장", ".lesson 파일로 저장", "lr-btn lr-save");
   // 앱 UI 는 색 이모지를 지운다(icons.js) — 그림은 같은 단색 SVG 아이콘으로 단다.
   const setIcon = (button, icon, label) => {
-    if (typeof setUiIconLabel === "function" && label) setUiIconLabel(button, icon, label);
+    if (typeof window !== "undefined" && typeof window.setUiIconLabel === "function" && label)
+      window.setUiIconLabel(button, icon, label);
     else if (typeof setUiIcon === "function") setUiIcon(button, icon, button.title);
   };
   setIcon(saveBtn, "save", "저장");

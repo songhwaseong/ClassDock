@@ -20,8 +20,12 @@ const DIARY_FORMAT = "classdock-diary";
 // · 13: 종이 밖 일기장 바탕(backdrop) — 템플릿·사용자 그림·맞춤·밝기.
 // · 14: 일기장 바탕 그림 템플릿 5종 추가.
 // · 15: 사진 테두리(frame) · 녹음 스티커(kind "audio", 소리 바이트는 assets/) · 기념일(anniversaries).
+// · 16: 종이 조명(lighting·lightIntensity) — 전등 장식과 발광을 나누어 저장한다.
+// · 17: 조명 색(lightColor).
+// · 18: 상단 바·오른쪽 스탠드·에디슨·선반 아래·사진 집게 조명 추가.
+// · 19: 전등 자리 비우기(lightAvoid) — 끄면 전등 위에도 글을 쓴다. 옛 앱은 이 값을 버려 다시 비우므로 판을 올린다.
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 15;
+const DIARY_VERSION = 19;
 const DIARY_JSON_NAME = "diary.json";
 const DIARY_LINES = ["ruled", "double", "triple", "dashed", "list", "grid", "columns", "dots", "crosses", "staff", "diagonal", "blank", "picture", "genko"];
 const DIARY_LINE_LABELS = { ruled:"줄 공책", double:"두 줄", triple:"세 줄", dashed:"점선", list:"목록", grid:"모눈", columns:"세로줄", dots:"점", crosses:"십자", staff:"오선", diagonal:"사선 격자", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
@@ -413,9 +417,266 @@ function diaryUiListDay(key){
 // 원고지 한 줄 칸 수 — 0 은 "자동"(줄 간격 크기의 칸을 폭에 맞게 채움). 나머지는 쓰기 공책(8·10칸)부터 원고지(20칸)까지.
 // 칸 수를 정하면 칸 크기는 종이 폭으로 정해지므로, 창 폭이 달라도·인쇄해도 줄바꿈 자리가 같다.
 const DIARY_GENKO_COLS = [0, 8, 10, 12, 16, 20, 24];
+const DIARY_LIGHTINGS = ["none", "string", "pendant", "lantern", "stars", "glass", "light-bar", "desk-lamp", "edison", "shelf", "photo-clips"];
+const DIARY_LIGHT_DEFAULT_COLOR = "#ffc66e";
+const DIARY_LIGHTING_LABELS = { none:"없음", string:"줄 전구", pendant:"펜던트", lantern:"덩굴 랜턴", stars:"별 전구", glass:"유리 전구",
+  "light-bar":"상단 바 조명", "desk-lamp":"오른쪽 스탠드", edison:"에디슨 전구", shelf:"선반 아래 조명", "photo-clips":"사진 집게 전구" };
+const DIARY_LIGHTING_LABELS_EN = { none:"None", string:"String bulbs", pendant:"Pendant", lantern:"Vine lanterns", stars:"Star lights", glass:"Glass bulbs",
+  "light-bar":"Header light bar", "desk-lamp":"Desk lamp", edison:"Edison bulb", shelf:"Shelf lighting", "photo-clips":"Photo clip lights" };
+/* 전등 기구가 차지하는 자리 — 조명 그림 좌표(폭 1000) 기준. 빛(glow)은 글 위에 겹쳐도 되므로 기구 끝까지만 잰다.
+   top = 위 띠 높이 · right/rightH = 오른쪽 기둥의 폭과 높이(옆에 선 기구는 위 줄을 통째로 비우지 않는다).
+   그림을 고치면 여기 숫자도 같이 고친다. */
+const DIARY_LIGHTING_RESERVE = {
+  string:{ top:120 }, pendant:{ top:105 }, lantern:{ top:175 }, stars:{ top:165 }, glass:{ top:165 },
+  "light-bar":{ top:165 }, "desk-lamp":{ right:135, rightH:155 }, edison:{ top:150 }, shelf:{ top:160 }, "photo-clips":{ top:185 }
+};
+/* 글이 전등을 피할 자리(px). 글·원고지·그림일기·인쇄가 모두 이 한 함수로 잰다.
+   높이는 줄 간격의 배수로 올려 손글씨가 줄에서 벗어나지 않게 한다. 원고지·그림일기는 칸을 가운데 맞춰 늘어놓아
+   오른쪽만 비울 수 없으므로 옆 기구도 위 띠로 바꾼다. lightAvoid 를 끄면 비우지 않는다(전등 위에도 쓴다). */
+function diaryLightingSpace(style, width){
+  const none = { top:0, right:0, rightH:0 };
+  if (!style || style.lightAvoid === false || !DIARY_LIGHTINGS.includes(style.lighting)) return none;
+  const reserve = DIARY_LIGHTING_RESERVE[style.lighting];
+  if (!reserve) return none;
+  const gap = DIARY_GAPS[style.gap] || DIARY_GAPS.normal;
+  const w = Math.max(0, Number(width) || 0);
+  const px = value => value * w / 1000;
+  // 102.00000000000001 같은 부동소수 꼬리 때문에 한 줄 더 비우지 않게 아주 작은 값을 뺀 뒤 올린다.
+  const rows = value => Math.ceil(px(value) / gap - 1e-9) * gap;
+  if (reserve.right && !diaryUsesGenko(style)) return { top:0, right:Math.ceil(px(reserve.right) - 1e-9), rightH:rows(reserve.rightH) };
+  return { top:rows(reserve.top || reserve.rightH), right:0, rightH:0 };
+}
+function diaryLightingInset(style, width){ return diaryLightingSpace(style, width).top; }
+/* 비운 자리에는 줄 무늬를 그리지 않는다 — 줄이 보이는데 커서가 안 들어가면 고장처럼 보인다.
+   줄 무늬는 글칸(textarea·인쇄 글 층)의 배경이라 그 층에 가리개(mask)를 씌운다. 비운 자리는 여백이라 글자는 안 가려진다.
+   가리개 층을 둘 겹쳐(합집합) '오른쪽 위 네모만 뺀' 모양을 만든다. */
+function diaryLightingMask(style, width){
+  const off = { image:"none", size:"auto", position:"0 0", repeat:"no-repeat" };
+  if (diaryUsesGenko(style)) return off;      // 원고지 칸은 처음부터 비운 자리 아래에만 그린다
+  const space = diaryLightingSpace(style, width);
+  const fill = "linear-gradient(#000, #000)";
+  if (space.top) return { image:fill, size:"100% 100%", position:`0 ${space.top}px`, repeat:"no-repeat" };
+  if (space.right){
+    return { image:`${fill}, ${fill}`, size:`calc(100% - ${space.right}px) 100%, 100% 100%`,
+      position:`0 0, 0 ${space.rightH}px`, repeat:"no-repeat, no-repeat" };
+  }
+  return off;
+}
+function diaryApplyLightingMask(el, mask){
+  Object.assign(el.style, { maskImage:mask.image, maskSize:mask.size, maskPosition:mask.position, maskRepeat:mask.repeat,
+    webkitMaskImage:mask.image, webkitMaskSize:mask.size, webkitMaskPosition:mask.position, webkitMaskRepeat:mask.repeat });
+}
+function diaryLightingPalette(raw){
+  const color = DIARY_HEX_RE.test(String(raw || "")) ? String(raw).toLowerCase() : DIARY_LIGHT_DEFAULT_COLOR;
+  const mixWhite = amount => "#" + [1, 3, 5].map(start => {
+    const channel = parseInt(color.slice(start, start + 2), 16);
+    return Math.round(channel + (255 - channel) * amount).toString(16).padStart(2, "0");
+  }).join("");
+  return { color, soft:mixWhite(.55), core:mixWhite(.92) };
+}
+let diaryLightingSerial = 0;
+// 장식·발광·주변 빛을 독립된 SVG 그룹으로 그린다. 필터/애니메이션/외부 이미지 없이 오프라인 인쇄도 같다.
+function diaryLightingSvg(kind){
+  if (!DIARY_LIGHTINGS.includes(kind) || kind === "none") return "";
+  const id = "diary-light-" + (++diaryLightingSerial);
+  const ref = name => `url(#${id}-${name})`;
+  const fixtures = [], emission = [], glow = [];
+  const wire = (x, y) => fixtures.push(`<path d="M${x} 0V${y}" stroke="#48362b" stroke-width="3"/>`);
+  const halo = (x, y, spread = 1) => {
+    glow.push(`<ellipse cx="${x}" cy="${y + 75 * spread}" rx="${130 * spread}" ry="${190 * spread}" fill="${ref("glow")}"/>`
+      + `<circle cx="${x}" cy="${y}" r="${62 * spread}" fill="${ref("halo")}"/>`);
+  };
+  const bulb = (x, y, r = 17, glass = false) => {
+    fixtures.push(`<g transform="translate(${x} ${y})"><rect x="-9" y="${-r - 12}" width="18" height="16" rx="3" fill="${ref("metal")}"/>`
+      + `<circle r="${r}" fill="${glass ? ref("glass") : "#d9c6a2"}" stroke="#c8a66a" stroke-opacity=".8" stroke-width="1.5"/>`
+      + `<path d="M${-r * .5} ${-r * .45}Q${-r * .78} 0 ${-r * .45} ${r * .4}" fill="none" stroke="#fff7da" stroke-opacity=".7" stroke-width="2.5"/>`
+      + `<path d="M-5 5 0-4 5 5" fill="none" stroke="#b98645" stroke-width="2"/></g>`);
+    emission.push(`<g transform="translate(${x} ${y})"><circle r="${glass ? r * .72 : r}" fill="${ref("bulb")}"/>`
+      + `<path d="M-5 5 0-4 5 5" fill="none" stroke="var(--diary-light-core,#fff8da)" stroke-width="3"/></g>`);
+    halo(x, y, glass ? 1.1 : .75);
+  };
+  const lantern = (x, y, scale = 1) => {
+    wire(x, y - 50 * scale);
+    fixtures.push(`<g transform="translate(${x} ${y}) scale(${scale})"><path d="M-29-35 0-54 29-35 25-28H-25Z" fill="${ref("metal")}"/>`
+      + `<rect x="-23" y="-28" width="46" height="65" rx="3" fill="${ref("glass")}" stroke="#80532d" stroke-width="4"/>`
+      + `<path d="M-27 39H27L20 48H-20Z" fill="${ref("metal")}"/><path d="M0-28V38M-22-27-17 37M22-27 17 37" stroke="#80532d" stroke-width="3"/>`
+      + `<path d="M-16-20V23" stroke="#ffe7a8" stroke-width="2" opacity=".55"/></g>`);
+    emission.push(`<g transform="translate(${x} ${y}) scale(${scale})"><rect x="-17" y="-24" width="34" height="57" rx="4" fill="${ref("bulb")}"/>`
+      + `<path d="M0-27V37" stroke="#80532d" stroke-width="3"/></g>`);
+    halo(x, y, 1.45 * scale);
+  };
+  const vines = () => {
+    fixtures.push(`<path d="M-20 9Q150 62 306-8M718-10Q830 75 1020 20M995 0Q932 75 973 168" fill="none" stroke="#5b6330" stroke-width="4"/>`);
+    for (const [x, y, a, s] of [[20,24,20,1.2],[70,32,-45,1],[124,38,35,1.2],[184,22,-30,.9],[252,8,35,1],
+      [744,12,40,1],[795,31,-30,1.2],[851,41,35,1],[900,31,-50,1.1],[958,31,30,1.2],[963,79,-40,1],[982,122,45,1],[968,153,-30,.85]]){
+      fixtures.push(`<g transform="translate(${x} ${y}) rotate(${a}) scale(${s})"><path d="M0 0Q-26 7-18 35Q4 29 0 0Z" fill="${ref("leaf")}"/>`
+        + `<path d="M0 0-17 32" stroke="#b5ad64" stroke-width="1" opacity=".55"/></g>`);
+    }
+  };
+  const plant = (x, y, scale = 1) => {
+    const leaves = [[-10,-10,-30],[9,-18,40],[27,-4,65],[-22,8,-60],[13,22,25],[34,43,65],
+      [21,63,-25],[45,79,45],[28,100,-35],[43,119,25]];
+    fixtures.push(`<g transform="translate(${x} ${y}) scale(${scale})">`
+      + `<path d="M-26 0H25L18 35H-20Z" fill="${ref("pot")}" stroke="#94673d" stroke-width="1.5"/>`
+      + `<ellipse cy="1" rx="27" ry="6" fill="#55422c" stroke="#c59658" stroke-width="2"/>`
+      + `<path d="M0 2Q-12-37 27-16M12 0Q57 16 30 67Q15 89 42 134" fill="none" stroke="#566139" stroke-width="3"/>`
+      + leaves.map(([lx, ly, angle]) => `<g transform="translate(${lx} ${ly}) rotate(${angle})"><path d="M0 0Q-26 6-17 28Q3 25 0 0Z" fill="${ref("leaf")}"/>`
+        + `<path d="M0 0-16 25" stroke="#b7b572" stroke-width="1" opacity=".45"/></g>`).join("") + `</g>`);
+  };
+  const strip = (x, y, width) => {
+    fixtures.push(`<rect x="${x}" y="${y}" width="${width}" height="7" rx="3.5" fill="#bba486"/>`);
+    emission.push(`<rect x="${x}" y="${y}" width="${width}" height="7" rx="3.5" fill="${ref("bulb")}"/>`);
+    glow.push(`<ellipse cx="${x + width / 2}" cy="${y + 55}" rx="${width * .65}" ry="185" fill="${ref("glow")}"/>`
+      + `<ellipse cx="${x + width / 2}" cy="${y + 10}" rx="${width * .58}" ry="40" fill="${ref("halo")}"/>`);
+  };
+  if (kind === "string" || kind === "stars"){
+    fixtures.push(`<path d="M-10 10Q220 83 500 19Q750 1 1010 68" fill="none" stroke="#59422d" stroke-width="3"/>`);
+    const positions = [[65,51],[220,68],[385,60],[550,49],[720,61],[900,93]];
+    positions.forEach(([x, y], i) => {
+      fixtures.push(`<path d="M${x} ${y - 26}V${y - 10}" stroke="#6d5234" stroke-width="2"/>`);
+      if (kind === "string") bulb(x, y, i % 2 ? 18 : 15);
+      else {
+        const star = "M0-24 7-8 25-6 12 7 15 25 0 15-15 25-12 7-25-6-7-8Z";
+        fixtures.push(`<path d="${star}" transform="translate(${x} ${y})" fill="#c4a05f" stroke="#a47837" stroke-width="2"/>`);
+        emission.push(`<path d="${star}" transform="translate(${x} ${y})" fill="${ref("bulb")}" stroke="var(--diary-light-soft,#ffdc89)" stroke-width="2"/>`);
+        halo(x, y, .9);
+      }
+    });
+    if (kind === "stars") lantern(944, 130, .65);
+  } else if (kind === "pendant"){
+    for (const [x, y] of [[210,69],[500,56],[790,81]]){
+      wire(x, y - 38);
+      halo(x, y + 10, 1.3);
+      glow.push(`<path d="M${x - 28} ${y}L${x - 185} ${y + 430}Q${x} ${y + 490} ${x + 185} ${y + 430}L${x + 28} ${y}Z" fill="${ref("beam")}"/>`);
+      fixtures.push(`<g transform="translate(${x} ${y})"><ellipse cy="7" rx="48" ry="11" fill="#bb935d"/>`
+        + `<path d="M-13-38H13L21-25 48 7Q0 18-48 7L-21-25Z" fill="${ref("shade")}" stroke="#554335" stroke-width="1.5"/>`
+        + `<path d="M-9-31-15-20-34 2" fill="none" stroke="#bba381" stroke-opacity=".45" stroke-width="3"/></g>`);
+      emission.push(`<ellipse cx="${x}" cy="${y + 8}" rx="40" ry="7" fill="${ref("bulb")}"/>`);
+    }
+  } else if (kind === "lantern"){
+    lantern(132, 70, 1.1); lantern(870, 113, 1.05); vines();
+  } else if (kind === "glass"){
+    for (const [x, y, r] of [[140,52,32],[360,103,36],[570,65,32],[782,95,38],[919,134,27]]){
+      wire(x, y - r - 10); bulb(x, y, r, true);
+      fixtures.push(`<circle cx="${x + r * .35}" cy="${y - r * .35}" r="${r * .14}" fill="#fff" opacity=".6"/>`);
+      glow.push(`<path d="M${x - 70} ${y + 120}Q${x + 130} ${y + 170} ${x - 90} ${y + 300}" fill="none" stroke="var(--diary-light-color,#ffd78c)" stroke-width="3" opacity=".12"/>`);
+    }
+  } else if (kind === "light-bar"){
+    fixtures.push(`<rect x="24" y="18" width="952" height="75" rx="28" fill="${ref("wood")}" stroke="#94724d" stroke-width="2"/>`
+      + `<path d="M54 27H945M52 85H946" stroke="#b99862" stroke-opacity=".22" stroke-width="2"/>`
+      + `<circle cx="80" cy="54" r="12" fill="${ref("metal")}"/><path d="M76 48V60M84 48V60" stroke="#dabd82" stroke-width="2"/>`);
+    for (const x of [768, 826]){
+      fixtures.push(`<circle cx="${x}" cy="52" r="13" fill="${ref("metal")}"/><circle cx="${x}" cy="52" r="8" fill="#c5aa7e"/>`);
+      emission.push(`<circle cx="${x}" cy="52" r="8" fill="${ref("bulb")}"/>`);
+      halo(x, 52, .35);
+    }
+    for (const x of [60, 285, 615, 813]) strip(x, 91, x === 813 ? 85 : 135);
+    plant(922, 32, .88);
+  } else if (kind === "desk-lamp"){
+    fixtures.push(`<path d="M964-8 938 20M957 23Q993 20 987 65V148" fill="none" stroke="#302a25" stroke-width="5"/>`
+      + `<path d="M991 64V148" fill="none" stroke="#c6a373" stroke-width="1" opacity=".5"/>`
+      + `<g transform="translate(920 66) rotate(25)"><path d="M-13-44H13L18-24 45 5Q0 19-45 5L-18-24Z" fill="${ref("shade")}" stroke="#544939" stroke-width="2"/>`
+      + `<ellipse cy="7" rx="44" ry="10" fill="#c6ad83"/><path d="M-7-36-13-22-31 0" fill="none" stroke="#bda789" stroke-width="3" opacity=".5"/></g>`);
+    emission.push(`<g transform="translate(920 66) rotate(25)"><ellipse cy="7" rx="40" ry="8" fill="${ref("bulb")}"/></g>`);
+    glow.push(`<g transform="translate(920 66) rotate(25)"><path d="M-35 8-230 425Q0 500 230 425L35 8Z" fill="${ref("beam")}"/>`
+      + `<ellipse cy="180" rx="180" ry="260" fill="${ref("glow")}"/><circle cy="12" r="70" fill="${ref("halo")}"/></g>`);
+  } else if (kind === "edison"){
+    wire(118, 62);
+    fixtures.push(`<g transform="translate(118 100)"><rect x="-12" y="-55" width="24" height="24" rx="4" fill="${ref("metal")}"/>`
+      + `<path d="M-17-33C-14-17-38-15-38 9C-38 33-24 46 0 46S38 33 38 9C38-15 14-17 17-33Z" fill="${ref("glass")}" stroke="#c69758" stroke-width="2"/>`
+      + `<path d="M-21-6Q-29 9-19 27" fill="none" stroke="#fff4d9" stroke-width="3" opacity=".6"/>`
+      + `<path d="M-5-28-7 18Q0 30 7 18L5-28" fill="none" stroke="#b6884c" stroke-width="2"/></g>`);
+    emission.push(`<g transform="translate(118 100)"><ellipse cy="9" rx="27" ry="30" fill="${ref("bulb")}" opacity=".38"/>`
+      + `<path d="M-5-26-7 18Q0 30 7 18L5-26M-4-13 4-9-4-5 4-1-4 3 4 7" fill="none" stroke="var(--diary-light-core,#fffce8)" stroke-width="3"/>`
+      + `<path d="M-10-23-12 20Q0 38 12 20L10-23" fill="none" stroke="var(--diary-light-color,#ffc66e)" stroke-width="1.5"/></g>`);
+    halo(118, 111, 1.65);
+  } else if (kind === "shelf"){
+    fixtures.push(`<path d="M0 47H1000V72H0Z" fill="${ref("wood")}"/><path d="M0 47H1000L972 58H20Z" fill="#92603b"/>`
+      + `<path d="M12 67H984" stroke="#c08a52" stroke-width="1.5" opacity=".4"/>`);
+    for (const [x, height, color, angle] of [[142,70,"#504e58",0],[165,61,"#8b694e",0],[193,78,"#3c5060",0],
+      [223,67,"#6f4434",0],[254,74,"#494344",-8],[284,63,"#8a7057",-12]]){
+      fixtures.push(`<g transform="translate(${x} 47) rotate(${angle})"><rect y="${-height}" width="23" height="${height}" rx="2" fill="${color}"/>`
+        + `<path d="M5 ${-height + 5}V-6M3-7H20" stroke="#d3ba94" stroke-width="1.5" opacity=".45"/></g>`);
+    }
+    strip(95, 73, 230); strip(365, 73, 560);
+    plant(58, 10, .98);
+  } else if (kind === "photo-clips"){
+    fixtures.push(`<path d="M-10 12Q400 78 1010 51" fill="none" stroke="#695036" stroke-width="3"/>`);
+    for (const [x, y] of [[70,28],[310,57],[468,61],[636,65],[833,62],[963,56]]){
+      fixtures.push(`<path d="M${x} ${y - 11}V${y + 6}" stroke="#715336" stroke-width="2"/>`);
+      bulb(x, y + 14, 8);
+    }
+    for (const [x, y, angle, note] of [[160,31,9,false],[741,53,-8,false],[883,53,7,true]]){
+      fixtures.push(`<g transform="translate(${x} ${y}) rotate(${angle})"><rect x="-50" y="8" width="100" height="112" fill="${note ? "#ceb18e" : "#e7dfce"}" stroke="#b5a68f" stroke-width="1"/>`
+        + (note ? `<path d="M0 48C-17 22-37 50 0 80C37 50 17 22 0 48Z" fill="none" stroke="#9e6756" stroke-width="2"/>`
+          : `<rect x="-43" y="15" width="86" height="78" fill="${ref("photo")}"/><path d="M-43 70-22 49 0 67 19 55 43 71V93H-43Z" fill="#344d64"/>`
+            + `<path d="M-43 83H43" stroke="#cc9670" stroke-opacity=".5" stroke-width="2"/>`)
+        + `<rect x="-6" y="-8" width="12" height="36" rx="2" fill="${ref("pot")}" stroke="#95673f" stroke-width="1"/>`
+        + `<path d="M0-2V24" stroke="#f1d6ad" stroke-width="1" opacity=".5"/></g>`);
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" aria-hidden="true" focusable="false"><defs>`
+    + `<radialGradient id="${id}-glow"><stop stop-color="var(--diary-light-color,#ffc66e)" stop-opacity=".44"/><stop offset=".4" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity=".19"/><stop offset="1" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity="0"/></radialGradient>`
+    + `<radialGradient id="${id}-halo"><stop stop-color="var(--diary-light-soft,#ffe7a1)" stop-opacity=".7"/><stop offset=".35" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity=".32"/><stop offset="1" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity="0"/></radialGradient>`
+    + `<radialGradient id="${id}-bulb" cx=".4" cy=".35" r=".7"><stop stop-color="var(--diary-light-core,#fffce8)"/><stop offset=".45" stop-color="var(--diary-light-soft,#ffeab0)"/><stop offset="1" stop-color="var(--diary-light-color,#ffc66e)"/></radialGradient>`
+    + `<linearGradient id="${id}-beam" x2="0" y2="1"><stop stop-color="var(--diary-light-color,#ffc66e)" stop-opacity=".3"/><stop offset="1" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity="0"/></linearGradient>`
+    + `<linearGradient id="${id}-metal"><stop stop-color="#39291f"/><stop offset=".4" stop-color="#aa783c"/><stop offset="1" stop-color="#51321f"/></linearGradient>`
+    + `<linearGradient id="${id}-shade"><stop stop-color="#1c2530"/><stop offset=".45" stop-color="#44413b"/><stop offset="1" stop-color="#171e29"/></linearGradient>`
+    + `<linearGradient id="${id}-glass"><stop stop-color="#fff3c9" stop-opacity=".42"/><stop offset=".4" stop-color="#ad8959" stop-opacity=".16"/><stop offset="1" stop-color="#ffd48a" stop-opacity=".35"/></linearGradient>`
+    + `<linearGradient id="${id}-leaf"><stop stop-color="#8c9650"/><stop offset="1" stop-color="#3b542c"/></linearGradient>`
+    + `<linearGradient id="${id}-wood" x2="0" y2="1"><stop stop-color="#4c3a2e"/><stop offset=".5" stop-color="#302c2e"/><stop offset="1" stop-color="#5f422c"/></linearGradient>`
+    + `<linearGradient id="${id}-pot"><stop stop-color="#946139"/><stop offset=".45" stop-color="#deb177"/><stop offset="1" stop-color="#8c603e"/></linearGradient>`
+    + `<linearGradient id="${id}-photo" x2="0" y2="1"><stop stop-color="#334c70"/><stop offset=".63" stop-color="#c49487"/><stop offset=".76" stop-color="#e8ac74"/><stop offset="1" stop-color="#425b75"/></linearGradient></defs>`
+    + `<g class="diary-light-glow">${glow.join("")}</g><g class="diary-light-fixtures">${fixtures.join("")}</g>`
+    + `<g class="diary-light-emission">${emission.join("")}</g></svg>`;
+}
+function diaryPaintLighting(layer, style){
+  const kind = style && DIARY_LIGHTINGS.includes(style.lighting) ? style.lighting : "none";
+  if (layer.dataset.lighting !== kind){
+    layer.innerHTML = diaryLightingSvg(kind);
+    layer.dataset.lighting = kind;
+  }
+  layer.hidden = kind === "none";
+  const intensity = Number(style && style.lightIntensity);
+  layer.style.setProperty("--diary-light-intensity", String(Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : .6));
+  const palette = diaryLightingPalette(style && style.lightColor);
+  for (const key of ["color", "soft", "core"]) layer.style.setProperty("--diary-light-" + key, palette[key]);
+  layer.setAttribute("aria-hidden", "true");
+}
+// 미리보기 중에는 복구본/저장 표시만 갱신하고, 조절이 끝날 때 기록을 한 번 확정한다.
+function diaryBindLightingControl(input, env, property, read){
+  let gesture = false;
+  const begin = () => {
+    if (gesture) return;
+    env.flush(); gesture = true;
+  };
+  const finish = () => {
+    if (!gesture) return;
+    env.commit(); gesture = false;
+  };
+  input.addEventListener("pointerdown", begin);
+  input.addEventListener("input", () => {
+    begin();
+    const value = read(input.value);
+    if (value == null) return;
+    env.style()[property] = value;
+    env.repaint(); env.preview();
+  });
+  for (const event of ["change", "blur", "pointercancel"]) input.addEventListener(event, finish);
+  return finish;
+}
+function diaryBindLightIntensity(input, env){
+  return diaryBindLightingControl(input, env, "lightIntensity", raw => {
+    const value = Number(raw);
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value / 100)) : null;
+  });
+}
+function diaryBindLightColor(input, env){
+  return diaryBindLightingControl(input, env, "lightColor", raw => DIARY_HEX_RE.test(String(raw)) ? String(raw).toLowerCase() : null);
+}
 function diaryDefaultStyle(){
   return { lines:"ruled", gap:"normal", bg:"", fit:"cover", veil:0.4, font:"gothic", genkoCols:0,
-    paper:"none", paperColor:DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5 };
+    paper:"none", paperColor:DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:true };
 }
 const DIARY_BACKDROP_THEMES = ["none", "blossom", "linen", "night",
   "paper-flowers", "pastel-sky", "wood-desk", "moonlit-sky", "leafy-bokeh", "custom"];
@@ -441,6 +702,7 @@ function diaryNormalizeStyle(raw, hasAsset){
   if (!raw || typeof raw !== "object") return base;
   const veil = Number(raw.veil);
   const tone = Number(raw.paperTone);
+  const intensity = Number(raw.lightIntensity);
   const bg = String(raw.bg || "");
   return {
     lines:DIARY_LINES.includes(raw.lines) ? raw.lines : base.lines,
@@ -454,7 +716,13 @@ function diaryNormalizeStyle(raw, hasAsset){
     // 배경 효과 — 모르는 이름은 "없음"으로 떨어뜨린다(예전 파일·다음 판 파일을 함께 열 수 있게).
     paper:DIARY_PAPERS.includes(raw.paper) ? raw.paper : base.paper,
     paperColor:DIARY_HEX_RE.test(String(raw.paperColor || "")) ? String(raw.paperColor).toLowerCase() : base.paperColor,
-    paperTone:raw.paperTone === "" || raw.paperTone == null || !Number.isFinite(tone) ? base.paperTone : Math.max(0, Math.min(1, tone))
+    paperTone:raw.paperTone === "" || raw.paperTone == null || !Number.isFinite(tone) ? base.paperTone : Math.max(0, Math.min(1, tone)),
+    lighting:DIARY_LIGHTINGS.includes(raw.lighting) ? raw.lighting : base.lighting,
+    lightIntensity:raw.lightIntensity === "" || raw.lightIntensity == null || !Number.isFinite(intensity)
+      ? base.lightIntensity : Math.max(0, Math.min(1, intensity)),
+    lightColor:diaryLightingPalette(raw.lightColor).color,
+    // 전등 자리 비우기 — 판 18 까지는 늘 비웠으므로 값이 없으면 켠다. 꺼 둔 것만 false 로 남는다.
+    lightAvoid:raw.lightAvoid !== false
   };
 }
 /* ---------- 내장 스티커(그림) ----------
@@ -1750,7 +2018,7 @@ function diaryPictureBox(style, width){
   const w = Math.max(0, Number(width) || 0);
   const height = Math.max(4, Math.round((w * 0.55) / gap)) * gap;
   const grid = diaryGenkoGrid(style, w);
-  return { top:gap / 2, left:grid.offsetX, right:Math.max(0, w - grid.offsetX - grid.cols * grid.cell - 1), height };
+  return { top:gap / 2 + diaryLightingInset(style, w), left:grid.offsetX, right:Math.max(0, w - grid.offsetX - grid.cols * grid.cell - 1), height };
 }
 // 원고지 칸에 글자를 그리는 줄 무늬(원고지·그림일기). 이때 textarea 는 숨은 입력칸이 된다.
 function diaryUsesGenko(style){ return !!style && (style.lines === "genko" || style.lines === "picture"); }
@@ -1761,8 +2029,9 @@ function diaryLineMetrics(style, width){
   const fontSize = Math.round((DIARY_FONT_SIZES[style && style.gap] || 16) * diaryFontScale(style && style.font));
   const lift = Math.max(0, Math.round(gap / 2 - fontSize * 0.62));
   const box = lines === "picture" ? diaryPictureBox(style, width) : null;
-  const padTop = box ? gap + box.height + gap : gap;
-  return { gap, lines, padTop, padLeft, padRight:32, fontSize, lift, box };
+  const space = diaryLightingSpace(style, width);
+  const padTop = (box ? gap + box.height + gap : gap) + space.top;
+  return { gap, lines, padTop, padLeft, padRight:Math.max(32, space.right), fontSize, lift, box };
 }
 function diaryLineBackground(style){
   const { gap, lines, lift } = diaryLineMetrics(style);
@@ -1912,7 +2181,7 @@ function diaryGenkoMetrics(style, width){
   return { cell, rowGap, pitch:cell + rowGap, cols, offsetX,
     // 한 쪽 길이는 칸 크기가 아니라 줄 간격으로 잰다(큰 칸을 골라도 종이가 끝없이 길어지지 않게).
     pageH:(DIARY_GAPS[style && style.gap] || DIARY_GAPS.normal) * 26,
-    padTop:box ? box.top + box.height + Math.round(cell * 0.6) : Math.round(cell * 0.8),
+    padTop:box ? box.top + box.height + Math.round(cell * 0.6) : Math.round(cell * 0.8) + diaryLightingInset(style, w),
     fontSize:Math.round(cell * 0.58 * Math.min(1.25, diaryFontScale(style && style.font))) };   // 칸 밖으로 넘치지 않게 배율을 줄인다
 }
 const DIARY_GENKO_HALF = /^[A-Za-z0-9]$/;
@@ -2353,6 +2622,10 @@ function diaryColorInput(className, onPick){
 function mountDiaryPaper(els, paperEnv){
   let audioPlayer = null, audioPlayingId = "";      // 녹음 스티커 듣기(한 번에 하나)
   const { paper, area, bgLayer, veilLayer, genkoLayer, genkoCaret, genkoGrid, stickerLayer, artBgLayer, drawLayer, drawCanvas, pictureBox, pictureHint, main } = els;
+  const lightingLayer = document.createElement("div");
+  lightingLayer.className = "diary-paper-lighting";
+  // 배경/덮개 위, 본문 아래. 양쪽 문서의 종이 뼈대에 같은 장식을 넣는다.
+  paper.insertBefore(lightingLayer, area);
   const { model, assets, assetUrl, currentLabel, ensureEntry, entryOf, onDrawModeChange, onEntryChange, onStickerSelect, openStickerColorPicker, refreshCurrentLabel, refreshDirty, renderCalendar, repaintCardPapers, scheduleRecovery, setStatus, syncDrawBar, syncPanel, touch, translateUi } = paperEnv;
   /* ----- 종이 ----- */
   // 고른 스티커는 종이의 것이다. 바깥은 selectionIds()·clearSelection() 으로만 본다.
@@ -2368,6 +2641,7 @@ function mountDiaryPaper(els, paperEnv){
       lineHeight:m.gap + "px", fontSize:m.fontSize + "px", fontFamily:DIARY_FONT_STACKS[style.font] || "",
       paddingTop:m.padTop + "px", paddingBottom:m.gap + "px", paddingLeft:m.padLeft + "px", paddingRight:m.padRight + "px"
     });
+    diaryApplyLightingMask(area, diaryLightingMask(style, paperWidth || paper.clientWidth));
     paper.dataset.lines = m.lines;
     paper.dataset.font = style.font;
     if (DIARY_HAND_FONTS[style.font]){
@@ -2393,6 +2667,7 @@ function mountDiaryPaper(els, paperEnv){
     bgLayer.hidden = !url;
     veilLayer.hidden = !url;
     veilLayer.style.opacity = String(style.veil);
+    diaryPaintLighting(lightingLayer, style);
     repaintCardPapers();
     syncPanel();
   }
@@ -2407,7 +2682,10 @@ function mountDiaryPaper(els, paperEnv){
     const effective = diaryEffectiveStyle(model, entryOf(paperEnv.current()));
     if (diaryUsesGenko(effective)){ layoutGenko(width, effective, flow); positionStickers(); return; }
     const m = diaryLineMetrics(effective, width);
+    // 전등 자리는 종이 폭에 비례한다 — 폭이 바뀔 때마다 여백과 줄 가리개를 다시 맞춘다.
     area.style.paddingTop = m.padTop + "px";
+    area.style.paddingRight = m.padRight + "px";
+    diaryApplyLightingMask(area, diaryLightingMask(effective, width));
     placePictureBox(m);
     const top = main.scrollTop;
     area.style.height = "0px";
@@ -3733,6 +4011,45 @@ function mountDiaryPanels(panelEnv){
   const paperToneValue = document.createElement("span");
   paperToneValue.className = "diary-veil-value";
   paperToneControls.append(paperColorPick, paperToneRange, paperToneValue);
+  const lightingChips = section(diaryEn("조명", "Lighting"));
+  lightingChips.classList.add("diary-lighting-grid");
+  const lightingButtons = DIARY_LIGHTINGS.map(id => {
+    const button = document.createElement("button");
+    button.type = "button"; button.className = "diary-chip diary-lighting-chip"; button.dataset.lighting = id;
+    const sample = document.createElement("span"); sample.className = "diary-lighting-sample";
+    diaryPaintLighting(sample, { lighting:id, lightIntensity:.75 });
+    // '없음'도 견본 칸은 유지한다.
+    sample.hidden = false;
+    const label = document.createElement("span"); label.className = "diary-chip-label";
+    button.append(sample, label);
+    button.addEventListener("click", () => changeStyle({ lighting:id }, true));
+    lightingChips.append(button);
+    return button;
+  });
+  const lightControls = section(diaryEn("빛 세기", "Light intensity"));
+  const lightRange = document.createElement("input");
+  lightRange.type = "range"; lightRange.min = "0"; lightRange.max = "100"; lightRange.step = "1";
+  lightRange.className = "diary-light-intensity";
+  const lightValue = document.createElement("span"); lightValue.className = "diary-veil-value";
+  lightControls.append(lightRange, lightValue);
+  const lightColorControls = section(diaryEn("조명 색", "Light color"));
+  const lightColorInput = document.createElement("input");
+  lightColorInput.type = "color"; lightColorInput.className = "diary-paper-color diary-light-color";
+  const lightColorReset = diaryButton(diaryEn("기본 색", "Default color"));
+  lightColorReset.addEventListener("click", () => {
+    finishLightColorGesture(); changeStyle({ lightColor:DIARY_LIGHT_DEFAULT_COLOR }, true);
+  });
+  lightColorControls.append(lightColorInput, lightColorReset);
+  // 전등 자리 비우기 — 꾸미기 값이라 '이 날짜에만'을 따른다(changeStyle).
+  const lightAvoidRow = document.createElement("label");
+  lightAvoidRow.className = "diary-light-avoid";
+  const lightAvoidBox = document.createElement("input");
+  lightAvoidBox.type = "checkbox";
+  const lightAvoidText = document.createElement("span");
+  lightAvoidRow.append(lightAvoidBox, lightAvoidText);
+  lightAvoidBox.addEventListener("change", () => changeStyle({ lightAvoid:lightAvoidBox.checked }, true));
+  const lightNote = document.createElement("div"); lightNote.className = "diary-style-note";
+  panel.append(lightAvoidRow, lightNote);
   const bgControls = section("배경 그림");
   const bgThumb = document.createElement("span");
   bgThumb.className = "diary-bg-thumb";
@@ -3765,7 +4082,8 @@ function mountDiaryPanels(panelEnv){
   printPlainRow.append(printPlainBox, printPlainText);
   const printPlainNote = document.createElement("div");
   printPlainNote.className = "diary-style-note";
-  printPlainNote.textContent = "배경 효과와 배경 그림을 빼고 인쇄해요(잉크를 아껴요). 일기장 전체에 적용돼요.";
+  printPlainNote.textContent = diaryEn("배경 효과·배경 그림·조명을 빼고 인쇄해요(잉크를 아껴요). 전체에 적용돼요.",
+    "Print without paper effects, background images or lighting to save ink. Applies to the whole journal.");
   panel.append(printPlainRow, printPlainNote);
 
   // 꾸미기 창의 칩·칸을 지금 꾸미기로 맞춘다. 종이를 그리는 일과는 상관이 없어 창 곁에 둔다.
@@ -3827,6 +4145,37 @@ function mountDiaryPanels(panelEnv){
     paperColorPick.disabled = paperToneRange.disabled = style.paper === "none";
     paperToneRange.value = String(Math.round(style.paperTone * 100));
     paperToneValue.textContent = Math.round(style.paperTone * 100) + "%";
+    lightingChips.parentElement.querySelector(".diary-style-label").textContent = diaryEn("조명", "Lighting");
+    lightControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("빛 세기", "Light intensity");
+    lightRange.setAttribute("aria-label", diaryEn("조명 빛 세기", "Lighting intensity"));
+    lightingButtons.forEach(button => {
+      const kind = button.dataset.lighting, on = kind === style.lighting;
+      const label = diaryLabel(DIARY_LIGHTING_LABELS, DIARY_LIGHTING_LABELS_EN, kind);
+      button.querySelector(".diary-chip-label").textContent = label;
+      button.setAttribute("aria-label", label); button.setAttribute("aria-pressed", String(on));
+      button.classList.toggle("is-on", on);
+      const sample = button.querySelector(".diary-lighting-sample");
+      diaryPaintLighting(sample, { lighting:kind, lightIntensity:.75, lightColor:style.lightColor });
+      sample.hidden = false;
+    });
+    lightRange.disabled = style.lighting === "none";
+    lightRange.value = String(Math.round(style.lightIntensity * 100));
+    lightValue.textContent = Math.round(style.lightIntensity * 100) + "%";
+    lightColorControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("조명 색", "Light color");
+    lightColorInput.value = style.lightColor;
+    lightColorInput.disabled = lightColorReset.disabled = style.lighting === "none";
+    lightColorInput.setAttribute("aria-label", diaryEn("조명 색", "Light color"));
+    lightColorReset.textContent = diaryEn("기본 색", "Default color");
+    lightColorReset.setAttribute("aria-label", diaryEn("조명 기본 색으로 되돌리기", "Reset light color"));
+    lightAvoidBox.checked = style.lightAvoid !== false;
+    lightAvoidBox.disabled = style.lighting === "none";
+    lightAvoidText.textContent = diaryEn("전등 자리 비우기", "Keep text clear of fixtures");
+    lightNote.textContent = diaryEn("0%에서는 전등 장식만 남아요. 배경 그림과 함께 사용할 수 있어요. "
+      + "전등 자리 비우기를 끄면 전등 위에도 글을 쓸 수 있어요.",
+      "At 0%, only the fixtures remain. Lighting can be used with a background image. "
+      + "Turn off “Keep text clear of fixtures” to write over the lights.");
+    printPlainNote.textContent = diaryEn("배경 효과·배경 그림·조명을 빼고 인쇄해요(잉크를 아껴요). 전체에 적용돼요.",
+      "Print without paper effects, background images or lighting to save ink. Applies to the whole journal.");
     const url = assetUrl(style.bg);
     bgThumb.style.backgroundImage = url ? `url("${url}")` : "none";
     bgThumb.classList.toggle("is-empty", !url);
@@ -4057,6 +4406,16 @@ function mountDiaryPanels(panelEnv){
   fitSelect.addEventListener("change", () => changeStyle({ fit:fitSelect.value }, true));
   veilRange.addEventListener("input", () => changeStyle({ veil:Number(veilRange.value) / 100 }, false));
   paperToneRange.addEventListener("input", () => changeStyle({ paperTone:Number(paperToneRange.value) / 100 }, false));
+  // 한 번 끌기를 되돌리기 한 단계로 묶는다. touch(false)의 지연 기록은 이 조절기에 쓰지 않는다.
+  const lightingControlEnv = {
+    flush:() => { if (panelEnv.history()) panelEnv.history().flush(); },
+    style:() => diaryEffectiveStyle(model, entryOf(panelEnv.current())),
+    repaint:applyStyle,
+    preview:() => { if (panelEnv.previewChange) panelEnv.previewChange(); },
+    commit:() => touch(true)
+  };
+  const finishLightGesture = diaryBindLightIntensity(lightRange, lightingControlEnv);
+  const finishLightColorGesture = diaryBindLightColor(lightColorInput, lightingControlEnv);
   printPlainBox.addEventListener("change", () => {
     if (panelEnv.history()) panelEnv.history().flush();
     model.printPlain = printPlainBox.checked;
@@ -4064,6 +4423,7 @@ function mountDiaryPanels(panelEnv){
   });
 
   const setPanelOpen = (open) => {
+    if (!open){ finishLightGesture(); finishLightColorGesture(); }
     panel.hidden = !open;
     styleBtn.setAttribute("aria-expanded", String(open));
     styleBtn.classList.toggle("is-on", open);
@@ -4128,6 +4488,7 @@ function mountDiaryPanels(panelEnv){
    화면과 같은 함수로 그리므로 줄바꿈 자리가 흔들리지 않는다.
    printEnv = { assetUrl } · plain 이면 배경을 빼고 찍는다(잉크를 아낀다). */
 function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
+  if (plain) style = { ...style, lighting:"none" };
   const e = entry;                     // 아래 몸통이 쓰던 이름을 그대로 둔다
   const waits = [];
   const paperEl = document.createElement("div");
@@ -4153,6 +4514,12 @@ function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
     paperEl.append(bg, veil);
     const pre = new Image(); pre.src = url;
     if (pre.decode) waits.push(pre.decode().catch(() => {}));
+  }
+  if (style.lighting && style.lighting !== "none"){
+    const lighting = document.createElement("div");
+    lighting.className = "diary-paper-lighting";
+    diaryPaintLighting(lighting, style);
+    paperEl.append(lighting);
   }
   let stickerBottom = 0;
   for (const st of entry.stickers) stickerBottom = Math.max(stickerBottom, diaryStickerBottom(st) * width);
@@ -4188,6 +4555,7 @@ function diaryBuildPrintPaper(entry, style, width, plain, printEnv){
       paddingTop:m.padTop + "px", paddingBottom:m.gap + "px", paddingLeft:m.padLeft + "px", paddingRight:m.padRight + "px",
       minHeight:Math.ceil((stickerBottom + DIARY_STICKER_PAD) / m.gap) * m.gap + "px"
     });
+    diaryApplyLightingMask(text, diaryLightingMask(style, width));
     paperEl.append(text);
   }
   for (const st of entry.stickers){
@@ -5741,7 +6109,7 @@ function mountDiaryEditor(doc){
   /* ----- 꾸미기 바꾸기 ----- */
   /* ----- 꾸미기 창·스티커 창 ----- */
   // 창은 종이 뒤에 세운다 — 창이 종이의 스티커 색·투명도를 되비추기 때문이다.
-  const panels = mountDiaryPanels({ model, assets, assetUrl:(...a) => assetUrl(...a), addAsset:(...a) => addAsset(...a), entryOf:(...a) => entryOf(...a), ensureEntry:(...a) => ensureEntry(...a), touch:(...a) => touch(...a), setStatus:(...a) => setStatus(...a), applyStyle:(...a) => applyStyle(...a), applyBackdrop, layout:(...a) => layout(...a), renderCalendar:(...a) => renderCalendar(...a), bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker:(...a) => addArtSticker(...a), addTextSticker:(...a) => addTextSticker(...a), addAudioSticker:(...a) => addAudioSticker(...a), applyStickerColor:(...a) => applyStickerColor(...a), applyStickerOpacity:(...a) => applyStickerOpacity(...a), selectedStickers:(...a) => selectedStickers(...a), stickerColorNow:(...a) => stickerColorNow(...a), stickerOpacityNow:(...a) => stickerOpacityNow(...a), photoOpacity:true, current:() => current, history:() => history });
+  const panels = mountDiaryPanels({ previewChange:() => { refreshDirty(); scheduleRecovery(); }, model, assets, assetUrl:(...a) => assetUrl(...a), addAsset:(...a) => addAsset(...a), entryOf:(...a) => entryOf(...a), ensureEntry:(...a) => ensureEntry(...a), touch:(...a) => touch(...a), setStatus:(...a) => setStatus(...a), applyStyle:(...a) => applyStyle(...a), applyBackdrop, layout:(...a) => layout(...a), renderCalendar:(...a) => renderCalendar(...a), bgInput, backdropInput, styleBtn, stickerBtn, addArtSticker:(...a) => addArtSticker(...a), addTextSticker:(...a) => addTextSticker(...a), addAudioSticker:(...a) => addAudioSticker(...a), applyStickerColor:(...a) => applyStickerColor(...a), applyStickerOpacity:(...a) => applyStickerOpacity(...a), selectedStickers:(...a) => selectedStickers(...a), stickerColorNow:(...a) => stickerColorNow(...a), stickerOpacityNow:(...a) => stickerOpacityNow(...a), photoOpacity:true, current:() => current, history:() => history });
   const { panel, artPanel, artCustomColor, syncPanel, syncArtPanel, setPanelOpen, setArtPanelOpen } = panels;
   // 덮개(잠금)보다 아래에 오도록 자리를 지켜 끼운다.
   root.insertBefore(panel, pickPop);
@@ -6685,6 +7053,7 @@ if (typeof module !== "undefined" && module.exports){
     diaryAssetMime,
     DIARY_FORMAT, DIARY_VERSION, DIARY_LINES, DIARY_GAPS, DIARY_ENCRYPTED_MAGIC, DIARY_PBKDF2_ITER,
     DIARY_PAPERS, DIARY_PAPER_DARK, DIARY_PAPER_DEFAULT_COLOR, diaryPaperBackground,
+    DIARY_LIGHTINGS, DIARY_LIGHT_DEFAULT_COLOR, DIARY_LIGHTING_LABELS, DIARY_LIGHTING_LABELS_EN, diaryLightingSvg, diaryLightingPalette, diaryPaintLighting, diaryLightingInset, DIARY_LIGHTING_RESERVE, diaryLightingSpace, diaryLightingMask, diaryBindLightIntensity, diaryBindLightColor, diaryBuildPrintPaper,
     diaryDateKey, diaryIsDateKey, diaryAddDays, diaryDateLabel, diaryMonthGrid,
     diaryDefaultStyle, diaryNormalizeStyle, diaryDefaultBackdrop, diaryNormalizeBackdrop, diaryNormalizeSticker, diaryNormalizeTags, diaryNormalizeEntry, diaryEntryIsEmpty,
     diaryEmpty, diaryNormalize, diaryContentKey, diaryModelJson, diaryEffectiveStyle, diaryReferencedAssets,

@@ -74,7 +74,7 @@ test("일기장을 저장했다 열면 글·꾸미기·스티커·사진이 그�
   const back = await diary.diaryUnpack(bytes);
   assert.equal(back.model.title, "나의 일기");
   assert.deepEqual(back.model.style, { lines:"grid", gap:"wide", bg:"assets/bg000001.jpg", fit:"tile", veil:0.25, font:"gothic", genkoCols:0,
-    paper:"none", paperColor:diary.DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5 });
+    paper:"none", paperColor:diary.DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:diary.DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:true });
   assert.equal(back.model.entries.length, 1);
   assert.equal(back.model.entries[0].text, "우산을 챙겼다.\n저녁엔 개었다.");
   assert.deepEqual(back.model.entries[0].stickers, [{ id:"st-a", kind:"photo", asset:"assets/st000001.png", x:0.2, y:0.5, w:0.3, ar:0.75, rot:0, flip:false }]);
@@ -614,9 +614,9 @@ test("내장 그림·글상자만 붙인 날도 빈 날로 버리지 않는다",
   }
 });
 
-test("사진 테두리·녹음·기념일이 들어간 파일은 version 15 이고 다음 버전은 거절한다", () => {
-  assert.equal(diary.DIARY_VERSION, 15);
-  const json = JSON.stringify({ format:"classdock-diary", version:16, title:"미래", entries:[] });
+test("전등 자리 비우기가 들어간 파일은 version 19 이고 다음 버전은 거절한다", () => {
+  assert.equal(diary.DIARY_VERSION, 19);
+  const json = JSON.stringify({ format:"classdock-diary", version:20, title:"미래", entries:[] });
   assert.throws(() => diary.diaryNormalize(JSON.parse(json)), /diary-version/);
 });
 

@@ -18,7 +18,11 @@ const TRIP_FORMAT = "classdock-trip";
 //    저장하므로 판을 올린다. 없음(none)이면 여행일지 고유의 하늘 바탕 그대로다.
 // 5: 공용 종이의 사진 테두리·녹음 스티커(소리는 assets/*.webm 등) · 날에 안 붙는 경비(expenses) · 준비물·할 일(checklist).
 //    옛 앱은 녹음 소리를 모르는 자산으로 버리고 새 칸도 버린 채 저장하므로 판을 올린다.
-const TRIP_VERSION = 5;
+// 6: 공통 종이 조명(lighting·lightIntensity). 이전 앱이 조명을 버린 채 저장하지 못하게 한다.
+// 7: 공통 종이 조명 색(lightColor).
+// 8: 공통 종이 조명 5종 추가(상단 바·스탠드·에디슨·선반·사진 집게).
+// 9: 공통 종이의 전등 자리 비우기(lightAvoid).
+const TRIP_VERSION = 9;
 const TRIP_JSON_NAME = "trip.json";
 const TRIP_MAX_DAYS = 400;
 const TRIP_MAX_SPOTS = 60;            // 하루에 들를 곳
@@ -2075,6 +2079,7 @@ function mountTripEditor(doc){
   /* ----- 꾸미기 창·스티커 창 ----- */
   // 일기장과 같은 창을 그대로 쓴다. 종이가 같으니 꾸밀 거리도 같다.
   const panels = mountDiaryPanels({
+    previewChange:() => { refreshDirty(); scheduleRecovery(); },
     model, assets, bgInput, styleBtn, stickerBtn,
     assetUrl:(...a) => assetUrl(...a),
     addAsset:(...a) => addAsset(...a),
