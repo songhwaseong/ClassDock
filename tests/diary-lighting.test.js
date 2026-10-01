@@ -60,11 +60,11 @@ test("light colors reject unsafe values and old lighting files retain warm defau
   assert.equal(diary.diaryNormalizeStyle({ lightColor:"#AABBCC" }).lightColor, "#aabbcc");
   const before = diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:16, style:{ lighting:"stars", lightIntensity:.25 } });
   assert.equal(before.style.lightColor, "");
-  assert.equal(diary.diaryLightColor(before.style), diary.DIARY_LIGHT_DEFAULT_COLOR);
+  assert.equal(diary.diaryLightColor(before.style), diary.DIARY_LIGHT_COLORS.stars);
   assert.equal(before.style.lighting, "stars");
   assert.equal(before.style.lightIntensity, .25);
   assert.equal(diary.diaryLightColor(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:6, style:{ lighting:"glass" } }).style),
-    diary.DIARY_LIGHT_DEFAULT_COLOR);
+    diary.DIARY_LIGHT_COLORS.glass);
   assert.deepEqual(diary.diaryLightingPalette("#000000"), { color:"#000000", soft:"#8c8c8c", core:"#ebebeb" });
   assert.deepEqual(diary.diaryLightingPalette("#ffffff"), { color:"#ffffff", soft:"#ffffff", core:"#ffffff" });
   const oldStyle = { lighting:"pendant", lightIntensity:.48, lightColor:"#55aaff" };
@@ -275,8 +275,11 @@ test("only lights with a fixture offer the fixture-space option", () => {
 test("each light has its own default color that follows the light until a color is picked", async () => {
   assert.equal(diary.diaryLightDefaultColor("firefly"), "#dff07e");
   assert.equal(diary.diaryLightDefaultColor("hanji"), "#ffb56b");
-  assert.equal(diary.diaryLightDefaultColor("pendant"), diary.DIARY_LIGHT_DEFAULT_COLOR);
-  for (const kind of Object.keys(diary.DIARY_LIGHT_COLORS)) assert.ok(diary.DIARY_LIGHTINGS.includes(kind));
+  assert.equal(diary.diaryLightDefaultColor("pendant"), "#ffd79a");
+  assert.equal(diary.diaryLightDefaultColor("none"), diary.DIARY_LIGHT_DEFAULT_COLOR);
+  // 조명마다 빠짐없이 제 색이 있고, 모두 안전한 #rrggbb 다.
+  assert.deepEqual(Object.keys(diary.DIARY_LIGHT_COLORS).sort(), diary.DIARY_LIGHTINGS.filter(id => id !== "none").sort());
+  for (const color of Object.values(diary.DIARY_LIGHT_COLORS)) assert.match(color, /^#[0-9a-f]{6}$/);
   const auto = diary.diaryNormalizeStyle({ lighting:"firefly" });
   assert.equal(auto.lightColor, "");
   assert.equal(diary.diaryLightColor(auto), "#dff07e");

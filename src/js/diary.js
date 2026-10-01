@@ -422,8 +422,20 @@ const DIARY_LIGHTINGS = ["none", "string", "pendant", "lantern", "stars", "glass
   "hanji", "curtain", "firefly", "moon", "window-light"];
 const DIARY_LIGHT_DEFAULT_COLOR = "#ffc66e";
 /* 조명마다 기본 색 — style.lightColor 가 빈 값이면 이 색을 쓴다(조명을 바꾸면 색도 따라 바뀐다).
-   판 20 전에 있던 10종은 예전 기본 색 그대로라, 옛 파일의 "#ffc66e" 를 빈 값으로 읽어도 모양이 같다. */
-const DIARY_LIGHT_COLORS = { hanji:"#ffb56b", curtain:"#ffcf7d", firefly:"#dff07e", moon:"#ffd98a", "window-light":"#ffc77a" };
+   옛 파일(판 19 이전)의 "#ffc66e" 는 빈 값으로 읽으므로, 예전 조명도 이 표의 색으로 열린다. 표에 없으면 DIARY_LIGHT_DEFAULT_COLOR. */
+const DIARY_LIGHT_COLORS = {
+  string:"#ffc66e",        // 줄 전구 — 예전 기본 색(백열 주황빛)
+  pendant:"#ffd79a",       // 펜던트 — 식탁 위 따뜻한 흰빛
+  lantern:"#ffad4d",       // 덩굴 랜턴 — 촛불 호박빛
+  stars:"#ffe58f",         // 별 전구 — 별빛 금색
+  glass:"#ffd2a8",         // 유리 전구 — 샴페인 복숭아빛
+  "light-bar":"#ffe6b8",   // 상단 바 — LED 흰빛
+  "desk-lamp":"#ffdca0",   // 오른쪽 스탠드 — 책 읽는 불빛
+  edison:"#ff9a3c",        // 에디슨 전구 — 필라멘트 진한 호박빛
+  shelf:"#ffeac4",         // 선반 아래 — 은은한 LED
+  "photo-clips":"#ffc58a", // 사진 집게 — 꼬마전구 살굿빛
+  hanji:"#ffb56b", curtain:"#ffcf7d", firefly:"#dff07e", moon:"#ffd98a", "window-light":"#ffc77a"
+};
 function diaryLightDefaultColor(kind){
   return Object.prototype.hasOwnProperty.call(DIARY_LIGHT_COLORS, kind) ? DIARY_LIGHT_COLORS[kind] : DIARY_LIGHT_DEFAULT_COLOR;
 }
