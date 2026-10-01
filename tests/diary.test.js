@@ -74,7 +74,7 @@ test("일기장을 저장했다 열면 글·꾸미기·스티커·사진이 그�
   const back = await diary.diaryUnpack(bytes);
   assert.equal(back.model.title, "나의 일기");
   assert.deepEqual(back.model.style, { lines:"grid", gap:"wide", bg:"assets/bg000001.jpg", fit:"tile", veil:0.25, font:"gothic", genkoCols:0,
-    paper:"none", paperColor:diary.DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:diary.DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:true });
+    paper:"none", paperColor:diary.DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:diary.DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:false });
   assert.equal(back.model.entries.length, 1);
   assert.equal(back.model.entries[0].text, "우산을 챙겼다.\n저녁엔 개었다.");
   assert.deepEqual(back.model.entries[0].stickers, [{ id:"st-a", kind:"photo", asset:"assets/st000001.png", x:0.2, y:0.5, w:0.3, ar:0.75, rot:0, flip:false }]);

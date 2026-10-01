@@ -23,7 +23,7 @@ const DIARY_FORMAT = "classdock-diary";
 // · 16: 종이 조명(lighting·lightIntensity) — 전등 장식과 발광을 나누어 저장한다.
 // · 17: 조명 색(lightColor).
 // · 18: 상단 바·오른쪽 스탠드·에디슨·선반 아래·사진 집게 조명 추가.
-// · 19: 전등 자리 비우기(lightAvoid) — 끄면 전등 위에도 글을 쓴다. 옛 앱은 이 값을 버려 다시 비우므로 판을 올린다.
+// · 19: 전등 자리 비우기(lightAvoid, 기본 끔) — 켜면 전등 기구 자리를 비운다. 옛 앱은 이 값을 버리므로 판을 올린다.
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
 const DIARY_VERSION = 19;
 const DIARY_JSON_NAME = "diary.json";
@@ -432,10 +432,10 @@ const DIARY_LIGHTING_RESERVE = {
 };
 /* 글이 전등을 피할 자리(px). 글·원고지·그림일기·인쇄가 모두 이 한 함수로 잰다.
    높이는 줄 간격의 배수로 올려 손글씨가 줄에서 벗어나지 않게 한다. 원고지·그림일기는 칸을 가운데 맞춰 늘어놓아
-   오른쪽만 비울 수 없으므로 옆 기구도 위 띠로 바꾼다. lightAvoid 를 끄면 비우지 않는다(전등 위에도 쓴다). */
+   오른쪽만 비울 수 없으므로 옆 기구도 위 띠로 바꾼다. lightAvoid 를 켠 때만 비운다(기본은 전등 위에도 쓴다). */
 function diaryLightingSpace(style, width){
   const none = { top:0, right:0, rightH:0 };
-  if (!style || style.lightAvoid === false || !DIARY_LIGHTINGS.includes(style.lighting)) return none;
+  if (!style || style.lightAvoid !== true || !DIARY_LIGHTINGS.includes(style.lighting)) return none;
   const reserve = DIARY_LIGHTING_RESERVE[style.lighting];
   if (!reserve) return none;
   const gap = DIARY_GAPS[style.gap] || DIARY_GAPS.normal;
@@ -676,7 +676,7 @@ function diaryBindLightColor(input, env){
 }
 function diaryDefaultStyle(){
   return { lines:"ruled", gap:"normal", bg:"", fit:"cover", veil:0.4, font:"gothic", genkoCols:0,
-    paper:"none", paperColor:DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:true };
+    paper:"none", paperColor:DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:false };
 }
 const DIARY_BACKDROP_THEMES = ["none", "blossom", "linen", "night",
   "paper-flowers", "pastel-sky", "wood-desk", "moonlit-sky", "leafy-bokeh", "custom"];
@@ -721,8 +721,8 @@ function diaryNormalizeStyle(raw, hasAsset){
     lightIntensity:raw.lightIntensity === "" || raw.lightIntensity == null || !Number.isFinite(intensity)
       ? base.lightIntensity : Math.max(0, Math.min(1, intensity)),
     lightColor:diaryLightingPalette(raw.lightColor).color,
-    // 전등 자리 비우기 — 판 18 까지는 늘 비웠으므로 값이 없으면 켠다. 꺼 둔 것만 false 로 남는다.
-    lightAvoid:raw.lightAvoid !== false
+    // 전등 자리 비우기 — 기본은 끔(전등 위에도 쓴다). 켠 것만 true 로 남는다. 판 18 이전 파일도 값이 없어 끔으로 연다.
+    lightAvoid:raw.lightAvoid === true
   };
 }
 /* ---------- 내장 스티커(그림) ----------
@@ -4167,13 +4167,13 @@ function mountDiaryPanels(panelEnv){
     lightColorInput.setAttribute("aria-label", diaryEn("조명 색", "Light color"));
     lightColorReset.textContent = diaryEn("기본 색", "Default color");
     lightColorReset.setAttribute("aria-label", diaryEn("조명 기본 색으로 되돌리기", "Reset light color"));
-    lightAvoidBox.checked = style.lightAvoid !== false;
+    lightAvoidBox.checked = style.lightAvoid === true;
     lightAvoidBox.disabled = style.lighting === "none";
     lightAvoidText.textContent = diaryEn("전등 자리 비우기", "Keep text clear of fixtures");
     lightNote.textContent = diaryEn("0%에서는 전등 장식만 남아요. 배경 그림과 함께 사용할 수 있어요. "
-      + "전등 자리 비우기를 끄면 전등 위에도 글을 쓸 수 있어요.",
+      + "전등 자리 비우기를 켜면 전등이 있는 자리를 비우고 글을 써요.",
       "At 0%, only the fixtures remain. Lighting can be used with a background image. "
-      + "Turn off “Keep text clear of fixtures” to write over the lights.");
+      + "Turn on “Keep text clear of fixtures” to leave the fixture area empty.");
     printPlainNote.textContent = diaryEn("배경 효과·배경 그림·조명을 빼고 인쇄해요(잉크를 아껴요). 전체에 적용돼요.",
       "Print without paper effects, background images or lighting to save ink. Applies to the whole journal.");
     const url = assetUrl(style.bg);

@@ -123,7 +123,7 @@ test("lighting reserves only each fixture's own space, aligned to the lines, for
     for (const lines of ["ruled", "genko", "picture"]){
       const plain = diary.diaryNormalizeStyle({ lines });
       for (const lighting of diary.DIARY_LIGHTINGS.filter(id => id !== "none")){
-        const lit = { ...plain, lighting };
+        const lit = { ...plain, lighting, lightAvoid:true };
         const reserve = diary.DIARY_LIGHTING_RESERVE[lighting];
         const space = diary.diaryLightingSpace(lit, width);
         const before = diary.diaryLineMetrics(plain, width), after = diary.diaryLineMetrics(lit, width);
@@ -149,27 +149,29 @@ test("lighting reserves only each fixture's own space, aligned to the lines, for
   }
 });
 
-test("turning off the fixture space lets text run under the lights; old files keep the space", () => {
+test("fixture space is off by default so text runs under the lights; old files open with it off", () => {
   for (const lighting of diary.DIARY_LIGHTINGS){
-    const style = diary.diaryNormalizeStyle({ lighting, lightAvoid:false });
+    const style = diary.diaryNormalizeStyle({ lighting });
     assert.equal(style.lightAvoid, false);
     assert.deepEqual(diary.diaryLightingSpace(style, 900), { top:0, right:0, rightH:0 });
     assert.deepEqual(diary.diaryLineMetrics(style, 900), diary.diaryLineMetrics(diary.diaryNormalizeStyle({}), 900));
     assert.equal(diary.diaryLightingMask(style, 900).image, "none");
   }
-  for (const value of [undefined, null, "", 0, "false", true]){
-    assert.equal(diary.diaryNormalizeStyle({ lighting:"stars", lightAvoid:value }).lightAvoid, true);
+  for (const value of [undefined, null, "", 0, 1, "true", false]){
+    assert.equal(diary.diaryNormalizeStyle({ lighting:"stars", lightAvoid:value }).lightAvoid, false);
   }
-  assert.equal(diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:18, style:{ lighting:"shelf" } }).style.lightAvoid, true);
-  assert.equal(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:8, style:{ lighting:"shelf" } }).style.lightAvoid, true);
+  assert.equal(diary.diaryNormalizeStyle({ lighting:"stars", lightAvoid:true }).lightAvoid, true);
+  assert.equal(diary.diaryDefaultStyle().lightAvoid, false);
+  assert.equal(diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:18, style:{ lighting:"shelf" } }).style.lightAvoid, false);
+  assert.equal(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:8, style:{ lighting:"shelf" } }).style.lightAvoid, false);
 });
 
 test("lines are hidden exactly where text cannot go", () => {
-  const top = { ...diary.diaryNormalizeStyle({}), lighting:"pendant" };
+  const top = { ...diary.diaryNormalizeStyle({}), lighting:"pendant", lightAvoid:true };
   const space = diary.diaryLightingSpace(top, 780);
   assert.deepEqual(diary.diaryLightingMask(top, 780), { image:"linear-gradient(#000, #000)", size:"100% 100%",
     position:`0 ${space.top}px`, repeat:"no-repeat" });
-  const side = { ...diary.diaryNormalizeStyle({}), lighting:"desk-lamp" };
+  const side = { ...diary.diaryNormalizeStyle({}), lighting:"desk-lamp", lightAvoid:true };
   const s = diary.diaryLightingSpace(side, 780);
   const mask = diary.diaryLightingMask(side, 780);
   assert.equal(mask.size, `calc(100% - ${s.right}px) 100%, 100% 100%`);
@@ -181,7 +183,7 @@ test("lines are hidden exactly where text cannot go", () => {
 
 test("fixture space round-trips per date in diary and trip files", async () => {
   const off = diary.diaryNormalizeStyle({ lighting:"desk-lamp", lightAvoid:false });
-  const model = diary.diaryEmpty("Space"); model.style = diary.diaryNormalizeStyle({ lighting:"desk-lamp" });
+  const model = diary.diaryEmpty("Space"); model.style = diary.diaryNormalizeStyle({ lighting:"desk-lamp", lightAvoid:true });
   model.entries.push({ date:"2026-10-01", text:"Today", style:off, stickers:[] });
   const { model:back } = await diary.diaryUnpack(diary.diaryPack(model, new Map()));
   assert.equal(back.style.lightAvoid, true);
