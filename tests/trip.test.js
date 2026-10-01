@@ -476,7 +476,7 @@ test("여행일지 상단 편집 도구는 공용 아이콘과 짧은 이름을 
   ]) {
     assert.match(source, new RegExp('diaryButton\\("",[^\\n]*"[^"]*' + className + '[^"]*"[^\\n]*"' + icon + '"\\)'));
   }
-  for (const label of ["되돌리기", "다시하기", "사진추가", "사진정보", "꾸미기", "편집/설정", "인쇄", "내보내기", "저장"]){
+  for (const label of ["되돌리기", "다시하기", "사진추가", "사진정보", "스티커·글상자", "종이·배경", "인쇄", "내보내기", "저장"]){
     assert.match(source, new RegExp('toolLabel\\([^\\n]*"' + label.replace(/[/?]/g, "\\$&") + '"'));
   }
   assert.match(source, /className = "trip-brand"/);
@@ -846,6 +846,60 @@ test("여행일지 찾기는 날과 장소를 구분해 정확한 id를 돌린�
   assert.deepEqual(trip.tripSearchRows(model, "플랫폼"), [{ dayId:"dy-1", spotId:"sp-1" }]);
   assert.deepEqual(trip.tripSearchRows(model, "2026-05-02"), [{ dayId:"dy-2", spotId:"" }]);
   assert.deepEqual(trip.tripSearchRows(model, "  "), []);
+});
+
+test("여행일지 검색과 통합 검색은 글상자·녹음 이름도 읽는다", () => {
+  const model = { title:"여행", days:[{ id:"dy-1", date:"2026-10-01", text:"하루", spots:[], stickers:[
+    { id:"st-text", kind:"text", text:"해변에서의 추억" },
+    { id:"st-audio", kind:"audio", label:"파도 소리" },
+    { id:"st-photo", kind:"photo", asset:"assets/ignore.jpg" }
+  ] }] };
+  assert.deepEqual(trip.tripSearchRows(model, "해변에서의 추억"), [{ dayId:"dy-1", spotId:"", stickerId:"st-text" }]);
+  assert.deepEqual(trip.tripSearchRows(model, "파도 소리"), [{ dayId:"dy-1", spotId:"", stickerId:"st-audio" }]);
+  const text = trip.tripPlainText(model);
+  assert.match(text, /해변에서의 추억/);
+  assert.match(text, /파도 소리/);
+  assert.doesNotMatch(text, /ignore\.jpg/);
+});
+
+test("여행 저장은 취소·오류 뒤 재시도하고 저장 중 새 편집을 미저장으로 남긴다", async () => {
+  const vm = require("node:vm");
+  let attempt = 0, finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const context = vm.createContext({
+    TextEncoder, TextDecoder, Uint8Array, console,
+    markDocumentDirty:(doc, dirty) => { doc.hasUnsavedEdits = dirty; },
+    saveTextDoc:async () => {
+      attempt++;
+      if (attempt === 1) return false;
+      if (attempt === 2) throw new Error("write failed");
+      if (attempt === 3) return pending;
+      return true;
+    }
+  });
+  vm.runInContext(read("src/js/diary.js"), context);
+  vm.runInContext(read("src/js/trip.js"), context);
+  const save = vm.runInContext("saveTrip", context);
+  const model = trip.tripEmpty("저장 시험");
+  model.days.push(trip.tripNormalizeDay({ id:"dy-1", date:"2026-10-01", text:"저장 전" }));
+  const doc = { trip:model, tripAssets:new Map(), hasUnsavedEdits:true };
+  const states = [];
+  doc._refreshJournalSaveStatus = () => states.push(doc._journalSaveState);
+  assert.equal(await save(doc), false);
+  assert.equal(doc._journalSaveState, "incomplete");
+  await assert.rejects(save(doc), /write failed/);
+  assert.equal(doc._journalSaveState, "error");
+  const saving = save(doc);
+  assert.equal(doc._journalSaveState, "saving");
+  assert.equal(await save(doc), false, "진행 중인 저장을 중복 실행하지 않는다");
+  model.days[0].text = "저장 중 입력";
+  finish(true);
+  assert.equal(await saving, true);
+  assert.equal(doc.hasUnsavedEdits, true);
+  assert.equal(diary.diarySaveStatus(doc, true, false).state, "dirty");
+  assert.equal(await save(doc), true);
+  assert.equal(doc.hasUnsavedEdits, false);
+  assert.deepEqual(states, ["saving", "incomplete", "saving", "error", "saving", "saved", "saving", "saved"]);
 });
 
 test("읽기용 여행 HTML은 날짜·글·장소·사진을 담고 사용자 글을 이스케이프한다", () => {

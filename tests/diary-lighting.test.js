@@ -5,7 +5,8 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const diary = require("../src/js/diary.js");
 for (const name of ["diaryDefaultStyle", "diaryNormalizeStyle", "diaryDefaultBackdrop", "diaryNormalizeBackdrop",
-  "diaryNormalizeSticker", "diaryNormalizeStroke", "diaryNormalizeTags", "diaryCleanSticker", "diaryZipBuild", "diaryZipRead"]){
+  "diaryNormalizeSticker", "diaryNormalizeStroke", "diaryNormalizeTags", "diaryCleanSticker", "diaryZipBuild", "diaryZipRead",
+  "diaryLegacyLightColor"]){
   globalThis[name] = diary[name];
 }
 const trip = require("../src/js/trip.js");
@@ -53,14 +54,16 @@ function layer(){
 }
 test("light colors reject unsafe values and old lighting files retain warm defaults", () => {
   for (const value of [undefined, null, "", "red", "#abc", "url(javascript:bad)", "#aabbcc;display:none"]){
-    assert.equal(diary.diaryNormalizeStyle({ lightColor:value }).lightColor, diary.DIARY_LIGHT_DEFAULT_COLOR);
+    // 빈 값 = 조명마다 다른 기본 색
+    assert.equal(diary.diaryNormalizeStyle({ lightColor:value }).lightColor, "");
   }
   assert.equal(diary.diaryNormalizeStyle({ lightColor:"#AABBCC" }).lightColor, "#aabbcc");
   const before = diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:16, style:{ lighting:"stars", lightIntensity:.25 } });
-  assert.equal(before.style.lightColor, diary.DIARY_LIGHT_DEFAULT_COLOR);
+  assert.equal(before.style.lightColor, "");
+  assert.equal(diary.diaryLightColor(before.style), diary.DIARY_LIGHT_DEFAULT_COLOR);
   assert.equal(before.style.lighting, "stars");
   assert.equal(before.style.lightIntensity, .25);
-  assert.equal(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:6, style:{ lighting:"glass" } }).style.lightColor,
+  assert.equal(diary.diaryLightColor(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:6, style:{ lighting:"glass" } }).style),
     diary.DIARY_LIGHT_DEFAULT_COLOR);
   assert.deepEqual(diary.diaryLightingPalette("#000000"), { color:"#000000", soft:"#8c8c8c", core:"#ebebeb" });
   assert.deepEqual(diary.diaryLightingPalette("#ffffff"), { color:"#ffffff", soft:"#ffffff", core:"#ffffff" });
@@ -85,7 +88,7 @@ test("one color picker gesture previews live and undoes independently from inten
   assert.equal(history.size(), 1);
   events.get("change")(); events.get("blur")();
   assert.equal(history.size(), 2);
-  history.undo(); assert.equal(style.lightColor, diary.DIARY_LIGHT_DEFAULT_COLOR);
+  history.undo(); assert.equal(style.lightColor, "");
   history.redo(); assert.equal(style.lightColor, "#ff8aca");
   assert.equal(style.lightIntensity, .25);
   input.value = "#000000"; events.get("input")(); finish();
@@ -267,4 +270,37 @@ test("only lights with a fixture offer the fixture-space option", () => {
   assert.ok(space.right > 0 && space.rightH > 0);
   assert.equal(diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:20, style:{ lighting:"moon" } }).style.lighting, "moon");
   assert.equal(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:10, style:{ lighting:"hanji" } }).style.lighting, "hanji");
+});
+
+test("each light has its own default color that follows the light until a color is picked", async () => {
+  assert.equal(diary.diaryLightDefaultColor("firefly"), "#dff07e");
+  assert.equal(diary.diaryLightDefaultColor("hanji"), "#ffb56b");
+  assert.equal(diary.diaryLightDefaultColor("pendant"), diary.DIARY_LIGHT_DEFAULT_COLOR);
+  for (const kind of Object.keys(diary.DIARY_LIGHT_COLORS)) assert.ok(diary.DIARY_LIGHTINGS.includes(kind));
+  const auto = diary.diaryNormalizeStyle({ lighting:"firefly" });
+  assert.equal(auto.lightColor, "");
+  assert.equal(diary.diaryLightColor(auto), "#dff07e");
+  assert.equal(diary.diaryLightColor({ ...auto, lighting:"moon" }), "#ffd98a");
+  const node = layer();
+  diary.diaryPaintLighting(node, auto);
+  assert.equal(node.style["--diary-light-color"], "#dff07e");
+  // 고른 색은 조명을 바꿔도 남는다.
+  const picked = diary.diaryNormalizeStyle({ lighting:"firefly", lightColor:"#ffc66e" });
+  assert.equal(diary.diaryLightColor({ ...picked, lighting:"hanji" }), "#ffc66e");
+  // 판 20 파일에서 고른 #ffc66e 는 그대로, 옛 판의 기본 색은 빈 값으로 읽는다.
+  const now = diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:20, style:{ lighting:"hanji", lightColor:"#ffc66e" } });
+  assert.equal(now.style.lightColor, "#ffc66e");
+  const old = diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:19, style:{ lighting:"pendant", lightColor:"#ffc66e" },
+    entries:[{ date:"2026-09-30", text:"x", style:{ lighting:"glass", lightColor:"#ffc66e" } }] });
+  assert.equal(old.style.lightColor, "");
+  assert.equal(old.entries[0].style.lightColor, "");
+  const oldTrip = trip.tripNormalize({ format:trip.TRIP_FORMAT, version:9, style:{ lighting:"pendant", lightColor:"#ffc66e" },
+    days:[{ id:"d1", text:"x", style:{ lighting:"glass", lightColor:"#ffc66e" } }] });
+  assert.equal(oldTrip.style.lightColor, "");
+  assert.equal(oldTrip.days[0].style.lightColor, "");
+  assert.equal(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:10, style:{ lightColor:"#ffc66e" } }).style.lightColor, "#ffc66e");
+  // 빈 값도 파일을 오가며 그대로 남는다.
+  const model = diary.diaryEmpty("Auto"); model.style = auto;
+  const { model:back } = await diary.diaryUnpack(diary.diaryPack(model, new Map()));
+  assert.equal(back.style.lightColor, "");
 });

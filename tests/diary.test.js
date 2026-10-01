@@ -74,7 +74,7 @@ test("일기장을 저장했다 열면 글·꾸미기·스티커·사진이 그�
   const back = await diary.diaryUnpack(bytes);
   assert.equal(back.model.title, "나의 일기");
   assert.deepEqual(back.model.style, { lines:"grid", gap:"wide", bg:"assets/bg000001.jpg", fit:"tile", veil:0.25, font:"gothic", genkoCols:0,
-    paper:"none", paperColor:diary.DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:diary.DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:false });
+    paper:"none", paperColor:diary.DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:"", lightAvoid:false });
   assert.equal(back.model.entries.length, 1);
   assert.equal(back.model.entries[0].text, "우산을 챙겼다.\n저녁엔 개었다.");
   assert.deepEqual(back.model.entries[0].stickers, [{ id:"st-a", kind:"photo", asset:"assets/st000001.png", x:0.2, y:0.5, w:0.3, ar:0.75, rot:0, flip:false }]);
@@ -336,6 +336,17 @@ test("월간 돌아보기는 작성일·연속 기록·사진·기분·자주 �
   assert.equal(stats.favorite, 1);
   assert.deepEqual(stats.mood, ["happy", 2]);
   assert.deepEqual(stats.words[0], ["산책", 3]);
+});
+
+test("월간 사진 수는 그림·글상자·녹음을 제외하고 사진만 센다", () => {
+  const entry = diary.diaryNormalizeEntry({ date:"2026-10-01", stickers:[
+    { kind:"photo", asset:"assets/photo123.jpg", x:0, y:0, w:.2, ar:1 },
+    { kind:"art", art:"heart", x:0, y:0, w:.2 },
+    { kind:"text", text:"사진 설명", x:0, y:0, w:.2 },
+    { kind:"audio", asset:"assets/audio123.mp3", label:"파도", x:0, y:0, w:.2 }
+  ] }, () => true);
+  assert.equal(entry.stickers.length, 4);
+  assert.equal(diary.diaryReviewStats([entry], 2026, 10).photos, 1);
 });
 
 test("기분 지도는 한 해의 쓴 날마다 기분을 담고, 나온 기분만 DIARY_MOODS 차례로 센다", () => {
@@ -940,12 +951,28 @@ test("저장을 취소하거나 실패해도 다음 저장을 할 수 있다", a
     }
   });
   const originalKey = doc.savedText;
+  const states = [];
+  doc._refreshJournalSaveStatus = () => states.push(doc._journalSaveState);
   assert.equal(await save(doc), false);
   assert.equal(doc.savedText, originalKey);
   assert.equal(doc.hasUnsavedEdits, true);
   await assert.rejects(save(doc), /write failed/);
   assert.equal(await save(doc), true);
   assert.equal(doc.hasUnsavedEdits, false);
+  assert.deepEqual(states, ["saving", "incomplete", "saving", "error", "saving", "saved"]);
+});
+
+test("저장 표시에는 저장 중 편집·복원본·새 파일·취소·오류가 반영된다", () => {
+  const state = (doc, dirty=false) => diary.diarySaveStatus(doc, dirty, false).state;
+  assert.equal(state({}), "saved");
+  assert.equal(state({ _journalSaveState:"saved" }, true), "dirty");
+  assert.equal(state({ restoredUnsaved:true }), "dirty");
+  assert.equal(state({ isScratch:true }), "dirty");
+  assert.equal(state({ isScratch:true, _named:true }), "saved");
+  assert.equal(state({ _journalSaveState:"saving" }, true), "saving");
+  assert.equal(state({ _journalSaveState:"incomplete" }, true), "incomplete");
+  assert.equal(state({ _journalSaveState:"error" }, true), "error");
+  assert.equal(diary.diarySaveStatus({}, false, true).text, "Saved");
 });
 
 function diaryStickerHarness(){

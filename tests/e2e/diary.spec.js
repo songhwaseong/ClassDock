@@ -35,7 +35,7 @@ test("오늘 날짜로 열리고, 글을 쓰면 달력에 점이 찍히며 줄 �
   await area.click();
   await page.keyboard.type("오늘은 맑았다.");
   await expect(cell).toHaveClass(/has-entry/);
-  await expect(page.locator(".diary-status")).toContainText("저장 안 됨");
+  await expect(page.locator(".journal-save-status")).toContainText("저장 안 됨");
   await expect(page.locator(".diary-month-item")).toHaveCount(1);
   await expect(page.locator(".diary-month-item-label")).toHaveText("오늘은 맑았다.");
 
@@ -349,7 +349,7 @@ test("저장 버튼은 ZIP 바이트 그대로 쓰고, 그 파일을 열면 같�
   });
   await page.locator(".diary-text").fill("저장 확인");
   await page.locator(".diary-bar .run-save").click();
-  await expect(page.locator(".diary-status")).toHaveText("");
+  await expect(page.locator(".journal-save-status")).toHaveText("저장 완료");
   const head = await page.evaluate(async () => {
     const bytes = new Uint8Array(await window.__written.arrayBuffer());
     return [...bytes.slice(0, 4)].map(b => b.toString(16).padStart(2, "0")).join("");
@@ -388,7 +388,7 @@ test("파일 암호를 설정하면 글·사진이 봉인되고 틀린 암호로
   await setModal.locator('input[type="password"]').nth(1).fill("diary-password-2026");
   await setModal.locator("button", { hasText:"암호 설정" }).click();
   await expect(page.locator(".diary-bar .diary-btn[aria-haspopup=menu]")).toHaveClass(/is-on/, { timeout:15_000 });
-  await expect(page.locator(".diary-status")).toHaveText("", { timeout:15_000 });
+  await expect(page.locator(".journal-save-status")).toHaveText("저장 완료", { timeout:15_000 });
 
   const sealed = await page.evaluate(async () => {
     const bytes = new Uint8Array(await window.__written.arrayBuffer());

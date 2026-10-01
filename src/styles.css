@@ -9061,7 +9061,10 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
     radial-gradient(210px 46px at 66% 100%,rgba(48,157,190,.38) 0 48%,transparent 51%),
     linear-gradient(180deg,transparent 30%,rgba(44,169,201,.26) 31%,rgba(20,132,173,.34) 100%)}
 .trip-bar,.trip-body{position:relative;z-index:1}
-/* 여행일지 바탕(일기장과 같은 테마) — 고르면 아래 물결 층이 '흐리게' 막으로 바뀐다. 없음이면 속성이 없어 하늘 바탕 그대로. */
+/* 기본 바탕은 밝은 테마의 하늘·물결과 어두운 테마의 검정 계열 바탕을 따른다. */
+[data-theme="dark"] .trip-root:not([data-backdrop]){background:var(--bg)}
+[data-theme="dark"] .trip-root:not([data-backdrop])::before{display:none}
+/* 여행일지 바탕(일기장과 같은 테마) — 고르면 아래 물결 층이 '흐리게' 막으로 바뀐다. */
 .trip-root[data-backdrop]::before{top:0;height:auto;background:var(--bg);opacity:var(--diary-backdrop-veil,.15)}
 .trip-root[data-backdrop="blossom"]::after{content:"✿";position:absolute;z-index:0;right:4%;bottom:28px;color:rgba(199,105,135,.17);font-size:130px;line-height:1;pointer-events:none}
 .trip-bar{gap:10px;margin:10px 12px 0;padding:7px 10px;min-height:76px;border:1px solid rgba(255,255,255,.82);border-radius:16px;
@@ -9349,6 +9352,57 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .diary-danger:hover:not(:disabled){border-color:var(--danger);color:var(--danger)}
 .diary-btn .ui-icon{width:16px;height:16px}
 .diary-status{color:var(--muted);font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 120px}
+.journal-save-status{flex:0 0 auto;font-size:11px;line-height:1.5;padding:3px 7px;border:1px solid var(--border);border-radius:7px;background:var(--panel);color:var(--muted);white-space:nowrap}
+.journal-save-status[data-state="dirty"]{color:var(--ink);border-color:var(--accent)}
+.journal-save-status[data-state="saving"]{color:var(--accent)}
+.journal-save-status[data-state="error"],.journal-save-status[data-state="incomplete"]{color:var(--danger);border-color:var(--danger)}
+.trip-bar>.journal-save-status{order:3}
+.trip-bar-actions .trip-tool-button.trip-sticker-btn.diary-ico{width:76px}
+.trip-bar-actions .trip-tool-button.trip-style-btn.diary-ico{width:66px}
+@media(max-width:860px){
+  .trip-bar-actions .trip-tool-button.trip-sticker-btn.diary-ico,.trip-bar-actions .trip-tool-button.trip-style-btn.diary-ico{width:34px}
+}
+.diary-search-more,.diary-photo-more,.trip-search-more{align-self:stretch;margin:8px 0;min-height:36px}
+/* 여행 템플릿과 몰입. 좁은 화면에서도 저장·몰입 종료 도구를 스크롤해 찾을 수 있다. */
+.trip-bar-actions{flex-shrink:1;overflow-x:auto;scrollbar-width:thin}
+.trip-template-panel{position:absolute;z-index:50;display:flex;flex-direction:column;gap:10px;box-sizing:border-box;
+  padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--panel);color:var(--ink);
+  box-shadow:0 14px 40px rgba(0,0,0,.22);overflow:auto;overscroll-behavior:contain}
+.trip-template-panel[hidden]{display:none}
+.trip-template-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.trip-template-head strong{font-size:15px}
+.trip-template-note{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.trip-template-choices{display:flex;flex-direction:column;gap:7px;padding:9px;border-radius:8px;background:var(--field);font-size:12.5px}
+.trip-template-choices label{display:flex;align-items:center;gap:7px;cursor:pointer}
+.trip-template-choices input{accent-color:var(--accent)}
+.trip-template-option{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--border);border-radius:10px;
+  background:var(--field);color:var(--ink);text-align:left;font:inherit;cursor:pointer}
+.trip-template-option:hover:not(:disabled){border-color:var(--accent)}
+.trip-template-option:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.trip-template-option:disabled{opacity:.45;cursor:default}
+.trip-template-option strong{font-size:14px}
+.trip-template-description{font-size:12.5px;line-height:1.5}
+.trip-template-preview{color:var(--muted);font-size:11.5px;line-height:1.6;overflow-wrap:anywhere}
+.trip-template-card{display:flex;flex-direction:column;gap:5px;min-width:0}
+.trip-template-option{width:100%;box-sizing:border-box}
+.trip-template-group{font-size:13px;margin-top:3px}
+.trip-template-actions{display:flex;flex-wrap:wrap;gap:6px}
+.trip-template-actions .diary-btn{font-size:12px;min-height:30px}
+.trip-template-create{align-self:stretch}
+.trip-template-form,.trip-template-field{display:flex;flex-direction:column;gap:8px;min-width:0}
+.trip-template-form{gap:14px}
+.trip-template-field{font-size:12.5px;line-height:1.5}
+.trip-template-field input,.trip-template-field textarea{box-sizing:border-box;width:100%;min-width:0;padding:8px 10px;
+  border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit}
+.trip-template-field textarea{resize:vertical;min-height:100px;max-height:280px}
+.trip-template-field input:focus-visible,.trip-template-field textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.trip-template-error{margin:0;color:var(--danger,#c43838);font-size:12px;line-height:1.6}
+.trip-template-error[hidden]{display:none}
+.trip-root.is-trip-focus .trip-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+.trip-root.is-trip-focus .trip-rail,.trip-root.is-trip-focus .trip-map-divider,
+.trip-root.is-trip-focus .trip-map-pane,.trip-root.is-trip-focus .trip-map-mobile-btn{display:none!important}
+.trip-bar-actions .trip-focus-btn.is-on{background:var(--accent);color:#fff}
+.trip-bar-actions .trip-focus-btn.is-on .trip-tool-label{color:#fff}
 .diary-locked-panel{max-width:520px;margin:40px auto;padding:26px;border:1px solid var(--border);border-radius:14px;
   background:var(--panel-2);display:flex;flex-direction:column;align-items:center;gap:11px;text-align:center}
 .diary-locked-icon{display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;

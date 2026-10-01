@@ -24,7 +24,7 @@ const DIARY_FORMAT = "classdock-diary";
 // · 17: 조명 색(lightColor).
 // · 18: 상단 바·오른쪽 스탠드·에디슨·선반 아래·사진 집게 조명 추가.
 // · 19: 전등 자리 비우기(lightAvoid, 기본 끔) — 켜면 전등 기구 자리를 비운다. 옛 앱은 이 값을 버리므로 판을 올린다.
-// · 20: 한지 연등·커튼 전구·반딧불 유리병·달 구름 모빌·창문 햇살 조명 추가.
+// · 20: 한지 연등·커튼 전구·반딧불 유리병·달 구름 모빌·창문 햇살 조명 추가. 조명 색 빈 값 = 조명마다 다른 기본 색.
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
 const DIARY_VERSION = 20;
 const DIARY_JSON_NAME = "diary.json";
@@ -421,6 +421,22 @@ const DIARY_GENKO_COLS = [0, 8, 10, 12, 16, 20, 24];
 const DIARY_LIGHTINGS = ["none", "string", "pendant", "lantern", "stars", "glass", "light-bar", "desk-lamp", "edison", "shelf", "photo-clips",
   "hanji", "curtain", "firefly", "moon", "window-light"];
 const DIARY_LIGHT_DEFAULT_COLOR = "#ffc66e";
+/* 조명마다 기본 색 — style.lightColor 가 빈 값이면 이 색을 쓴다(조명을 바꾸면 색도 따라 바뀐다).
+   판 20 전에 있던 10종은 예전 기본 색 그대로라, 옛 파일의 "#ffc66e" 를 빈 값으로 읽어도 모양이 같다. */
+const DIARY_LIGHT_COLORS = { hanji:"#ffb56b", curtain:"#ffcf7d", firefly:"#dff07e", moon:"#ffd98a", "window-light":"#ffc77a" };
+function diaryLightDefaultColor(kind){
+  return Object.prototype.hasOwnProperty.call(DIARY_LIGHT_COLORS, kind) ? DIARY_LIGHT_COLORS[kind] : DIARY_LIGHT_DEFAULT_COLOR;
+}
+// 실제로 칠할 조명 색 — 고른 색이 있으면 그 색, 없으면 조명의 기본 색.
+function diaryLightColor(style){
+  const raw = String(style && style.lightColor || "");
+  return DIARY_HEX_RE.test(raw) ? raw.toLowerCase() : diaryLightDefaultColor(style && style.lighting);
+}
+// 판 19(여행일지 9) 이전 파일은 '기본 색'을 "#ffc66e" 로 적어 두었다 — 빈 값(조명 기본 색)으로 읽는다.
+function diaryLegacyLightColor(style){
+  if (style && style.lightColor === DIARY_LIGHT_DEFAULT_COLOR) style.lightColor = "";
+  return style;
+}
 const DIARY_LIGHTING_LABELS = { none:"없음", string:"줄 전구", pendant:"펜던트", lantern:"덩굴 랜턴", stars:"별 전구", glass:"유리 전구",
   "light-bar":"상단 바 조명", "desk-lamp":"오른쪽 스탠드", edison:"에디슨 전구", shelf:"선반 아래 조명", "photo-clips":"사진 집게 전구",
   hanji:"한지 연등", curtain:"커튼 전구", firefly:"반딧불 유리병", moon:"달 구름 모빌", "window-light":"창문 햇살" };
@@ -477,8 +493,8 @@ function diaryApplyLightingMask(el, mask){
   Object.assign(el.style, { maskImage:mask.image, maskSize:mask.size, maskPosition:mask.position, maskRepeat:mask.repeat,
     webkitMaskImage:mask.image, webkitMaskSize:mask.size, webkitMaskPosition:mask.position, webkitMaskRepeat:mask.repeat });
 }
-function diaryLightingPalette(raw){
-  const color = DIARY_HEX_RE.test(String(raw || "")) ? String(raw).toLowerCase() : DIARY_LIGHT_DEFAULT_COLOR;
+function diaryLightingPalette(raw, kind){
+  const color = DIARY_HEX_RE.test(String(raw || "")) ? String(raw).toLowerCase() : diaryLightDefaultColor(kind);
   const mixWhite = amount => "#" + [1, 3, 5].map(start => {
     const channel = parseInt(color.slice(start, start + 2), 16);
     return Math.round(channel + (255 - channel) * amount).toString(16).padStart(2, "0");
@@ -735,7 +751,7 @@ function diaryPaintLighting(layer, style){
   layer.hidden = kind === "none";
   const intensity = Number(style && style.lightIntensity);
   layer.style.setProperty("--diary-light-intensity", String(Number.isFinite(intensity) ? Math.max(0, Math.min(1, intensity)) : .6));
-  const palette = diaryLightingPalette(style && style.lightColor);
+  const palette = diaryLightingPalette(diaryLightColor(style));
   for (const key of ["color", "soft", "core"]) layer.style.setProperty("--diary-light-" + key, palette[key]);
   layer.setAttribute("aria-hidden", "true");
 }
@@ -772,7 +788,7 @@ function diaryBindLightColor(input, env){
 }
 function diaryDefaultStyle(){
   return { lines:"ruled", gap:"normal", bg:"", fit:"cover", veil:0.4, font:"gothic", genkoCols:0,
-    paper:"none", paperColor:DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:DIARY_LIGHT_DEFAULT_COLOR, lightAvoid:false };
+    paper:"none", paperColor:DIARY_PAPER_DEFAULT_COLOR, paperTone:0.5, lighting:"none", lightIntensity:0.6, lightColor:"", lightAvoid:false };
 }
 const DIARY_BACKDROP_THEMES = ["none", "blossom", "linen", "night",
   "paper-flowers", "pastel-sky", "wood-desk", "moonlit-sky", "leafy-bokeh", "custom"];
@@ -816,7 +832,8 @@ function diaryNormalizeStyle(raw, hasAsset){
     lighting:DIARY_LIGHTINGS.includes(raw.lighting) ? raw.lighting : base.lighting,
     lightIntensity:raw.lightIntensity === "" || raw.lightIntensity == null || !Number.isFinite(intensity)
       ? base.lightIntensity : Math.max(0, Math.min(1, intensity)),
-    lightColor:diaryLightingPalette(raw.lightColor).color,
+    // 빈 값 = 조명마다 다른 기본 색(diaryLightColor). 고른 색만 #rrggbb 로 남는다.
+    lightColor:DIARY_HEX_RE.test(String(raw.lightColor || "")) ? String(raw.lightColor).toLowerCase() : "",
     // 전등 자리 비우기 — 기본은 끔(전등 위에도 쓴다). 켠 것만 true 로 남는다. 판 18 이전 파일도 값이 없어 끔으로 연다.
     lightAvoid:raw.lightAvoid === true
   };
@@ -1486,9 +1503,11 @@ function diaryEmpty(title){
 function diaryNormalize(raw, hasAsset){
   if (!raw || typeof raw !== "object" || raw.format !== DIARY_FORMAT) throw new Error("diary-format");
   if (!(Number(raw.version) >= 1 && Number(raw.version) <= DIARY_VERSION)) throw new Error("diary-version");
+  const legacyColor = Number(raw.version) < 20;
   const byDate = new Map();
   for (const item of (Array.isArray(raw.entries) ? raw.entries : []).slice(0, DIARY_MAX_ENTRIES)){
     const entry = diaryNormalizeEntry(item, hasAsset);
+    if (legacyColor && entry) diaryLegacyLightColor(entry.style);
     if (entry && !diaryEntryIsEmpty(entry) && !byDate.has(entry.date)) byDate.set(entry.date, entry);
   }
   return {
@@ -1496,7 +1515,7 @@ function diaryNormalize(raw, hasAsset){
     title:String(raw.title || "일기장").slice(0, 200),
     createdAt:Number(raw.createdAt) || Date.now(),
     updatedAt:Number(raw.updatedAt) || Date.now(),
-    style:diaryNormalizeStyle(raw.style, hasAsset),
+    style:legacyColor ? diaryLegacyLightColor(diaryNormalizeStyle(raw.style, hasAsset)) : diaryNormalizeStyle(raw.style, hasAsset),
     backdrop:diaryNormalizeBackdrop(raw.backdrop, hasAsset),
     // 인쇄할 땐 배경 빼기 — 꾸미기와 달리 날짜별로 갈리지 않는다(한 번 인쇄에 여러 날이 함께 나가므로).
     printPlain:!!raw.printPlain,
@@ -1712,7 +1731,7 @@ function diaryReviewStats(entries, year, month){
   for (const e of rows){
     if (e.mood) mood.set(e.mood, (mood.get(e.mood) || 0) + 1);
     if (e.weather) weather.set(e.weather, (weather.get(e.weather) || 0) + 1);
-    photos += (e.stickers || []).length;
+    photos += (e.stickers || []).filter(s => diaryStickerKind(s) === "photo").length;
     const tokens = (String(e.title || "") + " " + String(e.text || "")).toLocaleLowerCase();
     for (const token of tokens.match(/[가-힣]{2,}|[a-z]{3,}/g) || []){
       if (!skip.has(token)) words.set(token, (words.get(token) || 0) + 1);
@@ -2653,6 +2672,8 @@ async function diaryOutputBytes(model, assets, protection, now){
 async function saveDiary(doc){
   if (!doc || !doc.diary || doc._diarySaving) return false;
   doc._diarySaving = true;
+  doc._journalSaveState = "saving";
+  if (typeof doc._refreshJournalSaveStatus === "function") doc._refreshJournalSaveStatus();
   try {
     const now = Date.now();
     const savedKey = diaryContentKey(doc.diary);
@@ -2681,8 +2702,24 @@ async function saveDiary(doc){
         || (Number(doc.diarySecurityRevision) || 0) !== savedSecurityRevision;
       if (typeof markDocumentDirty === "function") markDocumentDirty(doc, dirty);
     }
+    doc._journalSaveState = ok ? "saved" : "incomplete";
     return ok;
-  } finally { doc._diarySaving = false; }
+  } finally {
+    doc._diarySaving = false;
+    if (doc._journalSaveState === "saving") doc._journalSaveState = "error";
+    if (typeof doc._refreshJournalSaveStatus === "function") doc._refreshJournalSaveStatus();
+  }
+}
+
+// 작업 안내와 별도로, 저장 버튼·단축키·통합 저장 모두 같은 상태를 표시한다.
+function diarySaveStatus(doc, dirty, en){
+  const state = doc._journalSaveState;
+  if (state === "saving") return { state, text:en ? "Saving…" : "저장 중…" };
+  if (state === "error") return { state, text:en ? "Save failed" : "저장 실패" };
+  if (state === "incomplete") return { state, text:en ? "Save not completed" : "저장 미완료" };
+  if (dirty || doc.hasUnsavedEdits || doc.restoredUnsaved || (doc.isScratch && !doc._named))
+    return { state:"dirty", text:en ? "Unsaved changes" : "저장 안 됨" };
+  return { state:"saved", text:en ? "Saved" : "저장 완료" };
 }
 
 /* ---------- 편집기 ---------- */
@@ -3700,8 +3737,8 @@ function mountDiaryPaper(els, paperEnv){
     // 여러 장은 이미 정렬해 두었다고 알려 준다 — 다른 모양으로 깔 길(우클릭)도 여기서 한 번 짚어 준다.
     else if (fitted > 1) setStatus(diaryTf("사진 {n}장을 그림 칸에 나눠 맞췄어요.", { n:fitted }));
     else if (fresh.length > 1) setStatus(diaryTf("사진 {n}장을 줄 맞춰 깔았어요 — 우클릭 '정렬해서 깔기' 로 격자·사진첩 모양으로 바꿀 수 있어요.", { n:fresh.length }));
-    // 일기장 refreshDirty 는 저장 상태를 문구로 쓰지만 여행일지는 그렇지 않다. 한 장 성공도 직접 끝났다고
-    // 알려 주지 않으면 여행일지 막대에는 시작 문구인 "사진을 붙이는 중…"이 영원히 남는다.
+    // 저장 상태와 작업 안내는 따로 표시한다. 한 장 성공도 끝났다고 알려야
+    // 시작 문구인 "사진을 붙이는 중…"이 계속 남지 않는다.
     else if (added) setStatus(diaryTf("사진 {n}장을 붙였어요.", { n:added }));
     else refreshDirty();
   }
@@ -4133,7 +4170,7 @@ function mountDiaryPanels(panelEnv){
   lightColorInput.type = "color"; lightColorInput.className = "diary-paper-color diary-light-color";
   const lightColorReset = diaryButton(diaryEn("기본 색", "Default color"));
   lightColorReset.addEventListener("click", () => {
-    finishLightColorGesture(); changeStyle({ lightColor:DIARY_LIGHT_DEFAULT_COLOR }, true);
+    finishLightColorGesture(); changeStyle({ lightColor:"" }, true);
   });
   lightColorControls.append(lightColorInput, lightColorReset);
   // 전등 자리 비우기 — 꾸미기 값이라 '이 날짜에만'을 따른다(changeStyle).
@@ -4258,11 +4295,12 @@ function mountDiaryPanels(panelEnv){
     lightRange.value = String(Math.round(style.lightIntensity * 100));
     lightValue.textContent = Math.round(style.lightIntensity * 100) + "%";
     lightColorControls.parentElement.querySelector(".diary-style-label").textContent = diaryEn("조명 색", "Light color");
-    lightColorInput.value = style.lightColor;
-    lightColorInput.disabled = lightColorReset.disabled = style.lighting === "none";
+    lightColorInput.value = diaryLightColor(style);
+    lightColorInput.disabled = style.lighting === "none";
+    lightColorReset.disabled = style.lighting === "none" || !style.lightColor;
     lightColorInput.setAttribute("aria-label", diaryEn("조명 색", "Light color"));
     lightColorReset.textContent = diaryEn("기본 색", "Default color");
-    lightColorReset.setAttribute("aria-label", diaryEn("조명 기본 색으로 되돌리기", "Reset light color"));
+    lightColorReset.setAttribute("aria-label", diaryEn("이 조명의 기본 색으로 되돌리기", "Reset to this light's default color"));
     lightAvoidBox.checked = style.lightAvoid === true;
     lightAvoidBox.disabled = !diaryLightingHasFixture(style.lighting);
     lightAvoidText.textContent = diaryEn("전등 자리 비우기", "Keep text clear of fixtures");
@@ -4775,6 +4813,9 @@ function mountDiaryEditor(doc){
   const status = document.createElement("span");
   status.className = "diary-status";
   status.setAttribute("aria-live", "polite");
+  const saveStatus = document.createElement("span");
+  saveStatus.className = "journal-save-status";
+  saveStatus.setAttribute("role", "status");
   const photoInput = document.createElement("input");
   photoInput.type = "file"; photoInput.accept = "image/*"; photoInput.multiple = true; photoInput.hidden = true;
   const bgInput = document.createElement("input");
@@ -4786,7 +4827,7 @@ function mountDiaryEditor(doc){
   // 몰입 중에만 보이는 날짜 — 몰입 모드는 종이 위 날짜 머리까지 감추므로 지금 며칠인지는 여기서 본다.
   const focusDate = document.createElement("span");
   focusDate.className = "diary-focus-date";
-  barIdentity.append(sideToggleBtn, railToggleBtn, focusBtn, barViewSep, titleInput, focusDate, status);
+  barIdentity.append(sideToggleBtn, railToggleBtn, focusBtn, barViewSep, titleInput, focusDate, saveStatus, status);
   const barActions = document.createElement("div");
   barActions.className = "diary-bar-actions";
   barActions.append(undoBtn, redoBtn, photoBtn, stickerBtn, styleBtn, protectBtn, saveBtn);
@@ -5089,11 +5130,19 @@ function mountDiaryEditor(doc){
 
   /* ----- 상태 표시·되돌리기·복구본 ----- */
   const setStatus = (msg) => { status.textContent = msg || ""; };
+  const refreshSaveStatus = (dirty = diaryContentKey(model) !== doc.savedText
+    || (Number(doc.diarySecurityRevision) || 0) !== (Number(doc.savedDiarySecurityRevision) || 0)) => {
+    const info = diarySaveStatus(doc, dirty, diaryIsEn());
+    saveStatus.dataset.state = info.state;
+    saveStatus.textContent = info.text;
+    saveStatus.title = info.text;
+  };
+  doc._refreshJournalSaveStatus = refreshSaveStatus;
   const refreshDirty = () => {
     const dirty = diaryContentKey(model) !== doc.savedText
       || (Number(doc.diarySecurityRevision) || 0) !== (Number(doc.savedDiarySecurityRevision) || 0);
     if (typeof markDocumentDirty === "function") markDocumentDirty(doc, dirty);
-    setStatus(dirty ? diaryT("● 저장 안 됨") : "");
+    refreshSaveStatus(dirty);
     return dirty;
   };
   let recoveryGeneration = 0;
@@ -5723,24 +5772,37 @@ function mountDiaryEditor(doc){
     if (!items.length){ const empty = document.createElement("div"); empty.className = "diary-entry-rail-empty"; empty.textContent = emptyText; items.push(empty); }
     monthList.replaceChildren(heading, ...items);
   }
+  let searchVisible = 100, searchCriteria = "";
   function renderSearchResults(){
     const query = searchInput.value.trim(), filter = searchFilter.value || "all";
     const entries = diaryCleanEntries(model);
     syncSearchDetailOptions(entries);
-    let rows = diaryFilterEntries(entries.sort((a, b) => a.date < b.date ? 1 : -1),
+    const criteria = JSON.stringify([query, filter, searchTag.value, searchMood.value]);
+    if (criteria !== searchCriteria){ searchCriteria = criteria; searchVisible = 100; }
+    const rows = diaryFilterEntries(entries.sort((a, b) => a.date < b.date ? 1 : -1),
       query, filter, searchTag.value, searchMood.value);
-    if (!query && filter === "all") rows = rows.slice(0, 30);
     const countText = query || filter !== "all"
       ? (diaryIsEn() ? rows.length + " results" : rows.length + "개의 일기")
       : (diaryIsEn() ? "Recent entries" : "최근 일기");
     const summary = document.createElement("div"); summary.className = "diary-search-count"; summary.textContent = countText;
     searchResults.replaceChildren(summary);
-    renderEntryCards(rows.slice(0, 100), countText, diaryIsEn() ? "No matching entries." : "조건에 맞는 일기가 없어요.");
+    renderEntryCards(rows.slice(0, searchVisible), countText, diaryIsEn() ? "No matching entries." : "조건에 맞는 일기가 없어요.");
+    if (rows.length > searchVisible){
+      const more = diaryButton(diaryIsEn() ? "Show more entries" : "일기 더 보기", "", "diary-btn diary-search-more");
+      more.textContent += " (" + Math.min(searchVisible, rows.length) + "/" + rows.length + ")";
+      more.addEventListener("click", () => {
+        searchVisible += 100; renderSearchResults();
+        const target = monthList.querySelector(".diary-search-more") || monthList.lastElementChild;
+        if (target) target.focus({ preventScroll:true });
+      });
+      monthList.append(more);
+    }
   }
   /* 사진만 모아 보기 — 날짜마다 흩어진 사진을 최근 날부터 한 칸에 모은다.
      썸네일 수천 장을 한 번에 그리면 탭을 누를 때마다 멈추므로 정해진 수까지만 그리고, 남은 장수는 글로 알린다.
      누르면 그 날로 가서 그 사진을 골라 준다(어디에 붙인 사진인지 종이에서 보이게). */
   const DIARY_PHOTO_WALL_MAX = 300;
+  let photoVisible = DIARY_PHOTO_WALL_MAX;
   function renderPhotoWall(){
     const rows = diaryCleanEntries(model).slice().sort((a, b) => a.date < b.date ? 1 : -1);
     const groups = [];
@@ -5748,8 +5810,8 @@ function mountDiaryEditor(doc){
     for (const e of rows){
       const photos = (e.stickers || []).filter(s => diaryStickerKind(s) === "photo" && assetUrl(s.asset));
       total += photos.length;
-      if (!photos.length || shown >= DIARY_PHOTO_WALL_MAX) continue;
-      const take = photos.slice(0, DIARY_PHOTO_WALL_MAX - shown);
+      if (!photos.length || shown >= photoVisible) continue;
+      const take = photos.slice(0, photoVisible - shown);
       groups.push({ date:e.date, photos:take });
       shown += take.length;
     }
@@ -5795,6 +5857,15 @@ function mountDiaryEditor(doc){
       }
       day.append(label, grid);
       parts.push(day);
+    }
+    if (shown < total){
+      const more = diaryButton(diaryIsEn() ? "Show more photos" : "사진 더 보기", "", "diary-btn diary-photo-more");
+      more.addEventListener("click", () => {
+        photoVisible += DIARY_PHOTO_WALL_MAX; renderPhotoWall();
+        const target = photoPane.querySelector(".diary-photo-more") || photoPane.querySelector(".diary-photo-day:last-of-type .diary-photo-cell:last-child");
+        if (target) target.focus({ preventScroll:true });
+      });
+      parts.push(more);
     }
     photoPane.replaceChildren(...parts);
   }
@@ -7130,6 +7201,7 @@ function mountDiaryEditor(doc){
     urls.clear();
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
     if (doc._diaryQueueSavedSnapshot) delete doc._diaryQueueSavedSnapshot;
+    if (doc._refreshJournalSaveStatus === refreshSaveStatus) delete doc._refreshJournalSaveStatus;
     recoveryGeneration++;
   });
 
@@ -7140,16 +7212,17 @@ function mountDiaryEditor(doc){
   applyPanels();            // translateUi 다음에 — 단추 글자는 상태까지 봐야 해서 여기서 확정한다
   history.reset();
   updateHistoryButtons();
+  refreshSaveStatus();
   // 첫 마운트는 탭이 아직 안 보일 수 있다 — 보인 다음 프레임에 한 번 더 잰다.
   requestAnimationFrame(() => layout());
 }
 
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
-    diaryAssetMime,
+    diaryAssetMime, diarySaveStatus,
     DIARY_FORMAT, DIARY_VERSION, DIARY_LINES, DIARY_GAPS, DIARY_ENCRYPTED_MAGIC, DIARY_PBKDF2_ITER,
     DIARY_PAPERS, DIARY_PAPER_DARK, DIARY_PAPER_DEFAULT_COLOR, diaryPaperBackground,
-    DIARY_LIGHTINGS, DIARY_LIGHT_DEFAULT_COLOR, DIARY_LIGHTING_LABELS, DIARY_LIGHTING_LABELS_EN, diaryLightingSvg, diaryLightingPalette, diaryPaintLighting, diaryLightingInset, DIARY_LIGHTING_RESERVE, diaryLightingHasFixture, diaryLightingSpace, diaryLightingMask, diaryBindLightIntensity, diaryBindLightColor, diaryBuildPrintPaper,
+    DIARY_LIGHTINGS, DIARY_LIGHT_DEFAULT_COLOR, DIARY_LIGHT_COLORS, diaryLightDefaultColor, diaryLightColor, diaryLegacyLightColor, DIARY_LIGHTING_LABELS, DIARY_LIGHTING_LABELS_EN, diaryLightingSvg, diaryLightingPalette, diaryPaintLighting, diaryLightingInset, DIARY_LIGHTING_RESERVE, diaryLightingHasFixture, diaryLightingSpace, diaryLightingMask, diaryBindLightIntensity, diaryBindLightColor, diaryBuildPrintPaper,
     diaryDateKey, diaryIsDateKey, diaryAddDays, diaryDateLabel, diaryMonthGrid,
     diaryDefaultStyle, diaryNormalizeStyle, diaryDefaultBackdrop, diaryNormalizeBackdrop, diaryNormalizeSticker, diaryNormalizeTags, diaryNormalizeEntry, diaryEntryIsEmpty,
     diaryEmpty, diaryNormalize, diaryContentKey, diaryModelJson, diaryEffectiveStyle, diaryReferencedAssets,

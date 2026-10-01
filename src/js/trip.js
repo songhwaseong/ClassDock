@@ -22,7 +22,7 @@ const TRIP_FORMAT = "classdock-trip";
 // 7: 공통 종이 조명 색(lightColor).
 // 8: 공통 종이 조명 5종 추가(상단 바·스탠드·에디슨·선반·사진 집게).
 // 9: 공통 종이의 전등 자리 비우기(lightAvoid).
-// 10: 공통 종이 조명 5종 추가(한지 연등·커튼 전구·반딧불 유리병·달 구름 모빌·창문 햇살).
+// 10: 공통 종이 조명 5종 추가(한지 연등·커튼 전구·반딧불 유리병·달 구름 모빌·창문 햇살). 조명 색 빈 값 = 조명마다 다른 기본 색.
 const TRIP_VERSION = 10;
 const TRIP_JSON_NAME = "trip.json";
 const TRIP_MAX_DAYS = 400;
@@ -532,6 +532,122 @@ function tripNormalizeChecklist(raw){
     return { id, text, done:item.done === true };
   }).filter(Boolean).slice(0, TRIP_MAX_CHECKLIST);
 }
+
+// 시작 양식은 기존 본문과 준비물에만 넣는다. 별도 문서 갈래나 파일 필드는 만들지 않는다.
+const TRIP_TEMPLATES = [
+  { id:"daytrip", name:["당일치기", "Day trip"],
+    description:["하루 여행의 준비와 기억을 간단히 정리해요.", "Pack for a day out and record its highlights."],
+    checklist:[["교통편·돌아오는 시간 확인", "Check transport and return time"], ["충전기", "Charger"],
+      ["보조 배터리", "Power bank"], ["물", "Water"], ["우산·날씨 확인", "Check weather and pack an umbrella"],
+      ["예약·입장권 확인", "Check reservations and tickets"]],
+    questions:[["오늘의 여행지와 떠난 이유", "Destination and reason for this trip"], ["기억에 남는 장소와 순간", "Memorable places and moments"],
+      ["맛있었던 음식과 쓴 돈", "Food and spending"], ["다음에 다시 가면 하고 싶은 일", "What I would do on a return visit"]] },
+  { id:"overnight", name:["숙박 여행", "Overnight trip"],
+    description:["숙소·짐을 챙기고 하루씩 여행을 기록해요.", "Prepare for an overnight stay and write about each day."],
+    checklist:[["교통편·돌아오는 시간 확인", "Check transport and return time"], ["숙소 예약·체크인 시간 확인", "Check accommodation and check-in time"],
+      ["충전기", "Charger"], ["보조 배터리", "Power bank"], ["갈아입을 옷", "Change of clothes"],
+      ["세면도구", "Toiletries"], ["상비약", "Personal medicines"], ["예약·입장권 확인", "Check reservations and tickets"]],
+    questions:[["오늘의 이동과 들른 곳", "Today's travel and places visited"], ["숙소와 쉬어 간 순간", "Accommodation and moments of rest"],
+      ["가장 기억에 남는 경험", "Most memorable experience"], ["오늘 쓴 돈과 내일 챙길 일", "Today's spending and plans for tomorrow"]] },
+  { id:"fieldtrip", name:["답사", "Field visit"],
+    description:["방문 목적·관찰·배운 점을 여행 기록에 남겨요.", "Record the purpose, observations and lessons from a visit."],
+    checklist:[["방문 시간·예약 확인", "Check visiting hours and reservations"], ["이동 경로 확인", "Check the route"],
+      ["관찰할 내용 정리", "Prepare observation topics"], ["메모 도구", "Notebook and pen"],
+      ["충전기", "Charger"], ["촬영·출입 규칙 확인", "Check photography and access rules"]],
+    questions:[["답사 장소와 방문 목적", "Location and purpose of the visit"], ["직접 보고 관찰한 내용", "What I saw and observed"],
+      ["새롭게 알게 된 점과 궁금한 점", "What I learned and remaining questions"], ["남기고 싶은 사진·자료와 출처", "Photos, materials and their sources"]] }
+];
+const TRIP_USER_TEMPLATES_KEY = "mn.tripUserTemplates";
+const TRIP_MAX_USER_TEMPLATES = 30;
+const TRIP_MAX_TEMPLATE_QUESTIONS = 40;
+function tripTemplateLines(value, limit, length){
+  const lines = typeof value === "string" ? value.split(/\r?\n/) : Array.isArray(value) ? value : [];
+  const seen = new Set(), result = [];
+  for (const line of lines){
+    if (typeof line !== "string") continue;
+    const text = line.replace(/\s+/g, " ").trim().slice(0, length), key = text.toLocaleLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key); result.push(text);
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+function tripNormalizeUserTemplates(raw){
+  const ids = new Set(), result = [];
+  for (const item of Array.isArray(raw) ? raw : []){
+    if (!item || typeof item !== "object" || typeof item.id !== "string" || !/^user-[a-z0-9-]{1,50}$/.test(item.id) || ids.has(item.id)) continue;
+    const name = typeof item.name === "string" ? item.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    const checklist = tripTemplateLines(item.checklist, TRIP_MAX_CHECKLIST, 120);
+    const questions = tripTemplateLines(item.questions, TRIP_MAX_TEMPLATE_QUESTIONS, 300);
+    if (!name || (!checklist.length && !questions.length)) continue;
+    ids.add(item.id); result.push({ id:item.id, name, checklist, questions });
+    if (result.length >= TRIP_MAX_USER_TEMPLATES) break;
+  }
+  return result;
+}
+function tripReadUserTemplates(storage){
+  try { return tripNormalizeUserTemplates(JSON.parse(storage.getItem(TRIP_USER_TEMPLATES_KEY) || "[]")); }
+  catch(_){ return []; }
+}
+function tripWriteUserTemplates(templates, storage){
+  try { storage.setItem(TRIP_USER_TEMPLATES_KEY, JSON.stringify(tripNormalizeUserTemplates(templates))); return true; }
+  catch(_){ return false; }
+}
+function tripGetTemplates(storage){
+  return [...TRIP_TEMPLATES, ...tripReadUserTemplates(storage).map(item => ({
+    id:item.id, custom:true, name:[item.name, item.name],
+    description:["내가 저장한 양식", "My saved template"],
+    checklist:item.checklist.map(text => [text, text]), questions:item.questions.map(text => [text, text])
+  }))];
+}
+function tripTemplateText(template, en){
+  const index = en ? 1 : 0;
+  return "— " + template.name[index] + (en ? " notes" : " 기록") + " —\n\n"
+    + template.questions.map(question => question[index] + ":\n").join("\n");
+}
+function tripApplyTemplate(model, dayId, templateId, options={}){
+  const template = (options.templates || TRIP_TEMPLATES).find(item => item.id === templateId);
+  if (!template) return { changed:false, reason:"unknown" };
+  const addChecklist = options.checklist !== false && template.checklist.length > 0;
+  const addQuestions = options.questions !== false && template.questions.length > 0;
+  if (!addChecklist && !addQuestions) return { changed:false, reason:"empty" };
+  const en = !!options.en, days = model.days || [];
+  let day = days.find(item => item.id === dayId) || null;
+  if (addQuestions && !day && days.length >= TRIP_MAX_DAYS) return { changed:false, reason:"full" };
+  const existing = model.checklist || [];
+  const keyOf = text => String(text || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const keys = new Set(existing.map(item => keyOf(item.text))), ids = new Set(existing.map(item => item.id));
+  const additions = [];
+  let skippedChecklist = 0;
+  if (addChecklist) for (const pair of template.checklist){
+    if (pair.some(text => keys.has(keyOf(text)))) continue;
+    if (existing.length + additions.length >= TRIP_MAX_CHECKLIST){ skippedChecklist++; continue; }
+    let id;
+    do { id = "ck-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7); } while (ids.has(id));
+    ids.add(id);
+    additions.push({ id, text:pair[en ? 1 : 0], done:false });
+    pair.forEach(text => keys.add(keyOf(text)));
+  }
+  let addedQuestions = false;
+  if (addQuestions){
+    const text = day ? String(day.text || "") : "";
+    const headings = new Set(text.split(/\r?\n/).map(line => line.trim()));
+    const alreadyAdded = [false, true].some(language => headings.has(tripTemplateText(template, language).split("\n")[0]));
+    if (!alreadyAdded){
+      if (!day){
+        day = tripNormalizeDay({ date:tripNextDayDate(model) });
+        while (days.some(item => item.id === day.id)) day.id = tripDayId();
+        days.push(day); model.days = days;
+      }
+      day.text = text + (text ? (text.endsWith("\n\n") ? "" : text.endsWith("\n") ? "\n" : "\n\n") : "") + tripTemplateText(template, en);
+      if (!String(day.title || "").trim()) day.title = template.name[en ? 1 : 0];
+      addedQuestions = true;
+    }
+  }
+  if (additions.length) model.checklist = [...existing, ...additions];
+  return { changed:addedQuestions || !!additions.length, dayId:day ? day.id : dayId,
+    addedChecklist:additions.length, addedQuestions, skippedChecklist };
+}
 function tripEmpty(title){
   const now = Date.now();
   return {
@@ -557,9 +673,12 @@ function tripNormalize(raw, hasAsset){
   if (!(Number(raw.version) >= 1 && Number(raw.version) <= TRIP_VERSION)) throw new Error("trip-version");
   const days = [];
   const ids = new Set();
+  // 판 9 이전의 조명 '기본 색'("#ffc66e")은 빈 값(조명마다 다른 기본 색)으로 읽는다(일기장과 같은 규칙).
+  const legacyColor = Number(raw.version) < 10 && typeof diaryLegacyLightColor === "function" ? diaryLegacyLightColor : style => style;
   for (const item of (Array.isArray(raw.days) ? raw.days : []).slice(0, TRIP_MAX_DAYS)){
     const day = tripNormalizeDay(item, hasAsset);
     if (!day || tripDayIsEmpty(day)) continue;
+    legacyColor(day.style);
     if (ids.has(day.id)) day.id = tripDayId();
     ids.add(day.id);
     days.push(day);
@@ -569,7 +688,7 @@ function tripNormalize(raw, hasAsset){
     title:String(raw.title || tripWord("docName")).slice(0, 200),
     createdAt:Number(raw.createdAt) || Date.now(),
     updatedAt:Number(raw.updatedAt) || Date.now(),
-    style:typeof diaryNormalizeStyle === "function" ? diaryNormalizeStyle(raw.style, hasAsset) : null,
+    style:typeof diaryNormalizeStyle === "function" ? legacyColor(diaryNormalizeStyle(raw.style, hasAsset)) : null,
     backdrop:typeof diaryNormalizeBackdrop === "function" ? diaryNormalizeBackdrop(raw.backdrop, hasAsset) : null,
     printPlain:!!raw.printPlain,
     header:tripNormalizePairs(raw.header, TRIP_MAX_HEADER),
@@ -906,6 +1025,8 @@ async function loadTrip(file, opts = {}){
 async function saveTrip(doc){
   if (!doc || !doc.trip || doc._tripSaving) return false;
   doc._tripSaving = true;
+  doc._journalSaveState = "saving";
+  if (typeof doc._refreshJournalSaveStatus === "function") doc._refreshJournalSaveStatus();
   try {
     const now = Date.now();
     const savedKey = tripContentKey(doc.trip);         // await 앞에서 모델을 고정한다(저장 중 입력과 섞이지 않게)
@@ -924,8 +1045,18 @@ async function saveTrip(doc){
       // 디스크에 쓰는 동안에도 입력할 수 있다 — 쓴 내용과 지금 내용을 다시 견줘 '저장 안 됨'을 정한다.
       if (typeof markDocumentDirty === "function") markDocumentDirty(doc, tripContentKey(doc.trip) !== savedKey);
     }
+    doc._journalSaveState = ok ? "saved" : "incomplete";
     return ok;
-  } finally { doc._tripSaving = false; }
+  } finally {
+    doc._tripSaving = false;
+    if (doc._journalSaveState === "saving") doc._journalSaveState = "error";
+    if (typeof doc._refreshJournalSaveStatus === "function") doc._refreshJournalSaveStatus();
+  }
+}
+
+function tripStickerText(sticker){
+  const kind = typeof diaryStickerKind === "function" ? diaryStickerKind(sticker) : sticker.kind;
+  return kind === "text" ? String(sticker.text || "") : kind === "audio" ? String(sticker.label || "") : "";
 }
 
 /* 통합 검색에 줄 글. savedText 는 비교용 열쇠(JSON)라 본문이 아니다. */
@@ -934,6 +1065,7 @@ function tripPlainText(model){
   for (const day of (model.days || [])){
     parts.push([day.date, day.title].filter(Boolean).join(" "));
     parts.push(day.text || "");
+    for (const sticker of (day.stickers || [])) parts.push(tripStickerText(sticker));
     for (const s of (day.spots || [])) parts.push([s.at, s.name, s.address, s.note].filter(Boolean).join(" "));
   }
   return parts.filter(Boolean).join("\n");
@@ -948,6 +1080,10 @@ function tripSearchRows(model, query){
   for (const day of (model.days || [])){
     if ([day.date, day.title, day.text].some(v => String(v || "").toLocaleLowerCase().includes(needle)))
       rows.push({ dayId:day.id, spotId:"" });
+    else {
+      const sticker = (day.stickers || []).find(s => tripStickerText(s).toLocaleLowerCase().includes(needle));
+      if (sticker) rows.push({ dayId:day.id, spotId:"", stickerId:sticker.id });
+    }
     for (const spot of (day.spots || [])){
       if ([spot.at, spot.name, spot.address, spot.note].some(v => String(v || "").toLocaleLowerCase().includes(needle)))
         rows.push({ dayId:day.id, spotId:spot.id });
@@ -1606,6 +1742,7 @@ function mountTripEditor(doc){
   // '＋ 날' 이 날짜를 미리 채운 뒤 아직 사용자가 날짜를 고르지 않은 날(문서에는 남기지 않는다).
   const autoDated = new Set();
   let recoveryTimer = 0;
+  let focusMode = false;
 
   /* 사진 주소는 한 번 만들어 두고 다시 쓴다(문서에 썸네일을 따로 담지 않는다). */
   const urls = new Map();
@@ -1655,6 +1792,10 @@ function mountTripEditor(doc){
   titleInput.value = model.title || "";
   const status = document.createElement("span");
   status.className = "trip-status";
+  status.setAttribute("aria-live", "polite");
+  const saveStatus = document.createElement("span");
+  saveStatus.className = "journal-save-status";
+  saveStatus.setAttribute("role", "status");
   status.dataset.placeholder = tripIsEn()
     ? "Record your journey. Ctrl+Z will undo changes."
     : "여행을 기록해보세요. Ctrl+Z로 되돌릴 수 있어요.";
@@ -1667,6 +1808,11 @@ function mountTripEditor(doc){
   const exifInput = document.createElement("input");
   exifInput.type = "file"; exifInput.accept = "image/jpeg,image/jpg"; exifInput.multiple = true; exifInput.hidden = true;
   const mapMobileBtn = diaryButton("", "지도 열기", "diary-btn trip-map-mobile-btn", "map");
+  const templateBtn = diaryButton("", "여행 템플릿 — 준비물과 기록 질문 넣기", "diary-btn trip-template-btn", "notebook");
+  templateBtn.setAttribute("aria-haspopup", "dialog");
+  templateBtn.setAttribute("aria-expanded", "false");
+  const focusBtn = diaryButton("", "몰입 모드 — 여정·지도 감추기", "diary-btn trip-focus-btn", "fit");
+  focusBtn.setAttribute("aria-pressed", "false");
   const stickerBtn = diaryButton("", "그림·글상자 붙이기", "diary-btn trip-sticker-btn", "sticker");
   const styleBtn = diaryButton("", "종이 꾸미기", "diary-btn trip-style-btn", "sliders");
   const bgInput = document.createElement("input");
@@ -1688,19 +1834,21 @@ function mountTripEditor(doc){
   toolLabel(photoBtn, "사진추가", "Add photo");
   toolLabel(exifBtn, "사진정보", "Photo info");
   toolLabel(mapMobileBtn, "지도", "Map");
-  toolLabel(stickerBtn, "꾸미기", "Decorate");
-  toolLabel(styleBtn, "편집/설정", "Style");
+  toolLabel(templateBtn, "템플릿", "Templates");
+  toolLabel(focusBtn, "몰입", "Focus");
+  toolLabel(stickerBtn, "스티커·글상자", "Stickers / text");
+  toolLabel(styleBtn, "종이·배경", "Paper / background");
   toolLabel(printBtn, "인쇄", "Print");
   toolLabel(exportBtn, "내보내기", "Export");
   toolLabel(saveBtn, "저장", "Save");
   const actions = document.createElement("div");
   actions.className = "trip-bar-actions";
   actions.append(undoBtn, redoBtn, photoBtn, photoInput, exifBtn, exifInput,
-    mapMobileBtn, stickerBtn, styleBtn, bgInput, backdropInput, printBtn, exportBtn, saveBtn);
-  bar.append(brand, titleInput, status, actions);
+    mapMobileBtn, templateBtn, focusBtn, stickerBtn, styleBtn, bgInput, backdropInput, printBtn, exportBtn, saveBtn);
+  bar.append(brand, titleInput, saveStatus, status, actions);
 
   /* 종이 밖 바탕 — 일기장과 같은 테마·그림을 여행일지 화면 전체(도구막대 뒤까지)에 깐다.
-     '없음'이면 data-backdrop 을 떼어 여행일지 고유의 하늘 바탕을 그대로 둔다. */
+     '없음'이면 data-backdrop 을 떼어 현재 밝은·어두운 테마의 기본 바탕을 쓴다. */
   function applyBackdrop(){
     const backdrop = model.backdrop || diaryDefaultBackdrop();
     if (backdrop.theme === "none") delete root.dataset.backdrop;
@@ -1942,8 +2090,17 @@ function mountTripEditor(doc){
 
   /* ----- 저장 여부·복구본 ----- */
   const setStatus = (msg) => { status.textContent = msg || ""; };
+  const refreshSaveStatus = (dirty = tripContentKey(model) !== doc.savedText) => {
+    const info = diarySaveStatus(doc, dirty, tripIsEn());
+    saveStatus.dataset.state = info.state;
+    saveStatus.textContent = info.text;
+    saveStatus.title = info.text;
+  };
+  doc._refreshJournalSaveStatus = refreshSaveStatus;
   const refreshDirty = () => {
-    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, tripContentKey(model) !== doc.savedText);
+    const dirty = tripContentKey(model) !== doc.savedText;
+    if (typeof markDocumentDirty === "function") markDocumentDirty(doc, dirty);
+    refreshSaveStatus(dirty);
   };
   const scheduleRecovery = () => {
     clearTimeout(recoveryTimer);
@@ -2110,9 +2267,224 @@ function mountTripEditor(doc){
     history:() => history
   });
   root.append(panels.panel, panels.artPanel);
+  /* 여행 템플릿 — 준비물은 여행 전체에, 기록 질문은 현재 날의 본문에 더한다. */
+  const templatePanel = document.createElement("div");
+  templatePanel.className = "trip-template-panel";
+  templatePanel.id = "trip-template-" + doc.id;
+  templatePanel.hidden = true;
+  templatePanel.setAttribute("role", "dialog");
+  templateBtn.setAttribute("aria-controls", templatePanel.id);
+  root.append(templatePanel);
+  let templateChecklist = true, templateQuestions = true;
+  let templateDraft = null, templateDeleteId = "";
+  function openTemplateEditor(template){
+    const index = tripIsEn() ? 1 : 0;
+    templateDraft = { id:template && template.custom ? template.id : "",
+      name:template ? template.name[index] + (template.custom ? "" : tripIsEn() ? " (my version)" : " (내 양식)") : "",
+      checklist:template ? template.checklist.map(pair => pair[index]).join("\n") : "",
+      questions:template ? template.questions.map(pair => pair[index]).join("\n") : "" };
+    templateDeleteId = "";
+    renderTemplatePanel(); positionTemplatePanel();
+    const field = templatePanel.querySelector(".trip-template-name");
+    if (field) field.focus({ preventScroll:true });
+  }
+  function renderTemplatePanel(){
+    const en = tripIsEn(), index = en ? 1 : 0;
+    const make = (tag, cls, text) => {
+      const node = document.createElement(tag); node.className = cls;
+      if (text) node.textContent = text;
+      return node;
+    };
+    templatePanel.setAttribute("aria-label", en ? "Travel templates" : "여행 템플릿");
+    const head = make("div", "trip-template-head");
+    const title = make("strong", "", en ? "Travel templates" : "여행 템플릿");
+    const close = diaryButton("", en ? "Close templates" : "템플릿 닫기", "diary-btn trip-template-close", "close");
+    close.addEventListener("click", () => { setTemplateOpen(false); templateBtn.focus(); });
+    head.append(title, close);
+    if (templateDraft){
+      const note = make("p", "trip-template-note", en
+        ? "Saved on this computer for every travel journal. Enter one item or question per line."
+        : "이 컴퓨터에 저장해 다른 여행일지에서도 쓸 수 있어요. 준비물과 질문은 한 줄에 하나씩 적으세요.");
+      const form = make("form", "trip-template-form");
+      const fields = [["name", en ? "Template name" : "템플릿 이름", "input", 80],
+        ["checklist", en ? "Packing & to-do (up to 200 lines, 120 characters each)" : "준비물·할 일 (최대 200줄, 한 줄 120자)", "textarea", 25000],
+        ["questions", en ? "Writing questions (up to 40 lines, 300 characters each)" : "기록 질문 (최대 40줄, 한 줄 300자)", "textarea", 12500]];
+      for (const [key, labelText, tag, maxLength] of fields){
+        const label = make("label", "trip-template-field"), field = make(tag, "trip-template-" + key);
+        if (tag === "input") field.type = "text"; else field.rows = 5;
+        field.maxLength = maxLength; field.value = templateDraft[key];
+        field.addEventListener("input", () => { templateDraft[key] = field.value; });
+        label.append(make("span", "", labelText), field); form.append(label);
+      }
+      const error = make("p", "trip-template-error"); error.setAttribute("role", "alert"); error.hidden = true;
+      const actions = make("div", "trip-template-actions");
+      const save = make("button", "diary-btn", en ? "Save template" : "템플릿 저장"); save.type = "submit";
+      const cancel = make("button", "diary-btn", en ? "Cancel" : "취소"); cancel.type = "button";
+      cancel.addEventListener("click", () => { templateDraft = null; renderTemplatePanel(); templatePanel.querySelector(".trip-template-create").focus(); });
+      actions.append(save, cancel); form.append(error, actions);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const fail = text => { error.textContent = text; error.hidden = false; };
+        const name = templateDraft.name.replace(/\s+/g, " ").trim();
+        const packing = templateDraft.checklist.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        const questions = templateDraft.questions.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (!name || (!packing.length && !questions.length)){
+          fail(en ? "Enter a name and at least one packing item or question." : "이름과 준비물 또는 질문을 하나 이상 적어 주세요."); return;
+        }
+        if (name.length > 80 || packing.length > TRIP_MAX_CHECKLIST || questions.length > TRIP_MAX_TEMPLATE_QUESTIONS
+          || packing.some(line => line.length > 120) || questions.some(line => line.length > 300)){
+          fail(en ? "Check the line and character limits shown above." : "위에 적힌 줄 수와 한 줄의 글자 수를 확인해 주세요."); return;
+        }
+        const list = tripReadUserTemplates(localStorage);
+        const keyOf = value => value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+        if (tripGetTemplates(localStorage).some(item => item.id !== templateDraft.id && item.name.some(text => keyOf(text) === keyOf(name)))){
+          fail(en ? "A template with this name already exists. Use a different name." : "같은 이름의 템플릿이 있어요. 다른 이름을 적어 주세요."); return;
+        }
+        if (!list.some(item => item.id === templateDraft.id) && list.length >= TRIP_MAX_USER_TEMPLATES){
+          fail(en ? "You can save up to 30 templates. Edit or delete an existing one." : "내 템플릿은 30개까지 저장할 수 있어요. 기존 양식을 수정하거나 삭제해 주세요."); return;
+        }
+        let id = templateDraft.id;
+        if (!id) do { id = "user-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7); } while (list.some(item => item.id === id));
+        const saved = { id, name, checklist:packing, questions };
+        const next = list.filter(item => item.id !== id); next.push(saved);
+        if (!tripWriteUserTemplates(next, localStorage)){
+          fail(en ? "The template could not be saved. Your draft is still here; try again." : "템플릿을 저장하지 못했어요. 작성한 내용은 그대로 있으니 다시 시도해 주세요."); return;
+        }
+        templateDraft = null; renderTemplatePanel();
+        const selected = templatePanel.querySelector('.trip-template-option[data-template="' + id + '"]');
+        if (selected) selected.focus({ preventScroll:true });
+        setStatus(tripIsEn() ? "Saved your template. Select it to add it to the journal." : "내 템플릿을 저장했어요. 목록에서 고르면 여행일지에 넣을 수 있어요.");
+      });
+      templatePanel.replaceChildren(head, note, form);
+      return;
+    }
+    const note = make("p", "trip-template-note", en
+      ? "Adds to your existing text and list. Duplicate items are skipped. Ctrl+Z undoes the addition."
+      : "기존 글·목록에 덧붙이고, 같은 항목은 건너뛰어요. Ctrl+Z 한 번으로 되돌릴 수 있어요.");
+    const choices = make("div", "trip-template-choices");
+    for (const [kind, ko, english] of [["checklist", "준비물·할 일 추가", "Add packing & to-do"], ["questions", "현재 날에 기록 질문 추가", "Add questions to this day"]]){
+      const label = make("label", "");
+      const checkbox = make("input", ""); checkbox.type = "checkbox";
+      checkbox.checked = kind === "checklist" ? templateChecklist : templateQuestions;
+      checkbox.addEventListener("change", () => {
+        if (kind === "checklist") templateChecklist = checkbox.checked; else templateQuestions = checkbox.checked;
+        for (const button of templatePanel.querySelectorAll(".trip-template-option")){
+          button.disabled = !(templateChecklist && button.dataset.checklist === "true") && !(templateQuestions && button.dataset.questions === "true");
+        }
+      });
+      label.append(checkbox, make("span", "", en ? english : ko)); choices.append(label);
+    }
+    const create = make("button", "diary-btn trip-template-create", en ? "+ New template" : "＋ 새 템플릿 만들기"); create.type = "button";
+    create.addEventListener("click", () => openTemplateEditor(null));
+    const templates = tripGetTemplates(localStorage);
+    const options = templates.map(template => {
+      const card = make("div", "trip-template-card");
+      const button = make("button", "trip-template-option"); button.type = "button"; button.dataset.template = template.id;
+      button.dataset.checklist = String(template.checklist.length > 0); button.dataset.questions = String(template.questions.length > 0);
+      button.disabled = !(templateChecklist && template.checklist.length) && !(templateQuestions && template.questions.length);
+      button.append(make("strong", "", template.name[index]), make("span", "trip-template-description", template.description[index]),
+        make("span", "trip-template-preview", (en ? "Packing: " : "준비물: ") + (template.checklist.map(pair => pair[index]).join(" · ") || (en ? "None" : "없음"))),
+        make("span", "trip-template-preview", (en ? "Questions: " : "기록: ") + (template.questions.map(pair => pair[index]).join(" · ") || (en ? "None" : "없음"))));
+      button.addEventListener("click", () => applyTemplate(template.id));
+      const actions = make("div", "trip-template-actions");
+      const edit = make("button", "diary-btn", template.custom ? (en ? "Edit" : "수정") : (en ? "Copy & edit" : "복사·수정")); edit.type = "button";
+      edit.setAttribute("aria-label", template.name[index] + " " + edit.textContent);
+      edit.addEventListener("click", () => openTemplateEditor(template)); actions.append(edit);
+      if (template.custom){
+        const remove = make("button", "diary-btn trip-template-remove", templateDeleteId === template.id ? (en ? "Confirm delete" : "삭제 확인") : (en ? "Delete" : "삭제")); remove.type = "button";
+        remove.dataset.template = template.id;
+        remove.setAttribute("aria-label", template.name[index] + " " + remove.textContent);
+        remove.addEventListener("click", () => {
+          if (templateDeleteId !== template.id){
+            templateDeleteId = template.id; renderTemplatePanel();
+            templatePanel.querySelector('.trip-template-remove[data-template="' + template.id + '"]').focus(); return;
+          }
+          if (!tripWriteUserTemplates(tripReadUserTemplates(localStorage).filter(item => item.id !== template.id), localStorage)){
+            note.textContent = en ? "Could not delete the template. Try again." : "템플릿을 삭제하지 못했어요. 다시 시도해 주세요."; return;
+          }
+          templateDeleteId = ""; renderTemplatePanel(); templatePanel.querySelector(".trip-template-create").focus();
+        });
+        actions.append(remove);
+        if (templateDeleteId === template.id){
+          const cancel = make("button", "diary-btn", en ? "Cancel" : "취소"); cancel.type = "button";
+          cancel.addEventListener("click", () => {
+            templateDeleteId = ""; renderTemplatePanel();
+            templatePanel.querySelector('.trip-template-remove[data-template="' + template.id + '"]').focus();
+          }); actions.append(cancel);
+        }
+      }
+      card.append(button, actions);
+      return card;
+    });
+    const custom = options.filter((_, i) => templates[i].custom), builtins = options.filter((_, i) => !templates[i].custom);
+    templatePanel.replaceChildren(head, note, create, choices,
+      ...(custom.length ? [make("strong", "trip-template-group", en ? "My templates" : "내 템플릿"), ...custom] : []),
+      make("strong", "trip-template-group", en ? "Built-in templates" : "기본 템플릿"), ...builtins);
+  }
+  function positionTemplatePanel(){
+    const anchor = templateBtn.getBoundingClientRect(), base = root.getBoundingClientRect();
+    const width = Math.min(400, Math.max(0, base.width - 16));
+    const top = Math.min(anchor.bottom - base.top + 8, Math.max(8, base.height - 120));
+    templatePanel.style.width = width + "px";
+    templatePanel.style.left = Math.max(8, Math.min(base.width - width - 8, anchor.right - base.left - width)) + "px";
+    templatePanel.style.top = Math.max(8, top) + "px";
+    templatePanel.style.maxHeight = Math.max(80, base.height - top - 8) + "px";
+  }
+  function setTemplateOpen(open){
+    templatePanel.hidden = !open;
+    templateBtn.classList.toggle("is-on", open);
+    templateBtn.setAttribute("aria-expanded", String(open));
+    if (!open){ templateDeleteId = ""; return; }
+    panels.setPanelOpen(false); panels.setArtPanelOpen(false);
+    renderTemplatePanel(); positionTemplatePanel();
+    const first = templatePanel.querySelector(".trip-template-option:not(:disabled)") || templatePanel.querySelector("input");
+    if (first) first.focus({ preventScroll:true });
+  }
+  function applyTemplate(id){
+    setDrawMode(false);
+    if (history) history.flush();
+    const result = tripApplyTemplate(model, current, id, { en:tripIsEn(), checklist:templateChecklist, questions:templateQuestions, templates:tripGetTemplates(localStorage) });
+    if (result.reason === "unknown"){
+      renderTemplatePanel();
+      const message = tripIsEn() ? "This template was deleted. Select another template." : "삭제된 템플릿이에요. 다른 양식을 골라 주세요.";
+      setStatus(message);
+      const note = templatePanel.querySelector(".trip-template-note");
+      if (note) note.textContent = message;
+      return;
+    }
+    if (result.reason === "full"){
+      const message = tripIsEn() ? "This journal already has 400 days. Choose an existing day." : "여정이 400날에 도달했어요. 기존 날을 골라 주세요.";
+      setStatus(message);
+      const note = templatePanel.querySelector(".trip-template-note");
+      if (note) note.textContent = message;
+      return;
+    }
+    setTemplateOpen(false);
+    if (result.changed){
+      if (result.dayId) current = result.dayId;
+      if (result.addedChecklist){
+        checkOpen = true;
+        try { localStorage.setItem("mn.tripChecklistOpen", "1"); } catch(_){}
+      }
+      if (result.addedQuestions){ els.area.value = dayOf(current).text; layout({ flow:true }); }
+      clearSelection(); renderRail(); renderPage(); renderChecklist(); touch(true);
+    }
+    const messages = [];
+    if (result.addedChecklist) messages.push(tripIsEn() ? "Added " + result.addedChecklist + " packing items" : "준비물 " + result.addedChecklist + "개를 더했어요");
+    if (result.addedQuestions) messages.push(tripIsEn() ? "Added questions to this day" : "이 날에 기록 질문을 더했어요");
+    if (result.skippedChecklist) messages.push(tripIsEn() ? "Some items exceed the 200-item limit" : "200개 제한으로 일부 준비물은 넣지 못했어요");
+    const message = messages.join(" · ") || (result.reason === "empty"
+      ? (tripIsEn() ? "Select packing items or questions to add." : "추가할 준비물이나 기록 질문을 선택해 주세요.")
+      : (tripIsEn() ? "This template is already included." : "이미 들어 있는 템플릿이에요."));
+    setStatus(message);
+    if (typeof toast === "function") toast(message, 3200);
+    if (result.addedQuestions) els.area.focus({ preventScroll:true }); else templateBtn.focus({ preventScroll:true });
+  }
+  templateBtn.addEventListener("click", () => setTemplateOpen(templatePanel.hidden));
   // 창 바깥을 누르면 닫는다. 스티커 창은 종이 위 스티커를 고르며 쓰는 창이라 종이를 눌러도 안 닫는다.
   const onOutside = (e) => {
     if (!root.isConnected) return;
+    if (!templatePanel.hidden && !templatePanel.contains(e.target) && !templateBtn.contains(e.target)) setTemplateOpen(false);
     if (!panels.panel.hidden && !panels.panel.contains(e.target) && !styleBtn.contains(e.target)) panels.setPanelOpen(false);
     if (!panels.artPanel.hidden && !panels.artPanel.contains(e.target) && !stickerBtn.contains(e.target)
       && !els.paper.contains(e.target)) panels.setArtPanelOpen(false);
@@ -2789,6 +3161,7 @@ function mountTripEditor(doc){
   applyTripMapWidth(tripMapWidth);
   let mobileMapOpen = false;
   function setMobileMapOpen(open, focusClose){
+    if (open && focusMode) setFocusMode(false);
     mobileMapOpen = !!open && matchMedia("(max-width: 1100px)").matches;
     body.classList.toggle("is-map-open", mobileMapOpen);
     mapMobileBtn.setAttribute("aria-expanded", String(mobileMapOpen));
@@ -2806,8 +3179,56 @@ function mountTripEditor(doc){
   }
   mapMobileBtn.addEventListener("click", () => setMobileMapOpen(!mobileMapOpen, true));
   mapCloseBtn.addEventListener("click", () => setMobileMapOpen(false, true));
+  /* 몰입은 보는 상태다. 여정의 접힘과 지도 폭·위치, 파일 내용은 그대로 유지한다. */
+  let focusLayoutRaf = 0;
+  function canWriteCurrentDay(){
+    return !!dayOf(current) && !els.area.disabled && !els.area.readOnly;
+  }
+  function syncFocusButton(){
+    const writable = canWriteCurrentDay();
+    focusBtn.disabled = !writable && !focusMode;
+    root.classList.toggle("is-trip-focus", focusMode);
+    focusBtn.classList.toggle("is-on", focusMode);
+    focusBtn.setAttribute("aria-pressed", String(focusMode));
+    focusBtn.title = tripIsEn() ? (focusMode ? "Exit focus mode (Esc)" : writable ? "Focus mode — hide days and map" : "Add a day to write before entering focus mode")
+      : (focusMode ? "몰입 모드 끝내기 (Esc)" : writable ? "몰입 모드 — 여정·지도 감추기" : "＋ 날로 글을 쓸 날을 추가하면 몰입할 수 있어요");
+    focusBtn.setAttribute("aria-label", focusBtn.title);
+    focusBtn.querySelector(".trip-tool-label").textContent = tripIsEn() ? (focusMode ? "Exit focus" : "Focus") : (focusMode ? "몰입 끝" : "몰입");
+  }
+  function setFocusMode(on){
+    if (on && !canWriteCurrentDay()){
+      syncFocusButton();
+      setStatus(tripIsEn() ? "Add a day to write before entering focus mode." : "＋ 날로 글을 쓸 날을 먼저 추가해 주세요.");
+      addDayBtn.focus({ preventScroll:true });
+      return;
+    }
+    if (focusMode === !!on) return;
+    const scrollTop = main.scrollTop;
+    setTemplateOpen(false); panels.setPanelOpen(false); panels.setArtPanelOpen(false);
+    if (on){ setMobileMapOpen(false); cancelPicking(); }
+    focusMode = !!on;
+    syncFocusButton();
+    cancelAnimationFrame(focusLayoutRaf);
+    focusLayoutRaf = requestAnimationFrame(() => {
+      focusLayoutRaf = 0;
+      if (!focusMode) applyTripMapWidth(tripMapWidth);
+      layout(); redrawDrawing(); main.scrollTop = scrollTop;
+    });
+    if (focusMode) els.area.focus({ preventScroll:true });
+    else if (canWriteCurrentDay()) focusBtn.focus({ preventScroll:true });
+    else addDayBtn.focus({ preventScroll:true });
+  }
+  focusBtn.addEventListener("click", () => setFocusMode(!focusMode));
+  const onTripLanguageChange = () => {
+    templateBtn.querySelector(".trip-tool-label").textContent = tripIsEn() ? "Templates" : "템플릿";
+    templateBtn.title = tripIsEn() ? "Travel templates — packing and writing questions" : "여행 템플릿 — 준비물과 기록 질문 넣기";
+    templateBtn.setAttribute("aria-label", templateBtn.title);
+    syncFocusButton();
+    if (!templatePanel.hidden){ renderTemplatePanel(); positionTemplatePanel(); }
+  };
+  window.addEventListener("mni18nchange", onTripLanguageChange);
   mapDivider.addEventListener("pointerdown", (e) => {
-    if (matchMedia("(max-width: 1100px)").matches) return;
+    if (focusMode || matchMedia("(max-width: 1100px)").matches) return;
     e.preventDefault();
     mapDivider.setPointerCapture(e.pointerId);
     mapDivider.classList.add("dragging");
@@ -2836,7 +3257,12 @@ function mountTripEditor(doc){
     applyTripMapWidth(tripMapWidth + (e.key === "ArrowLeft" ? 20 : -20));
     rememberTripMapWidth();
   });
-  const onTripWindowResize = () => { if (!matchMedia("(max-width: 1100px)").matches && mobileMapOpen) setMobileMapOpen(false); applyTripMapWidth(tripMapWidth); };
+  const onTripWindowResize = () => {
+    if (!matchMedia("(max-width: 1100px)").matches && mobileMapOpen) setMobileMapOpen(false);
+    if (!focusMode) applyTripMapWidth(tripMapWidth);
+    else { layout(); redrawDrawing(); }
+    if (!templatePanel.hidden) positionTemplatePanel();
+  };
   window.addEventListener("resize", onTripWindowResize);
 
   /* 이 날만 볼지 여행 전체를 볼지 — 보는 사람 편의라 파일이 아니라 이 브라우저에만 남긴다.
@@ -3268,6 +3694,7 @@ function mountTripEditor(doc){
 
   function startPicking(spotId){
     if (pickingFor === spotId){ cancelPicking(); return; }
+    if (focusMode) setFocusMode(false);
     if (matchMedia("(max-width: 1100px)").matches) setMobileMapOpen(true, true);
     pickingFor = spotId;
     mapStage.classList.add("is-picking");
@@ -3365,8 +3792,10 @@ function mountTripEditor(doc){
     renderPage();
   }
 
+  let searchVisible = 100, lastSearchQuery = "";
   function renderTripSearchResults(){
     const query = searchInput.value.trim();
+    if (query !== lastSearchQuery){ lastSearchQuery = query; searchVisible = 100; }
     searchResults.hidden = !query;
     railList.hidden = addDayBtn.hidden = checkBox.hidden = !!query;
     if (!query){ searchResults.replaceChildren(); return; }
@@ -3382,10 +3811,11 @@ function mountTripEditor(doc){
       empty.textContent = en ? "No matching days or places." : "맞는 날이나 장소가 없어요.";
       searchResults.append(empty);
     }
-    for (const result of rows.slice(0, 100)){
+    for (const result of rows.slice(0, searchVisible)){
       const day = dayOf(result.dayId);
       if (!day) continue;
       const spot = result.spotId ? (day.spots || []).find(item => item.id === result.spotId) : null;
+      const sticker = result.stickerId ? (day.stickers || []).find(item => item.id === result.stickerId) : null;
       const button = document.createElement("button");
       button.type = "button"; button.className = "trip-search-result";
       const label = document.createElement("strong");
@@ -3393,7 +3823,7 @@ function mountTripEditor(doc){
       const detail = document.createElement("span");
       detail.textContent = spot
         ? [spot.at, spot.name, spot.address, spot.note].filter(Boolean).join(" · ")
-        : (day.title || String(day.text || "").replace(/\s+/g, " ").slice(0, 90) || (en ? "Day" : "날"));
+        : (sticker ? tripStickerText(sticker) : day.title || String(day.text || "").replace(/\s+/g, " ").slice(0, 90) || (en ? "Day" : "날"));
       button.append(label, detail);
       button.addEventListener("click", () => {
         goTo(day.id);
@@ -3401,12 +3831,22 @@ function mountTripEditor(doc){
           const row = [...spotList.querySelectorAll(".trip-spot")].find(item => item.dataset.id === spot.id);
           if (row){ row.scrollIntoView({ block:"center" }); const field = row.querySelector(".trip-spot-name"); if (field) field.focus(); }
         }
+        if (sticker){
+          paperApi.selectSticker(sticker.id);
+          const node = [...els.stickerLayer.querySelectorAll("[data-id]")].find(item => item.dataset.id === sticker.id);
+          if (node){ node.focus({ preventScroll:true }); node.scrollIntoView({ block:"center", inline:"nearest" }); }
+        }
       });
       searchResults.append(button);
     }
-    if (rows.length > 100){
-      const more = document.createElement("p"); more.className = "trip-search-count";
-      more.textContent = en ? "Showing the first 100 results. Narrow your search." : "처음 100개만 보여요. 검색어를 더 구체적으로 적어 주세요.";
+    if (rows.length > searchVisible){
+      const more = document.createElement("button"); more.type = "button"; more.className = "diary-btn trip-search-more";
+      more.textContent = (en ? "Show more" : "더 보기") + " (" + searchVisible + "/" + rows.length + ")";
+      more.addEventListener("click", () => {
+        searchVisible += 100; renderTripSearchResults();
+        const target = searchResults.querySelector(".trip-search-more") || searchResults.lastElementChild;
+        if (target) target.focus({ preventScroll:true });
+      });
       searchResults.append(more);
     }
   }
@@ -4536,6 +4976,8 @@ function mountTripEditor(doc){
     dayDate.disabled = !day;
     els.area.value = day ? (day.text || "") : "";
     els.area.disabled = !day;
+    if (focusMode && !canWriteCurrentDay()) setFocusMode(false);
+    else syncFocusButton();
     applyStyle();
     renderStickers();
     layout();
@@ -4720,6 +5162,13 @@ function mountTripEditor(doc){
     mapMobileBtn.title = tripIsEn() ? (mobileMapOpen ? "Close map" : "Open map") : (mobileMapOpen ? "지도 닫기" : "지도 열기");
     mapMobileBtn.setAttribute("aria-label", mapMobileBtn.title);
     mapMobileBtn.querySelector(".trip-tool-label").textContent = tripIsEn() ? "Map" : "지도";
+    stickerBtn.querySelector(".trip-tool-label").textContent = tripIsEn() ? "Stickers / text" : "스티커·글상자";
+    styleBtn.querySelector(".trip-tool-label").textContent = tripIsEn() ? "Paper / background" : "종이·배경";
+    templateBtn.querySelector(".trip-tool-label").textContent = tripIsEn() ? "Templates" : "템플릿";
+    templateBtn.title = tripIsEn() ? "Travel templates — packing and writing questions" : "여행 템플릿 — 준비물과 기록 질문 넣기";
+    templateBtn.setAttribute("aria-label", templateBtn.title);
+    syncFocusButton();
+    refreshSaveStatus();
     renderRail();
     renderPage();
     renderChecklist();
@@ -5026,6 +5475,9 @@ function mountTripEditor(doc){
         action:() => paperApi.runSpellcheck() },
       { label:tripIsEn() ? "Pictures and text boxes" : "그림·글상자 붙이기", action:() => stickerBtn.click() },
       { label:tripIsEn() ? "Paper style and settings" : "종이 꾸미기·설정", action:() => styleBtn.click() },
+      { label:tripIsEn() ? "Travel templates" : "여행 템플릿", action:() => setTemplateOpen(true) },
+      { label:tripIsEn() ? (focusMode ? "Exit focus mode" : "Focus mode") : (focusMode ? "몰입 모드 끝내기" : "몰입 모드"),
+        active:focusMode, disabled:!focusMode && !canWriteCurrentDay(), action:() => setFocusMode(!focusMode) },
       pictureItems.length ? { label:tripIsEn() ? "Picture area" : "그림 칸", children:pictureItems } : null,
       { separator:true },
       { label:tripIsEn() ? "Print" : "인쇄", children:[
@@ -5073,25 +5525,56 @@ function mountTripEditor(doc){
   }, true);
 
   undoBtn.addEventListener("click", () => history.undo());
-  redoBtn.addEventListener("click", () => history.redo());
+  redoBtn.addEventListener("click", () => { history.flush(); history.redo(); });
   saveBtn.addEventListener("click", () => saveTrip(doc));
 
   const onKey = (e) => {
     if (!root.isConnected || activeId !== doc.id) return;
+    if (e.defaultPrevented || e.isComposing) return;
+    if (e.key === "Escape" && !templatePanel.hidden && root.contains(e.target)){
+      e.preventDefault(); e.stopPropagation(); setTemplateOpen(false); templateBtn.focus(); return;
+    }
+    if (e.key === "Escape" && !panels.panel.hidden && root.contains(e.target)){
+      e.preventDefault(); e.stopPropagation(); panels.setPanelOpen(false); styleBtn.focus(); return;
+    }
+    if (e.key === "Escape" && !panels.artPanel.hidden && root.contains(e.target)){
+      e.preventDefault(); e.stopPropagation(); panels.setArtPanelOpen(false); stickerBtn.focus(); return;
+    }
     if (e.key === "Escape" && mobileMapOpen && (mapPane.contains(e.target) || e.target === mapMobileBtn)){
       e.preventDefault(); e.stopPropagation(); setMobileMapOpen(false, true); return;
     }
     if (e.key === "Escape" && pickingFor){
       e.preventDefault(); e.stopPropagation(); cancelPicking(); return;
     }
+    if (e.key === "Escape" && focusMode && root.contains(e.target) && els.drawBar.hidden
+      && panels.panel.hidden && panels.artPanel.hidden && !e.target.closest(".diary-sticker-edit")){
+      e.preventDefault(); e.stopPropagation(); setFocusMode(false); return;
+    }
     if ((e.ctrlKey || e.metaKey) && String(e.key || "").toLowerCase() === "s"){
       e.preventDefault(); saveTrip(doc); return;
     }
     if (!doc.el.contains(document.activeElement) && !root.contains(e.target)) return;
-    const inField = /^(input|textarea|select)$/i.test(String(e.target && e.target.tagName || ""));
-    if ((e.ctrlKey || e.metaKey) && !inField && String(e.key || "").toLowerCase() === "z"){
-      e.preventDefault();
-      if (e.shiftKey) history.redo(); else history.undo();
+    const inBody = e.target === els.area;
+    const inField = /^(input|textarea|select)$/i.test(String(e.target && e.target.tagName || ""))
+      || !!(e.target && e.target.isContentEditable);
+    // 본문은 템플릿·사진 흐름까지 같은 기록으로 되돌린다. 검색·제목·글상자 편집은 기본 글자 되돌리기를 쓴다.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (!inField || inBody)){
+      const key = String(e.key || "").toLowerCase();
+      const undo = key === "z" && !e.shiftKey;
+      const redo = key === "y" || (key === "z" && e.shiftKey);
+      if (!undo && !redo) return;
+      e.preventDefault(); e.stopPropagation();
+      const selection = inBody ? [els.area.selectionStart, els.area.selectionEnd, els.area.selectionDirection] : null;
+      const scrollTop = main.scrollTop;
+      if (redo){ history.flush(); history.redo(); } else history.undo();
+      if (inBody && !els.area.disabled){
+        els.area.focus({ preventScroll:true });
+        els.area.setSelectionRange(Math.min(selection[0], els.area.value.length), Math.min(selection[1], els.area.value.length), selection[2]);
+        main.scrollTop = scrollTop;
+      } else if (inBody){
+        // 처음 만든 날을 되돌리면 본문이 비활성화된다. 날을 다시 만들거나 다시 실행할 수 있게 옮긴다.
+        addDayBtn.focus({ preventScroll:true });
+      }
     }
   };
   document.addEventListener("keydown", onKey, true);
@@ -5100,7 +5583,9 @@ function mountTripEditor(doc){
   doc.cleanupFns.push(() => {
     clearTimeout(recoveryTimer);
     cancelAnimationFrame(mapResizeRaf);
+    cancelAnimationFrame(focusLayoutRaf);
     window.removeEventListener("resize", onTripWindowResize);
+    window.removeEventListener("mni18nchange", onTripLanguageChange);
     document.removeEventListener("keydown", onKey, true);
     document.removeEventListener("pointerdown", onOutside, true);
     document.removeEventListener("dragover", onDragScrollOver, true);
@@ -5116,6 +5601,7 @@ function mountTripEditor(doc){
     for (const url of urls.values()) URL.revokeObjectURL(url);
     urls.clear();
     if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery;
+    if (doc._refreshJournalSaveStatus === refreshSaveStatus) delete doc._refreshJournalSaveStatus;
   });
 
   applyBackdrop();
@@ -5129,7 +5615,9 @@ function mountTripEditor(doc){
 if (typeof module !== "undefined" && module.exports){
   module.exports = {
     TRIP_FORMAT, TRIP_VERSION, TRIP_JSON_NAME, TRIP_MAX_DAYS, TRIP_MAX_SPOTS,
-    TRIP_WORDS, TRIP_WORDS_EN, TRIP_SPOT_KINDS, TRIP_SPOT_KIND_IDS,
+    TRIP_WORDS, TRIP_WORDS_EN, TRIP_SPOT_KINDS, TRIP_SPOT_KIND_IDS, TRIP_TEMPLATES, tripTemplateText, tripApplyTemplate,
+    TRIP_USER_TEMPLATES_KEY, TRIP_MAX_USER_TEMPLATES, TRIP_MAX_TEMPLATE_QUESTIONS,
+    tripTemplateLines, tripNormalizeUserTemplates, tripReadUserTemplates, tripWriteUserTemplates, tripGetTemplates,
     tripWord, tripWordf,
     tripSpotKindInfo, tripSpotKindName, tripSpotKindIcon, tripSpotKindColor,
     tripIsDateKey, tripNormalizeTime, tripSortSpotsByTime, tripMoveSpot, tripMoveSpotToDay,
