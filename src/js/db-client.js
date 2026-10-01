@@ -1657,7 +1657,7 @@ const MNDbClient = (() => {
       instance.host.dataset.sqlTabId = tab.id;
       instance.host.hidden = tab.id !== activeSqlTab.id;
       editorWrap.append(instance.host);
-      if (typeof registerEditorFont === "function") registerEditorFont(instance.host);
+      if (typeof registerEditorFont === "function") registerEditorFont(instance.host, doc);
       instance.ta.addEventListener("input", () => {
         tab.sql = instance.getValue();
         if (tab === activeSqlTab) refreshRunLabel();
@@ -1808,7 +1808,7 @@ const MNDbClient = (() => {
       group.label = label;
       list.forEach(choice => {
         const option = new Option(choice.label, choice.value);
-        if (typeof _codeFontFamily === "string" && choice.value === _codeFontFamily) option.selected = true;
+        if (typeof codeFontSettings === "function" && choice.value === codeFontSettings(doc).family) option.selected = true;
         group.append(option);
       });
       fontPick.append(group);
@@ -1860,7 +1860,7 @@ const MNDbClient = (() => {
     resultTabs.hidden = true;
 
     const resultHost = el("div", "db-result");
-    if (typeof registerEditorFont === "function") registerEditorFont(resultHost);
+    if (typeof registerEditorFont === "function") registerEditorFont(resultHost, doc);
 
     /* 최근 실행 목록 — 클릭하면 편집기 커서 자리에 그 쿼리를 넣는다. */
     const historyPanel = el("aside", "db-history-panel");
@@ -2100,13 +2100,13 @@ const MNDbClient = (() => {
       applyResultTextColor();
     };
     fontDownButton.addEventListener("click", () => {
-      if (typeof bumpCodeFont === "function") bumpCodeFont(-1);
+      if (typeof bumpCodeFont === "function") bumpCodeFont(-1, doc);
     });
     fontUpButton.addEventListener("click", () => {
-      if (typeof bumpCodeFont === "function") bumpCodeFont(1);
+      if (typeof bumpCodeFont === "function") bumpCodeFont(1, doc);
     });
     fontPick.addEventListener("change", () => {
-      if (typeof setCodeFontFamily === "function") setCodeFontFamily(fontPick.value);
+      if (typeof setCodeFontFamily === "function") setCodeFontFamily(fontPick.value, doc);
     });
     editorColor.addEventListener("input", () => {
       try { localStorage.setItem(editorColorKey(), editorColor.value); } catch(_){}

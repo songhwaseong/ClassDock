@@ -1147,12 +1147,12 @@ test("DB 결과 전체나 선택 영역을 메모 표로 보낼 수 있다", () 
 test("DB 편집기와 결과 표의 글꼴·크기 및 테마별 글자색을 바꿀 수 있다", () => {
   const source = fs.readFileSync(path.join(root, "src", "js", "db-client.js"), "utf8");
   const css = fs.readFileSync(path.join(root, "src", "styles.css"), "utf8");
-  assert.match(source, /registerEditorFont\(instance\.host\)/);
-  assert.match(source, /registerEditorFont\(resultHost\)/);
+  assert.match(source, /registerEditorFont\(instance\.host, doc\)/);
+  assert.match(source, /registerEditorFont\(resultHost, doc\)/);
   assert.match(source, /groupedCodeFontChoices\(\)/);
-  assert.match(source, /bumpCodeFont\(-1\)/);
-  assert.match(source, /bumpCodeFont\(1\)/);
-  assert.match(source, /setCodeFontFamily\(fontPick\.value\)/);
+  assert.match(source, /bumpCodeFont\(-1, doc\)/);
+  assert.match(source, /bumpCodeFont\(1, doc\)/);
+  assert.match(source, /setCodeFontFamily\(fontPick\.value, doc\)/);
   assert.match(source, /classdockDbEditorTextColorLightV1/);
   assert.match(source, /classdockDbEditorTextColorDarkV1/);
   assert.match(source, /editor\.host\.style\.setProperty\("--code-text", value\)/);

@@ -1268,20 +1268,21 @@ function renderJavaRunnable(context){
   fontDown.textContent = "A−"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)";
   const fontUp = document.createElement("button"); fontUp.className = "run-font"; fontUp.type = "button";
   fontUp.textContent = "A+"; fontUp.title = "코드·결과 글자 크게 (Ctrl++)";
-  fontDown.addEventListener("click", () => bumpCodeFont(-1));
-  fontUp.addEventListener("click", () => bumpCodeFont(1));
+  fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host));
+  fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
   const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
   fontPick.title = "코드 글꼴 (고정폭 · 가변폭 · 손글씨로 나눠 표시)";
   fontPick.setAttribute("aria-label", fontPick.title);
   const fontGroups = groupedCodeFontChoices();
   const installedFonts = fontGroups.all;
-  if (_codeFontFamily && !installedFonts.some(choice => choice.value === _codeFontFamily)) setCodeFontFamily("");
+  const fontSettings = codeFontSettings(ownerDoc || host);
+  if (fontSettings.family && !installedFonts.some(choice => choice.value === fontSettings.family)) setCodeFontFamily("", ownerDoc || host);
   const addFontGroup = (label, choices) => {
     if (!choices.length) return;
     const group = document.createElement("optgroup"); group.label = label;
     choices.forEach((choice) => {
       const option = document.createElement("option"); option.value = choice.value; option.textContent = choice.label;
-      if (choice.value === _codeFontFamily) option.selected = true;
+      if (choice.value === fontSettings.family) option.selected = true;
       group.appendChild(option);
     });
     fontPick.appendChild(group);
@@ -1289,7 +1290,7 @@ function renderJavaRunnable(context){
   addFontGroup("고정폭 (코딩용)", fontGroups.mono);
   addFontGroup("가변폭 (읽기용)", fontGroups.prop);
   addFontGroup("손글씨", fontGroups.hand);
-  fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
+  fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value, ownerDoc || host));
   if (installedFonts.length <= 1) fontPick.hidden = true;
   fontGroup.append(fontDown, fontUp, fontPick);
 
@@ -1656,13 +1657,13 @@ function renderJavaRunnable(context){
     if (typeof shortcutMatches !== "function") return;
     if (shortcutMatches(e, "runCode")){ e.preventDefault(); run(true); return; }
     if (shortcutMatches(e, "saveCurrent")){ e.preventDefault(); saveBtn.click(); return; }
-    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1); }
-    else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1, ownerDoc || host); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1, ownerDoc || host); }
   });
 
-  registerEditorFont(editor.host);
+  registerEditorFont(editor.host, ownerDoc || host);
   outPanel.__refreshFontMetrics = () => outputFinder.refresh();
-  registerEditorFont(outPanel);
+  registerEditorFont(outPanel, ownerDoc || host);
 
   if (ownerDoc){
     const openJavaDocFind = () => {

@@ -1171,7 +1171,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     let treeMode = false;                         // JSON 트리 보기(화면 전용). 편집·저장은 항상 원본 텍스트 기준
     let treeData = null, treeDataFor = null;      // JSON.parse 결과 캐시(같은 원문이면 재파싱 생략)
     let treeEl = null;                            // 현재 표시 중인 트리 요소(모두 펼치기/접기 버튼이 제어)
-    let activeEditor = null, viewJumpTimer = 0;
+    let activeEditor = null, viewJumpTimer = 0, fontViewHost = null;
     let pendingViewAnchor = null;                 // 편집 → 보기 복귀 시 되살릴 위치 {line, clientY, scrollLeft} — showView 가 한 번 쓰고 비운다
     let findOnlyEdit = false;                     // Ctrl+F(찾기)로 편집 모드에 들어온 경우 — 찾기를 닫으면 보기로 복귀
     let viewMode = "";                            // "view"/"edit"/"preview" — 현재 표시 모드
@@ -1196,6 +1196,7 @@ async function renderCode(file, host, ext, profile, runCtx){
 
     const teardownActive = () => {
       clearTimeout(viewJumpTimer);
+      if (fontViewHost){ unregisterEditorFont(fontViewHost); fontViewHost = null; }
       const ed = activeEditor;
       if (ed){ try { ed.destroy(); } catch(_){} unregisterEditorFont(ed.host); activeEditor = null; }
       if (ownerDoc){ ownerDoc.codeViewer = null; if (ownerDoc.codeEditor && ownerDoc.codeEditor === ed) ownerDoc.codeEditor = null; }
@@ -1322,7 +1323,8 @@ async function renderCode(file, host, ext, profile, runCtx){
       wrap.className = "code-host code-host-readonly" + (longLine ? " is-wrapped" : "") + (big ? " code-chunked" : "");
       if (prof === "python") wrap.classList.add("code-color-target");
       // 읽기 화면도 편집기에서 선택·저장한 글자 크기/줄 간격/글꼴을 그대로 사용한다.
-      applyCodeFontMetrics(wrap);
+      fontViewHost = wrap;
+      registerEditorFont(wrap, ownerDoc || host);
       wrap.tabIndex = -1;
       let preRef = null;                                       // 비청크 모드의 pre(focusLine 정밀 계산용)
       const CHUNK = 500;
@@ -1798,10 +1800,9 @@ async function renderCode(file, host, ext, profile, runCtx){
       // 줄바꿈은 편집·읽기 화면이 같은 설정을 쓴다 — 편집기에 바로 걸고, 보기로 돌아가도 그대로 이어진다.
       const wrapBtn = buildWrapButton((on) => { if (editor.setWrap) editor.setWrap(on); editor.ta.focus(); });
       if (editor.setWrap) editor.setWrap(textWrapEnabled());
-      fontDown.addEventListener("click", () => bumpCodeFont(-1)); fontUp.addEventListener("click", () => bumpCodeFont(1));
+      fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host)); fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
       const status = document.createElement("span"); status.className = "run-status";
-      // 글꼴은 파이썬·자바 편집기와 같은 설정을 쓴다(손글씨 포함) — 여기서 바꾸면 그쪽도 함께 바뀐다.
-      const fontPick = buildCodeFontPicker("글꼴 (고정폭 · 가변폭 · 손글씨 — 코드 편집기와 같은 설정)");
+      const fontPick = buildCodeFontPicker("이 파일 글꼴 (고정폭 · 가변폭 · 손글씨)", ownerDoc || host);
       bar.append(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, fontPick, status);
       attachTextStats(editor, bar, null);      // 상태 문구 다음 — 왼쪽 묶음(저장 상태·문서 정보)의 끝
       attachSpellcheck(editor, bar, saveName);
@@ -1837,7 +1838,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       diagBar.append(diagText, diagGo);
       host.appendChild(bar); host.appendChild(diagBar); host.appendChild(editor.host);
       if (typeof syncShortcutHints === "function") syncShortcutHints(bar);
-      registerEditorFont(editor.host);
+      registerEditorFont(editor.host, ownerDoc || host);
       let diagTimer = 0;
       const runDiagnostic = () => {
         const d = structuredEditDiagnostic(ext, prof, editor.getValue());
@@ -1941,8 +1942,8 @@ async function renderCode(file, host, ext, profile, runCtx){
       runDiagnostic();                                        // 편집 진입 시 1회 즉시 진단
       editor.ta.addEventListener("keydown", (e) => {
         if (shortcutMatches(e, "saveCurrent")){ e.preventDefault(); saveBtn.click(); }
-        else if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1); }
-        else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1); }
+        else if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1, ownerDoc || host); }
+        else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1, ownerDoc || host); }
       });
       saveBtn.addEventListener("click", async () => {
         saveBtn.disabled = true;
@@ -2219,9 +2220,9 @@ async function renderCode(file, host, ext, profile, runCtx){
   const fontGroup = document.createElement("span"); fontGroup.className = "run-font-group";
   const fontDown = document.createElement("button"); fontDown.className = "run-font"; fontDown.type = "button"; fontDown.textContent = "A−"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)";
   const fontUp = document.createElement("button"); fontUp.className = "run-font"; fontUp.type = "button"; fontUp.textContent = "A+"; fontUp.title = "코드·결과 글자 크게 (Ctrl++)";
-  fontDown.addEventListener("click", () => bumpCodeFont(-1));
-  fontUp.addEventListener("click", () => bumpCodeFont(1));
-  fontGroup.append(fontDown, fontUp, buildCodeFontPicker());
+  fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host));
+  fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
+  fontGroup.append(fontDown, fontUp, buildCodeFontPicker(undefined, ownerDoc || host));
   // 편집 흐름상 "고치다가 새로 열기"가 잦아서, 글자 크기 옆에 새 파이썬 코드 버튼을 둔다(사이드바 버튼은 그대로).
   const inFolder = !!(ownerDoc && ownerDoc.archiveCtx && runPathDir(normalizedRunPath(ownerDoc.relPath || ownerDoc.workspacePath || "")));
   const newPyTitle = inFolder ? "이 폴더에 새 파이썬 파일 · 같은 폴더 모듈 import 가능" : "새 파이썬 코드";
@@ -3004,10 +3005,10 @@ async function renderCode(file, host, ext, profile, runCtx){
             ownerDoc.workspacePath = path;
             ownerDoc.size = updated.size;
             ownerDoc.savedText = value;
+            if (ownerDoc.isScratch) ownerDoc._named = true;
             markDocumentSavedAsUtf8(ownerDoc, false);
             persisted = await rememberWorkspace([updated], false, { silent:true });     // 자동 복원용 작업공간 사본도 조용히 갱신
             ownerDoc.savedInWorkspace = persisted;
-            if (ownerDoc.isScratch) ownerDoc._named = true;
           }
           savedValue = value;
           clearPythonDraft(draftKey);
@@ -3448,12 +3449,12 @@ async function renderCode(file, host, ext, profile, runCtx){
       if (ui.runCurrentCell) ui.runCurrentCell(false); else run(true);
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1); }
-    else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1, ownerDoc || host); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1, ownerDoc || host); }
   });
-  registerEditorFont(editor.host);                                                    // 저장된 글자 크기 적용
+  registerEditorFont(editor.host, ownerDoc || host);                                  // 이 파일의 글자 크기 적용
   outPanel.__refreshFontMetrics = () => { if (outputFindOpen) renderOutputFindHighlights(); };
-  registerEditorFont(outPanel);                                                       // 실행 결과 문자에도 같은 크기 적용
+  registerEditorFont(outPanel, ownerDoc || host);                                     // 같은 파일의 실행 결과에도 적용
   if (ownerDoc){
     const openPythonDocFind = () => {
       if (outPanel.contains(document.activeElement) || outputFindSelectionSeed()) openOutputFind();
@@ -4181,9 +4182,9 @@ async function saveViaServer(text, ownerDoc, name){
   } catch(e){ return null; }
 }
 
-// ===== 에디터 편의: 코드 글자 크기·폰트(모든 에디터 공유·저장) =====
+// ===== 에디터 편의: 코드 글자 크기·폰트(문서별 화면 설정) =====
 const CODE_FONT_SIZE_BASE = 13;                     // 배율 1.0 의 기준 크기(--code-scale 계산에 씀)
-let _codeFontSize = (() => { const v = Number(localStorage.getItem("pyCodeFontSize")); return (v >= 11 && v <= 30) ? v : CODE_FONT_SIZE_BASE; })();
+const _codeFontSize = (() => { const v = Number(localStorage.getItem("pyCodeFontSize")); return (v >= 11 && v <= 30) ? v : CODE_FONT_SIZE_BASE; })();
 // 시스템에 설치된 폰트만 후보로 둔다(웹폰트는 비동기 로드라 첫 렌더에서 겹침이 어긋날 수 있음).
 // value 가 ""이면 기본(Consolas) 사용. 각 stack 끝에 폴백을 두어 미설치 폰트도 안전하게 다음 후보로 넘어간다.
 // 고정폭/가변폭은 실제 설치된 글꼴을 측정해 자동으로 나눈다(isMonospaceFont) → 후보를 추가할 때 따로 표시할 필요 없음.
@@ -4261,10 +4262,8 @@ function groupedCodeFontChoices(){
   for (const c of availableCodeFontChoices()) (c.hand ? hand : isMonospaceFont(c.stack) ? mono : prop).push(c);
   return { mono, prop, hand, all:[...mono, ...prop, ...hand] };
 }
-let _codeFontFamily = (() => {
-  const v = String(localStorage.getItem("pyCodeFontFamily") || "");
-  return CODE_FONT_CHOICES.some(c => c.value === v) ? v : "";
-})();
+// 파일별 글꼴을 지정하지 않았으면 Consolas로 시작한다. 예전 공통 글꼴은 시작값으로 가져오지 않는다.
+const _codeFontFamily = "";
 function codeFontStack(value){
   const found = CODE_FONT_CHOICES.find(c => c.value === value);
   if (found && found.hand){
@@ -4282,39 +4281,94 @@ function ensureCodeHandFont(value){
   diaryEnsureFont(found.hand).then(ok => {
     if (!ok || _codeHandFontApplied.has(found.hand)) return;
     _codeHandFontApplied.add(found.hand);
-    if (_codeFontFamily === value) reapplyAllEditorFonts();
+    reapplyAllEditorFonts();
   });
 }
 const _editorHosts = new Set();
-function applyCodeFontMetrics(host){
-  host.style.setProperty("--code-fs", _codeFontSize + "px");
-  host.style.setProperty("--code-lh", Math.round(_codeFontSize * 1.6) + "px");
+const _editorFontOwners = new WeakMap();
+const _documentFonts = new WeakMap();
+const CODE_DOCUMENT_FONT_PREFIX = "classdock-code-font:v1:";
+function codeFontOwner(target){
+  if (target) return _editorFontOwners.get(target) || target;
+  if (typeof docs !== "undefined" && typeof activeId !== "undefined") return docs.find(d => d.id === activeId) || null;
+  return null;
+}
+function codeDocumentFontKey(owner){
+  // 이름을 정하지 않은 새 문서들은 같은 기본 이름이어도 서로 다른 화면 설정을 쓴다.
+  if (!owner || (owner.isScratch && !owner._named)) return "";
+  const path = owner.isScratch && owner._named ? (owner.workspacePath || owner.name)
+    : typeof docStableKey === "function" && owner.el ? docStableKey(owner)
+    : owner.workspaceRestorePath || owner.workspacePath || owner.relPath || owner.name || "";
+  return path ? CODE_DOCUMENT_FONT_PREFIX + String(path).replace(/\\/g, "/") : "";
+}
+function codeDocumentNativeFontKey(owner){
+  const path = owner && (owner.nativeAbsolutePath || owner.fsHandle && owner.fsHandle.nativePath);
+  return path ? CODE_DOCUMENT_FONT_PREFIX + "native:" + String(path).replace(/\\/g, "/").toLowerCase() : "";
+}
+function codeFontSettings(target){
+  const owner = codeFontOwner(target);
+  if (!owner) return { size:_codeFontSize, family:_codeFontFamily };
+  let settings = _documentFonts.get(owner);
+  if (!settings){
+    settings = { size:_codeFontSize, family:_codeFontFamily };
+    try {
+      const key = codeDocumentFontKey(owner);
+      const nativeKey = key ? codeDocumentNativeFontKey(owner) : "";
+      const saved = JSON.parse((nativeKey && localStorage.getItem(nativeKey)) || (key && localStorage.getItem(key)) || "null");
+      // 이름이 같아도 서로 다른 원본 경로라면 복원용 별칭의 설정을 가져오지 않는다.
+      if (saved && nativeKey && saved.nativeKey && saved.nativeKey !== nativeKey) throw new Error("different-font-source");
+      if (saved && Number.isFinite(saved.size) && saved.size >= 11 && saved.size <= 30) settings.size = saved.size;
+      if (saved && CODE_FONT_CHOICES.some(c => c.value === saved.family)) settings.family = saved.family;
+    } catch(_){}
+    _documentFonts.set(owner, settings);
+  }
+  return settings;
+}
+function persistCodeFontSettings(target){
+  const owner = codeFontOwner(target);
+  if (!owner || !_documentFonts.has(owner)) return;
+  const key = codeDocumentFontKey(owner);
+  if (key){
+    try {
+      const nativeKey = codeDocumentNativeFontKey(owner);
+      const saved = JSON.stringify({ ..._documentFonts.get(owner), nativeKey });
+      if (nativeKey) localStorage.setItem(nativeKey, saved);
+      localStorage.setItem(key, saved);
+    } catch(_){}
+  }
+}
+function applyCodeFontMetrics(host, target){
+  const settings = codeFontSettings(target || _editorFontOwners.get(host) || host);
+  host.style.setProperty("--code-fs", settings.size + "px");
+  host.style.setProperty("--code-lh", Math.round(settings.size * 1.6) + "px");
   // 단위 없는 배율 — 마크다운 본문·제목처럼 px 로 고정된 곳을 코드 글자 크기에 비례해 함께 키운다.
-  host.style.setProperty("--code-scale", String(Math.round(_codeFontSize / CODE_FONT_SIZE_BASE * 1000) / 1000));
-  const stack = codeFontStack(_codeFontFamily);
+  host.style.setProperty("--code-scale", String(Math.round(settings.size / CODE_FONT_SIZE_BASE * 1000) / 1000));
+  const stack = codeFontStack(settings.family);
   if (stack) host.style.setProperty("--code-ff", stack);
   else host.style.removeProperty("--code-ff");
-  ensureCodeHandFont(_codeFontFamily);
+  ensureCodeHandFont(settings.family);
   // 폰트/크기 바뀌면 4칸 폭이 바뀌므로 들여쓰기 가이드도 다시 그린다(buildCodeEditor 가 등록한 콜백).
   if (typeof host.__refreshIndent === "function") host.__refreshIndent();
   if (typeof host.__refreshPins === "function") host.__refreshPins();        // 줄 높이 변화 → 핀 마커도 재배치
   if (typeof host.__refreshFontMetrics === "function") host.__refreshFontMetrics();
 }
-// 코드 글꼴 드롭다운(아이콘을 겹친 겉 칸째) — 파이썬 실행 바·텍스트 편집 바가 함께 쓴다. 고른 값은 모든 편집기 공용.
-function buildCodeFontPicker(title="코드 글꼴 (고정폭 · 가변폭 · 손글씨로 나눠 표시)"){
+// 같은 문서 안의 편집기와 실행 결과만 글꼴을 공유한다.
+function buildCodeFontPicker(title="이 파일 글꼴 (고정폭 · 가변폭 · 손글씨로 나눠 표시)", target){
+  const owner = codeFontOwner(target);
+  const settings = codeFontSettings(owner);
   const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
   fontPick.title = title;
   fontPick.setAttribute("aria-label", fontPick.title);
   const fontGroups = groupedCodeFontChoices();
   // 저장된 폰트가 시스템에서 빠졌으면 기본으로 자동 폴백(드롭다운에 안 나타나는 옵션이 선택돼 보이는 혼란 방지).
-  if (_codeFontFamily && !fontGroups.all.some(c => c.value === _codeFontFamily)) setCodeFontFamily("");
+  if (settings.family && !fontGroups.all.some(c => c.value === settings.family)) setCodeFontFamily("", owner);
   // 고정폭/가변폭/손글씨를 묶어서 보여준다 — 코드 정렬이 맞는 글꼴을 한눈에 고를 수 있게.
   const addFontGroup = (label, list) => {
     if (!list.length) return;
     const g = document.createElement("optgroup"); g.label = label;
     for (const c of list){
       const o = document.createElement("option"); o.value = c.value; o.textContent = c.label;
-      if (c.value === _codeFontFamily) o.selected = true;
+      if (c.value === settings.family) o.selected = true;
       g.appendChild(o);
     }
     fontPick.appendChild(g);
@@ -4322,7 +4376,7 @@ function buildCodeFontPicker(title="코드 글꼴 (고정폭 · 가변폭 · 손
   addFontGroup("고정폭 (코딩용)", fontGroups.mono);
   addFontGroup("가변폭 (읽기용)", fontGroups.prop);
   addFontGroup("손글씨", fontGroups.hand);
-  fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value));
+  fontPick.addEventListener("change", () => setCodeFontFamily(fontPick.value, owner));
   // 후보가 기본 하나뿐이면(설치된 게 없으면) 드롭다운 자체를 숨겨 자리만 차지하지 않게 한다.
   // select 안에는 SVG 를 못 넣어서 아이콘은 겉 칸에 겹쳐 둔다(클릭은 select 로 통과).
   const fontPickWrap = document.createElement("span"); fontPickWrap.className = "run-fontpick-wrap";
@@ -4332,21 +4386,33 @@ function buildCodeFontPicker(title="코드 글꼴 (고정폭 · 가변폭 · 손
   if (fontGroups.all.length <= 1) fontPickWrap.hidden = true;
   return fontPickWrap;
 }
-function registerEditorFont(host){ _editorHosts.add(host); applyCodeFontMetrics(host); }
-function unregisterEditorFont(host){ _editorHosts.delete(host); }
-function reapplyAllEditorFonts(){
-  for (const h of [..._editorHosts]){ if (h.isConnected) applyCodeFontMetrics(h); else _editorHosts.delete(h); }
+function registerEditorFont(host, target){
+  _editorFontOwners.set(host, codeFontOwner(target) || host);
+  _editorHosts.add(host); applyCodeFontMetrics(host);
 }
-function bumpCodeFont(delta){
-  _codeFontSize = Math.max(11, Math.min(30, _codeFontSize + delta));
-  reapplyAllEditorFonts();
-  try { localStorage.setItem("pyCodeFontSize", String(_codeFontSize)); } catch(_){}
+function unregisterEditorFont(host){ _editorHosts.delete(host); _editorFontOwners.delete(host); }
+function reapplyAllEditorFonts(target){
+  const owner = target ? codeFontOwner(target) : null;
+  for (const h of [..._editorHosts]){
+    if (!h.isConnected){ unregisterEditorFont(h); continue; }
+    if (!owner || _editorFontOwners.get(h) === owner) applyCodeFontMetrics(h);
+  }
 }
-function setCodeFontFamily(value){
+function bumpCodeFont(delta, target){
+  const owner = codeFontOwner(target);
+  if (!owner) return;
+  const settings = codeFontSettings(owner);
+  settings.size = Math.max(11, Math.min(30, settings.size + delta));
+  reapplyAllEditorFonts(owner);
+  persistCodeFontSettings(owner);
+}
+function setCodeFontFamily(value, target){
+  const owner = codeFontOwner(target);
+  if (!owner) return;
   if (!CODE_FONT_CHOICES.some(c => c.value === value)) value = "";
-  _codeFontFamily = value;
-  reapplyAllEditorFonts();
-  try { localStorage.setItem("pyCodeFontFamily", value); } catch(_){}
+  codeFontSettings(owner).family = value;
+  reapplyAllEditorFonts(owner);
+  persistCodeFontSettings(owner);
 }
 // 빈 파이썬 코드로 바로 시작(파일 없이 라이브 코딩)
 let _scratchCount = 0;

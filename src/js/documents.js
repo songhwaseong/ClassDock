@@ -1454,6 +1454,7 @@ async function saveDocumentRecoverySnapshot(doc, bytes, type){
 
 async function markDocumentSavedSnapshot(doc, bytes, type){
   if (!doc) return false;
+  if (typeof persistCodeFontSettings === "function") persistCodeFontSettings(doc);
   const file = recoverySnapshotFile(doc, bytes, type);
   if (file){
     doc.sourceFile = file;
@@ -1488,6 +1489,7 @@ function setDocumentTextEncoding(doc, info, refresh=true){
 }
 
 function markDocumentSavedAsUtf8(doc, refresh=true){
+  if (typeof persistCodeFontSettings === "function") persistCodeFontSettings(doc);
   setDocumentTextEncoding(doc, {
     encoding:"utf-8", label:"UTF-8", shortLabel:"UTF-8", bom:false,
     empty:false, uncertain:false, sampled:false
@@ -2391,6 +2393,7 @@ async function applyOriginalRename(doc, ctx, newName, newHandle){
   if (typeof workspaceIndexDocument === "function") workspaceIndexDocument(doc);
   doc.stableRestoreKey = "";
   doc.stableRestoreKey = docStableKey(doc);
+  if (typeof persistCodeFontSettings === "function") persistCodeFontSettings(doc);
   if (typeof contentCacheDrop === "function") contentCacheDrop(doc.id);
   if (doc.archiveCtx && typeof doc.archiveCtx.rename === "function") doc.archiveCtx.rename(oldPath, newPath, fresh);
   replaceWorkspacePathInGroups(oldPath, newPath);

@@ -589,12 +589,12 @@ function renderJsRunnable(context){
     if (typeof shortcutMatches !== "function") return;
     if (shortcutMatches(e, "runCode")){ e.preventDefault(); run(true); return; }
     if (shortcutMatches(e, "saveCurrent")){ e.preventDefault(); saveBtn.click(); return; }
-    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1); }
-    else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1); }
+    if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(1, ownerDoc || host); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === "-"){ e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1, ownerDoc || host); }
   });
 
-  registerEditorFont(editor.host);
-  registerEditorFont(outPanel);
+  registerEditorFont(editor.host, ownerDoc || host);
+  registerEditorFont(outPanel, ownerDoc || host);
 
   if (ownerDoc){
     ownerDoc.codeEditor = editor;

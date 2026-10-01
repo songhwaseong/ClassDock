@@ -932,10 +932,10 @@ function nbOnKeydown(ownerDoc, e){
     e.preventDefault(); e.stopPropagation(); saveNotebook(ownerDoc); return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "=" || e.key === "+")){
-    e.preventDefault(); e.stopPropagation(); bumpCodeFont(1); return;
+    e.preventDefault(); e.stopPropagation(); bumpCodeFont(1, ownerDoc); return;
   }
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === "-"){
-    e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1); return;
+    e.preventDefault(); e.stopPropagation(); bumpCodeFont(-1, ownerDoc); return;
   }
   if (ownerDoc._nbInkMode && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "z" || e.key === "Z")){
     e.preventDefault(); e.stopPropagation(); nbUndoInk(ownerDoc); return;

@@ -215,8 +215,8 @@ function renderNotebookView(model, host, ownerDoc){
   fontUp.type = "button"; fontUp.className = "nbv-font"; fontUp.textContent = "A+";
   fontUp.title = "노트북 글자 크게 — 코드 셀·마크다운 셀·결과 (Ctrl++)";
   fontUp.setAttribute("aria-label", fontUp.title);
-  fontDown.addEventListener("click", () => bumpCodeFont(-1));
-  fontUp.addEventListener("click", () => bumpCodeFont(1));
+  fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host));
+  fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
   fontGroup.append(fontDown, fontUp);
   const exportBtn = document.createElement("button");
   exportBtn.type = "button"; exportBtn.className = "nbv-export"; exportBtn.textContent = ".py 내보내기";
@@ -379,7 +379,7 @@ function renderNotebookView(model, host, ownerDoc){
         }
       });
     };
-    registerEditorFont(root);
+    registerEditorFont(root, ownerDoc);
     ownerDoc._nbStatusEl = status;
     ownerDoc._nbBusy = false;
     ownerDoc._nbCancelRequested = false;

@@ -52,10 +52,10 @@ test("A+ / A− 로 크기를 바꾸면 배율도 같은 비율로 따라간다"
   const ctx = loadFontModule(null);
   const host = fakeHost();
   ctx.registerEditorFont(host);
-  ctx.bumpCodeFont(5);                                      // 13 → 18px
+  ctx.bumpCodeFont(5, host);                                // 13 → 18px
   assert.equal(host.props.get("--code-fs"), "18px");
   assert.equal(host.props.get("--code-scale"), String(Math.round(18 / 13 * 1000) / 1000));
-  ctx.bumpCodeFont(-7);                                     // 18 → 11px (하한)
+  ctx.bumpCodeFont(-7, host);                               // 18 → 11px (하한)
   assert.equal(host.props.get("--code-fs"), "11px");
   assert.equal(host.props.get("--code-scale"), String(Math.round(11 / 13 * 1000) / 1000));
 });
