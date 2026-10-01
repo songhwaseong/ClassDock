@@ -9285,6 +9285,32 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .trip-region-chip{border-color:rgba(125,158,193,.25);background:rgba(255,255,255,.68)}
 .trip-root>.diary-style-panel,.trip-root>.diary-art-panel{top:98px;border-radius:14px}
 
+/* 어두운 여정 띠에서는 글자와 선택·hover 바탕을 함께 바꿔 대비를 유지한다. */
+[data-theme="dark"] .trip-brand-title,
+[data-theme="dark"] .trip-rail-titlebar,
+[data-theme="dark"] .trip-rail-head,
+[data-theme="dark"] .trip-day-chip-head,
+[data-theme="dark"] .trip-check-toggle{color:var(--ink)}
+[data-theme="dark"] .trip-brand-sub,
+[data-theme="dark"] .trip-day-chip-sub{color:#b4c2d8}
+[data-theme="dark"] .trip-rail-icon{color:#a5b4fc}
+[data-theme="dark"] .trip-rail-chevron{color:#b4c2d8}
+[data-theme="dark"] .trip-rail-chevron:hover{background:var(--panel-hover);color:var(--ink)}
+[data-theme="dark"] .trip-rail .diary-btn:hover:not(:disabled),
+[data-theme="dark"] .trip-check-clear:hover{color:#a5b4fc}
+[data-theme="dark"] .trip-day-chip:hover{border-color:#8096f8;background:var(--panel-hover)}
+[data-theme="dark"] .trip-day-chip.is-on{border-color:#8096f8;background:color-mix(in srgb,#526cf4 22%,var(--field));box-shadow:0 5px 13px rgba(0,0,0,.2)}
+[data-theme="dark"] .trip-day-chip:focus-visible{outline:2px solid #a5b4fc;outline-offset:1px}
+[data-theme="dark"] .trip-day-chip::before{background:#a5b4fc}
+[data-theme="dark"] .trip-day-chip::after{border-color:#7085a6}
+[data-theme="dark"] .trip-day-special{background:var(--field);color:#b4c2d8}
+[data-theme="dark"] .trip-day-special.is-holiday{background:color-mix(in srgb,var(--danger) 18%,var(--field));color:#fda4af}
+[data-theme="dark"] .trip-check-toggle.is-done{color:#86efac}
+[data-theme="dark"] .trip-check-add{background:var(--field);border-color:#7085a6}
+[data-theme="dark"] .trip-search-input::placeholder,
+[data-theme="dark"] .trip-check-text::placeholder,
+[data-theme="dark"] .trip-check-add::placeholder{color:#b4c2d8;opacity:1}
+
 @media (max-width:1350px){
   .trip-brand{min-width:auto}.trip-brand-words{display:none}.trip-brand-mark{width:50px;height:50px}
   .trip-status{display:none}.trip-title{max-width:270px}
