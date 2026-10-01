@@ -24,8 +24,9 @@ const DIARY_FORMAT = "classdock-diary";
 // · 17: 조명 색(lightColor).
 // · 18: 상단 바·오른쪽 스탠드·에디슨·선반 아래·사진 집게 조명 추가.
 // · 19: 전등 자리 비우기(lightAvoid, 기본 끔) — 켜면 전등 기구 자리를 비운다. 옛 앱은 이 값을 버리므로 판을 올린다.
+// · 20: 한지 연등·커튼 전구·반딧불 유리병·달 구름 모빌·창문 햇살 조명 추가.
 // 새 값이 생길 때마다 올린다 — 옛 앱이 모르는 값을 기본값으로 바꾼 채 덮어쓰지 못하게(옛 앱은 새 파일을 거절한다).
-const DIARY_VERSION = 19;
+const DIARY_VERSION = 20;
 const DIARY_JSON_NAME = "diary.json";
 const DIARY_LINES = ["ruled", "double", "triple", "dashed", "list", "grid", "columns", "dots", "crosses", "staff", "diagonal", "blank", "picture", "genko"];
 const DIARY_LINE_LABELS = { ruled:"줄 공책", double:"두 줄", triple:"세 줄", dashed:"점선", list:"목록", grid:"모눈", columns:"세로줄", dots:"점", crosses:"십자", staff:"오선", diagonal:"사선 격자", blank:"빈 종이", picture:"그림일기", genko:"원고지" };
@@ -417,19 +418,29 @@ function diaryUiListDay(key){
 // 원고지 한 줄 칸 수 — 0 은 "자동"(줄 간격 크기의 칸을 폭에 맞게 채움). 나머지는 쓰기 공책(8·10칸)부터 원고지(20칸)까지.
 // 칸 수를 정하면 칸 크기는 종이 폭으로 정해지므로, 창 폭이 달라도·인쇄해도 줄바꿈 자리가 같다.
 const DIARY_GENKO_COLS = [0, 8, 10, 12, 16, 20, 24];
-const DIARY_LIGHTINGS = ["none", "string", "pendant", "lantern", "stars", "glass", "light-bar", "desk-lamp", "edison", "shelf", "photo-clips"];
+const DIARY_LIGHTINGS = ["none", "string", "pendant", "lantern", "stars", "glass", "light-bar", "desk-lamp", "edison", "shelf", "photo-clips",
+  "hanji", "curtain", "firefly", "moon", "window-light"];
 const DIARY_LIGHT_DEFAULT_COLOR = "#ffc66e";
 const DIARY_LIGHTING_LABELS = { none:"없음", string:"줄 전구", pendant:"펜던트", lantern:"덩굴 랜턴", stars:"별 전구", glass:"유리 전구",
-  "light-bar":"상단 바 조명", "desk-lamp":"오른쪽 스탠드", edison:"에디슨 전구", shelf:"선반 아래 조명", "photo-clips":"사진 집게 전구" };
+  "light-bar":"상단 바 조명", "desk-lamp":"오른쪽 스탠드", edison:"에디슨 전구", shelf:"선반 아래 조명", "photo-clips":"사진 집게 전구",
+  hanji:"한지 연등", curtain:"커튼 전구", firefly:"반딧불 유리병", moon:"달 구름 모빌", "window-light":"창문 햇살" };
 const DIARY_LIGHTING_LABELS_EN = { none:"None", string:"String bulbs", pendant:"Pendant", lantern:"Vine lanterns", stars:"Star lights", glass:"Glass bulbs",
-  "light-bar":"Header light bar", "desk-lamp":"Desk lamp", edison:"Edison bulb", shelf:"Shelf lighting", "photo-clips":"Photo clip lights" };
+  "light-bar":"Header light bar", "desk-lamp":"Desk lamp", edison:"Edison bulb", shelf:"Shelf lighting", "photo-clips":"Photo clip lights",
+  hanji:"Hanji lanterns", curtain:"Curtain lights", firefly:"Firefly jar", moon:"Moon mobile", "window-light":"Window sunlight" };
 /* 전등 기구가 차지하는 자리 — 조명 그림 좌표(폭 1000) 기준. 빛(glow)은 글 위에 겹쳐도 되므로 기구 끝까지만 잰다.
    top = 위 띠 높이 · right/rightH = 오른쪽 기둥의 폭과 높이(옆에 선 기구는 위 줄을 통째로 비우지 않는다).
+   창문 햇살처럼 기구가 없는 조명은 top:0 — 비울 자리가 없다.
    그림을 고치면 여기 숫자도 같이 고친다. */
 const DIARY_LIGHTING_RESERVE = {
   string:{ top:120 }, pendant:{ top:105 }, lantern:{ top:175 }, stars:{ top:165 }, glass:{ top:165 },
-  "light-bar":{ top:165 }, "desk-lamp":{ right:135, rightH:155 }, edison:{ top:150 }, shelf:{ top:160 }, "photo-clips":{ top:185 }
+  "light-bar":{ top:165 }, "desk-lamp":{ right:135, rightH:155 }, edison:{ top:150 }, shelf:{ top:160 }, "photo-clips":{ top:185 },
+  hanji:{ top:225 }, curtain:{ top:210 }, firefly:{ right:185, rightH:205 }, moon:{ top:195 }, "window-light":{ top:0 }
 };
+// 비울 기구가 있는 조명인지 — 없으면 '전등 자리 비우기'를 끈다.
+function diaryLightingHasFixture(kind){
+  const reserve = DIARY_LIGHTING_RESERVE[kind];
+  return !!reserve && (reserve.top > 0 || reserve.right > 0);
+}
 /* 글이 전등을 피할 자리(px). 글·원고지·그림일기·인쇄가 모두 이 한 함수로 잰다.
    높이는 줄 간격의 배수로 올려 손글씨가 줄에서 벗어나지 않게 한다. 원고지·그림일기는 칸을 가운데 맞춰 늘어놓아
    오른쪽만 비울 수 없으므로 옆 기구도 위 띠로 바꾼다. lightAvoid 를 켠 때만 비운다(기본은 전등 위에도 쓴다). */
@@ -437,7 +448,7 @@ function diaryLightingSpace(style, width){
   const none = { top:0, right:0, rightH:0 };
   if (!style || style.lightAvoid !== true || !DIARY_LIGHTINGS.includes(style.lighting)) return none;
   const reserve = DIARY_LIGHTING_RESERVE[style.lighting];
-  if (!reserve) return none;
+  if (!diaryLightingHasFixture(style.lighting)) return none;
   const gap = DIARY_GAPS[style.gap] || DIARY_GAPS.normal;
   const w = Math.max(0, Number(width) || 0);
   const px = value => value * w / 1000;
@@ -480,7 +491,7 @@ function diaryLightingSvg(kind){
   if (!DIARY_LIGHTINGS.includes(kind) || kind === "none") return "";
   const id = "diary-light-" + (++diaryLightingSerial);
   const ref = name => `url(#${id}-${name})`;
-  const fixtures = [], emission = [], glow = [];
+  const fixtures = [], emission = [], glow = [], defs = [];
   const wire = (x, y) => fixtures.push(`<path d="M${x} 0V${y}" stroke="#48362b" stroke-width="3"/>`);
   const halo = (x, y, spread = 1) => {
     glow.push(`<ellipse cx="${x}" cy="${y + 75 * spread}" rx="${130 * spread}" ry="${190 * spread}" fill="${ref("glow")}"/>`
@@ -522,6 +533,12 @@ function diaryLightingSvg(kind){
       + `<path d="M0 2Q-12-37 27-16M12 0Q57 16 30 67Q15 89 42 134" fill="none" stroke="#566139" stroke-width="3"/>`
       + leaves.map(([lx, ly, angle]) => `<g transform="translate(${lx} ${ly}) rotate(${angle})"><path d="M0 0Q-26 6-17 28Q3 25 0 0Z" fill="${ref("leaf")}"/>`
         + `<path d="M0 0-16 25" stroke="#b7b572" stroke-width="1" opacity=".45"/></g>`).join("") + `</g>`);
+  };
+  const star = (x, y, scale = 1) => {
+    const shape = "M0-24 7-8 25-6 12 7 15 25 0 15-15 25-12 7-25-6-7-8Z", at = `translate(${x} ${y}) scale(${scale})`;
+    fixtures.push(`<path d="${shape}" transform="${at}" fill="#c4a05f" stroke="#a47837" stroke-width="2"/>`);
+    emission.push(`<path d="${shape}" transform="${at}" fill="${ref("bulb")}" stroke="var(--diary-light-soft,#ffdc89)" stroke-width="2"/>`);
+    halo(x, y, .9 * scale);
   };
   const strip = (x, y, width) => {
     fixtures.push(`<rect x="${x}" y="${y}" width="${width}" height="7" rx="3.5" fill="#bba486"/>`);
@@ -614,6 +631,85 @@ function diaryLightingSvg(kind){
         + `<rect x="-6" y="-8" width="12" height="36" rx="2" fill="${ref("pot")}" stroke="#95673f" stroke-width="1"/>`
         + `<path d="M0-2V24" stroke="#f1d6ad" stroke-width="1" opacity=".5"/></g>`);
     }
+  } else if (kind === "hanji"){
+    // 처진 줄(y = 20 + 180t(1-t))에 둥근 한지 등 다섯 개. 꺼진 등은 한지 색, 켜면 발광 층이 살대째 덮는다.
+    const ribs = `<path d="M-29-25Q0-20 29-25M-39-12Q0-5 39-12M-42 0Q0 7 42 0M-39 12Q0 19 39 12M-29 25Q0 30 29 25M0-35V35" `
+      + `fill="none" stroke="#b86d36" stroke-opacity=".4" stroke-width="1.5"/>`;
+    fixtures.push(`<path d="M-10 20Q500 110 1010 20" fill="none" stroke="#4a3426" stroke-width="3"/>`);
+    for (const [x, wireY, y, s] of [[110,39,92,.88],[300,58,116,1],[500,65,128,1.12],[700,58,116,1],[890,39,92,.88]]){
+      fixtures.push(`<path d="M${x} ${wireY}V${y - 42 * s}" stroke="#4a3426" stroke-width="2"/>`
+        + `<g transform="translate(${x} ${y}) scale(${s})"><ellipse rx="42" ry="35" fill="#e6d3b3" stroke="#b98a5a" stroke-width="1.2"/>${ribs}`
+        + `<rect x="-15" y="-43" width="30" height="10" rx="2" fill="#4f3424"/><rect x="-15" y="33" width="30" height="10" rx="2" fill="#4f3424"/>`
+        + `<path d="M0 43V64" stroke="#b8432e" stroke-width="3"/><path d="M-6 59H6L4 82H-4Z" fill="#b8432e"/></g>`);
+      emission.push(`<g transform="translate(${x} ${y}) scale(${s})"><ellipse rx="40" ry="33" fill="${ref("bulb")}" opacity=".92"/>${ribs}</g>`);
+      halo(x, y, 1.15 * s);
+    }
+  } else if (kind === "curtain"){
+    // 세로 줄에 길이 0 점선 + 둥근 끝을 주어 점 전구로 보이게 한다. 짝·홀 줄은 첫 점 높이를 달리해 엇갈린다.
+    const ends = [208,176,170,142,139,114,115,94,99,82,90,76,88,78,94,87,106,103,126,127,154,158,188,196];
+    const lines = (pick, from) => ends.map((end, i) => pick(i) ? `M${40 + i * 40} ${from}V${end}` : "").join("");
+    const even = lines(i => i % 2 === 0, 26), odd = lines(i => i % 2 === 1, 38);
+    const dots = (color, width, extra = "") => [even, odd].map(d => `<path d="${d}" fill="none" stroke="${color}" stroke-width="${width}" `
+      + `stroke-linecap="round" stroke-dasharray="0 24"${extra}/>`).join("");
+    glow.push(`<ellipse cx="500" cy="95" rx="560" ry="200" fill="${ref("glow")}"/>` + dots("var(--diary-light-color,#ffc66e)", 22, ` opacity=".3"`));
+    fixtures.push(`<path d="${lines(() => true, 14)}" fill="none" stroke="#4d3d30" stroke-width="1.3" opacity=".6"/>` + dots("#d9c6a2", 6.5)
+      + `<rect x="0" y="6" width="1000" height="12" rx="5" fill="${ref("wood")}"/>`);
+    emission.push(dots("var(--diary-light-soft,#ffe7a1)", 9) + dots("var(--diary-light-core,#fffce8)", 5));
+  } else if (kind === "firefly"){
+    // 오른쪽 위 유리병(오른쪽 기둥만 비움)에서 반딧불이가 왼쪽으로 날아간다. 날아가는 빛은 글 위에 겹쳐도 된다.
+    const inside = [[-18,120,4],[10,150,3.5],[22,110,3],[-8,172,3],[28,168,3.5],[-28,152,2.5],[2,96,2.5]];
+    const flying = [[790,170,3.5],[742,118,3],[690,150,2.5],[640,96,3.5],[585,135,2.5],[530,80,3],[470,118,2.5],
+      [410,70,3],[350,105,2],[290,62,2.5],[225,92,2],[160,58,2],[560,210,2.2],[330,180,2]];
+    glow.push(`<circle cx="872" cy="140" r="200" fill="${ref("glow")}"/>`
+      + `<path d="M822 150C760 70 700 180 630 100S500 60 440 105S300 40 160 70" fill="none" stroke="var(--diary-light-soft,#ffe7a1)" `
+      + `stroke-width="2.5" stroke-dasharray="1 12" stroke-linecap="round" opacity=".6"/>`
+      + flying.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r * 6}" fill="${ref("halo")}"/>`).join(""));
+    fixtures.push(`<g transform="translate(872 0)"><path d="M0 0V38" stroke="#8f6f48" stroke-width="2.5"/>`
+      + `<path d="M-30 58Q0 18 30 58" fill="none" stroke="#8f6f48" stroke-width="2.5"/>`
+      + `<path d="M-32 76Q-52 82-52 104V176Q-52 200-28 200H28Q52 200 52 176V104Q52 82 32 76Z" fill="#dfeae6" fill-opacity=".3" stroke="#9fb9b0" stroke-width="2"/>`
+      + `<path d="M-46 196Q-30 180-20 196Q-8 178 4 196Q18 182 28 196Q40 184 48 196Z" fill="#6f8a45" opacity=".75"/>`
+      + inside.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#6b5a3a" opacity=".6"/>`).join("")
+      + `<path d="M-40 102V170" stroke="#fff" stroke-opacity=".45" stroke-width="5" stroke-linecap="round"/>`
+      + `<path d="M-30 68H30L32 76H-32Z" fill="#cfe3dc" fill-opacity=".4" stroke="#9fb9b0" stroke-width="1.5"/>`
+      + `<rect x="-34" y="52" width="68" height="16" rx="3" fill="${ref("metal")}"/><path d="M-34 57H34M-34 62H34" stroke="#3e2f22" stroke-opacity=".45"/>`
+      + `<path d="M-32 72Q-44 84-36 92M32 72Q46 82 40 94" fill="none" stroke="#c9875f" stroke-width="3" stroke-linecap="round"/></g>`);
+    emission.push(flying.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--diary-light-core,#fffce8)"/>`).join("")
+      + `<g transform="translate(872 0)"><ellipse cy="140" rx="46" ry="58" fill="${ref("halo")}"/>`
+      + inside.map(([x, y, r]) => `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--diary-light-core,#fffce8)"/>`).join("") + `</g>`);
+  } else if (kind === "moon"){
+    // 나무 막대에 초승달·구름·별을 매단 모빌. 초승달은 원에서 다른 원을 빼는 가리개(mask) 하나로 만든다.
+    defs.push(`<mask id="${id}-crescent"><circle r="52" fill="#fff"/><circle cx="24" cy="-16" r="45" fill="#000"/></mask>`);
+    const face = `<path d="M-26 6Q-19 13-12 6" fill="none" stroke="#c89a4a" stroke-width="2.5" stroke-linecap="round"/>`
+      + `<circle cx="-24" cy="24" r="6" fill="#f2a27a" opacity=".45"/>`;
+    const cloud = (x, y, scale) => {
+      fixtures.push(`<g transform="translate(${x} ${y}) scale(${scale})"><path d="M-52 18Q-70 18-68 2Q-66-14-48-12Q-46-36-20-36Q0-48 18-32Q40-38 48-18Q68-16 66 2Q64 18 46 18Z" `
+        + `fill="#f6f0e6" stroke="#d6c9b5" stroke-width="2"/><circle cx="-18" cy="-6" r="2.5" fill="#8a7563"/><circle cx="14" cy="-6" r="2.5" fill="#8a7563"/>`
+        + `<path d="M-6 2Q-2 6 2 2" fill="none" stroke="#8a7563" stroke-width="2" stroke-linecap="round"/></g>`);
+      emission.push(`<path d="M${x - 46 * scale} ${y + 12 * scale}H${x + 44 * scale}" stroke="var(--diary-light-soft,#ffe7a1)" stroke-width="3" stroke-linecap="round"/>`);
+      glow.push(`<circle cx="${x}" cy="${y}" r="${90 * scale}" fill="${ref("glow")}" opacity=".5"/>`);
+    };
+    fixtures.push(`<path d="M500 0V26M175 26V80M310 26V90M455 26V58M590 26V76M720 26V118M815 26V56" stroke="#5a4636" stroke-width="1.8"/>`
+      + `<rect x="147" y="22" width="706" height="8" rx="4" fill="${ref("wood")}"/><circle cx="500" cy="26" r="5" fill="#4e3726"/>`
+      + `<g transform="translate(320 140)"><circle r="52" fill="#e9dcb9" mask="${ref("crescent")}"/>${face}</g>`);
+    emission.push(`<g transform="translate(320 140)"><circle r="52" fill="${ref("bulb")}" mask="${ref("crescent")}"/>${face}</g>`);
+    halo(320, 140, 1.5);
+    star(175, 104); star(455, 80, .85); star(720, 140, .95);
+    cloud(590, 114, 1); cloud(815, 84, .75);
+    emission.push([[240,70,1],[400,170,.8],[660,62,1],[905,130,.9],[540,200,.7],[130,170,.8]].map(([x, y, s]) =>
+      `<path d="M0-10 2.5-2.5 10 0 2.5 2.5 0 10-2.5 2.5-10 0-2.5-2.5Z" transform="translate(${x} ${y}) scale(${s})" fill="var(--diary-light-core,#fffce8)" opacity=".85"/>`).join(""));
+  } else if (kind === "window-light"){
+    // 기구 없는 조명 — 왼쪽 위 창으로 든 햇빛이 창틀 모양·잎 그림자로 종이에 내려앉는다. 빛 세기 0% 면 아무것도 안 남는다.
+    defs.push(`<linearGradient id="${id}-ray" x2="1" y2="1"><stop stop-color="var(--diary-light-soft,#ffe7a1)" stop-opacity=".55"/>`
+      + `<stop offset=".55" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity=".18"/><stop offset="1" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity="0"/></linearGradient>`);
+    glow.push(`<circle r="320" fill="${ref("halo")}"/><path d="M0 0H360L880 280 720 670 300 590 0 170Z" fill="${ref("ray")}"/>`
+      + `<path d="M470 170 660 215 590 405 400 360ZM675 219 865 264 795 454 605 409ZM394 375 584 420 514 610 324 565ZM600 424 790 469 720 659 530 614Z" `
+      + `fill="var(--diary-light-soft,#ffe7a1)" opacity=".45"/>`
+      + `<g fill="#5b3f26" opacity=".16"><path d="M900 236Q790 330 700 520" fill="none" stroke="#5b3f26" stroke-width="5"/>`
+      + [[835,285,42,15,-25],[808,338,40,14,35],[776,388,44,15,-30],[748,442,38,13,30],[724,494,36,13,-20]].map(([x, y, rx, ry, a]) =>
+        `<ellipse cx="${x}" cy="${y}" rx="${rx}" ry="${ry}" transform="rotate(${a} ${x} ${y})"/>`).join("") + `</g>`);
+    emission.push([[120,60,2.5],[200,120,1.8],[262,40,2.2],[330,150,3],[410,110,1.6],[380,230,2.4],[480,262,1.8],
+      [560,200,2.6],[620,300,1.8],[300,300,2.2],[450,420,2],[700,380,2.4],[170,200,1.6],[540,520,2]].map(([x, y, r]) =>
+      `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--diary-light-core,#fffce8)" opacity=".85"/>`).join(""));
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" aria-hidden="true" focusable="false"><defs>`
     + `<radialGradient id="${id}-glow"><stop stop-color="var(--diary-light-color,#ffc66e)" stop-opacity=".44"/><stop offset=".4" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity=".19"/><stop offset="1" stop-color="var(--diary-light-color,#ffc66e)" stop-opacity="0"/></radialGradient>`
@@ -626,7 +722,7 @@ function diaryLightingSvg(kind){
     + `<linearGradient id="${id}-leaf"><stop stop-color="#8c9650"/><stop offset="1" stop-color="#3b542c"/></linearGradient>`
     + `<linearGradient id="${id}-wood" x2="0" y2="1"><stop stop-color="#4c3a2e"/><stop offset=".5" stop-color="#302c2e"/><stop offset="1" stop-color="#5f422c"/></linearGradient>`
     + `<linearGradient id="${id}-pot"><stop stop-color="#946139"/><stop offset=".45" stop-color="#deb177"/><stop offset="1" stop-color="#8c603e"/></linearGradient>`
-    + `<linearGradient id="${id}-photo" x2="0" y2="1"><stop stop-color="#334c70"/><stop offset=".63" stop-color="#c49487"/><stop offset=".76" stop-color="#e8ac74"/><stop offset="1" stop-color="#425b75"/></linearGradient></defs>`
+    + `<linearGradient id="${id}-photo" x2="0" y2="1"><stop stop-color="#334c70"/><stop offset=".63" stop-color="#c49487"/><stop offset=".76" stop-color="#e8ac74"/><stop offset="1" stop-color="#425b75"/></linearGradient>${defs.join("")}</defs>`
     + `<g class="diary-light-glow">${glow.join("")}</g><g class="diary-light-fixtures">${fixtures.join("")}</g>`
     + `<g class="diary-light-emission">${emission.join("")}</g></svg>`;
 }
@@ -4168,7 +4264,7 @@ function mountDiaryPanels(panelEnv){
     lightColorReset.textContent = diaryEn("기본 색", "Default color");
     lightColorReset.setAttribute("aria-label", diaryEn("조명 기본 색으로 되돌리기", "Reset light color"));
     lightAvoidBox.checked = style.lightAvoid === true;
-    lightAvoidBox.disabled = style.lighting === "none";
+    lightAvoidBox.disabled = !diaryLightingHasFixture(style.lighting);
     lightAvoidText.textContent = diaryEn("전등 자리 비우기", "Keep text clear of fixtures");
     lightNote.textContent = diaryEn("0%에서는 전등 장식만 남아요. 배경 그림과 함께 사용할 수 있어요. "
       + "전등 자리 비우기를 켜면 전등이 있는 자리를 비우고 글을 써요.",
@@ -7053,7 +7149,7 @@ if (typeof module !== "undefined" && module.exports){
     diaryAssetMime,
     DIARY_FORMAT, DIARY_VERSION, DIARY_LINES, DIARY_GAPS, DIARY_ENCRYPTED_MAGIC, DIARY_PBKDF2_ITER,
     DIARY_PAPERS, DIARY_PAPER_DARK, DIARY_PAPER_DEFAULT_COLOR, diaryPaperBackground,
-    DIARY_LIGHTINGS, DIARY_LIGHT_DEFAULT_COLOR, DIARY_LIGHTING_LABELS, DIARY_LIGHTING_LABELS_EN, diaryLightingSvg, diaryLightingPalette, diaryPaintLighting, diaryLightingInset, DIARY_LIGHTING_RESERVE, diaryLightingSpace, diaryLightingMask, diaryBindLightIntensity, diaryBindLightColor, diaryBuildPrintPaper,
+    DIARY_LIGHTINGS, DIARY_LIGHT_DEFAULT_COLOR, DIARY_LIGHTING_LABELS, DIARY_LIGHTING_LABELS_EN, diaryLightingSvg, diaryLightingPalette, diaryPaintLighting, diaryLightingInset, DIARY_LIGHTING_RESERVE, diaryLightingHasFixture, diaryLightingSpace, diaryLightingMask, diaryBindLightIntensity, diaryBindLightColor, diaryBuildPrintPaper,
     diaryDateKey, diaryIsDateKey, diaryAddDays, diaryDateLabel, diaryMonthGrid,
     diaryDefaultStyle, diaryNormalizeStyle, diaryDefaultBackdrop, diaryNormalizeBackdrop, diaryNormalizeSticker, diaryNormalizeTags, diaryNormalizeEntry, diaryEntryIsEmpty,
     diaryEmpty, diaryNormalize, diaryContentKey, diaryModelJson, diaryEffectiveStyle, diaryReferencedAssets,

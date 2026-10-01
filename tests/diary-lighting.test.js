@@ -23,7 +23,7 @@ test("old journals default to no lighting; invalid names and intensity are norma
   assert.equal(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:5 }).style.lighting, "none");
 });
 
-test("all ten lights persist with independent date overrides in diary and trip ZIPs", async () => {
+test("all fifteen lights persist with independent date overrides in diary and trip ZIPs", async () => {
   for (const lighting of diary.DIARY_LIGHTINGS.filter(id => id !== "none")){
     const globalStyle = diary.diaryNormalizeStyle({ lighting, lightIntensity:.83, lightColor:"#85bfff" });
     const dateStyle = diary.diaryNormalizeStyle({ lighting:"glass", lightIntensity:0, lightColor:"#ff8aca" });
@@ -44,7 +44,7 @@ test("all ten lights persist with independent date overrides in diary and trip Z
     roundtrip.style.lightIntensity = .2;
     assert.notEqual(trip.tripContentKey(roundtrip), key);
   }
-  assert.throws(() => trip.tripNormalize({ format:trip.TRIP_FORMAT, version:10 }), /trip-version/);
+  assert.throws(() => trip.tripNormalize({ format:trip.TRIP_FORMAT, version:11 }), /trip-version/);
 });
 
 function layer(){
@@ -94,7 +94,7 @@ test("one color picker gesture previews live and undoes independently from inten
 
 test("brightness updates only light groups, preserving fixtures and unique SVG references", () => {
   const ids = new Set();
-  assert.equal(diary.DIARY_LIGHTINGS.length, 11);
+  assert.equal(diary.DIARY_LIGHTINGS.length, 16);
   assert.deepEqual(Object.keys(diary.DIARY_LIGHTING_LABELS).sort(), [...diary.DIARY_LIGHTINGS].sort());
   assert.deepEqual(Object.keys(diary.DIARY_LIGHTING_LABELS_EN).sort(), [...diary.DIARY_LIGHTINGS].sort());
   for (const lighting of diary.DIARY_LIGHTINGS.filter(id => id !== "none")){
@@ -138,6 +138,10 @@ test("lighting reserves only each fixture's own space, aligned to the lines, for
           assert.ok(space.right >= reserve.right * width / 1000);
           assert.equal(after.padRight, Math.max(32, space.right));
           assert.equal(space.rightH % after.gap, 0);
+        } else if (!diary.diaryLightingHasFixture(lighting)){
+          // 창문 햇살처럼 기구가 없는 조명은 비울 자리가 없다.
+          assert.deepEqual(space, { top:0, right:0, rightH:0 });
+          assert.equal(after.padRight, 32);
         } else {
           // 원고지는 칸을 가운데 맞추므로 옆 기구도 위 띠로 바꾼다.
           const height = reserve.top || reserve.rightH;
@@ -250,4 +254,17 @@ test("print uses the same lighting renderer and removes lighting and header spac
       assert.equal(style.lighting, kind);
     }
   } finally { globalThis.document = previous; }
+});
+
+test("only lights with a fixture offer the fixture-space option", () => {
+  assert.equal(diary.diaryLightingHasFixture("none"), false);
+  assert.equal(diary.diaryLightingHasFixture("window-light"), false);
+  for (const kind of ["hanji", "curtain", "firefly", "moon", "desk-lamp", "string"]) assert.equal(diary.diaryLightingHasFixture(kind), true);
+  // 반딧불 유리병은 스탠드처럼 오른쪽 옆만 비운다.
+  const jar = { ...diary.diaryNormalizeStyle({}), lighting:"firefly", lightAvoid:true };
+  const space = diary.diaryLightingSpace(jar, 900);
+  assert.equal(space.top, 0);
+  assert.ok(space.right > 0 && space.rightH > 0);
+  assert.equal(diary.diaryNormalize({ format:diary.DIARY_FORMAT, version:20, style:{ lighting:"moon" } }).style.lighting, "moon");
+  assert.equal(trip.tripNormalize({ format:trip.TRIP_FORMAT, version:10, style:{ lighting:"hanji" } }).style.lighting, "hanji");
 });

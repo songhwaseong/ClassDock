@@ -22,7 +22,8 @@ const TRIP_FORMAT = "classdock-trip";
 // 7: 공통 종이 조명 색(lightColor).
 // 8: 공통 종이 조명 5종 추가(상단 바·스탠드·에디슨·선반·사진 집게).
 // 9: 공통 종이의 전등 자리 비우기(lightAvoid).
-const TRIP_VERSION = 9;
+// 10: 공통 종이 조명 5종 추가(한지 연등·커튼 전구·반딧불 유리병·달 구름 모빌·창문 햇살).
+const TRIP_VERSION = 10;
 const TRIP_JSON_NAME = "trip.json";
 const TRIP_MAX_DAYS = 400;
 const TRIP_MAX_SPOTS = 60;            // 하루에 들를 곳

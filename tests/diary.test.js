@@ -614,9 +614,9 @@ test("내장 그림·글상자만 붙인 날도 빈 날로 버리지 않는다",
   }
 });
 
-test("전등 자리 비우기가 들어간 파일은 version 19 이고 다음 버전은 거절한다", () => {
-  assert.equal(diary.DIARY_VERSION, 19);
-  const json = JSON.stringify({ format:"classdock-diary", version:20, title:"미래", entries:[] });
+test("조명 5종이 더해진 파일은 version 20 이고 다음 버전은 거절한다", () => {
+  assert.equal(diary.DIARY_VERSION, 20);
+  const json = JSON.stringify({ format:"classdock-diary", version:21, title:"미래", entries:[] });
   assert.throws(() => diary.diaryNormalize(JSON.parse(json)), /diary-version/);
 });
 
