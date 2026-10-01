@@ -71,6 +71,7 @@ const TRIP_WORDS = {
   dayCount:     "{n}일",
   dayDelete:    "이 날 지우기",
   dayEmpty:     "아직 쓴 것이 없어요",
+  dayStartHint: "먼저 ‘＋ 날’을 눌러 날을 추가해 주세요.",
 
   spot:         "들른 곳",
   spotAdd:      "＋ 들른 곳",
@@ -118,6 +119,7 @@ const TRIP_WORDS_EN = {
   dayCount:     "{n} days",
   dayDelete:    "Delete day",
   dayEmpty:     "Nothing written yet",
+  dayStartHint: "Add a day with ‘+ Day’ first.",
 
   spot:         "Place",
   spotAdd:      "+ Place",
@@ -2035,6 +2037,14 @@ function mountTripEditor(doc){
   pageHead.append(dayDateField, dayTitle, weatherDisplay, recallBtn, deleteBtn);
 
   const els = tripBuildPaperEls(main);
+  function showEmptyDayHint(event){
+    if (dayOf(current) || event.target.closest("button")) return;
+    const message = tripWord("dayStartHint");
+    if (typeof toast === "function") toast(message, 3200);
+  }
+  // disabled 입력은 클릭을 받지 못하므로 빈 상태에서는 CSS로 바깥 영역에 클릭을 넘긴다.
+  pageHead.addEventListener("click", showEmptyDayHint);
+  els.paper.addEventListener("click", showEmptyDayHint);
 
   /* 장소 칸 — 종이 아래에 둔다. 스티커와 달리 지도·일정·경비가 함께 읽는 자료다(설계 2장). */
   const spotsBox = document.createElement("section");
@@ -2125,6 +2135,8 @@ function mountTripEditor(doc){
   function touch(immediate){
     // 종이에 사진을 붙이거나 떼면 여정 띠의 대표 사진이 바뀔 수 있다 — 그 날 것이 달라졌을 때만 다시 그린다.
     const live = dayOf(current);
+    // 사진·스티커·그림으로 첫날이 생겨도 날짜와 본문을 곧바로 활성화한다.
+    if (live && els.area.disabled) renderPage();
     if (live && railMarks.has(live.id) && railMarkOf(live) !== railMarks.get(live.id)) renderRail();
     refreshDirty();
     scheduleRecovery();
@@ -4966,6 +4978,7 @@ function mountTripEditor(doc){
 
   function renderPage(){
     const day = dayOf(current);
+    main.classList.toggle("is-trip-empty", !day);
     deleteBtn.disabled = !day;
     dayTitle.value = day ? (day.title || "") : "";
     dayTitle.placeholder = tripWord("dayTitleHint");
