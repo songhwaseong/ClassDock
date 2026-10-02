@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="ko" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>머리글 시안</title>
+<style>
+:root{--page:#f4f6f9;--page-ink:#0f172a;--page-muted:#64748b;--page-line:#dde3ea}
+html[data-theme="dark"]{--page:#0b1120;--page-ink:#e8eef7;--page-muted:#94a3b8;--page-line:#253047}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--page);color:var(--page-ink);font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;padding:20px 16px 48px}
+.top{max-width:1240px;margin:0 auto 18px}
+.top h1{font-size:18px;font-weight:700;margin-bottom:4px}
+.top p{color:var(--page-muted);font-size:13px;line-height:1.6;margin-bottom:10px}
+.ctrls{display:flex;gap:8px 14px;flex-wrap:wrap;align-items:center}
+.ctrl{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--page-muted)}
+.seg{display:inline-flex;border:1px solid var(--page-line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:var(--page-muted);font:inherit;font-size:12.5px;padding:5px 10px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--page-ink);color:var(--page)}
+.variant{max-width:1240px;margin:0 auto 34px}
+.v-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.v-head h2{font-size:16px;font-weight:700}
+.v-letter{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--page-ink);color:var(--page);font-size:13px;font-weight:700;transform:translateY(-1px)}
+.chip{font-size:12px;padding:2px 9px;border-radius:999px;border:1px solid var(--page-line);color:var(--page-muted)}
+.chip b{color:var(--page-ink)}
+.v-desc{color:var(--page-muted);font-size:13px;line-height:1.6;margin-bottom:10px}
+.v-desc b{color:var(--page-ink);font-weight:600}
+.frame-wrap{width:100%;overflow:hidden;border-radius:10px;border:1px solid var(--page-line)}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:6px 18px;margin-top:10px;font-size:12.5px;color:var(--page-muted);line-height:1.6}
+.notes strong{color:var(--page-ink);font-weight:600}
+
+/* ===== 앱 틀(실제 앱 값) ===== */
+.app{width:var(--app-w,1536px);--bg:#eef2f7;--panel:#fff;--ink:#0f172a;--muted:#64748b;--border:#e2e8f0;--accent:#4f46e5;--field:#fff;--panel-2:#f1f5f9;--code-bg:#f8fafc;--code-gutter:#eef2f7;
+  font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;height:440px;position:relative;overflow:hidden}
+html[data-theme="dark"] .app{--bg:#0b1120;--panel:#1e293b;--ink:#e8eef7;--muted:#94a3b8;--border:#334155;--accent:#6366f1;--field:#0f172a;--panel-2:#334155;--code-bg:#0f172a;--code-gutter:#16213a}
+.app svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto}
+.app svg.i.fill{fill:currentColor;stroke:none}
+.ib{position:relative;display:grid;place-items:center;width:36px;height:36px;border:1px solid transparent;border-radius:8px;background:transparent;color:#dbe7f5;flex:0 0 auto}
+.ib:hover{background:rgba(148,163,184,.13)}
+.ib.menu-ib{width:auto;grid-auto-flow:column;gap:2px;padding:0 4px 0 8px}
+.ib.menu-ib svg.i.c{width:13px;height:13px;opacity:.7}
+.srv-dot{position:absolute;right:5px;bottom:6px;width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px #1e293b}
+.grp{display:inline-flex;align-items:center;gap:2px;padding:0 4px}
+.grp+.grp{margin-left:2px;padding-left:7px;border-left:1px solid rgba(148,163,184,.25)}
+.grp:empty{display:none}
+.brand{display:flex;align-items:center;gap:8px;min-width:0}
+.brand-lockup{height:26px;width:auto;display:block;flex:0 0 auto}
+.zoomv{width:58px;height:34px;border:1px solid rgba(148,163,184,.3);border-radius:8px;background:rgba(15,23,42,.58);color:#eef2ff;font-size:12px;font-weight:700;display:grid;place-items:center}
+.ind{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;font-size:11.5px;white-space:nowrap;background:rgba(148,163,184,.14);color:#cbd5e1}
+.ind::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dot,#38bdf8)}
+.pet-run{display:inline-flex;align-items:center;gap:5px;height:36px;padding:0 9px;border-radius:8px;border:1px solid rgba(129,140,248,.75);background:rgba(79,70,229,.36);color:#e0e7ff;font-size:12.5px;font-variant-numeric:tabular-nums}
+.pet-run svg.i{width:18px;height:18px}
+
+/* 탭 줄 */
+.tabbar{display:flex;align-items:center;gap:4px;background:#0f172a;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.ws{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 7px 0 9px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:rgba(255,255,255,.07);color:#e2e8f0;font-size:12px;font-weight:600;flex:0 0 auto;white-space:nowrap}
+.ws .dot{width:8px;height:8px;border-radius:50%;background:#818cf8}
+.ws svg.i{width:14px;height:14px;opacity:.75}
+.sep{width:1px;height:18px;margin:0 4px;background:rgba(255,255,255,.14);flex:0 0 auto}
+.doctabs{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:4px}
+.tab{display:flex;align-items:center;gap:7px;min-width:0;max-width:210px;padding:6px 7px 6px 9px;border-radius:8px;border-bottom:2px solid transparent;flex:0 0 auto}
+.tab.active{background:rgba(255,255,255,.10);border-bottom-color:var(--ic)}
+.tab-ic{font:700 9px Consolas,monospace;min-width:28px;text-align:center;border-radius:4px;padding:2px 3px;color:var(--ic);
+  background:color-mix(in srgb,var(--ic) 14%,#0f172a);border:1px solid color-mix(in srgb,var(--ic) 38%,#334155)}
+.tab-name{font-size:12.5px;color:color-mix(in srgb,var(--ic) 55%,#e2e8f0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tab-x{width:18px;text-align:center;color:#94a3b8;font-size:12px}
+.tab-x.dirty{color:#fbbf24;font-size:8px}
+.tab-new-tool{flex:0 0 auto;display:grid;place-items:center;width:28px;height:28px;border-radius:7px;color:#94a3b8}
+.tab-new-tool svg.i{width:17px;height:17px}
+.tab-more{flex:0 0 auto;margin-left:auto;height:28px;min-width:48px;padding:0 10px;border:1px solid rgba(255,255,255,.14);border-radius:7px;background:rgba(255,255,255,.07);color:#cbd5e1;font-size:12px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.tab-more .d{color:#fbbf24;font-size:9px}
+
+/* 사본 저장 띠(탭 줄 아래 겹침) */
+.stbar{position:absolute;left:0;right:0;z-index:4;display:flex;align-items:center;justify-content:center;gap:8px;min-height:34px;font-size:12.5px;background:#dbeafe;color:#1e3a8a}
+html[data-theme="dark"] .stbar{background:#162033;color:#cbd5e1}
+
+/* 문서 영역 */
+.docarea{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+.doc-body{flex:1;min-height:0;display:flex;justify-content:center;padding:18px 0 0;overflow:hidden;position:relative}
+.sheet{width:520px;background:#fff;box-shadow:0 2px 10px rgba(15,23,42,.12);padding:46px 56px;display:flex;flex-direction:column;gap:11px}
+html[data-theme="dark"] .sheet{background:#f8fafc}
+.sheet .h{height:16px;width:55%;background:#cbd5e1;border-radius:3px;margin-bottom:10px}
+.sheet .l{height:8px;background:#e2e8f0;border-radius:3px}
+.pill{position:absolute;top:10px;right:16px;display:inline-flex;align-items:center;gap:4px;padding:5px 8px;border-radius:8px;background:rgba(15,23,42,.82);box-shadow:0 4px 14px rgba(0,0,0,.3);color:#fff;font-size:12.5px;font-variant-numeric:tabular-nums}
+.pill .pb{display:grid;place-items:center;min-width:26px;height:26px;padding:0 5px;border-radius:6px;background:rgba(255,255,255,.08)}
+.pill svg.i{width:16px;height:16px}
+.pill .pdv{width:1px;align-self:stretch;background:rgba(255,255,255,.2);margin:1px 2px}
+.pill .pn{width:34px;height:24px;border:1px solid rgba(255,255,255,.25);border-radius:6px;display:grid;place-items:center}
+.runbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--border)}
+.rb{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--border);font-size:12.5px;color:var(--ink);background:var(--field)}
+.rb.primary{background:#16a34a;border-color:#16a34a;color:#fff}
+.rb svg.i{width:16px;height:16px}
+.code{flex:1;display:flex;background:var(--code-bg);font:13px/1.75 Consolas,monospace;overflow:hidden}
+.code .g{padding:10px 10px 0 14px;text-align:right;color:var(--muted);background:var(--code-gutter);white-space:pre}
+.code .t{padding:10px 14px 0;white-space:pre;color:var(--ink)}
+.k{color:#1d4ed8}.s{color:#047857}.f{color:#0f766e}.cm{color:#64748b}
+html[data-theme="dark"] .k{color:#93c5fd}html[data-theme="dark"] .s{color:#86efac}html[data-theme="dark"] .f{color:#67e8f9}
+.empty{flex:1;display:grid;place-items:center}
+.empty div{text-align:center;color:var(--muted);font-size:13px}
+.empty h3{color:var(--ink);font-size:17px;margin-bottom:6px}
+.statusbar{display:flex;align-items:center;gap:14px;height:28px;padding:0 14px;background:var(--panel);border-top:1px solid var(--border);font-size:12px;color:var(--muted);white-space:nowrap}
+.statusbar .on{display:inline-flex;align-items:center;gap:6px}
+.statusbar .on::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dot,#22c55e)}
+.spacer{flex:1}
+
+/* A: 지금 */
+.hA{background:#1e293b;color:#fff;display:grid;grid-template-columns:auto minmax(80px,1fr) auto;align-items:center;gap:16px;padding:10px 16px;box-shadow:0 2px 8px rgba(0,0,0,.15);position:relative;z-index:2}
+.hA .title{text-align:center;font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:650;vertical-align:middle;background:rgba(148,163,184,.16);color:#cbd5e1;border:1px solid rgba(148,163,184,.3)}
+.badge.mode{background:rgba(45,212,191,.16);color:#99f6e4;border-color:rgba(45,212,191,.22)}
+.badge.dirty{background:rgba(245,158,11,.2);color:#fcd34d;border-color:rgba(245,158,11,.32)}
+.hA .capsule{display:flex;align-items:center;gap:2px;padding:4px;border:1px solid rgba(148,163,184,.12);border-radius:12px;background:linear-gradient(180deg,rgba(15,23,42,.7),rgba(2,6,23,.5))}
+.lang{font-size:13px;font-weight:600}
+
+/* B·D */
+.hB{display:flex;align-items:center;gap:12px;padding:8px 12px 8px 14px;background:#1e293b;color:#e2e8f0;position:relative;z-index:3}
+.hB .ib{color:#cbd5e1}
+.hB .left{display:flex;align-items:center;gap:10px;flex:1 1 0;min-width:0}
+.hB .right{display:flex;align-items:center;gap:4px;flex:1 1 0;justify-content:flex-end;min-width:0}
+.search{display:flex;align-items:center;gap:9px;width:380px;flex:0 1 380px;min-width:180px;height:36px;padding:0 10px 0 12px;border:1px solid rgba(148,163,184,.22);border-radius:9px;background:rgba(15,23,42,.45);color:#94a3b8;font-size:13px;white-space:nowrap}
+.search svg.i{width:17px;height:17px}
+.search kbd{margin-left:auto;font:11px Consolas,monospace;padding:2px 6px;border-radius:5px;border:1px solid rgba(148,163,184,.3);color:#cbd5e1}
+.state{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#94a3b8;margin-right:6px;white-space:nowrap}
+.state::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dot,#22c55e)}
+.state em{font-style:normal;padding:1px 6px;border-radius:5px;border:1px solid rgba(148,163,184,.3);font-size:11px}
+.vsep{width:1px;height:20px;margin:0 4px;background:rgba(148,163,184,.25);flex:0 0 auto}
+.menu{position:absolute;right:52px;top:50px;z-index:10;width:236px;padding:6px;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--ink);box-shadow:0 12px 32px rgba(15,23,42,.22)}
+.menu .mi{display:flex;align-items:center;gap:10px;height:31px;padding:0 9px;border-radius:6px;font-size:12.5px}
+.menu .mi svg.i{width:17px;height:17px;color:var(--muted)}
+.menu .mi kbd{margin-left:auto;font:11px Consolas,monospace;color:var(--muted)}
+.menu hr{border:0;border-top:1px solid var(--border);margin:5px 4px}
+.ib.open{background:rgba(148,163,184,.2);color:#fff}
+
+/* C */
+.hC{display:flex;align-items:center;gap:6px;height:46px;padding:0 10px 0 8px;background:#0f172a;color:#e2e8f0;border-bottom:1px solid rgba(255,255,255,.06);position:relative;z-index:3}
+.hC .ib{width:34px;height:34px;color:#cbd5e1}
+.hC .mark{height:24px;width:24px;display:block;flex:0 0 auto}
+
+/* D: 밝은 틀 */
+.light .hB{background:var(--panel);color:var(--ink);border-bottom:1px solid var(--border)}
+.light .hB .ib{color:#475569}
+html[data-theme="dark"] .light .hB .ib{color:#cbd5e1}
+.light .search{background:var(--panel-2);border-color:transparent;color:var(--muted)}
+.light .search kbd{color:var(--muted);border-color:var(--border)}
+.light .state{color:var(--muted)}
+.light .state em{border-color:var(--border)}
+.light .ind{background:var(--panel-2);color:var(--muted)}
+.light .vsep{background:var(--border)}
+.light .srv-dot{box-shadow:0 0 0 2px var(--panel)}
+.light .brand-lockup [fill="#ffffff"]{fill:#0f172a}
+html[data-theme="dark"] .light .brand-lockup [fill="#ffffff"]{fill:#ffffff}
+.light .tabbar{background:var(--bg);border-bottom:1px solid var(--border)}
+.light .ws{background:var(--panel);border-color:var(--border);color:var(--ink)}
+.light .sep{background:var(--border)}
+.light .tab.active{background:var(--panel);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+.light .tab-ic{background:color-mix(in srgb,var(--ic) 12%,var(--panel));border-color:color-mix(in srgb,var(--ic) 35%,var(--border))}
+.light .tab-name{color:color-mix(in srgb,var(--ic) 45%,var(--ink))}
+.light .tab-x,.light .tab-new-tool{color:var(--muted)}
+.light .tab-more{background:var(--panel);border-color:var(--border);color:var(--ink)}
+.light .pet-run{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>ClassDock 머리글 시안</h1>
+  <p>실제 앱 값(색·크기·아이콘·탭 수 계산)으로 그린 비교용 그림입니다. 문서 종류에 따라 머리글이 바뀌는 것, 가끔만 나타나는 표시까지 아래 단추로 바꿔 볼 수 있습니다.</p>
+  <div class="ctrls">
+    <span class="ctrl">창 폭<span class="seg"><button data-w="1280">1280</button><button data-w="1536" aria-pressed="true">1536</button><button data-w="1920">1920</button></span></span>
+    <span class="ctrl">열린 탭<span class="seg"><button data-n="0">0개</button><button data-n="3">3개</button><button data-n="9" aria-pressed="true">9개</button></span></span>
+    <span class="ctrl">보는 문서<span class="seg"><button data-k="pdf" aria-pressed="true">PDF</button><button data-k="code">파이썬</button></span></span>
+    <span class="ctrl">가끔 나오는 표시<span class="seg"><button data-a="0" aria-pressed="true">끔</button><button data-a="1">모두 켬</button></span></span>
+    <span class="ctrl">테마<span class="seg"><button data-t="light" aria-pressed="true">라이트</button><button data-t="dark">다크</button></span></span>
+  </div>
+</div>
+
+<section class="variant">
+  <div class="v-head"><span class="v-letter">A</span><h2>지금</h2><span class="chip" data-count="A"></span></div>
+  <p class="v-desc">PDF일 때는 확대·축소가 머리글과 문서 위 알약(오른쪽 위) 두 군데에 있고, 인쇄는 PDF가 아닐 때만 나옵니다. 파일 이름은 가운데와 탭에 두 번 나옵니다.</p>
+  <div class="frame-wrap"><div class="app" id="A"></div></div>
+</section>
+
+<section class="variant">
+  <div class="v-head"><span class="v-letter">B</span><h2>정돈형</h2><span class="chip" data-count="B"></span></div>
+  <p class="v-desc"><b>앱 전체 일은 왼쪽·오른쪽 끝, 지금 문서 일은 그 사이 한 칸에.</b> 가운데는 기능 검색 칸입니다. 확대·축소와 전체화면은 PDF 알약에 이미 있으므로 머리글에서 뺍니다. 가운데 파일 이름 대신 저장 상태와 인코딩만 오른쪽에 짧게 보입니다. ⋯ 메뉴는 펼쳐 둔 모습입니다.</p>
+  <div class="frame-wrap"><div class="app" id="B"></div></div>
+  <div class="notes">
+    <div><strong>⋯ 메뉴로</strong> 인쇄(PDF 아닐 때) · 전체화면 · 집중 모드 · 저장 폴더 · 이미지 메모 · 도움말 · 테마 · English</div>
+    <div><strong>열기 하나로</strong> 파일 열기·폴더 열기를 한 단추 메뉴로(사이드바 열기 메뉴와 같은 것)</div>
+    <div><strong>그대로</strong> PDF 편집·PDF 페이지 메뉴(PDF일 때만) · 탭 줄 칠판·지도·+N · 사본 저장 띠 · 펫 집중 타이머(돌 때만)</div>
+  </div>
+</section>
+
+<section class="variant">
+  <div class="v-head"><span class="v-letter">C</span><h2>한 줄형</h2><span class="chip" data-count="C"></span></div>
+  <p class="v-desc"><b>머리글과 탭 줄을 한 줄로 합칩니다.</b> 로고는 D 심볼만 남기고, 저장 상태·인코딩·준비 표시 같은 상태는 맨 아래 상태 줄로 내립니다. 오른쪽 단추가 탭 줄로 올라오므로 같은 창 폭에서 보이는 탭이 줄어듭니다.</p>
+  <div class="frame-wrap"><div class="app" id="C"></div></div>
+  <div class="notes">
+    <div><strong>⋯ 메뉴로</strong> B의 메뉴 + 파일 열기·폴더 열기</div>
+    <div><strong>주의</strong> 펫이 올라서는 자리·대기 높이가 #tabBar 기준이라 같이 손봐야 함</div>
+  </div>
+</section>
+
+<section class="variant light">
+  <div class="v-head"><span class="v-letter">D</span><h2>밝은형</h2><span class="chip" data-count="D"></span></div>
+  <p class="v-desc">B와 배치가 같고, <b>머리글·탭 줄을 문서 칸과 같은 밝은 색</b>으로 칠합니다. 다크 모드에서는 어두운 틀이 됩니다.</p>
+  <div class="frame-wrap"><div class="app" id="D"></div></div>
+</section>
+
+<script>
+const P = {
+  sidebar:'<path d="M5 4h4v16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+  search:'<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
+  more:'<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
+  file:'<path d="M6 3h8l4 4v14H6zM14 3v5h5"/><path d="M9 13h6M12 10v6"/>',
+  folder:'<path d="M3 6h7l2 2h9v10H3z"/>',
+  save:'<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
+  print:'<path d="M7 8V3h10v5M7 17H4V9h16v8h-3M7 14h10v7H7z"/><path d="M17 11h.01"/>',
+  zoomOut:'<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M7.5 10.5h6"/>',
+  zoomIn:'<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M10.5 7.5v6M7.5 10.5h6"/>',
+  full:'<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"/>',
+  settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.3 2.3-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.2h-3v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-2.3-2.3.1-.1A1.7 1.7 0 0 0 6.6 15a1.7 1.7 0 0 0-1.5-1H5v-3h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1 2.3-2.3.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V4h3v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.2v3h-.2a1.7 1.7 0 0 0-1.5 1z"/>',
+  help:'<circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.35 2.35 0 1 1 3.7 1.92c-.95.65-1.5 1.12-1.5 2.58M12 17h.01"/>',
+  theme:'<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+  memo:'<path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  pdfEdit:'<path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10zM13.5 7.5l3 3"/>',
+  pdfPage:'<path d="M7 6V4h12v15h-2"/><rect x="5" y="6" width="12" height="15" rx="1.5"/><path d="M8 10h6M8 14h6M8 18h4"/>',
+  focus:'<circle cx="12" cy="13" r="8"/><path d="M9 3h6M12 5v3M12 13l3-2"/>',
+  savefolder:'<path d="M3 6h7l2 2h9v11H3z"/><path d="M9 14h6M12 11v6"/>',
+  image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m5 17 4.5-4 3 2.5 2.5-2 4 3.5"/>',
+  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/>',
+  caret:'<path d="m6 9 6 6 6-6"/>',
+  board:'<rect x="4" y="4" width="16" height="13" rx="1"/><path d="M8 21h8M12 17v4M7 9h10M7 13h6"/>',
+  map:'<path d="M9 4 3 6.5V20l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
+  single:'<rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  play:'<path d="M7 4v16l13-8z"/>',
+  step:'<path d="M5 5v14M9 5l10 7-10 7z"/>',
+  term:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/>'
+};
+const ic = (n, c) => `<svg class="i${c ? " " + c : ""}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const icf = n => `<svg class="i fill" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const ib = (n, label, o = {}) => `<span class="ib${o.cls ? " " + o.cls : ""}" data-b title="${label}"${o.color ? ` style="color:${o.color}"` : ""}>${n === "more" ? icf(n) : ic(n)}${o.caret ? ic("caret", "c") : ""}${o.dot ? '<span class="srv-dot"></span>' : ""}</span>`;
+const LOGO = `<svg class="brand-lockup" viewBox="0 -20.8 114 26" role="img" aria-label="ClassDock"><g transform="translate(0 0)"><path class="brand-class" id="brand-lockup-class" fill="#ffffff" d="M15.72 -12.54 13.7 -10.6Q11.63 -12.79 9.04 -12.79Q6.86 -12.79 5.36 -11.3Q3.87 -9.81 3.87 -7.62Q3.87 -6.1 4.53 -4.92Q5.19 -3.74 6.4 -3.07Q7.61 -2.4 9.09 -2.4Q10.36 -2.4 11.4 -2.87Q12.44 -3.34 13.7 -4.58L15.66 -2.53Q13.98 -0.89 12.48 -0.25Q10.98 0.38 9.05 0.38Q5.5 0.38 3.24 -1.87Q0.98 -4.12 0.98 -7.63Q0.98 -9.91 2.01 -11.68Q3.04 -13.45 4.96 -14.52Q6.88 -15.6 9.09 -15.6Q10.98 -15.6 12.72 -14.8Q14.46 -14.01 15.72 -12.54Z M17.13 -15.6H19.95V0H17.13Z M30.74 -11.26H33.56V0H30.74V-1.19Q29.92 -0.4 29.08 -0.06Q28.25 0.29 27.28 0.29Q25.1 0.29 23.5 -1.4Q21.91 -3.09 21.91 -5.61Q21.91 -8.21 23.45 -9.88Q24.99 -11.54 27.2 -11.54Q28.21 -11.54 29.1 -11.16Q29.99 -10.78 30.74 -10.01ZM27.78 -8.94Q26.46 -8.94 25.59 -8.01Q24.72 -7.09 24.72 -5.64Q24.72 -4.18 25.61 -3.24Q26.49 -2.3 27.79 -2.3Q29.12 -2.3 30 -3.22Q30.88 -4.15 30.88 -5.65Q30.88 -7.12 30 -8.03Q29.12 -8.94 27.78 -8.94Z M43.32 -9.68 41.57 -7.93Q40.5 -8.99 39.63 -8.99Q39.16 -8.99 38.89 -8.79Q38.62 -8.59 38.62 -8.29Q38.62 -8.06 38.79 -7.87Q38.96 -7.68 39.63 -7.34L40.67 -6.83Q42.3 -6.02 42.91 -5.18Q43.52 -4.34 43.52 -3.22Q43.52 -1.72 42.42 -0.71Q41.32 0.29 39.47 0.29Q37.01 0.29 35.54 -1.63L37.28 -3.53Q37.77 -2.95 38.44 -2.59Q39.11 -2.23 39.62 -2.23Q40.18 -2.23 40.52 -2.5Q40.87 -2.77 40.87 -3.12Q40.87 -3.78 39.63 -4.4L38.68 -4.87Q35.95 -6.25 35.95 -8.32Q35.95 -9.65 36.98 -10.6Q38.01 -11.54 39.61 -11.54Q40.71 -11.54 41.68 -11.06Q42.64 -10.58 43.32 -9.68Z M52.32 -9.68 50.57 -7.93Q49.5 -8.99 48.63 -8.99Q48.16 -8.99 47.89 -8.79Q47.62 -8.59 47.62 -8.29Q47.62 -8.06 47.79 -7.87Q47.96 -7.68 48.63 -7.34L49.67 -6.83Q51.3 -6.02 51.91 -5.18Q52.52 -4.34 52.52 -3.22Q52.52 -1.72 51.42 -0.71Q50.32 0.29 48.47 0.29Q46.01 0.29 44.54 -1.63L46.28 -3.53Q46.77 -2.95 47.44 -2.59Q48.11 -2.23 48.62 -2.23Q49.18 -2.23 49.52 -2.5Q49.87 -2.77 49.87 -3.12Q49.87 -3.78 48.63 -4.4L47.68 -4.87Q44.95 -6.25 44.95 -8.32Q44.95 -9.65 45.98 -10.6Q47.01 -11.54 48.61 -11.54Q49.71 -11.54 50.68 -11.06Q51.64 -10.58 52.32 -9.68Z"/><path class="brand-ock" id="brand-lockup-ock" fill="#4f8ff7" d="M81.71 -11.54Q83.31 -11.54 84.71 -10.75Q86.11 -9.95 86.9 -8.59Q87.68 -7.22 87.68 -5.64Q87.68 -4.04 86.89 -2.66Q86.1 -1.27 84.73 -0.49Q83.37 0.29 81.72 0.29Q79.3 0.29 77.59 -1.43Q75.88 -3.16 75.88 -5.62Q75.88 -8.26 77.81 -10.01Q79.51 -11.54 81.71 -11.54ZM81.76 -8.89Q80.44 -8.89 79.57 -7.97Q78.69 -7.06 78.69 -5.63Q78.69 -4.16 79.56 -3.25Q80.42 -2.34 81.74 -2.34Q83.07 -2.34 83.95 -3.26Q84.83 -4.18 84.83 -5.63Q84.83 -7.08 83.96 -7.98Q83.1 -8.89 81.76 -8.89Z M100.44 -8.98 98.1 -7.69Q97.43 -8.38 96.79 -8.65Q96.14 -8.92 95.27 -8.92Q93.69 -8.92 92.71 -7.97Q91.73 -7.02 91.73 -5.54Q91.73 -4.11 92.68 -3.2Q93.62 -2.29 95.15 -2.29Q97.04 -2.29 98.1 -3.58L100.32 -2.06Q98.51 0.29 95.21 0.29Q92.24 0.29 90.56 -1.47Q88.88 -3.23 88.88 -5.59Q88.88 -7.22 89.7 -8.6Q90.51 -9.97 91.98 -10.76Q93.44 -11.54 95.25 -11.54Q96.93 -11.54 98.26 -10.88Q99.6 -10.21 100.44 -8.98Z M103.45 -15.6H106.27V-6.61L110.43 -11.26H113.97L109.13 -5.86L114.56 0H111.05L106.27 -5.18V0H103.45Z"/></g><image class="brand-mark" id="brand-lockup-mark" x="54" y="-17.8" width="20" height="20" preserveAspectRatio="xMidYMid meet" href="../src/assets/classdock-header-mark.png"/><defs><linearGradient id="brand-lockup-sheen-fill" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#dbeaff" stop-opacity="0"/><stop offset=".5" stop-color="#dbeaff" stop-opacity=".95"/><stop offset="1" stop-color="#dbeaff" stop-opacity="0"/></linearGradient><mask id="brand-lockup-mask" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="-20.8" width="114" height="26"><use transform="translate(0 0)" href="#brand-lockup-class"/><use transform="translate(0 0)" href="#brand-lockup-ock"/><use href="#brand-lockup-mark"/></mask></defs><g mask="url(#brand-lockup-mask)" aria-hidden="true"><rect class="brand-sheen" x="-18" y="-20.8" width="14" height="26" fill="url(#brand-lockup-sheen-fill)"/></g></svg>`;
+
+const DOCS = [
+  { k:"PDF", n:"수업자료.pdf", c:"#e0564f", kind:"pdf", mode:"PDF 편집", save:"원본" },
+  { k:"PY", n:"연습문제.py", c:"#3b82f6", kind:"code", mode:"Python 실습", save:"저장 안 됨", dirty:1, enc:"UTF-8" },
+  { k:"XLSX", n:"성적표.xlsx", c:"#1f9d57" },
+  { k:"HWP", n:"가정통신문.hwp", c:"#0fb5a6" },
+  { k:"DIARY", n:"3월 일기.diary", c:"#d946ef" },
+  { k:"TRIP", n:"제주 4박5일.trip", c:"#f59e0b" },
+  { k:"WB", n:"수학풀이 보드.board", c:"#8b5cf6" },
+  { k:"MAP", n:"학교 주변.map", c:"#10b981", dirty:1 },
+  { k:"MD", n:"수업계획.md", c:"#0ea5e9" }
+];
+const S = { w:1536, n:9, kind:"pdf", all:false };
+const activeDoc = () => !S.n ? null : (S.kind === "pdf" ? DOCS[0] : DOCS[1]);
+const tabLimitForWidth = w => Math.max(1, Math.min(6, Math.floor(Math.max(210, w - 146) / 210)));
+
+function fillTabs(el){
+  const list = DOCS.slice(0, S.n), doc = activeDoc(), limit = tabLimitForWidth(el.clientWidth);
+  let start = 0; const ai = list.indexOf(doc);
+  if (ai >= limit) start = ai - limit + 1;
+  const shown = list.slice(start, start + limit), hidden = list.filter(d => !shown.includes(d));
+  const hd = hidden.filter(d => d.dirty).length;
+  el.innerHTML = shown.map(d => `<span class="tab${d === doc ? " active" : ""}" style="--ic:${d.c}"><span class="tab-ic">${d.k}</span><span class="tab-name">${d.n}</span><span class="tab-x${d.dirty ? " dirty" : ""}">${d.dirty ? "●" : "✕"}</span></span>`).join("")
+    + `<span class="tab-new-tool" title="새 화이트보드">${ic("board")}</span><span class="tab-new-tool" title="새 지도">${ic("map")}</span>`
+    + (hidden.length ? `<span class="tab-more" title="숨겨진 탭 ${hidden.length}개">+${hidden.length}${hd ? `<span class="d">●${hd}</span>` : ""}</span>` : "");
+  return { shown: shown.length, hidden: hidden.length };
+}
+const ws = `<span class="ws"><span class="dot"></span>기본 작업공간${ic("caret")}</span>`;
+const tabbar = () => `<div class="tabbar">${ws}<span class="sep"></span><div class="doctabs"></div></div>`;
+const indicators = () => S.all ? `<span class="ind">백그라운드 작업 1</span><span class="ind" style="--dot:#f59e0b">파이썬 준비 중</span>` : "";
+const petRun = () => S.all ? `<span class="pet-run" data-b title="픽셀 펫 집중 모드">${ic("focus")}18:42</span>` : "";
+const saveBar = (top) => (S.all && activeDoc()) ? `<div class="stbar" style="top:${top}px"><b>사본 저장</b>원본은 그대로 두고 사본으로 저장합니다</div>` : "";
+
+function docArea(statusbar){
+  const d = activeDoc();
+  let body;
+  if (!d) body = `<div class="empty"><div><h3>파일을 열어 바로 시작하세요</h3>PDF·문서·이미지·코드 등 여러 파일을 한 작업 공간에서 다룰 수 있어요.</div></div>`;
+  else if (d.kind === "pdf") body = `<div class="doc-body"><div class="sheet"><div class="h"></div>${'<div class="l"></div>'.repeat(4)}<div class="l" style="width:70%"></div><div style="height:8px"></div>${'<div class="l"></div>'.repeat(5)}<div class="l" style="width:45%"></div></div>
+      <span class="pill" title="PDF 보기 알약(지금도 있음)"><span class="pb">－</span><span class="pb">100%</span><span class="pb">＋</span><span class="pdv"></span><span class="pb">${ic("single")}</span><span class="pn">3</span>/ 12<span class="pb">${ic("search")}</span><span class="pb">${ic("full")}</span></span></div>`;
+  else body = `<div class="runbar"><span class="rb primary">${icf("play")}실행</span><span class="rb">${ic("step")}단계 실행</span><span class="rb">${ic("term")}터미널</span><span class="spacer"></span><span class="rb">${ic("save")}저장</span></div>
+      <div class="code"><div class="g">1\n2\n3\n4\n5\n6</div><div class="t"><span class="k">def</span> <span class="f">two_sum</span>(nums, target):
+    seen = {}
+    <span class="k">for</span> i, n <span class="k">in</span> enumerate(nums):
+        <span class="k">if</span> target - n <span class="k">in</span> seen: <span class="k">return</span> [seen[target - n], i]
+        seen[n] = i
+<span class="f">print</span>(two_sum([2, 7, 11, 15], 9))  <span class="cm"># [0, 1]</span></div></div>`;
+  const sb = statusbar && d ? `<div class="statusbar"><span>${d.n}</span><span>${d.mode}</span>${d.enc ? `<span>${d.enc}</span>` : ""}<span class="on" style="--dot:${d.dirty ? "#f59e0b" : "#22c55e"}">${d.save}</span><span class="spacer"></span>${S.all ? `<span class="on" style="--dot:#38bdf8">백그라운드 작업 1</span><span class="on" style="--dot:#f59e0b">파이썬 준비 중</span>` : ""}</div>` : "";
+  return `<div class="docarea">${body}${sb}</div>`;
+}
+
+function headerA(){
+  const d = activeDoc(), pdf = d && d.kind === "pdf";
+  const tools = pdf ? ib("pdfEdit","PDF 편집") + ib("pdfPage","PDF 페이지") + ib("memo","메모") : d ? ib("memo","메모") : "";
+  return `<div class="hA">
+    <div class="brand">${ib("sidebar","사이드바",{color:"#60a5fa"})}${LOGO}${indicators()}</div>
+    <div class="title">${d ? `<span style="color:color-mix(in srgb,${d.c} 55%,#fff)">${d.n}</span><span class="badge mode">${d.mode}</span><span class="badge${d.dirty ? " dirty" : ""}">${d.save}</span>${d.enc ? `<span class="badge">${d.enc}</span>` : ""}` : ""}</div>
+    <div class="capsule">
+      <span class="grp">${tools}</span>
+      <span class="grp">${ib("search","기능 검색")}${ib("more","더보기")}${petRun()}<span class="ib lang" data-b>EN</span></span>
+      <span class="grp">${ib("file","파일 열기",{color:"#60a5fa"})}${ib("folder","폴더 열기",{color:"#fbbf24"})}${d ? ib("save","저장",{color:"#c084fc"}) : ""}</span>
+      <span class="grp">${d && !pdf ? ib("print","인쇄") : ""}</span>
+      <span class="grp">${pdf ? ib("zoomOut","축소") + '<span class="zoomv" data-b>100%</span>' + ib("zoomIn","확대") : ""}${d ? ib("full","전체화면") : ""}</span>
+      <span class="grp">${ib("settings","설정",{color:"#bfdbfe",dot:S.all})}${ib("help","도움말")}${ib("theme","테마")}</span>
+    </div>
+  </div>`;
+}
+function stateText(d){ return d ? `<span class="state" style="--dot:${d.dirty ? "#f59e0b" : "#22c55e"}">${d.save}${d.enc ? `<em>${d.enc}</em>` : ""}</span>` : ""; }
+function headerB(menuOpen){
+  const d = activeDoc(), pdf = d && d.kind === "pdf";
+  const ctx = pdf ? ib("pdfEdit","PDF 편집",{cls:"menu-ib",caret:1}) + ib("pdfPage","PDF 페이지",{cls:"menu-ib",caret:1}) + '<span class="vsep"></span>' : "";
+  return `<div class="hB">
+    <div class="left"><div class="brand">${ib("sidebar","사이드바")}${LOGO}</div>${indicators()}</div>
+    <div class="search">${ic("search")}기능 검색·실행<kbd>Ctrl+K</kbd></div>
+    <div class="right">
+      ${ctx}${petRun()}${stateText(d)}
+      ${ib("folder","열기 (파일·폴더)",{cls:"menu-ib",caret:1})}${d ? ib("save","저장") + ib("memo","메모") : ""}<span class="vsep"></span>${ib("more","더보기",{cls:menuOpen ? "open" : ""})}${ib("settings","설정",{dot:S.all})}
+    </div>
+    ${menuOpen ? `<div class="menu">
+      ${d && !pdf ? `<div class="mi">${ic("print")}인쇄 / PDF로 저장<kbd>Ctrl+P</kbd></div>` : ""}
+      ${d ? `<div class="mi">${ic("full")}전체화면</div>` : ""}
+      <div class="mi">${ic("focus")}집중 모드</div>
+      <hr>
+      <div class="mi">${ic("savefolder")}저장 폴더 열기</div>
+      <div class="mi">${ic("image")}이미지 메모</div>
+      <hr>
+      <div class="mi">${ic("help")}도움말·단축키<kbd>F1</kbd></div>
+      <div class="mi">${ic("theme")}다크 모드</div>
+      <div class="mi">${ic("globe")}English</div>
+    </div>` : ""}
+  </div>`;
+}
+function headerC(){
+  const d = activeDoc(), pdf = d && d.kind === "pdf";
+  const ctx = pdf ? ib("pdfEdit","PDF 편집",{cls:"menu-ib",caret:1}) + ib("pdfPage","PDF 페이지",{cls:"menu-ib",caret:1}) + '<span class="vsep" style="background:rgba(148,163,184,.25)"></span>' : "";
+  return `<div class="hC">
+    ${ib("sidebar","사이드바")}<img class="mark" src="../src/assets/classdock-header-mark.png" alt="ClassDock"><span style="width:4px"></span>${ws}<span class="sep"></span>
+    <div class="doctabs"></div>
+    ${ctx}${petRun()}${ib("search","기능 검색 (Ctrl+K)")}${d ? ib("save","저장") + ib("memo","메모") : ""}${ib("more","더보기")}${ib("settings","설정",{dot:S.all})}
+  </div>`;
+}
+
+function render(){
+  const H = { A: headerA() + tabbar(), B: headerB(true) + tabbar(), C: headerC(), D: headerB(false) + tabbar() };
+  for (const id of "ABCD"){
+    const app = document.getElementById(id);
+    app.style.zoom = 1;
+    app.style.setProperty("--app-w", S.w + "px");
+    app.innerHTML = H[id] + docArea(id === "C");
+    const r = fillTabs(app.querySelector(".doctabs"));
+    const bar = app.querySelector(".tabbar") || app.querySelector(".hC");
+    app.insertAdjacentHTML("beforeend", saveBar(bar.offsetTop + bar.offsetHeight));
+    const head = app.querySelector(".hA,.hB,.hC");
+    const n = head.querySelectorAll("[data-b]").length;
+    document.querySelector(`[data-count="${id}"]`).innerHTML = `머리글 단추 <b>${n}개</b> · 보이는 탭 <b>${r.shown}개</b>${r.hidden ? ` (+${r.hidden})` : ""}`;
+  }
+  fit();
+}
+function fit(){
+  document.querySelectorAll(".frame-wrap").forEach(w => { w.firstElementChild.style.zoom = Math.min(1, w.clientWidth / S.w); });
+}
+const seg = (attr, apply) => document.querySelectorAll(`[${attr}]`).forEach(b => b.addEventListener("click", () => {
+  apply(b.getAttribute(attr));
+  document.querySelectorAll(`[${attr}]`).forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  render();
+}));
+document.querySelectorAll(".seg button").forEach(b => { if (!b.hasAttribute("aria-pressed")) b.setAttribute("aria-pressed", "false"); b.type = "button"; });
+seg("data-w", v => { S.w = +v; });
+seg("data-n", v => { S.n = +v; });
+seg("data-k", v => { S.kind = v; });
+seg("data-a", v => { S.all = v === "1"; });
+seg("data-t", v => { document.documentElement.dataset.theme = v; });
+addEventListener("resize", fit);
+render();
+</script>
+</body>
+</html>

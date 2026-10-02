@@ -555,6 +555,7 @@ function setActiveDoc(id){
   if (typeof updatePdfOutlineButton === "function") updatePdfOutlineButton(d);   // 목차 버튼 상태를 활성 PDF 기준으로
   updateDocumentEncoding(d);
   updateSaveStatusBadge(d);
+  syncDocStatusCorner(d);
   updateModeBadges();
   const hdrName = byId("activeFileName");
   hdrName.textContent = d.name;
@@ -578,8 +579,8 @@ function setActiveDoc(id){
   // 저장 버튼(=저장 동선)은 렌더가 끝나야 생기므로, 저장 위치 배지는 렌더 완료 뒤 다시 판단한다.
   const rendered = ensureRendered(d);                     // 아직 안 그렸으면 이때 처음 렌더(지연 렌더)
   if (rendered && typeof rendered.then === "function"){
-    rendered.then(() => { if (activeId === d.id){ updateSaveStatusBadge(d); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); } }).catch(() => {});
-  }
+    rendered.then(() => { if (activeId === d.id){ updateSaveStatusBadge(d); syncDocStatusCorner(d); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); } }).catch(() => {});
+  } else syncDocStatusCorner(d);                          // 이번에 바로 그렸으면 생긴 요소 기준으로 다시 자리 잡기
   applyStudyLayout();
   updateSidebarActive();                                  // 전체 재생성 대신 활성 표시만 갱신(클릭 반응 향상)
   focusSidebarActive();                                   // 활성 파일을 사이드바에서 보이게(스크롤 + 접힌 폴더 펼침)
@@ -1549,6 +1550,21 @@ function hideSaveTargetNotice(){
   bar.classList.remove("notice-active");
   delete bar.dataset.noticeDocId;
   delete bar.dataset.noticeKey;
+}
+
+// 오른쪽 아래 문서 상태 판(#docStatusCorner)의 자리. 그 모서리를 이미 쓰는 화면에서는 비켜 앉는다 —
+// 표 선택 합계·대진표 확대 단추 위로, 지도는 출처 표시·범례가 오른쪽 아래라 왼쪽 아래로.
+// 이 요소들은 렌더가 끝나야 생기므로 렌더 뒤에도 한 번 더 부른다(setActiveDoc).
+function syncDocStatusCorner(doc=state){
+  const corner = byId("docStatusCorner");
+  if (!corner) return;
+  const el = doc && doc.el;
+  let place = "";
+  if (doc && doc.kind === "map") place = "map";            // 지도는 Leaflet 이 늦게 실려도 미리 비켜 둔다
+  else if (doc && doc.kind === "bracket") place = "bracket";
+  else if (el && el.querySelector(".sheet-stat")) place = "sheet";
+  if (place) corner.dataset.place = place;
+  else delete corner.dataset.place;
 }
 
 function updateSaveStatusBadge(doc){

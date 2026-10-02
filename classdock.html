@@ -27,7 +27,16 @@
   <span class="workspace-activity" id="workspaceActivity" hidden><span class="workspace-activity-dot"></span><span id="workspaceActivityText"></span></span>
   <span class="py-ready" id="pyReadyStatus" title="브라우저 파이썬(Pyodide) 준비 상태" hidden><span class="py-ready-ico" aria-hidden="true"></span><span class="py-ready-text" id="pyReadyText"></span></span>
   </div>
-  <div class="header-file-title"><span id="activeFileName"></span><span id="activeModeBadge" class="mode-badge" hidden></span><span id="studyPairBadge" class="study-pair-badge" hidden></span><span id="saveStatusBadge" class="save-status-badge" hidden></span><span id="activeDocEncoding" class="doc-encoding" hidden></span></div>
+  <!-- 가운데는 기능 검색 칸이다. 파일 이름·모드 표시는 탭에 이미 있어 화면에서는 감추되, 여러 곳(시험 포함)이
+       글자를 읽으므로 요소는 남긴다. 저장 상태·인코딩·분할 짝 표시는 오른쪽 아래 #docStatusCorner 로 옮겼다. -->
+  <div class="header-search">
+    <span class="header-doc-meta" hidden><span id="activeFileName"></span><span id="activeModeBadge" class="mode-badge" hidden></span></span>
+    <button id="commandPaletteOpen" class="cmdk-trigger hdr-tool-palette" type="button" data-shortcut-action="commandPalette" data-shortcut-title="기능 검색·실행" data-shortcut-aria="true" title="기능 검색·실행 (Ctrl+K)" aria-label="명령 팔레트 — 기능 검색·실행" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
+      <span>기능 검색·실행</span>
+      <kbd id="commandPaletteKbd" data-shortcut-action="commandPalette">Ctrl+K</kbd>
+    </button>
+  </div>
   <div class="header-actions">
   <div class="tools" id="tools" hidden>
     <details class="tool-menu hdr-tool-pdfedit"><summary title="PDF 편집" aria-label="PDF 편집"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10zM13.5 7.5l3 3"/></svg><span class="header-action-label">편집</span></summary><div class="tool-menu-pop">
@@ -52,10 +61,6 @@
     </button>
   </div>
   <div class="header-util">
-  <button id="commandPaletteOpen" class="cmdk-trigger hdr-tool-palette" type="button" data-shortcut-action="commandPalette" data-shortcut-title="기능 검색·실행" data-shortcut-aria="true" title="기능 검색·실행 (Ctrl+K)" aria-label="명령 팔레트 — 기능 검색·실행" aria-haspopup="dialog">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>
-    <span>기능 검색</span>
-  </button>
   <!-- 분할 작업 버튼(진입·종료 겸용) — 분할바 가운데 버튼(종료)·탭 드래그(진입)로 대체되어 CSS 로 숨겨둠(삭제 아님).
        나중에 다시 쓸 수 있어 관련 JS(applyStudyLayout 의 라벨 갱신 등)와 함께 코드는 그대로 유지한다.
        명령 팔레트 '분할 작업 켜기/끄기'는 이 버튼을 click() 하는 방식이라 숨김 상태에서도 계속 동작한다. -->
@@ -1010,6 +1015,8 @@
 <div class="toast" id="toast" aria-live="polite"></div>
 <div class="loading" id="loading" hidden><div class="spinner"></div><p id="loadingMsg">처리 중…</p><button class="btn" id="loadingCancel" hidden>작업 취소</button></div>
 <div class="hint" id="hint" hidden>요소를 끌어 위치 이동 · 더블클릭으로 텍스트 수정 · 모서리로 크기 조절 · Delete 키로 삭제</div>
+<!-- 오른쪽 아래 문서 상태: 저장 위치·상태, 분할 짝, 인코딩. 그 자리를 쓰는 화면에서는 syncDocStatusCorner 가 비켜 앉힌다. -->
+<div class="doc-status-corner" id="docStatusCorner"><span id="studyPairBadge" class="study-pair-badge" hidden></span><span id="saveStatusBadge" class="save-status-badge" hidden></span><span id="activeDocEncoding" class="doc-encoding" hidden></span></div>
 
 <!-- 시작할 때 바로 싣는 라이브러리는 PDF(앱의 중심 기능)뿐이다.
      엑셀·한글·PPT·Word·압축·캡처·맞춤법 사전은 src/js/lazy.js(MNLazy)가 그 형식을 열 때

@@ -44,8 +44,26 @@ test("현재 문서에서 쓸 수 없는 빠른 도구와 빈 기능군은 완�
 test("기존 메모·검색·언어 버튼도 빠른 도구와 같은 하나의 도크 표면을 쓴다", () => {
   assert.ok(css.includes('.header-actions{display:flex'));
   assert.ok(css.includes('background:linear-gradient(180deg,rgba(15,23,42,.7),rgba(2,6,23,.5))'));
-  assert.ok(css.includes('header .header-actions .cmdk-trigger'));
   assert.ok(css.includes('header .header-actions .lang-toggle'));
   assert.ok(css.includes('.header-command-dock{display:inline-flex'));
   assert.ok(css.includes('border-radius:0;background:transparent;box-shadow:none'));
+});
+
+test("머리글 가운데는 기능 검색 칸이고 문서 상태는 오른쪽 아래로 옮긴다", () => {
+  const center = html.match(/<div class="header-search">([\s\S]*?)\n  <\/div>/);
+  assert.ok(center, "header-search");
+  assert.match(center[1], /id="commandPaletteOpen"/);
+  assert.match(center[1], /<kbd id="commandPaletteKbd" data-shortcut-action="commandPalette">/);
+  // 파일 이름·모드 표시는 화면에서 감추되, 글자를 읽는 코드·시험을 위해 요소는 남긴다.
+  assert.match(center[1], /<span class="header-doc-meta" hidden><span id="activeFileName"><\/span><span id="activeModeBadge"/);
+  assert.ok(!html.includes('class="header-file-title"'));
+  const corner = html.match(/<div class="doc-status-corner" id="docStatusCorner">([\s\S]*?)<\/div>/);
+  assert.ok(corner, "docStatusCorner");
+  for (const id of ["studyPairBadge", "saveStatusBadge", "activeDocEncoding"]) assert.match(corner[1], new RegExp('id="' + id + '"'), id);
+  assert.ok(css.includes('.doc-status-corner:not(:has(>:not([hidden]))){display:none}'));
+  // <main> 이 z-index:19 로 쌓임 맥락을 만들므로 그보다 위여야 문서 위에 보인다.
+  const z = Number((css.match(/\.doc-status-corner\{[^}]*z-index:(\d+)/) || [])[1]);
+  assert.ok(z > 19 && z < 30, "z-index " + z);
+  assert.ok(documents.includes("function syncDocStatusCorner("));
+  assert.ok(documents.includes('syncDocStatusCorner(d);'));
 });
