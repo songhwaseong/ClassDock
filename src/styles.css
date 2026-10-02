@@ -4561,6 +4561,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapFlight .map-toolvis-flight,
   html.hide-tool-mapShip .map-toolvis-ship,
   html.hide-tool-mapWeather .map-toolvis-weather,
+  html.hide-tool-mapWind .map-toolvis-wind,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
   html.hide-tool-musicKey .music-toolvis-key,
@@ -8813,6 +8814,35 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-subway-arrival-group{margin-bottom:8px}
 .map-subway-arrival-group:not(.is-current){opacity:.8}
 .map-subway-arrival-group-title{display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:2px}
+/* 실시간 노선 칸 — 직접 그린 목록(map-viewer.js subwayLinePicker). 값은 숨긴 select 가 들고 있다:
+   display:none 이면 시험의 selectOption 이 '보이지 않음'으로 멈춰 투명하게만 겹쳐 둔다. */
+.map-subway-picker{position:relative;display:inline-flex}
+.map-subway-picker>select.map-subway-line{position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none}
+.map-subway-picker-btn{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;border:1px solid var(--border);
+  border-radius:8px;background:var(--field);color:var(--ink);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer}
+.map-subway-picker-btn:hover,.map-subway-picker-btn[aria-expanded="true"]{background:var(--panel-hover);border-color:var(--accent)}
+.map-subway-picker-btn::after{content:"";width:5px;height:5px;margin:0 2px 3px 3px;border:solid currentColor;border-width:0 1.5px 1.5px 0;
+  transform:rotate(45deg);opacity:.6}
+.map-subway-picker-list{position:absolute;top:calc(100% + 8px);left:0;z-index:1200;display:flex;flex-direction:column;min-width:max(100%,161px);
+  max-height:min(660px,70vh);overflow-y:auto;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:14px;background:var(--panel);
+  box-shadow:0 12px 28px rgba(0,0,0,.16)}
+.map-subway-picker-list[hidden]{display:none}
+.map-subway-picker-head{display:flex;align-items:center;gap:8px;padding:4px 5px 8px;color:var(--ink);font-size:13px;font-weight:500}
+.map-subway-picker-heading{padding:7px 7px 7px;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.02em}
+.map-subway-picker-group+.map-subway-picker-heading{margin-top:5px;padding-top:10px;border-top:1px solid var(--border)}
+.map-subway-picker-group{position:relative;display:flex;flex-direction:column;flex:none}
+.map-subway-picker-group::before{content:"";position:absolute;top:16px;bottom:16px;left:20px;width:2px;background:var(--border);pointer-events:none}
+.map-subway-picker-item{position:relative;display:flex;align-items:center;gap:10px;flex:none;height:32px;box-sizing:border-box;padding:0 12px;border:1px solid transparent;border-radius:8px;
+  background:transparent;color:var(--ink);font:inherit;font-size:12.5px;text-align:left;white-space:nowrap;cursor:pointer}
+.map-subway-picker-item:hover{background:var(--panel-hover)}
+.map-subway-picker-item:focus-visible{background:var(--panel-hover);outline:2px solid var(--accent);outline-offset:-2px}
+.map-subway-picker-item[aria-selected="true"]{background:color-mix(in srgb,var(--accent) 10%,var(--panel));border-color:color-mix(in srgb,var(--accent) 26%,var(--border))}
+.map-subway-picker-item[aria-selected="true"]::after{content:"";width:4px;height:8px;margin:0 2px 2px auto;padding-left:0;
+  border:solid var(--accent);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.map-subway-dot{width:10px;height:10px;border-radius:50%;flex:none;background:var(--subway-color)}
+.map-subway-route-stop{position:relative;width:16px;height:16px;box-sizing:border-box;border:4px solid var(--subway-color);background:var(--panel)}
+.map-subway-picker-item[aria-selected="true"] .map-subway-route-stop{background:var(--subway-color);box-shadow:0 0 0 3px color-mix(in srgb,var(--subway-color) 18%,transparent)}
+.map-subway-picker-item .map-subway-picker-label{font-weight:500}
 .map-subway-arrival-line{display:inline-block;padding:0 6px;border-radius:6px;color:#fff;font-size:12px;font-weight:700}
 .map-subway-arrival-group ul{list-style:none;margin:0;padding:0 0 0 4px}
 .map-subway-arrival-group li{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;padding:1px 0}
@@ -8947,6 +8977,26 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-wind-ramp{height:8px;margin:5px 0 1px;border-radius:4px}
 .map-wind-ticks{position:relative;height:18px;margin:0 3px}
 .map-wind-ticks span{position:absolute;transform:translateX(-50%);font-variant-numeric:tabular-nums}
+.map-wind-typhoon{margin-top:12px;padding-top:10px;border-top:1px solid #98b9bd66}
+.map-wind-typhoon[hidden],.map-typhoon-list[hidden]{display:none}
+.map-typhoon-status{margin:6px 0;font-size:12px;opacity:.85}
+.map-typhoon-item{margin-top:8px;padding:8px 10px;border-left:3px solid #d9363e;border-radius:8px;background:#d9363e14}
+.map-typhoon-item p{margin:3px 0;font-size:12px;font-variant-numeric:tabular-nums}
+.map-typhoon-item .map-weather-tools{align-items:center;margin:6px 0 0}
+.map-typhoon-image{font-size:12px}
+.map-typhoon-remark{display:block;margin-top:3px;font-size:11px;opacity:.8}
+.map-typhoon-plan{margin-top:6px;font-size:12px}
+.map-typhoon-plan summary{cursor:pointer;font-weight:700}
+.map-typhoon-plan p{margin:3px 0 3px 12px}
+/* 예상 시각 이름표: 예상 위치 점 오른쪽 위. */
+.leaflet-marker-icon.map-typhoon-time-icon{overflow:visible;border:0;background:none}
+.map-typhoon-time{position:absolute;bottom:6px;left:8px;padding:0 5px;border-radius:4px;background:#fffffff0;color:#7f1d1d;box-shadow:0 1px 3px #0005;font:700 11px/16px sans-serif;white-space:nowrap}
+/* 태풍 표지: 기호 원 + 오른쪽 이름표. 이름표를 표지 안에 두어 지도 그림 저장에도 남는다. */
+.leaflet-marker-icon.map-typhoon-icon{overflow:visible;border:0;background:none}
+.map-typhoon-pin{position:relative;display:block;width:28px;height:28px}
+.map-typhoon-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:#d9363e;color:#fff;box-shadow:0 0 0 2px #fff,0 1px 6px #0007}
+.map-typhoon-mark svg{width:20px;height:20px}
+.map-typhoon-label{position:absolute;top:50%;left:34px;transform:translateY(-50%);padding:2px 8px;border-radius:999px;background:#7f1d1d;color:#fff;box-shadow:0 1px 5px #0006;font:700 12px/18px sans-serif;white-space:nowrap}
 /* 차량 그림의 중심을 실제 좌표에 맞추고 크기를 24px로 고정한다. */
 .map-live-vehicle-icon{position:relative;display:grid;place-items:center;box-sizing:border-box;width:24px;height:24px;border:1px solid currentColor;border-radius:6px;background:#fff;box-shadow:0 0 0 1px #fff,0 1px 4px #0006}
 .map-live-vehicle-image{display:block;width:20px;height:20px;max-width:none;pointer-events:none}

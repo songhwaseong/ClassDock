@@ -28,8 +28,9 @@ class WorldWindTest
         Check(WorldWindService.SourceUrl("2026100200",6).EndsWith("gfs.t00z.pgrb2.1p00.f006"));
         foreach (string cycle in new[] { "../20261002", "2026130200", "2026100201", "http://bad" }) Reject(() => WorldWindService.SourceUrl(cycle, 6));
         foreach (int hour in new[] { -3, 1, 73, 999 }) Reject(() => WorldWindService.SourceUrl("2026100200", hour));
-        string index = "1:0:d=2026100200:UGRD:850 mb:6 hour fcst:\n2:50:d=2026100200:VGRD:850 mb:6 hour fcst:\n3:90:d=2026100200:TMP:850 mb:6 hour fcst:\n4:120:d=2026100200:PRES:surface:6 hour fcst:\n";
-        var records = WorldWindService.ReadIndex(index,"2026100200"); Check(records[0].Last == 49 && records[1].First == 50 && records[2].Last == 119);
+        string index = "1:0:d=2026100200:PRMSL:mean sea level:6 hour fcst:\n2:20:d=2026100200:UGRD:850 mb:6 hour fcst:\n3:50:d=2026100200:VGRD:850 mb:6 hour fcst:\n4:90:d=2026100200:TMP:850 mb:6 hour fcst:\n5:120:d=2026100200:PRES:surface:6 hour fcst:\n";
+        var records = WorldWindService.ReadIndex(index,"2026100200"); Check(records[0].Last == 19 && records[0].Variable == "PRMSL" && records[0].Level == "mean sea level");
+        Check(records[1].Last == 49 && records[2].First == 50 && records[3].Last == 119);
         Reject(() => WorldWindService.ReadIndex(index.Replace(":50:",":0:"),"2026100200"));
         Reject(() => WorldWindService.ReadIndex(index,"2026100206"));
 
@@ -38,14 +39,22 @@ class WorldWindTest
         int count = WorldWindGrib.Count;
         var u = Enumerable.Repeat(10f,count).ToArray(); var v = Enumerable.Repeat(-5f,count).ToArray();
         var temperature = Enumerable.Repeat(273.15f,count).ToArray(); var pressure = Enumerable.Repeat(100000f,count).ToArray();
-        pressure[0] = 84000; pressure[1] = Single.NaN; u[3] = Single.PositiveInfinity;
-        byte[] packed = WorldWindService.Pack(current,6,850,u,v,temperature,pressure);
+        var seaLevel = Enumerable.Repeat(101325f,count).ToArray();
+        pressure[0] = 84000; pressure[1] = Single.NaN; u[3] = Single.PositiveInfinity; seaLevel[2] = 50000; seaLevel[4] = Single.NaN;
+        byte[] packed = WorldWindService.Pack(current,6,850,u,v,temperature,pressure,seaLevel);
         Check(packed.Length == WorldWindService.FrameBytes && WorldWindService.ValidFrame(packed,current,6,850));
         Check(Single.IsNaN(BitConverter.ToSingle(packed,40)) && Single.IsNaN(BitConverter.ToSingle(packed,44)));
         Check(BitConverter.ToSingle(packed,48) == 10 && Single.IsNaN(BitConverter.ToSingle(packed,52)));
         Check(Math.Abs(BitConverter.ToSingle(packed,40 + count * 8 + 8)) < .001);
+        // 해면기압 채널: hPa 로 바꾸고, 지형 아래 가리기와 무관하며(0번은 상층 가림 지점), 터무니없는 값은 비운다.
+        int sea = 40 + count * 12;
+        Check(Math.Abs(BitConverter.ToSingle(packed,sea) - 1013.25f) < .01 && Math.Abs(BitConverter.ToSingle(packed,sea + 4) - 1013.25f) < .01);
+        Check(Single.IsNaN(BitConverter.ToSingle(packed,sea + 8)) && Single.IsNaN(BitConverter.ToSingle(packed,sea + 16)));
+        Check(Encoding.ASCII.GetString(packed,0,4) == "CDW2");
+        byte[] old = (byte[])packed.Clone(); old[3] = (byte)'1'; Check(!WorldWindService.ValidFrame(old,current,6,850));
         Check(!WorldWindService.ValidFrame(packed,current,9,850) && !WorldWindService.ValidFrame(packed,current,6,500));
-        byte[] surface = WorldWindService.Pack(current,6,10,u,v,temperature,null); Check(BitConverter.ToSingle(surface,40) == 10);
+        byte[] surface = WorldWindService.Pack(current,6,10,u,v,temperature,null,seaLevel); Check(BitConverter.ToSingle(surface,40) == 10);
+        Check(Single.IsNaN(BitConverter.ToSingle(WorldWindService.Pack(current,6,10,u,v,temperature,null,null),sea)));
 
         string cache = args[1]; Directory.CreateDirectory(cache); int calls = 0; bool cached;
         var service = new WorldWindService(cache,(url,first,last,limit) => { calls++; throw new IOException("offline"); });

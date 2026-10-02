@@ -113,10 +113,11 @@ test("켜면 열차가 그려지고, 시간이 지나면 스스로 움직인다"
 
   /* 새 값은 15초에 한 번뿐이라, 그 사이를 이어 그리는 것이 이 기능의 핵심이다.
      같은 응답만 오는데도 자리가 바뀌어야 한다. */
-  /* circleMarker 는 SVG <path> 로 그려지므로 d 가 자리를 말한다. 도착한 열차는 정차 시간 동안
-     제자리에 서 있는 것이 맞으므로(그것도 계약이다) '한 대라도 움직였는가' 를 본다.
-     기본 확대에서는 1초가 1픽셀이 안 되어 넉넉히 기다린다. */
-  const shapes = () => trains(page).evaluateAll((nodes) => nodes.map((n) => n.getAttribute("d")));
+  /* 열차는 아이콘(divIcon)이라 Leaflet 이 style.transform(3D 를 못 쓰면 left·top)으로 자리를 옮긴다 —
+     그 값이 곧 자리다. 도착한 열차는 정차 시간 동안 제자리에 서 있는 것이 맞으므로(그것도 계약이다)
+     '한 대라도 움직였는가' 를 본다. 기본 확대에서는 1초가 1픽셀이 안 되어 넉넉히 기다린다. */
+  const shapes = () => trains(page).evaluateAll((nodes) =>
+    nodes.map((n) => n.style.transform || (n.style.left && `${n.style.left},${n.style.top}`) || null));
   const before = await shapes();
   expect(before.filter(Boolean)).toHaveLength(2);
   await page.waitForTimeout(3000);

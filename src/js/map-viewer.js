@@ -1396,6 +1396,18 @@ const MAP_SUBWAY_COLORS = {
   "수인분당선":"#f5a200", "신분당선":"#d4003b", "경의중앙선":"#77c4a3", "공항철도":"#0090d2",
   "우이신설선":"#b7c452", "경춘선":"#0c8e72", "서해선":"#8fc740"
 };
+/* 노선 색 바탕 위 글자색. 수인분당선·서해선처럼 밝은 노선은 흰 글자가 안 읽혀 검정으로 바꾼다.
+   대비가 같아지는 밝기는 0.179 지만 그러면 2·5·8호선까지 검정이 되어 역 안내판과 달라 보여,
+   흰 글자 쪽으로 기울여 0.3 을 쓴다. */
+function mapSubwayTextColor(hex){
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
+  if (!match) return "#fff";
+  const [r, g, b] = match.slice(1).map((part) => {
+    const c = parseInt(part, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3 ? "#111" : "#fff";
+}
 /* 런처가 12초 캐시를 두므로 그보다 조금 길게 묻는다. 하루 1,000회 제한이라 이 값이 곧 예산이다 —
    15초면 한 노선을 4시간 넘게 볼 수 있고, 그보다 자주 물어도 런처 캐시에 막혀 새 값이 오지 않는다. */
 const MAP_SUBWAY_POLL_MS = 15000;
@@ -5128,6 +5140,7 @@ const MAP_TOOL_ICONS = {
   bus: '<rect x="4.5" y="3.5" width="15" height="14" rx="2.5"/><path d="M4.5 10h15M8 21v-3.5M16 21v-3.5"/><circle cx="8.3" cy="14" r="1" fill="#000"/><circle cx="15.7" cy="14" r="1" fill="#000"/>',
   plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
   sunCloud: '<circle cx="8" cy="8" r="3"/><path d="M8 2v1.3M2 8h1.3M3.8 3.8l.9.9M12.2 3.8l-.9.9"/><path d="M8.5 20a3.5 3.5 0 0 1-.4-7 5 5 0 0 1 9.6 1.2A3 3 0 0 1 17.5 20z"/>',
+  wind: '<path d="M3 8.5h9.5a2.5 2.5 0 1 0-2.5-2.5"/><path d="M3 12.5h14.5a3 3 0 1 1-3 3"/><path d="M3 16.5h6.5"/>',
   ship: '<path d="M12 10.2V14M12 2v3"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M19.4 20A11.6 11.6 0 0 0 21 14l-8.2-3.6a2 2 0 0 0-1.6 0L3 14a11.6 11.6 0 0 0 2.8 7.8"/><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
   save: '<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
@@ -5273,15 +5286,135 @@ async function mountMapEditor(doc){
 
   /* 실시간 열차도 런처가 대신 받아 줄 때만 뜻이 있다(아래에서 표시를 결정한다).
      노선을 고르는 칸과 켜고 끄는 단추가 한 벌이다 — 하루 조회 한도가 있어 한 번에 한 노선만 본다. */
+  /* 노선 칸은 직접 그린 목록이다 — 기본 select 는 선택지 안에 노선도 모양을 그릴 수 없다.
+     값은 여전히 숨긴 select 가 들고 있어 저장·되살리기·change 처리(아래)와 시험의 selectOption 이
+     그대로 산다. 고르면 select 값을 바꾸고 change 를 쏘는 것뿐이다. */
   const subwayLineSelect = document.createElement("select");
-  subwayLineSelect.className = "map-select map-subway-line map-toolvis-subway";
-  subwayLineSelect.title = "실시간으로 볼 노선";
-  subwayLineSelect.setAttribute("aria-label", "실시간 열차 노선");
+  subwayLineSelect.className = "map-subway-line";
+  subwayLineSelect.tabIndex = -1;
+  subwayLineSelect.setAttribute("aria-hidden", "true");
   for (const line of Object.keys(typeof SUBWAY_LINES !== "undefined" ? SUBWAY_LINES : {})){
     const option = document.createElement("option");
     option.value = line; option.textContent = line;
     subwayLineSelect.appendChild(option);
   }
+  const subwayLinePicker = document.createElement("div");
+  subwayLinePicker.className = "map-subway-picker map-toolvis-subway";
+  const subwayLineTrigger = document.createElement("button");
+  subwayLineTrigger.type = "button";
+  subwayLineTrigger.className = "map-subway-picker-btn";
+  subwayLineTrigger.title = "실시간으로 볼 노선";
+  subwayLineTrigger.setAttribute("aria-label", "실시간 열차 노선");
+  subwayLineTrigger.setAttribute("aria-haspopup", "listbox");
+  subwayLineTrigger.setAttribute("aria-expanded", "false");
+  const subwayLineList = document.createElement("div");
+  subwayLineList.className = "map-subway-picker-list";
+  subwayLineList.setAttribute("role", "listbox");
+  subwayLineList.setAttribute("aria-label", "노선 선택");
+  subwayLineList.hidden = true;
+  subwayLinePicker.append(subwayLineSelect, subwayLineTrigger, subwayLineList);
+
+  // 펼친 목록에서는 모든 노선을 역 동그라미 + 이름으로 맞춘다. 접힌 단추는 작은 색 점을 쓴다.
+  const subwayLineMark = (option, route = false) => {
+    const color = MAP_SUBWAY_COLORS[option.value] || "#64748b";
+    const dot = document.createElement("span");
+    dot.className = "map-subway-dot" + (route ? " map-subway-route-stop" : "");
+    dot.style.setProperty("--subway-color", color);
+    dot.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "map-subway-picker-label";
+    label.textContent = option.textContent;
+    return [dot, label];
+  };
+  const syncSubwayPicker = () => {
+    const option = subwayLineSelect.selectedOptions[0];
+    subwayLineTrigger.replaceChildren(...(option ? subwayLineMark(option) : []));
+  };
+  syncSubwayPicker();
+
+  const subwayLineItems = () => [...subwayLineList.querySelectorAll(".map-subway-picker-item")];
+  const subwayLineOutside = (event) => { if (!subwayLinePicker.contains(event.target)) closeSubwayPicker(false); };
+  const closeSubwayPicker = (refocus) => {
+    if (subwayLineList.hidden) return;
+    subwayLineList.hidden = true;
+    subwayLineTrigger.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", subwayLineOutside, true);
+    if (refocus) subwayLineTrigger.focus();
+  };
+  const chooseSubwayLine = (line) => {
+    closeSubwayPicker(true);
+    if (line === subwayLineSelect.value) return;
+    subwayLineSelect.value = line;
+    subwayLineSelect.dispatchEvent(new Event("change", { bubbles:true }));
+  };
+  // 펼칠 때마다 새로 그린다 — 16줄이라 싸고, 번역으로 바뀐 이름도 그대로 따라온다.
+  const openSubwayPicker = () => {
+    const head = document.createElement("div");
+    head.className = "map-subway-picker-head";
+    head.setAttribute("role", "presentation");
+    const icon = document.createElement("span");
+    icon.textContent = "🚇";
+    icon.setAttribute("aria-hidden", "true");
+    const title = document.createElement("span");
+    title.textContent = "노선 선택";
+    head.append(icon, title);
+    subwayLineList.replaceChildren(head);
+    for (const [numeric, name] of [[true, "1–9호선"], [false, "광역·경전철"]]){
+      const options = [...subwayLineSelect.options].filter((option) => /^\d/.test(option.value) === numeric);
+      if (!options.length) continue;
+      const heading = document.createElement("div");
+      heading.className = "map-subway-picker-heading";
+      heading.setAttribute("role", "presentation");
+      heading.textContent = name;
+      const group = document.createElement("div");
+      group.className = "map-subway-picker-group";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", name);
+      for (const option of options){
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "map-subway-picker-item";
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", String(option.selected));
+        item.dataset.line = option.value;
+        item.append(...subwayLineMark(option, true));
+        group.appendChild(item);
+      }
+      subwayLineList.append(heading, group);
+    }
+    subwayLineList.hidden = false;
+    subwayLineTrigger.setAttribute("aria-expanded", "true");
+    document.addEventListener("pointerdown", subwayLineOutside, true);
+    const selected = subwayLineList.querySelector('[aria-selected="true"]') || subwayLineItems()[0];
+    if (selected){ selected.focus(); selected.scrollIntoView({ block:"nearest" }); }
+  };
+  subwayLineTrigger.addEventListener("click", () => {
+    if (subwayLineList.hidden) openSubwayPicker(); else closeSubwayPicker(false);
+  });
+  subwayLineTrigger.addEventListener("keydown", (event) => {
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && subwayLineList.hidden){
+      event.preventDefault();
+      openSubwayPicker();
+    }
+  });
+  subwayLineList.addEventListener("click", (event) => {
+    const item = event.target.closest(".map-subway-picker-item");
+    if (item) chooseSubwayLine(item.dataset.line);
+  });
+  subwayLineList.addEventListener("keydown", (event) => {
+    const items = subwayLineItems();
+    const at = items.indexOf(document.activeElement);
+    let next = -1;
+    if (event.key === "ArrowDown") next = Math.min(items.length - 1, at + 1);
+    else if (event.key === "ArrowUp") next = Math.max(0, at - 1);
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = items.length - 1;
+    else if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); closeSubwayPicker(true); return; }
+    else if (event.key === "Tab"){ closeSubwayPicker(false); return; }
+    if (next < 0) return;
+    event.preventDefault();
+    items[next].focus();
+  });
   const subwayBtn = document.createElement("button");
   subwayBtn.type = "button";
   subwayBtn.className = "map-btn map-subway map-toolvis-subway";
@@ -5469,8 +5602,8 @@ async function mountMapEditor(doc){
     [csvTemplateBtn, "table"], [csvExportBtn, "fileExport"], [csvMemoBtn, "tableMemo"],
     [clearItemsBtn, "eraser"], [geoExportBtn, "download"], [boardBtn, "board"], [memoBtn, "memo"], [pngBtn, "image"],
     [printBtn, "print"], [taskBtn, "target"], [imageClearBtn, "trash"], [prepareBtn, "cloud"], [subwayBtn, "train"],
-    [saveBtn, "save"], [toolsToggleBtn, "panel"], [searchBtn, "search"]
-  ]) mapSetToolIcon(element, icon);
+    [toolsToggleBtn, "panel"], [searchBtn, "search"]
+  ]) mapSetToolIcon(element, icon);              // 저장은 빼 둔다 — setSaveIcon 이 이미 그림을 넣어 두 번 그려진다
   mapSetToolIcon(searchWrap, "pin");               // 검색칸 왼쪽 안쪽의 핀(CSS 가 칸 안에 띄운다)
   searchBtn.setAttribute("aria-label", "검색");     // 글자는 CSS 로 감추고 아이콘만 보인다
 
@@ -6011,6 +6144,7 @@ async function mountMapEditor(doc){
       const saved = localStorage.getItem(SUBWAY_LINE_KEY);
       if (saved && subwayLineSelect.querySelector(`option[value="${CSS.escape(saved)}"]`)) subwayLineSelect.value = saved;
     } catch(_){}
+    syncSubwayPicker();
 
     const subwayColor = () => MAP_SUBWAY_COLORS[subwayLineSelect.value] || "#c0392b";
 
@@ -6222,6 +6356,7 @@ async function mountMapEditor(doc){
         badge.className = "map-subway-arrival-line";
         badge.textContent = group.line;
         badge.style.backgroundColor = MAP_SUBWAY_COLORS[group.line] || "#64748b";
+        badge.style.color = mapSubwayTextColor(MAP_SUBWAY_COLORS[group.line] || "#64748b");
         const towards = document.createElement("span");
         towards.textContent = [group.direction, group.towards].filter(Boolean).join(" · ");
         title.append(badge, towards);
@@ -6338,6 +6473,7 @@ async function mountMapEditor(doc){
     });
     subwayLineSelect.addEventListener("change", () => {
       try { localStorage.setItem(SUBWAY_LINE_KEY, subwayLineSelect.value); } catch(_){}
+      syncSubwayPicker();
       if (!subwayOn) return;
       // 노선을 바꾸면 앞 노선의 열차와 이력은 버린다 — 남겨 두면 없는 선 위에 점이 떠 있게 된다.
       subwayTrains.clear();
@@ -6350,7 +6486,7 @@ async function mountMapEditor(doc){
       subwayPoll();
     });
 
-    toolChips.appendChild(subwayLineSelect);
+    toolChips.appendChild(subwayLinePicker);
     toolChips.appendChild(subwayBtn);
     mapTranslate(toolRow);
 

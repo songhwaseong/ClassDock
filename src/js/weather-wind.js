@@ -1,9 +1,13 @@
 "use strict";
-/* 키 없는 Open-Meteo GFS 바람. 1.5° 간격의 표본을 벡터로 보간한다.
-   화면의 입자 속도는 설명용이며 실제 이동 거리/시간을 뜻하지 않는다. */
+/* 키 없는 Open-Meteo GFS 바람. 1° 간격(세계 범위와 같은 촘촘함)의 표본을 벡터로 보간한다.
+   북쪽 끝은 함경북도 북단(약 43.0°N)이 잘리지 않게 44°N 까지 둔다. 지점 하나를 호출 1회로 세어도
+   195지점 × 하루 24번(1시간 재사용) ≈ 4,700회라 무료 한도(하루 10,000회) 안이다.
+   화면의 입자 속도는 설명용이며 실제 이동 거리/시간을 뜻하지 않는다.
+   해면기압(hPa)도 함께 받아 색으로 칠한다 — 태풍·저기압의 중심이 바람 그림보다 또렷하게 드러난다. */
 const MNWeatherWind = (() => {
-  const REGION = Object.freeze({ south:30, north:42, west:122, east:134, step:1.5, rows:9, cols:9 });
-  const CACHE_KEY = "classdock-wind-gfs-v2", HOUR = 3600000, HOURS = 25;
+  const REGION = Object.freeze({ south:30, north:44, west:122, east:134, step:1, rows:15, cols:13 });
+  const POINTS = REGION.rows * REGION.cols, VERSION = 4;
+  const CACHE_KEY = "classdock-wind-gfs-v4", HOUR = 3600000, HOURS = 25;
   const ATTRIBUTION = '<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> / NOAA GFS · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>';
   const WORLD_ATTRIBUTION = '<a href="https://www.ncei.noaa.gov/products/weather-climate-models/global-forecast" target="_blank" rel="noopener noreferrer">NOAA GFS</a> · 1°';
   const COLORS = [[0, [56, 120, 220]], [5, [34, 185, 181]], [10, [115, 195, 83]],
@@ -12,9 +16,13 @@ const MNWeatherWind = (() => {
     [10, [115, 195, 130]], [20, [245, 207, 80]], [30, [237, 123, 57]], [40, [196, 50, 78]]];
   const WORLD_COLORS = COLORS.map((stop, i) => [[0, 10, 20, 40, 60, 100][i], stop[1]]);
   const UPPER_TEMPERATURE_COLORS = TEMPERATURE_COLORS.map((stop, i) => [[-80, -60, -40, -20, 0, 10, 20][i], stop[1]]);
+  // 해면기압: 낮을수록 붉고 짙다(태풍 중심 960–990), 표준(1013) 언저리는 초록, 높을수록 파랗다.
+  const PRESSURE_COLORS = [[960, [96, 40, 140]], [980, [189, 55, 107]], [995, [238, 116, 53]], [1005, [245, 207, 80]],
+    [1013, [115, 195, 130]], [1025, [67, 182, 215]], [1040, [56, 90, 200]]];
+  const pressureOk = v => Number.isFinite(v) && v >= 850 && v <= 1100;
   let memory = null, pending = null, retryAt = 0;
   function coordinates(){
-    return Array.from({ length:REGION.rows * REGION.cols }, (_, i) => ({
+    return Array.from({ length:POINTS }, (_, i) => ({
       lat:REGION.south + Math.floor(i / REGION.cols) * REGION.step,
       lng:REGION.west + (i % REGION.cols) * REGION.step
     }));
@@ -22,7 +30,7 @@ const MNWeatherWind = (() => {
   function requestUrl(){
     const points = coordinates();
     const q = new URLSearchParams({ latitude:points.map(p => p.lat).join(","), longitude:points.map(p => p.lng).join(","),
-      hourly:"wind_speed_10m,wind_direction_10m,temperature_2m", forecast_hours:String(HOURS), wind_speed_unit:"ms",
+      hourly:"wind_speed_10m,wind_direction_10m,temperature_2m,pressure_msl", forecast_hours:String(HOURS), wind_speed_unit:"ms",
       temperature_unit:"celsius", timeformat:"unixtime", cell_selection:"nearest" });
     return "https://api.open-meteo.com/v1/gfs?" + q;
   }
@@ -40,12 +48,12 @@ const MNWeatherWind = (() => {
     body.forEach((item, index) => {
       const id = item.location_id == null ? index : item.location_id, point = points[id];
       if (!Number.isInteger(id) || !point || seen.has(id) || !Number.isFinite(item.latitude) || !Number.isFinite(item.longitude)
-          || Math.abs(item.latitude - point.lat) > .6 || Math.abs(item.longitude - point.lng) > .6) throw new Error("wind-data");
+          || Math.abs(item.latitude - point.lat) > .4 || Math.abs(item.longitude - point.lng) > .4) throw new Error("wind-data");
       seen.add(id);
       const h = item.hourly, units = item.hourly_units;
       if (!h || !Array.isArray(h.time) || h.time.length !== HOURS || !units || units.wind_speed_10m !== "m/s"
-          || units.time !== "unixtime" || units.wind_direction_10m !== "°" || units.temperature_2m !== "°C"
-          || ["wind_speed_10m", "wind_direction_10m", "temperature_2m"].some(key => !Array.isArray(h[key]) || h[key].length !== HOURS)) throw new Error("wind-data");
+          || units.time !== "unixtime" || units.wind_direction_10m !== "°" || units.temperature_2m !== "°C" || units.pressure_msl !== "hPa"
+          || ["wind_speed_10m", "wind_direction_10m", "temperature_2m", "pressure_msl"].some(key => !Array.isArray(h[key]) || h[key].length !== HOURS)) throw new Error("wind-data");
       const times = h.time.map(v => Number.isFinite(v) ? v * 1000 : NaN);
       if (times.some((v, i) => !Number.isFinite(v) || (i > 0 && v !== times[0] + i * HOUR))
           || Math.abs(now - times[0]) > 2 * HOUR || (frames && frames.some((f, i) => f.validAt !== times[i]))) throw new Error("wind-time");
@@ -53,21 +61,21 @@ const MNWeatherWind = (() => {
       frames.forEach((f, i) => {
         const wind = vector(h.wind_speed_10m[i], h.wind_direction_10m[i]), temp = h.temperature_2m[i];
         f.values[id] = { u:wind ? wind.u : null, v:wind ? wind.v : null,
-          temp:Number.isFinite(temp) && temp >= -100 && temp <= 70 ? temp : null };
+          temp:Number.isFinite(temp) && temp >= -100 && temp <= 70 ? temp : null, pres:pressureOk(h.pressure_msl[i]) ? h.pressure_msl[i] : null };
       });
     });
     if (frames.some(f => f.values.filter(v => Number.isFinite(v.u)).length < points.length * .8)) throw new Error("wind-data");
-    return { version:2, validAt:frames[0].validAt, fetchedAt:now, frames };
+    return { version:VERSION, validAt:frames[0].validAt, fetchedAt:now, frames };
   }
   function validCache(grid, now){
-    return !!grid && grid.version === 2 && Number.isFinite(grid.validAt) && Number.isFinite(grid.fetchedAt)
+    return !!grid && grid.version === VERSION && Number.isFinite(grid.validAt) && Number.isFinite(grid.fetchedAt)
       && now - grid.validAt >= -HOUR && now - grid.validAt < 24 * HOUR && grid.fetchedAt <= now + 60000
       && grid.fetchedAt >= grid.validAt - HOUR && Array.isArray(grid.frames) && grid.frames.length === HOURS
-      && grid.frames.every((f, i) => f && f.validAt === grid.validAt + i * HOUR && Array.isArray(f.values) && f.values.length === 81
-        && f.values.filter(v => v && Number.isFinite(v.u) && Number.isFinite(v.v)).length >= 65
+      && grid.frames.every((f, i) => f && f.validAt === grid.validAt + i * HOUR && Array.isArray(f.values) && f.values.length === POINTS
+        && f.values.filter(v => v && Number.isFinite(v.u) && Number.isFinite(v.v)).length >= Math.ceil(POINTS * .8)
         && f.values.every(v => v && ((v.u === null && v.v === null) ||
           (Number.isFinite(v.u) && Number.isFinite(v.v) && Math.hypot(v.u, v.v) <= 150))
-          && (v.temp === null || (Number.isFinite(v.temp) && v.temp >= -100 && v.temp <= 70))));
+          && (v.temp === null || (Number.isFinite(v.temp) && v.temp >= -100 && v.temp <= 70)) && (v.pres === null || pressureOk(v.pres))));
   }
   function timeIndex(grid, time = Date.now()){
     return Math.max(0, Math.min(grid.frames.length - 1, Math.floor((time - grid.validAt) / (grid.world ? 3 * HOUR : HOUR))));
@@ -112,18 +120,21 @@ const MNWeatherWind = (() => {
     // 변수별로 결측을 유지한다. 바람 결측 때문에 온도를 숨기거나, 결측을 0으로 보간하지 않는다.
     const interpolate = key => corners.some((v, i) => weights[i] > 1e-10 && (!v || !Number.isFinite(v[key]))) ? null
       : corners.reduce((sum, v, i) => sum + (weights[i] > 1e-10 ? v[key] * weights[i] : 0), 0);
-    const u = interpolate("u"), v = interpolate("v"), temp = interpolate("temp");
+    const u = interpolate("u"), v = interpolate("v"), temp = interpolate("temp"), pres = interpolate("pres");
     const speed = u === null || v === null ? null : Math.hypot(u, v);
     const direction = speed === null || speed < .05 ? null : (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
-    return { u, v, speed, direction, temp };
+    return { u, v, speed, direction, temp, pres };
   }
-  function color(value, mode = "wind", stops = mode === "temperature" ? TEMPERATURE_COLORS : COLORS){
+  function color(value, mode = "wind", stops = mode === "temperature" ? TEMPERATURE_COLORS : mode === "pressure" ? PRESSURE_COLORS : COLORS){
     value = Math.max(stops[0][0], Math.min(stops[stops.length - 1][0], value));
     const index = stops.findIndex((stop, i) => i > 0 && value <= stop[0]);
     const a = stops[index - 1], b = stops[index], mix = (value - a[0]) / (b[0] - a[0]);
     return a[1].map((channel, i) => Math.round(channel + (b[1][i] - channel) * mix));
   }
   const WORLD_COUNT = 360 * 181, WORLD_LEVELS = [10, 850, 500, 250];
+  // 상층은 바람이 몇 배 세다(제트기류 60–80 m/s). 같은 배율이면 선이 화면을 날아가므로 고도별로 늦춘다.
+  const MOTION = Object.freeze({ 10:1, 850:.6, 500:.4, 250:.25 });
+  function motionScale(level){ return MOTION[level] || 1; }
   const worldMemory = new Map(), worldPending = new Map();
   async function worldRequest(url, binary = false){
     const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 120000);
@@ -152,22 +163,24 @@ const MNWeatherWind = (() => {
     } catch(_) { throw new Error("world-wind-desktop"); }
     return parseWorldCatalog(await worldRequest("/world-wind-catalog"));
   }
+  // EXE 가 주는 한 장: 머리 40바이트("CDW2"·격자·고도·시각) + float32 채널 넷(u, v, 기온 °C, 해면기압 hPa).
+  const WORLD_CHANNELS = 4, WORLD_MAGIC = 0x32574443;
   function parseWorldFrame(buffer, catalog, hour, level){
-    if (!buffer || buffer.byteLength !== 40 + WORLD_COUNT * 12) throw new Error("world-wind-data");
+    if (!buffer || buffer.byteLength !== 40 + WORLD_COUNT * WORLD_CHANNELS * 4) throw new Error("world-wind-data");
     const view = new DataView(buffer), runAt = view.getFloat64(16, true), validAt = view.getFloat64(24, true), fetchedAt = view.getFloat64(32, true);
-    if (view.getUint32(0, true) !== 0x31574443 || view.getInt32(4, true) !== 360 || view.getInt32(8, true) !== 181
+    if (view.getUint32(0, true) !== WORLD_MAGIC || view.getInt32(4, true) !== 360 || view.getInt32(8, true) !== 181
         || !WORLD_LEVELS.includes(level) || view.getInt32(12, true) !== level || runAt !== catalog.runAt || validAt !== runAt + hour * HOUR
         || !Number.isFinite(fetchedAt) || fetchedAt < runAt || fetchedAt > Date.now() + 60000) throw new Error("world-wind-data");
-    const arrays = Array.from({ length:3 }, (_, channel) => {
+    const arrays = Array.from({ length:WORLD_CHANNELS }, (_, channel) => {
       const data = new Float32Array(WORLD_COUNT);
       for (let i = 0; i < WORLD_COUNT; i++){
         const v = view.getFloat32(40 + (channel * WORLD_COUNT + i) * 4, true);
-        if (!Number.isNaN(v) && (!Number.isFinite(v) || (channel === 2 ? v < -120 || v > 70 : Math.abs(v) > 200))) throw new Error("world-wind-data");
+        if (!Number.isNaN(v) && (!Number.isFinite(v) || (channel === 3 ? !pressureOk(v) : channel === 2 ? v < -120 || v > 70 : Math.abs(v) > 200))) throw new Error("world-wind-data");
         data[i] = v;
       }
       return data;
     });
-    return { world:true, level, runAt, validAt, fetchedAt, u:arrays[0], v:arrays[1], temp:arrays[2] };
+    return { world:true, level, runAt, validAt, fetchedAt, u:arrays[0], v:arrays[1], temp:arrays[2], pres:arrays[3] };
   }
   async function worldFrame(catalog, index, level){
     const hour = catalog.hours[index];
@@ -192,22 +205,25 @@ const MNWeatherWind = (() => {
     const interpolate = values => ids.some((id, i) => weights[i] > 1e-10 && !Number.isFinite(values[id])) ? null
       : ids.reduce((sum, id, i) => sum + (weights[i] > 1e-10 ? values[id] * weights[i] : 0), 0);
     const u = interpolate(grid.u), v = interpolate(grid.v), temp = interpolate(grid.temp), speed = u === null || v === null ? null : Math.hypot(u, v);
-    return { u, v, temp, speed, direction:speed === null || speed < .05 ? null : (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360 };
+    const pres = grid.pres ? interpolate(grid.pres) : null;
+    return { u, v, temp, pres, speed, direction:speed === null || speed < .05 ? null : (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360 };
   }
   function mount({ map, stage, toolRow, doc, movePanel = null }){
     const word = (ko, en) => window.MNI18N && window.MNI18N.lang === "en" ? en : ko;
     const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
     const btn = cls => { const n = el("button", "map-btn " + cls); n.type = "button"; return n; };
-    const toggle = btn("map-toolvis-weather map-wind-toggle"); toolRow.append(toggle);
+    const toggle = btn("map-toolvis-wind map-wind-toggle"); toolRow.append(toggle);
+    if (typeof mapSetToolIcon === "function") mapSetToolIcon(toggle, "wind");
     const panel = el("section", "map-weather-panel map-wind-panel"); panel.hidden = true;
     const heading = el("div", "map-weather-heading"), title = el("strong"), close = btn("map-wind-close"); heading.append(title, close);
-    const controls = el("div", "map-weather-tools"), show = btn("map-wind-show"), pause = btn("map-wind-pause"), clear = btn("map-wind-clear");
-    controls.append(show, pause, clear);
+    const controls = el("div", "map-weather-tools"), show = btn("map-wind-show"), pause = btn("map-wind-pause");
+    controls.append(show, pause);
     const colorLabel = el("label", "map-wind-color-label"), colorCheck = el("input"); colorCheck.type = "checkbox"; colorCheck.checked = true;
     const colorText = el("span"); colorLabel.append(colorCheck, colorText);
     const modeLabel = el("label", "map-wind-mode-label"), modeText = el("span"), modeSelect = el("select", "map-select map-wind-mode");
-    const windOption = el("option"), tempOption = el("option"); windOption.value = "wind"; tempOption.value = "temperature";
-    modeSelect.append(windOption, tempOption); modeSelect.value = "wind"; modeLabel.append(modeText, modeSelect);
+    const windOption = el("option"), tempOption = el("option"), pressureOption = el("option");
+    windOption.value = "wind"; tempOption.value = "temperature"; pressureOption.value = "pressure";
+    modeSelect.append(windOption, tempOption, pressureOption); modeSelect.value = "wind"; modeLabel.append(modeText, modeSelect);
     const scopeLabel = el("label", "map-wind-mode-label"), scopeText = el("span"), scopeSelect = el("select", "map-select map-wind-scope");
     const koreaOption = el("option"), worldOption = el("option"); koreaOption.value = "korea"; worldOption.value = "world";
     scopeSelect.append(koreaOption, worldOption); scopeSelect.value = "korea"; scopeLabel.append(scopeText, scopeSelect);
@@ -222,9 +238,11 @@ const MNWeatherWind = (() => {
     const spotBox = el("div", "map-wind-spot"), spotTitle = el("strong"), spotValues = el("p", "map-wind-spot-values"), spotNote = el("small");
     spotBox.setAttribute("aria-live", "polite"); spotBox.append(spotTitle, spotValues, spotNote);
     const status = el("p", "map-weather-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+    // 기상청 태풍 층. 바람 표시와 따로 켜고 끄며, 바람 단추로 지울 때만 함께 지운다.
+    const typhoonBox = el("div", "map-wind-typhoon");
     const note = el("p", "map-weather-note"), source = el("a"); source.href = "https://open-meteo.com/"; source.target = "_blank"; source.rel = "noopener noreferrer";
     source.textContent = "Open-Meteo / NOAA GFS · CC BY 4.0";
-    panel.append(heading, scopeLabel, levelLabel, controls, modeLabel, colorLabel, timeline, spotBox, status, note, source); stage.append(panel);
+    panel.append(heading, scopeLabel, levelLabel, controls, modeLabel, colorLabel, timeline, spotBox, status, typhoonBox, note, source); stage.append(panel);
     L.DomEvent.disableClickPropagation(panel); L.DomEvent.disableScrollPropagation(panel);
     if (movePanel) movePanel(panel, heading);
     const pane = map.createPane("mapWindPane"); pane.style.zIndex = "390"; pane.style.pointerEvents = "none";
@@ -237,26 +255,34 @@ const MNWeatherWind = (() => {
     let grid = null, saved = false, active = false, playing = false, moving = false, destroyed = false, loading = false;
     let frame = 0, lastFrame = 0, generation = 0, frozen = 0, width = 0, height = 0, ratio = 1, columns = 0;
     let field = [], seeds = [], particles = [], errorKey = "", selectedIndex = 0, spot = null;
-    let catalog = null, attribution = "";
+    let catalog = null, attribution = "", pendingIndex = null;
+    // 태풍 층은 만드는 도중에도 onChange(→ syncToggle)를 부른다. 그래서 typhoon·anyShown 을 먼저 선언해 두고 나중에 채운다.
+    let typhoon = null;
+    const anyShown = () => active || loading || !!(typhoon && typhoon.shown());
+    typhoon = typeof MNTyphoonLayer !== "undefined" ? MNTyphoonLayer.mount({ map, host:typhoonBox, word, onChange:() => syncToggle() }) : null;
+    if (!typhoon) typhoonBox.hidden = true;
     const CELL = 12;
     const stamp = time => new Date(time).toLocaleString(word("ko-KR", "en-GB"), { timeZone:"Asia/Seoul", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", hour12:false }) + " KST";
     const selectedFrame = () => grid ? grid.frames[selectedIndex] : null;
     const isWorld = () => scopeSelect.value === "world";
-    const levelName = () => isWorld() && levelSelect.value !== "10" ? levelSelect.value + " hPa" : word("지상 10m", "10 m");
-    const colorStops = () => modeSelect.value === "temperature" ? (isWorld() && levelSelect.value !== "10" ? UPPER_TEMPERATURE_COLORS : TEMPERATURE_COLORS)
-      : isWorld() ? WORLD_COLORS : COLORS;
+    // 이름표는 지도에 그려진 자료의 고도를 따른다. 새 고도를 받는 중이거나 받지 못했을 때 앞 자료에 새 이름이 붙지 않게 한다.
+    const shownLevel = () => !isWorld() ? "10" : active && grid && grid.world ? String(grid.level) : levelSelect.value;
+    const levelName = () => shownLevel() !== "10" ? shownLevel() + " hPa" : word("지상 10m", "10 m");
+    const colorStops = () => modeSelect.value === "temperature" ? (shownLevel() !== "10" ? UPPER_TEMPERATURE_COLORS : TEMPERATURE_COLORS)
+      : modeSelect.value === "pressure" ? PRESSURE_COLORS : isWorld() ? WORLD_COLORS : COLORS;
     function renderLegend(){
-      const temperature = modeSelect.value === "temperature", stops = colorStops();
+      const temperature = modeSelect.value === "temperature", pressure = modeSelect.value === "pressure", stops = colorStops();
       const min = stops[0][0], max = stops[stops.length - 1][0], percent = n => (n - min) / (max - min) * 100;
       ramp.style.background = "linear-gradient(to right," + stops.map(c => "rgb(" + c[1].join(",") + ") " + percent(c[0]) + "%").join(",") + ")";
       ticks.replaceChildren();
       for (const [n] of stops){
-        const tick = el("span"); tick.textContent = n === max ? n + "+" : temperature && n === min ? n + "−" : String(n);
+        const tick = el("span"); tick.textContent = n === max ? n + "+" : (temperature || pressure) && n === min ? n + "−" : String(n);
         tick.style.left = percent(n) + "%"; ticks.append(tick);
       }
       ramp.hidden = ticks.hidden = !colorCheck.checked;
-      const tempLevel = isWorld() && levelSelect.value !== "10" ? levelName() : word("지상 2m", "2 m");
+      const tempLevel = shownLevel() !== "10" ? levelName() : word("지상 2m", "2 m");
       legendTitle.textContent = colorCheck.checked && temperature ? tempLevel + word(" 기온 · °C / 선: 바람", " temperature · °C / lines: wind")
+        : colorCheck.checked && pressure ? word("해면기압 · hPa / 선: ", "Sea-level pressure · hPa / lines: ") + levelName() + word(" 바람", " wind")
         : levelName() + word(" 풍속 · m/s", " wind · m/s");
     }
     function renderSpot(){
@@ -267,12 +293,13 @@ const MNWeatherWind = (() => {
       if (!active || !spot){ spotValues.textContent = ""; return; }
       const value = sample(selectedFrame(), spot.lat, spot.lng);
       if (!value){ spotValues.textContent = word("표시 범위 밖입니다.", "Outside the covered region."); return; }
-      if (isWorld() && value.speed === null && value.temp === null){ spotValues.textContent = word("지형 아래의 기압면이거나 자료가 없는 지점입니다.", "This pressure level is below terrain, or data is missing."); return; }
+      if (isWorld() && value.speed === null && value.temp === null && value.pres === null){ spotValues.textContent = word("지형 아래의 기압면이거나 자료가 없는 지점입니다.", "This pressure level is below terrain, or data is missing."); return; }
       const directions = word("북,북북동,북동,동북동,동,동남동,남동,남남동,남,남남서,남서,서남서,서,서북서,북서,북북서", "N,NNE,NE,ENE,E,ESE,SE,SSE,S,SSW,SW,WSW,W,WNW,NW,NNW").split(",");
       const direction = value.direction === null ? (value.speed === null ? "—" : word("무풍", "Calm"))
         : directions[Math.round(value.direction / 22.5) % 16] + " " + (Math.round(value.direction) % 360) + "°";
       spotValues.textContent = word("풍속 ", "Speed ") + (value.speed === null ? "—" : value.speed.toFixed(1) + " m/s")
         + " · " + word("풍향 ", "From ") + direction + "\n" + word("기온 ", "Temperature ") + (value.temp === null ? "—" : value.temp.toFixed(1) + " °C")
+        + " · " + word("해면기압 ", "Sea-level pressure ") + (value.pres == null ? "—" : value.pres.toFixed(1) + " hPa")
         + "\n" + stamp(selectedFrame().validAt);
     }
     function drawSpot(){
@@ -289,36 +316,43 @@ const MNWeatherWind = (() => {
       [word("지상 10m", "10 m above ground"), "850 hPa (~1.5 km)", "500 hPa (~5.5 km)", "250 hPa (~10.5 km)"].forEach((label, i) => { levelOptions[i].textContent = label; });
       source.href = isWorld() ? "https://www.ncei.noaa.gov/products/weather-climate-models/global-forecast" : "https://open-meteo.com/";
       source.textContent = isWorld() ? "NOAA GFS · 1°" : "Open-Meteo / NOAA GFS · CC BY 4.0";
-      panel.setAttribute("aria-label", title.textContent); toggle.setAttribute("aria-expanded", String(!panel.hidden));
-      toggle.setAttribute("aria-pressed", String(active)); toggle.classList.toggle("is-on", active);
+      panel.setAttribute("aria-label", title.textContent); syncToggle();
       close.textContent = word("닫기", "Close"); show.textContent = active ? word("자료 갱신", "Update data") : isWorld() ? word("세계 바람 보기", "Show world wind") : word("한반도 바람 보기", "Show wind");
-      show.disabled = loading; pause.disabled = !active; clear.disabled = !active && !loading;
-      pause.textContent = word(playing ? "일시정지" : "재생", playing ? "Pause" : "Play"); pause.setAttribute("aria-pressed", String(playing)); clear.textContent = word("지도에서 지우기", "Clear wind");
+      show.disabled = loading; pause.disabled = !active;
+      pause.textContent = word(playing ? "일시정지" : "재생", playing ? "Pause" : "Play"); pause.setAttribute("aria-pressed", String(playing));
       colorText.textContent = word("색상 표시", "Show colors"); modeText.textContent = word("지도 색상", "Map colors");
-      windOption.textContent = word("풍속", "Wind speed"); tempOption.textContent = word("기온", "Temperature");
+      windOption.textContent = word("풍속", "Wind speed"); tempOption.textContent = word("기온", "Temperature"); pressureOption.textContent = word("해면기압", "Sea-level pressure");
       const count = grid ? grid.frames.length : isWorld() ? 9 : HOURS;
       timeTitle.textContent = isWorld() ? word("예보 시각 · 3시간 간격", "Forecast time · every 3 hours") : word("예보 시각 · 1시간 간격", "Forecast time · hourly"); slider.setAttribute("aria-label", timeTitle.textContent);
       timeOutput.textContent = grid ? stamp(selectedFrame().validAt) : word("자료를 받으면 시각을 고를 수 있습니다.", "Load data to choose a time.");
-      slider.max = String(count - 1); slider.value = String(selectedIndex); slider.disabled = !active || loading; slider.setAttribute("aria-valuetext", timeOutput.textContent);
+      slider.max = String(count - 1); slider.value = String(loading && pendingIndex !== null ? pendingIndex : selectedIndex); slider.disabled = !active || loading; slider.setAttribute("aria-valuetext", timeOutput.textContent);
       timeStart.textContent = grid ? stamp(grid.validAt) : ""; timeEnd.textContent = grid ? stamp(grid.frames[count - 1].validAt) : "";
       previous.textContent = word("이전 시간", "Previous hour"); current.textContent = word("현재 시각", "Current hour"); next.textContent = word("다음 시간", "Next hour");
       previous.disabled = !active || loading || selectedIndex === 0; next.disabled = !active || loading || selectedIndex === count - 1; current.disabled = !active || loading;
-      note.textContent = word("가입·키 없이 사용 · 비상업적 이용. 바람은 지상 10m, 기온은 지상 2m 예보를 1.5° 간격으로 받아 보간합니다. 범위: 북위 30–42°, 동경 122–134°. 선의 움직임은 설명용입니다. 자료는 1시간 재사용합니다.",
-        "No account or key · non-commercial use. 10 m wind and 2 m temperature sampled every 1.5° and interpolated; 30–42°N, 122–134°E. Particle motion is illustrative. Data is reused for one hour.");
-      if (isWorld()) note.textContent = word("가입·키 없이 Windows EXE에서 사용. NOAA GFS 1° 격자 예보이며 선택한 시각·고도만 받아 저장합니다. 지상 기온은 2m, 상층 기온은 선택한 기압면 기준입니다. 괄호의 높이는 근삿값이며 지형 아래 기압면과 극지방(±85° 밖)은 숨깁니다. 선의 움직임은 설명용입니다.",
-        "No account or key, in the Windows EXE. NOAA GFS 1° forecasts are downloaded and cached for the selected time and level. Surface temperature is at 2 m; upper temperature is on the selected pressure surface. Heights are approximate. Below-terrain levels and polar regions beyond ±85° are hidden. Particle motion is illustrative.");
+      note.textContent = word("가입·키 없이 사용 · 비상업적 이용. 바람은 지상 10m, 기온은 지상 2m, 기압은 해면기압 예보를 " + REGION.step + "° 간격으로 받아 보간합니다. 범위: 북위 " + REGION.south + "–" + REGION.north + "°, 동경 " + REGION.west + "–" + REGION.east + "°. 선의 움직임은 설명용입니다. 자료는 1시간 재사용합니다.",
+        "No account or key · non-commercial use. 10 m wind, 2 m temperature and sea-level pressure sampled every " + REGION.step + "° and interpolated; " + REGION.south + "–" + REGION.north + "°N, " + REGION.west + "–" + REGION.east + "°E. Particle motion is illustrative. Data is reused for one hour.");
+      if (isWorld()) note.textContent = word("가입·키 없이 Windows EXE에서 사용. NOAA GFS 1° 격자 예보이며 선택한 시각·고도만 받아 저장합니다. 지상 기온은 2m, 상층 기온은 선택한 기압면 기준이고, 해면기압은 고도와 상관없이 같은 지상 자료입니다. 괄호의 높이는 근삿값이며 지형 아래 기압면과 극지방(±85° 밖)은 숨깁니다. 선의 움직임은 설명용입니다.",
+        "No account or key, in the Windows EXE. NOAA GFS 1° forecasts are downloaded and cached for the selected time and level. Surface temperature is at 2 m; upper temperature is on the selected pressure surface; sea-level pressure is the same at every level. Heights are approximate. Below-terrain levels and polar regions beyond ±85° are hidden. Particle motion is illustrative.");
       renderLegend(); renderSpot();
       timeLabel.textContent = grid ? (saved ? word("저장 자료 · ", "Saved data · ") : "") + stamp(selectedFrame().validAt)
         + (isWorld() ? " · " + levelName() + word(" · 모델 ", " · Run ") + stamp(grid.runAt) : "") : "";
       legend.hidden = !active;
       if (loading) status.textContent = word("바람 자료를 받는 중…", "Loading wind data…");
       else if (errorKey === "world-wind-desktop") status.textContent = word("세계 바람은 최신 Windows ClassDock.exe에서 사용할 수 있습니다.", "World wind requires the latest Windows ClassDock.exe.");
-      else if (errorKey) status.textContent = errorKey === "wind-quota" || errorKey === "wind-retry"
+      else if (errorKey) status.textContent = (active ? word("새 자료를 받지 못해 앞의 표시를 그대로 둡니다. ", "The previous display is kept. ") : "")
+        + (errorKey === "wind-quota" || errorKey === "wind-retry"
         ? word("조회가 제한되었습니다. 5분 뒤 다시 눌러 주세요.", "Requests are limited. Try again in five minutes.")
-        : word("바람 자료를 받지 못했습니다. 인터넷 연결을 확인하고 잠시 후 다시 눌러 주세요.", "Could not load wind. Check your connection and try again later.");
+        : word("바람 자료를 받지 못했습니다. 인터넷 연결을 확인하고 잠시 후 다시 눌러 주세요.", "Could not load wind. Check your connection and try again later."));
       else if (active) status.textContent = (saved ? word("갱신 실패 — 저장 자료 표시 · ", "Update failed — showing saved data · ") : word("선택한 예보 · ", "Selected forecast · ")) + stamp(selectedFrame().validAt)
         + word(" · 수신 ", " · Fetched ") + stamp(grid.fetchedAt);
       else status.textContent = word("버튼을 누르면 선택한 범위의 바람을 표시합니다.", "Select Show wind to display the selected region.");
+    }
+    function syncToggle(){
+      const on = anyShown();
+      toggle.setAttribute("aria-expanded", String(!panel.hidden)); toggle.setAttribute("aria-pressed", String(active || !!(typhoon && typhoon.shown())));
+      toggle.classList.toggle("is-on", active || !!(typhoon && typhoon.shown()));
+      toggle.title = on ? word("누르면 바람·태풍 표시를 지우고 창을 닫습니다.", "Click to clear wind and typhoons and close the panel.")
+        : word("바람·기온·기압 예보와 태풍 정보를 지도에 표시합니다.", "Show wind, temperature, pressure forecasts and typhoons on the map.");
     }
     function stop(){ if (frame) cancelAnimationFrame(frame); frame = 0; lastFrame = 0; }
     function at(x, y){ return x >= 0 && y >= 0 && x < width && y < height ? field[Math.floor(y / CELL) * columns + Math.floor(x / CELL)] : null; }
@@ -349,15 +383,16 @@ const MNWeatherWind = (() => {
       for (const canvas of [heat, trails, spotCanvas]){ canvas.width = width; canvas.height = height; canvas.style.width = size.x + "px"; canvas.style.height = size.y + "px"; L.DomUtil.setPosition(canvas, origin); }
       heat.hidden = !colorCheck.checked; pane.style.visibility = "";
       columns = Math.ceil(width / CELL); field = []; seeds = [];
+      const shown = selectedFrame(), pace = shown && shown.world ? motionScale(shown.level) : 1;
       for (let y = 0; y < height; y += CELL) for (let x = 0; x < width; x += CELL){
         const px = Math.min(width - 1, x + CELL / 2), py = Math.min(height - 1, y + CELL / 2);
-        const ll = map.containerPointToLatLng([px / ratio, py / ratio]), wind = sample(selectedFrame(), ll.lat, ll.lng);
+        const ll = map.containerPointToLatLng([px / ratio, py / ratio]), wind = sample(shown, ll.lat, ll.lng);
         if (!wind){ field.push(null); continue; }
         // Mercator의 동서·남북 배율에 같은 위도 계수를 적용한다. 속도는 화면 표시용이다.
-        const scale = 2 * ratio / Math.max(.15, Math.cos(ll.lat * Math.PI / 180));
+        const scale = 2 * ratio * pace / Math.max(.15, Math.cos(ll.lat * Math.PI / 180));
         field.push(wind.speed === null ? null : { dx:wind.u * scale, dy:-wind.v * scale });
         if (wind.speed !== null) seeds.push({ x:px, y:py });
-        const value = modeSelect.value === "temperature" ? wind.temp : wind.speed;
+        const value = modeSelect.value === "temperature" ? wind.temp : modeSelect.value === "pressure" ? wind.pres : wind.speed;
         if (value !== null){ heatCtx.fillStyle = "rgba(" + color(value, modeSelect.value, colorStops()).join(",") + ",.42)"; heatCtx.fillRect(x, y, CELL, CELL); }
       }
       ctx.strokeStyle = "rgba(255,255,255,.95)"; ctx.lineWidth = 1.5;
@@ -376,35 +411,39 @@ const MNWeatherWind = (() => {
     async function showWind(options = {}){
       if (loading || frozen || destroyed) return;
       const world = isWorld(), wasActive = active, wasPlaying = playing, selectedTime = active ? selectedFrame().validAt : Date.now();
-      if (world){ const keepSpot = spot; clearWind(false); spot = keepSpot; }
-      const seq = ++generation; loading = true; errorKey = ""; sync();
+      // 받는 동안과 받지 못했을 때 지금 표시를 그대로 둔다. 새 자료는 다 받은 뒤에만 한꺼번에 바꾼다.
+      const seq = ++generation; loading = true; errorKey = ""; pendingIndex = Number.isInteger(options.index) ? options.index : null; sync();
       try {
-        let result, index;
+        let result, index, nextCatalog = catalog;
         if (world){
-          const selectedCatalog = options.reuse && catalog ? catalog : await worldCatalog();
+          nextCatalog = options.reuse && catalog ? catalog : await worldCatalog();
           if (destroyed || seq !== generation) return;
-          catalog = selectedCatalog;
-          const frames = catalog.hours.map(h => ({ validAt:catalog.runAt + h * HOUR }));
-          const data = { world:true, level:Number(levelSelect.value), runAt:catalog.runAt, validAt:frames[0].validAt, frames };
+          const frames = nextCatalog.hours.map(h => ({ validAt:nextCatalog.runAt + h * HOUR }));
+          const data = { world:true, level:Number(levelSelect.value), runAt:nextCatalog.runAt, validAt:frames[0].validAt, frames };
           index = Number.isInteger(options.index) ? Math.max(0, Math.min(8, options.index)) : timeIndex(data, selectedTime);
-          const loaded = await worldFrame(catalog, index, data.level);
+          const loaded = await worldFrame(nextCatalog, index, data.level);
           data.frames[index] = loaded; data.fetchedAt = loaded.fetchedAt;
-          result = { grid:data, saved:catalog.saved === true };
+          result = { grid:data, saved:nextCatalog.saved === true };
         } else result = await load();
         if (destroyed || seq !== generation) return;
         if (!heatCtx || !ctx) throw new Error("wind-canvas");
-        grid = result.grid; selectedIndex = world ? index : timeIndex(grid, selectedTime); saved = result.saved; active = true;
+        catalog = nextCatalog; grid = result.grid; selectedIndex = world ? index : timeIndex(grid, selectedTime); saved = result.saved; active = true;
         if (!attribution){ attribution = world ? WORLD_ATTRIBUTION : ATTRIBUTION; if (map.attributionControl) map.attributionControl.addAttribution(attribution); }
         playing = wasActive ? wasPlaying : !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         if (!wasActive && !options.reuse)
           map.fitBounds(world ? [[-65, -180], [75, 180]] : [[REGION.south, REGION.west], [REGION.north, REGION.east]], { padding:[35, 35], animate:false });
         redraw();
-      } catch(error){ if (!destroyed && seq === generation) errorKey = error.message || "wind-network"; }
-      finally { if (!destroyed && seq === generation){ loading = false; sync(); } }
+      } catch(error){
+        if (destroyed || seq !== generation) return;
+        errorKey = error.message || "wind-network";
+        // 고도 선택을 지도에 남은 자료의 고도로 되돌린다(슬라이더는 sync 가 selectedIndex 로 되돌린다).
+        if (active && grid && grid.world) levelSelect.value = String(grid.level);
+      }
+      finally { if (!destroyed && seq === generation){ loading = false; pendingIndex = null; sync(); } }
     }
-    function clearWind(resetCatalog = true){
+    function clearWind(){
       if (attribution && map.attributionControl) map.attributionControl.removeAttribution(attribution);
-      attribution = ""; if (resetCatalog) catalog = null;
+      attribution = ""; catalog = null; pendingIndex = null;
       generation++; loading = false; active = false; playing = false; grid = null; selectedIndex = 0; spot = null; errorKey = ""; stop();
       field = []; seeds = []; particles = []; if (heatCtx) heatCtx.clearRect(0, 0, width, height); if (ctx) ctx.clearRect(0, 0, width, height); drawSpot(); sync();
     }
@@ -413,10 +452,16 @@ const MNWeatherWind = (() => {
       if (isWorld()) return showWind({ reuse:true, index });
       selectedIndex = Math.max(0, Math.min(HOURS - 1, Math.floor(index))); redraw(); sync();
     }
-    toggle.addEventListener("click", () => { panel.hidden = !panel.hidden; sync(); if (!panel.hidden) show.focus(); });
+    // 켜진 채로 도구 단추를 누르면 지우고 닫는다(날씨·버스·항공 단추와 같은 규칙). 태풍 층도 함께 지운다.
+    toggle.addEventListener("click", () => {
+      if (anyShown()){ clearWind(); if (typhoon) typhoon.clear(); panel.hidden = true; }
+      else panel.hidden = !panel.hidden;
+      sync(); if (!panel.hidden) show.focus();
+    });
     close.addEventListener("click", () => { panel.hidden = true; sync(); toggle.focus(); });
     panel.addEventListener("keydown", event => { if (event.key === "Escape"){ event.stopPropagation(); close.click(); } });
-    show.addEventListener("click", showWind); clear.addEventListener("click", clearWind);
+    // '자료 갱신'은 켜 둔 태풍 정보도 새로 받는다.
+    show.addEventListener("click", event => { if (typhoon && typhoon.shown()) typhoon.refresh(); return showWind(event); });
     pause.addEventListener("click", () => { playing = !playing; if (playing) start(); else stop(); sync(); });
     colorCheck.addEventListener("change", () => { heat.hidden = !colorCheck.checked; sync(); });
     modeSelect.addEventListener("change", () => { redraw(); sync(); });
@@ -429,7 +474,9 @@ const MNWeatherWind = (() => {
     map.on("movestart zoomstart", suspend); map.on("moveend zoomend resize", moved);
     document.addEventListener("visibilitychange", visibility); window.addEventListener("mni18nchange", sync);
     // 앱 안에서 다른 문서로 전환했다 돌아온 경우에도 애니메이션을 다시 시작한다.
+    function syncTyphoon(){ if (typhoon) typhoon.sync(); }
     const observer = new IntersectionObserver(entries => { if (entries.some(e => e.isIntersecting)) start(); else stop(); }); observer.observe(stage);
+    window.addEventListener("mni18nchange", syncTyphoon);
     sync();
     const controller = {
       inspectAt(at){
@@ -437,21 +484,29 @@ const MNWeatherWind = (() => {
         spot = { lat:at.lat, lng:at.lng }; panel.hidden = false; drawSpot(); sync(); return true;
       },
       freeze(){ frozen++; stop(); return () => { frozen = Math.max(0, frozen - 1); start(); }; },
-      captureNote(){ if (active && isWorld()) return (colorCheck.checked && modeSelect.value === "temperature" ? word("기온·바람", "Temperature / wind") : word("바람", "Wind")) + " (1°) · " + timeLabel.textContent + " · NOAA GFS";
-        return active ? (colorCheck.checked && modeSelect.value === "temperature" ? word("기온·바람(1.5° 보간) · ", "Temperature / wind (1.5° interpolation) · ")
-        : word("바람(1.5° 보간) · ", "Wind (1.5° interpolation) · ")) + timeLabel.textContent + " · Open-Meteo / NOAA GFS · CC BY 4.0" : ""; },
+      captureNote(){
+        const notes = [typhoon ? typhoon.captureNote() : ""];
+        if (active){
+          const mode = colorCheck.checked ? modeSelect.value : "wind";
+          const what = mode === "temperature" ? word("기온·바람", "Temperature / wind") : mode === "pressure" ? word("해면기압·바람", "Sea-level pressure / wind") : word("바람", "Wind");
+          notes.unshift(isWorld() ? what + " (1°) · " + timeLabel.textContent + " · NOAA GFS"
+            : what + word("(" + REGION.step + "° 보간) · ", " (" + REGION.step + "° interpolation) · ") + timeLabel.textContent + " · Open-Meteo / NOAA GFS · CC BY 4.0");
+        }
+        return notes.filter(Boolean).join(" · ");
+      },
       destroy(){
         if (destroyed) return; destroyed = true; generation++; stop(); observer.disconnect();
         if (attribution && map.attributionControl) map.attributionControl.removeAttribution(attribution);
         map.off("movestart zoomstart", suspend); map.off("moveend zoomend resize", moved);
         document.removeEventListener("visibilitychange", visibility); window.removeEventListener("mni18nchange", sync);
+        window.removeEventListener("mni18nchange", syncTyphoon); if (typhoon) typhoon.destroy();
         field = []; seeds = []; particles = []; grid = null; active = false; spot = null; pane.remove(); panel.remove(); legend.remove(); toggle.remove();
       }
     };
     if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
     doc.cleanupFns.push(() => controller.destroy()); return controller;
   }
-  return { mount, REGION, HOURS, coordinates, requestUrl, vector, parse, sample, color, timeIndex, validCache, fresh, load,
+  return { mount, REGION, HOURS, PRESSURE_COLORS, coordinates, requestUrl, vector, parse, sample, color, timeIndex, validCache, fresh, load, motionScale,
     parseWorldCatalog, parseWorldFrame, worldSample, worldFrame };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = MNWeatherWind;

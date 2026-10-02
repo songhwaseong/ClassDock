@@ -18,7 +18,7 @@ using System.Xml;
 class ClassDockLauncher
 {
     static readonly WorldWindService WorldWind = new WorldWindService(Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "world-wind-v1"));
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "world-wind-v2"));
     [DllImport("user32.dll")]
     static extern bool AllowSetForegroundWindow(int dwProcessId);
     [DllImport("user32.dll")]
@@ -3509,12 +3509,15 @@ class ClassDockLauncher
                         : route == "/weather-now" ? "wx-ncst" : route == "/weather-ultra" ? "wx-ultra" : route == "/weather-forecast" ? "wx-fcst"
                         : route == "/weather-mid-land" ? "wx-mid-land" : route == "/weather-mid-temp" ? "wx-mid-temp"
                         : route == "/weather-day" ? "wx-day" : route == "/weather-holidays" ? "holidays" : route == "/weather-terms" ? "terms"
+                        : route == "/weather-typhoon" ? "wx-typhoon" : route == "/weather-typhoon-fcst" ? "wx-typhoon-fcst"
                         : route.StartsWith("/jeju-bus-", StringComparison.Ordinal) ? route.Substring("/jeju-bus-".Length) : "";
                     string value = kind == "cities" ? "all"
                         : (kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst") ? (QueryValue(path, "nx") ?? "").Trim() + "," + (QueryValue(path, "ny") ?? "").Trim()
                         : kind == "wx-mid-land" || kind == "wx-mid-temp" ? (QueryValue(path, "reg") ?? "").Trim()
                         : kind == "wx-day" ? (QueryValue(path, "stn") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : kind == "holidays" || kind == "terms" ? (QueryValue(path, "year") ?? "").Trim() + (QueryValue(path, "month") ?? "").Trim().PadLeft(2, '0')
+                        : kind == "wx-typhoon" ? "now"
+                        : kind == "wx-typhoon-fcst" ? (QueryValue(path, "seq") ?? "").Trim() + "-" + (QueryValue(path, "tmfc") ?? "").Trim()
                         : kind == "nearby" ? (QueryValue(path, "lat") ?? "").Trim() + "," + (QueryValue(path, "lng") ?? "").Trim()
                         : kind == "flights" ? String.Join("-", new[] { "airport", "io", "line", "page" }.Select(name => (QueryValue(path, name) ?? "").Trim()))
                         : kind == "flight" ? (QueryValue(path, "fln") ?? "").Trim().ToUpperInvariant()
@@ -3522,7 +3525,7 @@ class ClassDockLauncher
                         : kind == "ships" ? (QueryValue(path, "port") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : (QueryValue(path, kind == "routes" ? "keyword" : kind == "arrivals" ? "nodeId" : "routeId") ?? "").Trim();
                     bool weather = kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp"
-                        || kind == "wx-day" || kind == "holidays" || kind == "terms";
+                        || kind == "wx-day" || kind == "holidays" || kind == "terms" || kind == "wx-typhoon" || kind == "wx-typhoon-fcst";
                     bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather;
                     string busCity = noCity ? "" : (QueryValue(path, "city") ?? "").Trim();
                     if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby"
@@ -5906,6 +5909,16 @@ class ClassDockLauncher
             if (!match.Success || !DateTime.TryParseExact(match.Groups[2].Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day)) return false;
             return day >= new DateTime(1904, 4, 1) && day <= KmaKstNow().Date.AddDays(-1);
         }
+        // 태풍: 최근 발표 목록은 "now" 하나, 진로 예보는 "태풍번호-발표시각"(27-202610021600). 열흘 안의 발표만.
+        if (kind == "wx-typhoon") return value == "now";
+        if (kind == "wx-typhoon-fcst")
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(value, "^([1-9][0-9]?)-([0-9]{12})$");
+            DateTime at;
+            if (!match.Success || !DateTime.TryParseExact(match.Groups[2].Value, "yyyyMMddHHmm", CultureInfo.InvariantCulture, DateTimeStyles.None, out at)) return false;
+            DateTime kst = KmaKstNow();
+            return at >= kst.AddDays(-10) && at <= kst.AddHours(1);
+        }
         if (kind == "holidays" || kind == "terms")
         {
             int year, month;
@@ -5997,6 +6010,25 @@ class ClassDockLauncher
                 query = "dataType=JSON&pageNo=1&numOfRows=1&dataCd=ASOS&dateCd=DAY&startDt=" + day[1] + "&endDt=" + day[1] + "&stnIds=" + day[0];
                 break;
             }
+            // 태풍(기상청 태풍정보 조회서비스). 최근 사흘 발표를 한 번에 받아 지나온 길과 지금 위치를 그린다.
+            // 캐시는 한 시간마다 갈아 끼운다(발표는 3~6시간 간격, 가까워지면 더 잦다).
+            case "wx-typhoon":
+            {
+                DateTime kst = KmaKstNow();
+                service = KmaBase + "TyphoonInfoService/"; operation = "getTyphoonInfo"; needsCity = false;
+                query = "dataType=JSON&pageNo=1&numOfRows=500&fromTmFc=" + kst.AddDays(-3).ToString("yyyyMMdd", CultureInfo.InvariantCulture)
+                    + "&toTmFc=" + kst.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+                value = value + "@" + kst.ToString("yyyyMMddHH", CultureInfo.InvariantCulture);
+                break;
+            }
+            // 진로 예보: 통보 하나(발표 시각)의 예상 위치들. 같은 통보의 예보는 바뀌지 않으므로 하루 캐시해도 된다.
+            case "wx-typhoon-fcst":
+            {
+                string[] typhoon = value.Split('-');
+                service = KmaBase + "TyphoonInfoService/"; operation = "getTyphoonFcst"; needsCity = false;
+                query = "dataType=JSON&pageNo=1&numOfRows=100&tmFc=" + typhoon[1] + "&typSeq=" + typhoon[0];
+                break;
+            }
             case "holidays": case "terms":
                 service = KasiBase + "SpcdeInfoService/"; operation = kind == "holidays" ? "getRestDeInfo" : "get24DivisionsInfo"; needsCity = false;
                 query = "_type=json&numOfRows=50&solYear=" + value.Substring(0, 4) + "&solMonth=" + value.Substring(4);
@@ -6030,7 +6062,7 @@ class ClassDockLauncher
         // 실황·초단기예보는 한 시간마다, 단기예보는 세 시간마다 발표된다(캐시 열쇠에 발표 시각이 들어 있다).
         // 지난 날 관측·특일은 바뀌지 않는다.
         int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600
-            : kind == "wx-ncst" || kind == "wx-ultra" ? 600 : kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp" ? 1800 : 86400;
+            : kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-typhoon" ? 600 : kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp" ? 1800 : 86400;
         lock (JejuBusGates[(cacheKey.GetHashCode() & Int32.MaxValue) % JejuBusGates.Length])
         {
             JejuBusCacheEntry entry;

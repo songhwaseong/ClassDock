@@ -93,6 +93,7 @@
     "ship-map.js",
     "weather-api.js",
     "weather-map.js",
+    "weather-typhoon.js",
     "weather-wind.js",
     "kosis-api.js",
     "kosis-choro.js",
@@ -277,6 +278,7 @@
         "ship-map.js",
         "weather-api.js",
         "weather-map.js",
+        "weather-typhoon.js",
         "weather-wind.js",
         "kosis-api.js",
         "kosis-choro.js",
@@ -760,6 +762,12 @@
     ],
     "weather-map.js": [
       "weather-api.js"
+    ],
+    "weather-typhoon.js": [
+      "weather-api.js"
+    ],
+    "weather-wind.js": [
+      "weather-typhoon.js"
     ],
     "kosis-choro.js": [
       "kosis-api.js"

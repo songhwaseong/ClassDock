@@ -114,7 +114,8 @@ internal static class WorldWindGrib
 
 internal sealed class WorldWindService
 {
-    internal const int FrameBytes = 40 + WorldWindGrib.Count * 3 * 4;
+    // 채널 넷: u, v, 기온(°C), 해면기압(hPa). 해면기압은 고른 기압면과 상관없이 늘 같은 지상 자료다.
+    internal const int FrameBytes = 40 + WorldWindGrib.Count * 4 * 4;
     internal static readonly DateTime Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     readonly string cache;
     readonly Func<string, long, long, int, byte[]> download;
@@ -122,7 +123,7 @@ internal sealed class WorldWindService
     readonly Dictionary<string, DateTime> failures = new Dictionary<string, DateTime>();
     DateTime nextCatalogCheck = DateTime.MinValue;
     string lastCycle = "";
-    bool catalogSaved;
+    bool catalogSaved, legacySwept;
     internal WorldWindService(string cachePath, Func<string, long, long, int, byte[]> request = null)
     { cache = Path.GetFullPath(cachePath); download = request ?? new Func<string, long, long, int, byte[]>(Download); }
     static DateTime CycleDate(string cycle)
@@ -201,6 +202,13 @@ internal sealed class WorldWindService
         lock (gate)
         {
             DateTime now = DateTime.UtcNow;
+            // 채널 셋(CDW1)으로 저장하던 예전 캐시 폴더는 이제 읽지 않으므로 한 번 치운다.
+            if (!legacySwept)
+            {
+                legacySwept = true;
+                try { string legacy = Path.Combine(Path.GetDirectoryName(cache), "world-wind-v1"); if (Directory.Exists(legacy)) Directory.Delete(legacy, true); }
+                catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
             if (now >= nextCatalogCheck)
             {
                 nextCatalogCheck = now.AddMinutes(5);
@@ -251,19 +259,20 @@ internal sealed class WorldWindService
         if (matches.Length != 1) throw new InvalidDataException("world-wind-index");
         Record r = matches[0]; if (r.Last < r.First || r.Last - r.First + 1 > 4 * 1024 * 1024) throw new InvalidDataException("world-wind-range");
         var field = WorldWindGrib.Decode(download(SourceUrl(cycle, hour), r.First, r.Last, 4 * 1024 * 1024));
-        int category = variable == "TMP" ? 0 : variable == "PRES" ? 3 : 2;
-        int parameter = variable == "UGRD" ? 2 : variable == "VGRD" ? 3 : 0;
-        int surface = level == "surface" ? 1 : level.EndsWith("mb") ? 100 : 103;
-        double expectedLevel = level == "surface" ? 0 : Double.Parse(level.Split(' ')[0], CultureInfo.InvariantCulture) * (surface == 100 ? 100 : 1);
+        // GRIB2 표 4.2: 기온 0.0.0 · 바람 0.2.2/0.2.3 · 지표 기압 0.3.0 · 해면기압(PRMSL) 0.3.1. 표 4.5: 지표 1 · 해면 101 · 등압면 100 · 지상 높이 103.
+        int category = variable == "TMP" ? 0 : variable == "PRES" || variable == "PRMSL" ? 3 : 2;
+        int parameter = variable == "UGRD" ? 2 : variable == "VGRD" ? 3 : variable == "PRMSL" ? 1 : 0;
+        int surface = level == "surface" ? 1 : level == "mean sea level" ? 101 : level.EndsWith("mb") ? 100 : 103;
+        double expectedLevel = surface == 1 || surface == 101 ? 0 : Double.Parse(level.Split(' ')[0], CultureInfo.InvariantCulture) * (surface == 100 ? 100 : 1);
         if (field.Run != CycleDate(cycle) || field.Hour != hour || field.Category != category || field.Parameter != parameter
             || field.Surface != surface || field.Level != expectedLevel) throw new InvalidDataException("world-wind-metadata");
         return field;
     }
-    internal static byte[] Pack(string cycle, int hour, int level, float[] u, float[] v, float[] temperature, float[] pressure)
+    internal static byte[] Pack(string cycle, int hour, int level, float[] u, float[] v, float[] temperature, float[] pressure, float[] seaLevel)
     {
         using (var memory = new MemoryStream()) using (var writer = new BinaryWriter(memory))
         {
-            writer.Write(Encoding.ASCII.GetBytes("CDW1")); writer.Write(360); writer.Write(181); writer.Write(level);
+            writer.Write(Encoding.ASCII.GetBytes("CDW2")); writer.Write(360); writer.Write(181); writer.Write(level);
             writer.Write((CycleDate(cycle) - Epoch).TotalMilliseconds); writer.Write((CycleDate(cycle).AddHours(hour) - Epoch).TotalMilliseconds);
             writer.Write((DateTime.UtcNow - Epoch).TotalMilliseconds);
             foreach (float[] values in new[] { u, v, temperature }) for (int i = 0; i < WorldWindGrib.Count; i++)
@@ -273,12 +282,19 @@ internal sealed class WorldWindService
                 if (masked || Single.IsInfinity(value) || (values == temperature ? value < -120 || value > 70 : Math.Abs(value) > 200)) value = Single.NaN;
                 writer.Write(value);
             }
+            // 해면기압은 지형 아래 가리기를 하지 않는다(산지에서도 해면으로 환산한 값이 있다). Pa → hPa.
+            for (int i = 0; i < WorldWindGrib.Count; i++)
+            {
+                float value = seaLevel == null ? Single.NaN : seaLevel[i] / 100f;
+                if (Single.IsNaN(value) || Single.IsInfinity(value) || value < 850 || value > 1100) value = Single.NaN;
+                writer.Write(value);
+            }
             return memory.ToArray();
         }
     }
     internal static bool ValidFrame(byte[] data, string cycle, int hour, int level)
     {
-        return data != null && data.Length == FrameBytes && Encoding.ASCII.GetString(data, 0, 4) == "CDW1"
+        return data != null && data.Length == FrameBytes && Encoding.ASCII.GetString(data, 0, 4) == "CDW2"
             && BitConverter.ToInt32(data, 4) == 360 && BitConverter.ToInt32(data, 8) == 181 && BitConverter.ToInt32(data, 12) == level
             && BitConverter.ToDouble(data, 16) == (CycleDate(cycle) - Epoch).TotalMilliseconds
             && BitConverter.ToDouble(data, 24) == (CycleDate(cycle).AddHours(hour) - Epoch).TotalMilliseconds;
@@ -303,7 +319,8 @@ internal sealed class WorldWindService
                 var u = FetchField(records, cycle, hour, "UGRD", at); var v = FetchField(records, cycle, hour, "VGRD", at);
                 var t = FetchField(records, cycle, hour, "TMP", level == 10 ? "2 m above ground" : at);
                 var pressure = level == 10 ? null : FetchField(records, cycle, hour, "PRES", "surface");
-                byte[] data = Pack(cycle, hour, level, u.Values, v.Values, t.Values, pressure == null ? null : pressure.Values);
+                var seaLevel = FetchField(records, cycle, hour, "PRMSL", "mean sea level");
+                byte[] data = Pack(cycle, hour, level, u.Values, v.Values, t.Values, pressure == null ? null : pressure.Values, seaLevel.Values);
                 Save(file, data); Sweep(); failures.Remove(key); return data;
             }
             catch { if (failures.Count > 256) failures.Clear(); failures[key] = now.AddMinutes(5); throw; }

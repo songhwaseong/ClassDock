@@ -193,6 +193,8 @@
     "날씨 지역": "Weather area",
     "기상청 날씨로 채우기": "Fill from KMA weather",
     "고른 지역의 기상청 날씨로 이 날 날씨를 채웁니다": "Fill this day's weather from KMA data for the chosen area",
+    // 지도 바람·기온(설정의 도구 숨기기 목록 이름)
+    "바람·기온": "Wind / temperature",
     // 여객선 시간표(TAGO 국내선박운항정보)
     "여객선": "Ferries",
     "여객선 시간표": "Ferry timetable",
@@ -3421,6 +3423,9 @@
       "Shows trains running right now on the map — positions between stations are interpolated",
     "실시간으로 볼 노선": "Line to follow live",
     "실시간 열차 노선": "Live train line",
+    "노선 선택": "Select a line",
+    "1–9호선": "Lines 1–9",
+    "광역·경전철": "Regional & light rail",
     "{line} {no}호": "{line} train {no}",
     "급행": "Express",
     "막차": "Last train",

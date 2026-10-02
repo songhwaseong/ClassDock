@@ -289,6 +289,85 @@ const MNWeatherApi = (() => {
   }
 
   /* ── 런처 조회 ── 오류 까닭은 버스와 같은 이름(bus-key-required · bus-key-invalid · bus-quota). */
+  /* ── 태풍(기상청_태풍정보 조회서비스 getTyphoonInfo) ──
+     통보문 한 건이 한 줄이다: 태풍 번호 typSeq · 통보 차례 tmSeq · 발표 tmFc · 위치 시각 typTm(YYYYMMDDHHmm, 한국 시각) ·
+     typLat/typLon · 중심기압 typPs(hPa) · 최대풍속 typWs(m/s) · 강풍(15 m/s) 반경 typ15 · 폭풍(25 m/s) 반경 typ25(km) ·
+     이름 typName/typEn · 위치 설명 typLoc · 진행 방향 typDir(NW 같은 16방위) · 속도 typSp(km/h) · 진로도 그림 img ·
+     반경이 한쪽만 다를 때의 방향·거리 typ15ed/typ15er·typ25ed/typ25er · 비고 rem('|'로 나뉜 여러 문장).
+     2026-10-02 실측: 목록은 최근 통보부터 오고, 숫자 칸은 JSON 숫자(tmFc 만 문자열)다.
+     같은 태풍의 통보를 위치 시각 순서로 이어 지나온 길로 쓰고, 가장 늦은 것을 지금 위치로 본다.
+     번호는 해마다 1부터 다시 세므로 번호와 이름을 함께 열쇠로 쓴다. 마지막 통보가 '정보를 종료'하거나
+     하루 넘게 새 통보가 없으면 끝난 태풍으로 친다(온대저기압으로 바뀐 태풍은 마지막 통보에 종료가 적힌다). */
+  const TYPHOON_ENDED = 24 * 3600000;
+  function kstMinute(v){
+    const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(text(v));
+    if (!m) return null;
+    const at = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] - 9, +m[5]);
+    return Number.isFinite(at) && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31 && +m[4] <= 23 && +m[5] <= 59 ? at : null;
+  }
+  const within = (v, min, max) => v !== null && v >= min && v <= max ? v : null;
+  const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+  const compass = v => { const d = text(v).toUpperCase(); return COMPASS.includes(d) ? d : ""; };
+  // 반경이 한쪽 반원만 다를 때: { direction:"W", km:180 }.
+  const exception = (direction, km) => { const d = compass(direction), r = within(num(km), 1, 2000); return d && r ? { direction:d, km:r } : null; };
+  // 진로도 그림은 기상청 주소만 받는다(통보문 한 칸을 그대로 링크로 걸기 때문).
+  function typhoonImage(v){
+    const url = text(v).replace(/^http:\/\//i, "https://");
+    return /^https:\/\/([a-z0-9-]+\.)*(kma|weather)\.go\.kr\/[^\s"'<>]*$/i.test(url) ? url : "";
+  }
+  function parseTyphoons(body, now = Date.now()){
+    const groups = new Map();
+    for (const r of rows(body)){
+      const seq = num(r.typSeq), at = kstMinute(r.typTm), lat = num(r.typLat), lng = num(r.typLon);
+      if (!Number.isInteger(seq) || seq < 1 || seq > 99 || at === null || at > now + 3600000
+          || lat === null || lng === null || lat < -10 || lat > 60 || lng < 90 || lng > 200) continue;
+      const name = text(r.typName), key = seq + ":" + name;
+      if (!groups.has(key)) groups.set(key, { seq, name, nameEn:text(r.typEn), fixes:new Map() });
+      const group = groups.get(key), tmSeq = num(r.tmSeq);
+      const bulletin = /^\d{12}$/.test(text(r.tmFc)) ? text(r.tmFc) : "";
+      const fix = { at, issuedAt:kstMinute(r.tmFc), bulletin, tmSeq, lat, lng, place:text(r.typLoc), direction:compass(r.typDir),
+        speed:within(num(r.typSp), 0, 200), pressure:within(num(r.typPs), 850, 1050), wind:within(num(r.typWs), 0, 120),
+        gale:within(num(r.typ15), 1, 2000), storm:within(num(r.typ25), 1, 2000),
+        galeException:exception(r.typ15ed, r.typ15er), stormException:exception(r.typ25ed, r.typ25er),
+        image:typhoonImage(r.img), remarks:text(r.rem).split("|").map(line => line.trim()).filter(Boolean) };
+      // 같은 위치 시각의 통보가 여러 번 오면(정정 등) 차례가 늦은 것을 쓴다.
+      const old = group.fixes.get(at);
+      if (!old || (tmSeq !== null && (old.tmSeq === null || tmSeq >= old.tmSeq))) group.fixes.set(at, fix);
+    }
+    return [...groups.values()].map(g => {
+      const fixes = [...g.fixes.values()].sort((a, b) => a.at - b.at), latest = fixes[fixes.length - 1];
+      // 진로도 그림은 가장 늦은 통보의 것(목록이 최근 통보부터 와도 순서에 기대지 않는다).
+      const image = [...fixes].reverse().map(f => f.image).find(Boolean) || "";
+      const finished = latest.remarks.some(line => /정보를\s*종료/.test(line));
+      return { seq:g.seq, name:g.name, nameEn:g.nameEn, image, fixes, latest, ended:finished || now - latest.at > TYPHOON_ENDED };
+    }).sort((a, b) => a.ended - b.ended || b.latest.at - a.latest.at);
+  }
+  /* 진로 예보(getTyphoonFcst, 태풍 번호 + 통보 발표 시각 tmFc). 2026-10-02 실측: 한 통보에 12·24·36·48·72·96·120시간 뒤
+     예상 위치 일곱 곳이 오고, 칸 이름이 정보 조회와 다르며 값이 대부분 문자열이다 — 예상 시각 tm · lat/lon · 중심기압 ps ·
+     최대풍속 ws · 방향 dir · 속도 sp · 강풍/폭풍 반경 rad15/rad25(한쪽만 다르면 ed15/er15·ed25/er25) ·
+     70% 확률 반경 radPr(km, 예상 위치가 이 원 안에 들 확률이 70%) · 위치 설명 fcLocKo. */
+  function parseTyphoonForecast(body, seq, bulletin){
+    const issuedAt = kstMinute(bulletin), points = new Map();
+    for (const r of rows(body)){
+      const at = kstMinute(r.tm), lat = num(r.lat), lng = num(r.lon);
+      if (num(r.seq) !== seq || text(r.tmFc) !== bulletin || at === null || issuedAt === null || at <= issuedAt
+          || at > issuedAt + 7 * 24 * 3600000 || lat === null || lng === null || lat < -10 || lat > 70 || lng < 90 || lng > 200) continue;
+      points.set(at, { at, lat, lng, place:text(r.fcLocKo), direction:compass(r.dir), speed:within(num(r.sp), 0, 200),
+        pressure:within(num(r.ps), 850, 1050), wind:within(num(r.ws), 0, 120), gale:within(num(r.rad15), 1, 2000),
+        storm:within(num(r.rad25), 1, 2000), galeException:exception(r.ed15, r.er15), stormException:exception(r.ed25, r.er25),
+        probability:within(num(r.radPr), 1, 3000) });
+    }
+    return [...points.values()].sort((a, b) => a.at - b.at);
+  }
+  async function loadTyphoonForecast(seq, bulletin, { signal } = {}){
+    const result = await get("/weather-typhoon-fcst?seq=" + encodeURIComponent(seq) + "&tmfc=" + encodeURIComponent(bulletin), signal);
+    return parseTyphoonForecast(result.body, seq, bulletin);
+  }
+  async function loadTyphoons({ signal } = {}){
+    const result = await get("/weather-typhoon", signal);
+    return { typhoons:parseTyphoons(result.body), fetchedAt:result.fetchedAt };
+  }
+
   async function get(url, signal){
     const response = await fetch(url, { signal, cache:"no-store" });
     if (!response.ok){
@@ -394,7 +473,8 @@ const MNWeatherApi = (() => {
     forecast:"인증키가 날씨 조회에 쓰일 수 없어요. 공공데이터포털에서 '기상청_단기예보 조회서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요.",
     mid:"7일 예보를 보려면 공공데이터포털에서 '기상청_중기예보 조회서비스'를 추가로 활용신청해 주세요.",
     day:"인증키가 지난 날씨 조회에 쓰일 수 없어요. 공공데이터포털에서 '기상청_지상(종관, ASOS) 일자료 조회서비스' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요.",
-    special:"인증키가 공휴일 조회에 쓰일 수 없어요. 공공데이터포털에서 '한국천문연구원_특일 정보' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요."
+    special:"인증키가 공휴일 조회에 쓰일 수 없어요. 공공데이터포털에서 '한국천문연구원_특일 정보' 활용신청을 확인해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요.",
+    typhoon:"태풍 정보를 보려면 공공데이터포털에서 '기상청_태풍정보 조회서비스'를 활용신청해 주세요. 승인 직후라면 반영까지 1~2시간 걸릴 수 있어요."
   };
   function failureText(error, service){
     const reason = error && error.message;
@@ -408,7 +488,7 @@ const MNWeatherApi = (() => {
 
   return { STATIONS, DEFAULT_STATION, station, nearestStation, savedStation, saveStation, toGrid, gridOk, rows,
     skyName, ptyName, diaryWeatherOf, parseNow, parseForecast, parseMidForecast, sevenDayForecast, midTemperatureStation,
-    phenomena, parseDay, parseSpecialDays, available, loadNow, loadForecast, loadMidForecast, loadDay,
+    phenomena, parseDay, parseSpecialDays, parseTyphoons, parseTyphoonForecast, loadTyphoonForecast, available, loadNow, loadForecast, loadMidForecast, loadDay, loadTyphoons,
     loadSpecialDays, cachedSpecialDays, failureText, KEY_INVALID, metres };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = MNWeatherApi;
