@@ -53,6 +53,84 @@ test("이미지 편집 도구막대는 아이콘 버튼을 쓰고 저장 글자�
   assert.doesNotMatch(image, /mkBtn\("[↶↷]"/);
 });
 
+test("아이콘이 붙은 저장 단추는 그림만 보이고 설명 풍선을 잃지 않는다", () => {
+  for (const [file, pattern] of [
+    ["study-doc.js", /saveBtn\.classList\.add\("study-ico", "save-ico"\)/],
+    ["tier-list.js", /"tier-btn tier-primary run-save tier-ico save-ico"/],
+    ["pick.js", /"tier-btn tier-primary run-save tier-ico save-ico"/],
+    ["bracket.js", /"tier-btn tier-primary run-save tier-ico save-ico"/],
+    ["image-viewer.js", /saveBtn\.classList\.add\("img-ico", "save-ico"\)/],
+    ["lesson-replay.js", /setIcon\(saveBtn, "save"\);/],
+    ["code-viewer.js", /setBarIcon\(saveBtn, "save", "\.py 저장", "run-save-label"\);[\s\S]{0,200}saveBtn\.classList\.add\("save-ico"\)/]
+  ]) assert.match(read(file), pattern, file);
+  assert.match(read.css("styles.css"), /\.run-save\.save-ico \.run-save-label\{display:none\}/);
+  // 글자만 있던 저장 단추는 공용 setSaveIcon 으로 같은 모양(그림 + 감춘 글자 칸)을 만든다.
+  assert.match(read("icons.js"), /window\.setSaveIcon = function/);
+  for (const [file, target] of [["code-viewer.js", "saveBtn"], ["docx-editor.js", "saveBtn"], ["concept-doc.js", "saveBtn"], ["timeline.js", "saveBtn"],
+    ["db-client.js", "saveButton"], ["java-editor.js", "saveBtn"], ["js-editor.js", "saveBtn"], ["mnote.js", "saveBtn"], ["map-viewer.js", "saveBtn"], ["music-editor.js", "saveBtn"]]){
+    const source = read(file);
+    assert.match(source, new RegExp("window\\.setSaveIcon\\(" + target + "\\)"), file);
+    assert.doesNotMatch(source, /textContent = "💾 저장"/, file);
+  }
+  // documents.js 가 원본/사본 표시를 고칠 때 title 을 "" 로 비우면 그림만 있는 단추는 이름이 사라진다.
+  assert.match(read("documents.js"), /button\.title = target\.mode \? _t\(target\.title\) : button\.dataset\.saveTitle;/);
+});
+
+test("파이썬 실행 바 단추는 그림만 보이고 이름은 aria-label·title 로 남긴다", () => {
+  const code = read("code-viewer.js"), css = read.css("styles.css");
+  assert.match(css, /\.run-bar-icons \.run-bar-label\{display:none\}/);
+  assert.match(code, /btn\.setAttribute\("aria-label", label\);\s*\n\s*if \(!btn\.title\) btn\.title = label;/);
+  // 되돌리기 설명이 주석 안에 들어가 풍선이 비어 있던 자리.
+  assert.match(code, /\n\s*revertBtn\.title = "편집 전 원본 코드로 되돌리기";/);
+  assert.doesNotMatch(code, /pkgBtn\.removeAttribute\("title"\)/);
+  // 글자 크기·새 파이썬도 글자 대신 그림(아이콘은 icons.js 에 있어야 빈 단추가 되지 않는다).
+  for (const [target, icon] of [["fontDown", "textSmaller"], ["fontUp", "textLarger"], ["newPyBtn", "filePlus"]]){
+    assert.match(code, new RegExp("setBarIcon\\(" + target + ", \"" + icon + "\""), target);
+    assert.match(read("icons.js"), new RegExp("\\b" + icon + ":\\s*'<"), icon);
+  }
+  assert.doesNotMatch(code, /newPyBtn\.textContent = "\+Py"/);
+});
+
+test("자바·JS 실행 바도 파이썬처럼 그림만 보이는 단추를 쓴다", () => {
+  const icons = read("icons.js"), java = read("java-editor.js"), js = read("js-editor.js"), css = read.css("styles.css");
+  assert.match(icons, /window\.setRunBarIcon = function/);
+  assert.match(java, /bar\.className = "run-bar run-bar-icons java-run-bar"/);
+  assert.match(js, /bar\.className = "run-bar run-bar-icons"/);
+  for (const [target, icon] of [["gradeBtn", "check"], ["libBtn", "layers"], ["envBtn", "javaCup"], ["configBtn", "sliders"], ["junitBtn", "flask"],
+    ["formatBtn", "indent"], ["importsBtn", "importIn"], ["fontDown", "textSmaller"], ["fontUp", "textLarger"], ["newJavaBtn", "filePlus"], ["examplesBtn", "notebook"]]){
+    assert.match(java, new RegExp("barIcon\\(" + target + ", \"" + icon + "\""), target);
+    assert.match(icons, new RegExp("\\b" + icon + ":\\s*'<"), icon);
+  }
+  // 글자를 바꾸던 곳(따라치기·Side/Below·라이브러리 개수)은 textContent 대신 글자 칸째 갈아 끼운다.
+  for (const source of [java, js]){
+    assert.doesNotMatch(source, /layoutBtn\.textContent =|practiceBtn\.textContent =|button\.textContent = count/);
+    assert.match(source, /button\.dataset\.count = count \? String\(count\) : ""/);
+  }
+  assert.match(css, /\.run-bar-icons \.java-run-more-menu :not\(\.run-font\)>\.run-bar-label\{display:inline\}/);
+  // JS 노트북도 같은 라이브러리 고르개를 쓰므로 그 단추도 그림만 보인다.
+  const notebook = read("notebook-run.js");
+  assert.match(notebook, /nbToolIcon\(jsLibraryBtn, "layers"\)/);
+  // 노트북 도구 줄의 다른 단추도 그림만(▾ 드롭다운 항목은 글자 그대로).
+  for (const [target, icon] of [["saveBtn", "save"], ["undoBtn", "undo"], ["redoBtn", "redo"], ["runAllBtn", "stepForward"], ["clearBtn", "eraser"],
+    ["inkBtn", "pen"], ["tocBtn", "list"], ["findBtn", "search"], ["dedupeBtn", "delete"], ["fontDown", "textSmaller"], ["fontUp", "textLarger"],
+    ["exportBtn", "export"], ["helpBtn", "keyboard"]]){
+    assert.match(notebook, new RegExp("nbToolIcon\\(" + target + ", \"" + icon + "\""), target);
+    assert.match(read("icons.js"), new RegExp("\\b" + icon + ":\\s*'<"), icon);
+  }
+  assert.match(css, /\.nbv-bar \.nbv-ico \.run-bar-label\{display:none\}/);
+  // 저장 상태(저장 *·저장 중…)와 실행 중 ■ 전환은 글자 칸째 갈아 끼워 그림이 지워지지 않는다.
+  assert.match(read("notebook-cells.js"), /if \(slot\) slot\.textContent = nbT\(label\); else btn\.textContent = nbT\(label\);/);
+  assert.match(notebook, /window\.setRunBarIcon\(btn, running \? "stop" : "stepForward"/);
+  // ▾ 메뉴 항목은 [그림 + 글자] — 바뀌는 글자(최신 상태로 실행 (N)·로컬 Python …)도 칸째 갈아 끼운다.
+  const tools = read("notebook-tools.js");
+  assert.match(tools, /function nbSetMenuItem\(btn, icon, label\)/);
+  for (const target of ["restartRunBtn", "restartBtn", "localKernelBtn", "localRunBtn", "collapseOutputsBtn", "expandOutputsBtn", "pdfBtn", "toPyBtn"])
+    assert.match(notebook, new RegExp("nbSetMenuItem\\(" + target + ", \""), target);
+  assert.doesNotMatch(tools, /_nbLocal(Kernel|Run)Btn\.textContent =/);
+  assert.doesNotMatch(notebook, /btn\.textContent = staleCount > 0/);
+  assert.match(css, /\.nbv-bar \.nbv-run-menu \.nbv-run-menu-item\{display:flex;align-items:center;gap:8px;/);
+});
+
 test("암기장 도구막대도 아이콘을 쓰고 저장 글자칸을 따로 둔다", () => {
   const study = read("study-doc.js");
   // 저장 버튼은 이미지 편집기와 같은 규칙을 따른다(.run-save-label 칸만 갈아 끼운다).

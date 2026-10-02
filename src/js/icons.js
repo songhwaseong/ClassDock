@@ -112,6 +112,19 @@
     ,python: '<path d="M12 3H9.5A2.5 2.5 0 0 0 7 5.5V8h5.5M7 8H5.5A2.5 2.5 0 0 0 3 10.5v3A2.5 2.5 0 0 0 5.5 16H7v-2.5A2.5 2.5 0 0 1 9.5 11h5A2.5 2.5 0 0 0 17 8.5v-3A2.5 2.5 0 0 0 14.5 3H12"/><path d="M12 21h2.5a2.5 2.5 0 0 0 2.5-2.5V16h-5.5M17 16h1.5a2.5 2.5 0 0 0 2.5-2.5v-3A2.5 2.5 0 0 0 18.5 8H17v2.5a2.5 2.5 0 0 1-2.5 2.5h-5A2.5 2.5 0 0 0 7 15.5v3A2.5 2.5 0 0 0 9.5 21H12"/><circle cx="9.7" cy="5.5" r=".8" fill="currentColor" stroke="none"/><circle cx="14.3" cy="18.5" r=".8" fill="currentColor" stroke="none"/>'
     ,terminal: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7 9.5 3 2.5-3 2.5M12.5 15H17"/>'
     ,arrowDown: '<path d="M12 5v14M6 13l6 6 6-6"/>'
+    // 글자 크기 단추 — 돋보기(zoomIn/Out)는 화면 배율과 헷갈려서 'A' 옆에 −/+ 를 붙인다.
+    ,textSmaller: '<path d="m2.5 19 5-14 5 14M4.3 14h6.4"/><path d="M15.5 12h6"/>'
+    ,textLarger: '<path d="m2.5 19 5-14 5 14M4.3 14h6.4"/><path d="M15.5 12h6M18.5 9v6"/>'
+    ,filePlus: '<path d="M6 3h8l4 4v14H6zM14 3v5h5"/><path d="M12 11v6M9 14h6"/>'
+    // 자바·JS 실행 바 — 자바 환경은 커피잔, JUnit 은 시험 플라스크, 코드 정렬은 들여쓰기, import 정리는 '안으로 들이기'.
+    ,javaCup: '<path d="M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16M4 21.5h13"/><path d="M9 2.5c-1 1.2 1 2 0 3.5M12.5 2.5c-1 1.2 1 2 0 3.5"/>'
+    ,flask: '<path d="M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7.5 15h9"/>'
+    ,indent: '<path d="M4 5h16M10 10h10M10 15h10M4 20h16"/><path d="m4 9.5 3 3-3 3"/>'
+    ,importIn: '<path d="M12 3v10M8 9l4 4 4-4"/><path d="M4 14v5h16v-5"/>'
+    ,bookmark: '<path d="M6.5 3.5h11v17L12 16.5l-5.5 4z"/>'
+    ,keyboard: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M9.5 10h.01M12.5 10h.01M15.5 10h.01M18 10h.01M7.5 14h9"/>'
+    // 원격 터미널 연결 끊기 — 대각선으로 갈라진 플러그 두 쪽 사이를 넉넉히 벌려 '빠졌다'로 읽히게 한다.
+    ,unplug: '<path d="m3 21 3.4-3.4M21 3l-3.4 3.4"/><path d="m6.2 11.8 6 6-1.8 1.8a3.5 3.5 0 0 1-5 0l-1-1a3.5 3.5 0 0 1 0-5z"/><path d="m17.8 12.2-6-6 1.8-1.8a3.5 3.5 0 0 1 5 0l1 1a3.5 3.5 0 0 1 0 5z"/><path d="m7.7 13.3 2-2M10.7 16.3l2-2"/>'
     ,spellcheck: '<path d="m3 17 4.5-11 4.5 11M4.7 13h5.6"/><path d="m13.5 15 2.8 2.8L21 12"/>'
     ,pin: '<path d="M9 3.5h6l-1 5 3.5 3.5h-11L10 8.5z"/><path d="M12 12v8.5"/>'
     ,grip: '<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>'
@@ -124,6 +137,30 @@
     element.innerHTML = window.uiIcon(name);
     if (label) element.setAttribute("aria-label", label);
     return element;
+  };
+  // 저장 단추를 그림만 보이게 한다. 글자는 .run-save-label 칸에 남겨 CSS(.save-ico)로 감춘다 —
+  // documents.js 가 원본/사본 표시에 맞춰 그 칸만 갈아 끼우고, 이름은 title·aria-label 로 전한다.
+  window.setSaveIcon = function(button, label){
+    const name = label || String(button.textContent || "").trim() || "저장";
+    button.innerHTML = window.uiIcon("save");
+    const slot = document.createElement("span"); slot.className = "run-save-label"; slot.textContent = name;
+    button.append(slot);
+    button.classList.add("save-ico");
+    if (!button.title) button.title = name;
+    if (!button.getAttribute("aria-label")) button.setAttribute("aria-label", button.title);
+    return button;
+  };
+  // 실행 바 단추(자바·JS)를 [그림 + 감춘 글자 칸] 모양으로 만든다 — 파이썬 실행 바의 setBarIcon 과 같은 모양.
+  // 글자 칸은 .run-bar-icons 에서 감춰지고(⋯ 메뉴 안에서는 보인다) 이름은 aria-label·title 로 전한다.
+  // 글자를 바꿀 때도 이 함수로 칸째 갈아 끼운다 — textContent 로 쓰면 그림까지 지워진다.
+  window.setRunBarIcon = function(button, name, label){
+    const text = label || String(button.textContent || "").trim();
+    button.innerHTML = window.uiIcon(name);
+    const slot = document.createElement("span"); slot.className = "run-bar-label"; slot.textContent = text;
+    button.append(slot);
+    button.setAttribute("aria-label", text);
+    if (!button.title) button.title = text;
+    return button;
   };
   window.setUiIconLabel = function(element, name, label){
     element.innerHTML = window.uiIcon(name, label);

@@ -105,3 +105,45 @@ test("a late authentication response after cancellation is disconnected and neve
   assert.equal(h.calls.some(call=>call.op==="inspect"),false);assert.ok(h.calls.some(call=>call.op==="disconnect"&&call.values[1]==="peer-A"));
   h.ui.reset();
 });
+
+test("directory browser navigates literal paths, filters names and opens selected files through existing previews",async()=>{
+  const h=harness();h.ui.show();h.setDirectory("/home/student/");
+  input(h.ui.panel,"파일 연결 SSH 비밀번호").value="secret";
+  h.replies.list={path:"/home/student",entries:[
+    {name:"한글 $(literal).txt",kind:"file",size:"24",modified:100},
+    {name:"folder",kind:"directory",size:null,modified:null},
+    {name:".hidden",kind:"file",size:"0",modified:100}
+  ]};
+  await btn(h.ui.panel,"폴더 목록").onclick();
+  assert.equal(h.calls.find(call=>call.op==="list").values[2],"/home/student/");
+  assert.equal(h.calls.filter(call=>call.op==="connect").length,1);
+  const listing=find(h.ui.panel,node=>node.className==="ssh-file-list");
+  assert.equal(listing.children[0].children[0].textContent,"📁 folder");
+  const filter=find(h.ui.panel,node=>node.placeholder==="현재 목록에서 파일명 찾기");
+  filter.value="한글";filter.oninput();assert.equal(listing.children.length,1);
+  const file=listing.children[0].children[0];file.onclick();
+  assert.equal(input(h.ui.panel,"원격 파일 경로").value,"/home/student/한글 $(literal).txt");
+  assert.equal(listing.children[0].children[0],file,"selection must keep the element for double click");
+  await file.ondblclick();
+  assert.equal(h.calls.find(call=>call.op==="inspect").values[2],"/home/student/한글 $(literal).txt");
+  assert.equal(h.calls.filter(call=>call.op==="connect").length,1);
+  await btn(h.ui.panel,"목록 새로고침").onclick();
+  assert.equal(h.calls.filter(call=>call.op==="list").at(-1).values[2],"/home/student");
+  await btn(h.ui.panel,"상위 폴더").onclick();
+  assert.equal(h.calls.filter(call=>call.op==="list").at(-1).values[2],"/home");
+  h.ui.reset();
+});
+
+test("failed or cancelled listing preserves prior results and never replaces them with late data",async()=>{
+  const h=harness();h.ui.show();input(h.ui.panel,"원격 파일 경로").value="/home/student";
+  input(h.ui.panel,"파일 연결 SSH 비밀번호").value="secret";
+  h.replies.list={path:"/home/student",entries:[{name:"before.txt",kind:"file",size:"1"}]};
+  await btn(h.ui.panel,"폴더 목록").onclick();
+  const listing=find(h.ui.panel,node=>node.className==="ssh-file-list"), previous=listing.children[0];
+  h.replies.list={state:"failed",error:"ssh-file-permission"};await btn(h.ui.panel,"폴더 목록").onclick();
+  assert.equal(listing.children[0],previous);
+  h.gates.list=defer();h.replies.list={path:"/other",entries:[{name:"late.txt",kind:"file",size:"2"}]};
+  const done=btn(h.ui.panel,"폴더 목록").onclick();await settle();h.ui.cancel();h.gates.list.resolve();await done;
+  assert.equal(listing.children[0],previous);assert.equal(h.busy.at(-1),false);
+  assert.ok(h.calls.some(call=>call.op==="cancel"));h.ui.reset();
+});

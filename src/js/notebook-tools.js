@@ -86,6 +86,15 @@ function nbShowLocalPythonInstallGuide(ownerDoc){
   nbSetStatus(ownerDoc, "로컬 Python 설치 필요 · 설치 후 앱 다시 실행");
 }
 
+// 노트북 ▾ 메뉴 항목은 [그림 + 글자]. 글자가 바뀌는 항목도 이 함수로 칸째 갈아 끼운다 — textContent 로 쓰면 그림이 지워진다.
+function nbSetMenuItem(btn, icon, label){
+  if (!btn) return btn;
+  const text = typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
+  if (typeof window !== "undefined" && typeof window.setRunBarIcon === "function") window.setRunBarIcon(btn, icon, text);
+  else btn.textContent = text;
+  return btn;
+}
+
 function nbRefreshKernelModeUi(ownerDoc){
   if (!ownerDoc) return;
   // 자바스크립트 노트북에는 로컬 Python 이 해당 없다 — 관련 버튼을 감추고 커널 이름만 알린다.
@@ -113,14 +122,14 @@ function nbRefreshKernelModeUi(ownerDoc){
       : local
       ? "현재 셀 실행은 PC의 로컬 Python을 사용합니다. 누르면 브라우저 커널로 돌아갑니다."
       : "셀마다 PC의 로컬 Python으로 실행하고 변수·Selenium 브라우저 상태를 다음 셀까지 유지합니다.";
-    ownerDoc._nbLocalKernelBtn.textContent = typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
+    nbSetMenuItem(ownerDoc._nbLocalKernelBtn, local ? "arrowLeft" : "python", label);
     ownerDoc._nbLocalKernelBtn.title = typeof window !== "undefined" && typeof window.t === "function" ? window.t(title) : title;
     ownerDoc._nbLocalKernelBtn.classList.toggle("is-active", local);
     ownerDoc._nbLocalKernelBtn.classList.toggle("is-missing", missing);
   }
   if (ownerDoc._nbLocalRunBtn){
     const label = missing ? "로컬 Python 전체 실행 · 설치 필요" : "로컬 Python 전체 1회 실행";
-    ownerDoc._nbLocalRunBtn.textContent = typeof window !== "undefined" && typeof window.t === "function" ? window.t(label) : label;
+    nbSetMenuItem(ownerDoc._nbLocalRunBtn, "play", label);
     ownerDoc._nbLocalRunBtn.classList.toggle("is-missing", missing);
   }
 }

@@ -523,7 +523,7 @@ function mountBracketEditor(doc){
   const themeBtn = bracketButton("", "꾸미기 — 배경 템플릿·선 모양·카드 크기", "tier-btn", bracketSvg("palette"));
   const playBtn = bracketButton("", "다시 보기 — 지금까지 정한 경기를 1회전부터 차례로 올라가는 모습으로 다시 보여 줘요", "tier-btn bracket-play-btn", bracketUiIcon("play"));
   const undoBtn = bracketButton("", "실행 취소 (Ctrl+Z)", "tier-btn", bracketUiIcon("undo")), redoBtn = bracketButton("", "다시 실행 (Ctrl+Y)", "tier-btn", bracketUiIcon("redo"));
-  const saveBtn = bracketButton("저장하기", "대진표 저장 (Ctrl+S)", "tier-btn tier-primary run-save", bracketUiIcon("save"));
+  const saveBtn = bracketButton("저장하기", "대진표 저장 (Ctrl+S)", "tier-btn tier-primary run-save tier-ico save-ico", bracketUiIcon("save"));
   const moreBtn = bracketButton("", "더 보기 — 대진 크기·새로 뽑기·점수·움직임·그림으로 저장", "tier-btn", bracketUiIcon("more"));
   const actions = document.createElement("div"); actions.className = "bracket-actions";
   actions.append(addBtn, photoBtn, layoutBtn, themeBtn, playBtn, undoBtn, redoBtn, saveBtn, moreBtn);

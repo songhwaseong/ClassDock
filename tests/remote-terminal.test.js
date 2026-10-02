@@ -230,7 +230,7 @@ test("업로드는 파일 바이트를 HTTP에 싣지 않고 별도 scp 프로�
 });
 
 test("업로드 UI는 복수 파일·대상 디렉터리·재인증·진행률·취소를 제공한다", () => {
-  assert.match(ui, /button\("파일 업로드"/);
+  assert.match(ui, /iconButton\("파일 업로드", "export"/);
   assert.match(ui, /로컬 파일 \(최대 32개\)/);
   assert.match(ui, /원격 디렉터리/);
   assert.match(ui, /같은 이름의 파일은 덮어쓸 수 있습니다/);
@@ -389,7 +389,7 @@ test("SSH 종료 출력은 인증·시간 초과·거부·DNS·네트워크·지
 });
 
 test("종료된 터미널은 비밀번호만 비우고 재접속하며 무한 상태 재시도를 막는다", () => {
-  assert.match(ui, /retryButton = button\("재접속"/);
+  assert.match(ui, /retryButton = iconButton\("재접속"/);
   assert.match(ui, /passwordInput\.value = "";[\s\S]*showForm\(message[\s\S]*!privateKey\)/);
   assert.match(ui, /IP·포트·계정은 유지되고 비밀번호만 다시 입력합니다/);
   assert.match(ui, /접속 정보와 선택한 개인키를 유지합니다/);

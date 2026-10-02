@@ -900,6 +900,7 @@ function mountTimelineEditor(doc){
   const presentBtn = timelineButton("▶ 발표", "사건을 하나씩 크게 보여주기");
   const printBtn = timelineButton("🖨 인쇄", "세로 목록으로 인쇄하거나 PDF로 저장");
   const saveBtn = timelineButton("저장", "연대표 저장 (Ctrl+S)", "timeline-btn run-save timeline-save");
+  if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
   bar.append(titleInput, purposeSelect, addBtn, moveEarlierBtn, moveLaterBtn, undoBtn, redoBtn, modeSelect, zoomOut, zoomLabel, zoomIn, overviewBtn,
     listBtn, csvInBtn, imageFolderBtn, exportMenu, presentBtn, printBtn, saveBtn);
 

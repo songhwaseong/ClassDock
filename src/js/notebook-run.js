@@ -20,6 +20,13 @@ function renderNotebookView(model, host, ownerDoc){
   root.className = "nbv-doc";
 
   // ── 상단 툴바: 저장 + 변환(.py) 뷰 전환 ──
+  // 도구 줄 단추는 그림만 — 글자는 감춘 칸(.run-bar-label)에 남겨 화면 낭독·번역·글자를 갈아 끼우는 곳이 쓴다.
+  // ▾ 드롭다운 안의 항목은 글자 그대로 둔다.
+  const nbToolIcon = (btn, icon, label) => {
+    if (typeof window.setRunBarIcon !== "function") return btn;
+    window.setRunBarIcon(btn, icon, label); btn.classList.add("nbv-ico");
+    return btn;
+  };
   const bar = document.createElement("div");
   bar.className = "nbv-bar";
   const tag = document.createElement("span");
@@ -28,16 +35,16 @@ function renderNotebookView(model, host, ownerDoc){
   const saveBtn = document.createElement("button");
   saveBtn.type = "button"; saveBtn.className = "nbv-save"; saveBtn.textContent = "저장";
   saveBtn.title = "이 노트북을 .ipynb 로 저장 (Ctrl+S)";
-  saveBtn.addEventListener("click", () => saveNotebook(ownerDoc));
+  nbToolIcon(saveBtn, "save");
   const undoBtn = document.createElement("button");
   undoBtn.type = "button"; undoBtn.className = "nbv-history"; undoBtn.textContent = "↶";
   undoBtn.title = "마지막 셀 작업 되돌리기 (명령 모드 Ctrl+Z)";
-  undoBtn.setAttribute("aria-label", undoBtn.title);
+  nbToolIcon(undoBtn, "undo", "되돌리기"); undoBtn.setAttribute("aria-label", undoBtn.title);
   undoBtn.addEventListener("click", () => nbRestoreHistory(ownerDoc, "undo"));
   const redoBtn = document.createElement("button");
   redoBtn.type = "button"; redoBtn.className = "nbv-history"; redoBtn.textContent = "↷";
   redoBtn.title = "셀 작업 다시 실행 (명령 모드 Ctrl+Y)";
-  redoBtn.setAttribute("aria-label", redoBtn.title);
+  nbToolIcon(redoBtn, "redo", "다시 실행"); redoBtn.setAttribute("aria-label", redoBtn.title);
   redoBtn.addEventListener("click", () => nbRestoreHistory(ownerDoc, "redo"));
   // 실행/커널 버튼은 '전체 실행' 하나만 툴바에 두고, 재시작 계열은 옆 ▾ 드롭다운으로 묶는다.
   const runAllBtn = document.createElement("button");
@@ -46,6 +53,7 @@ function renderNotebookView(model, host, ownerDoc){
   runAllBtn.dataset.shortcutAction = "runNotebook";
   runAllBtn.dataset.shortcutTitle = "모든 코드 셀을 위에서부터 차례로 실행";
   runAllBtn.dataset.shortcutAria = "true";
+  nbToolIcon(runAllBtn, "stepForward");
   runAllBtn.addEventListener("click", () => {
     if (ownerDoc && (ownerDoc._nbBusy || ownerDoc._nbRunAllActive)) nbStopExecution(ownerDoc);
     else nbRunAll(ownerDoc);
@@ -84,6 +92,7 @@ function renderNotebookView(model, host, ownerDoc){
   runGroup.append(runAllBtn, runMore, runMenu);
   const jsLibraryBtn = document.createElement("button");
   jsLibraryBtn.type = "button"; jsLibraryBtn.className = "nbv-js-library run-pkg run-js-library"; jsLibraryBtn.textContent = "라이브러리";
+  nbToolIcon(jsLibraryBtn, "layers");
   const closeRunMenu = () => { if (!runMenu.hidden){ runMenu.hidden = true; runMore.setAttribute("aria-expanded", "false"); } };
   runMore.addEventListener("click", () => {
     const open = runMenu.hidden;
@@ -103,7 +112,7 @@ function renderNotebookView(model, host, ownerDoc){
   const clearBtn = document.createElement("button");
   clearBtn.type = "button"; clearBtn.className = "nbv-clear nbv-output-clear"; clearBtn.textContent = "출력 지우기";
   clearBtn.title = "노트북 실행 결과를 지웁니다(변수·상태는 유지)";
-  clearBtn.addEventListener("click", () => nbClearOutputs(ownerDoc));
+  nbToolIcon(clearBtn, "eraser");
   const collapseOutputsBtn = document.createElement("button");
   collapseOutputsBtn.type = "button"; collapseOutputsBtn.className = "nbv-run-menu-item";
   collapseOutputsBtn.textContent = "출력 접기"; collapseOutputsBtn.setAttribute("role", "menuitem");
@@ -159,22 +168,22 @@ function renderNotebookView(model, host, ownerDoc){
   const inkBtn = document.createElement("button");
   inkBtn.type = "button"; inkBtn.className = "nbv-ink-toggle"; inkBtn.textContent = "필기";
   inkBtn.title = "코드·마크다운·실행 결과 위에 셀별로 필기";
-  inkBtn.setAttribute("aria-pressed", "false");
+  inkBtn.setAttribute("aria-pressed", "false"); nbToolIcon(inkBtn, "pen");
   inkBtn.addEventListener("click", () => nbSetInkMode(ownerDoc, !ownerDoc._nbInkMode));
   const tocBtn = document.createElement("button");
   tocBtn.type = "button"; tocBtn.className = "nbv-toc-open"; tocBtn.textContent = "목차";
   tocBtn.title = "마크다운 제목에서 만든 노트북 목차";
-  tocBtn.setAttribute("aria-expanded", "false");
+  tocBtn.setAttribute("aria-expanded", "false"); nbToolIcon(tocBtn, "list");
   const findBtn = document.createElement("button");
   findBtn.type = "button"; findBtn.className = "nbv-find-open"; findBtn.textContent = "전체 찾기";
   findBtn.dataset.shortcutAction = "findInDocument";
   findBtn.dataset.shortcutTitle = "노트북 전체 셀에서 찾기·바꾸기";
   findBtn.dataset.shortcutAria = "true";
-  findBtn.title = "노트북 전체 셀에서 찾기·바꾸기 (Ctrl+F)";
+  findBtn.title = "노트북 전체 셀에서 찾기·바꾸기 (Ctrl+F)"; nbToolIcon(findBtn, "search");
   findBtn.addEventListener("click", () => nbOpenNotebookFind(ownerDoc));
   const dedupeBtn = document.createElement("button");
   dedupeBtn.type = "button"; dedupeBtn.className = "nbv-dedupe"; dedupeBtn.textContent = "중복 줄 삭제";
-  dedupeBtn.title = "선택한 줄에서 같은 내용을 한 줄만 남깁니다(공백·대소문자 구분)";
+  dedupeBtn.title = "선택한 줄에서 같은 내용을 한 줄만 남깁니다(공백·대소문자 구분)"; nbToolIcon(dedupeBtn, "delete");
   dedupeBtn.addEventListener("click", () => {
     const ctrl = (ownerDoc && ownerDoc._nbCtrls || [])[ownerDoc && ownerDoc._nbSelected];
     if (!ctrl || !["code", "markdown"].includes(ctrl.type)){
@@ -210,18 +219,18 @@ function renderNotebookView(model, host, ownerDoc){
   const fontDown = document.createElement("button");
   fontDown.type = "button"; fontDown.className = "nbv-font"; fontDown.textContent = "A−";
   fontDown.title = "노트북 글자 작게 — 코드 셀·마크다운 셀·결과 (Ctrl+−)";
-  fontDown.setAttribute("aria-label", fontDown.title);
+  nbToolIcon(fontDown, "textSmaller", "글자 작게"); fontDown.setAttribute("aria-label", fontDown.title);
   const fontUp = document.createElement("button");
   fontUp.type = "button"; fontUp.className = "nbv-font"; fontUp.textContent = "A+";
   fontUp.title = "노트북 글자 크게 — 코드 셀·마크다운 셀·결과 (Ctrl++)";
-  fontUp.setAttribute("aria-label", fontUp.title);
+  nbToolIcon(fontUp, "textLarger", "글자 크게"); fontUp.setAttribute("aria-label", fontUp.title);
   fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host));
   fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
   fontGroup.append(fontDown, fontUp);
   const exportBtn = document.createElement("button");
   exportBtn.type = "button"; exportBtn.className = "nbv-export"; exportBtn.textContent = ".py 내보내기";
   exportBtn.title = "현재 노트북을 파이썬(.py) 코드로 새 탭에 내보내기";
-  exportBtn.addEventListener("click", () => nbExportPy(ownerDoc));
+  nbToolIcon(exportBtn, "export");
   const pdfBtn = document.createElement("button");
   pdfBtn.type = "button"; pdfBtn.className = "nbv-export-pdf nbv-run-menu-item"; pdfBtn.textContent = "PDF로 저장";
   pdfBtn.setAttribute("role", "menuitem");
@@ -229,7 +238,7 @@ function renderNotebookView(model, host, ownerDoc){
   pdfBtn.addEventListener("click", () => nbExportImagePdf(ownerDoc));
   const helpBtn = document.createElement("button");
   helpBtn.type = "button"; helpBtn.className = "nbv-help-open"; helpBtn.textContent = "단축키";
-  helpBtn.title = "키보드 단축키 모아 보기";
+  helpBtn.title = "키보드 단축키 모아 보기"; nbToolIcon(helpBtn, "keyboard");
   helpBtn.addEventListener("click", () => nbToggleShortcutSheet(ownerDoc));
   const status = document.createElement("span");
   status.className = "nbv-status";
@@ -245,6 +254,17 @@ function renderNotebookView(model, host, ownerDoc){
     }
     if (typeof window !== "undefined" && window.mnNotebookMode) window.mnNotebookMode(false);
   });
+  // ▾ 메뉴 항목은 [그림 + 글자] — 글자가 바뀌는 항목(최신 상태로 실행 (N)·로컬 Python …)도 nbSetMenuItem 으로 칸째 갈아 끼운다.
+  if (typeof nbSetMenuItem === "function"){
+    nbSetMenuItem(restartRunBtn, "refresh", "재시작 후 실행");
+    nbSetMenuItem(restartBtn, "reset", "커널 재시작");
+    nbSetMenuItem(localKernelBtn, "python", "로컬 Python 확인 중…");
+    nbSetMenuItem(localRunBtn, "play", "로컬 Python 확인 중…");
+    nbSetMenuItem(collapseOutputsBtn, "chevronUp", "출력 접기");
+    nbSetMenuItem(expandOutputsBtn, "chevronDown", "출력 펼치기");
+    nbSetMenuItem(pdfBtn, "pdf", "PDF로 저장");
+    nbSetMenuItem(toPyBtn, "code", "변환(.py) 뷰");
+  }
   // 저장·내보내기 계열을 각각 한 덩어리(주 버튼 + ▾ 드롭다운)로 묶는다. 실행/출력 그룹과 같은 스타일·동작.
   const buildToolMenuGroup = (primaryBtn, moreTitle, menuItems, extraClass) => {
     const more = document.createElement("button");
@@ -528,7 +548,9 @@ function nbSetRunningUi(ownerDoc, running){
   const btn = ownerDoc._nbRunAllBtn;
   if (btn){
     const state = notebookExecutionControlState(running, ownerDoc._nbCancelRequested);
-    btn.textContent = nbT(state.label);
+    // 그림만 있는 단추면 그림과 감춘 글자 칸째 갈아 끼운다(전체 실행 ⏩ ↔ 중지 ■).
+    if (btn.classList.contains("nbv-ico") && typeof window.setRunBarIcon === "function") window.setRunBarIcon(btn, running ? "stop" : "stepForward", nbT(running ? "중지" : state.label));
+    else btn.textContent = nbT(state.label);
     btn.title = nbT(state.title);
     btn.disabled = state.disabled;
     btn.setAttribute("aria-label", btn.title);
@@ -611,10 +633,13 @@ function nbRefreshExecutionStates(ownerDoc){
   const btn = ownerDoc._nbFreshRunBtn;
   if (btn){
     btn.classList.toggle("has-stale", staleCount > 0);
-    btn.textContent = staleCount > 0
+    const label = staleCount > 0
       ? (typeof window !== "undefined" && typeof window.tf === "function"
         ? window.tf("최신 상태로 실행 ({n})", { n:staleCount }) : "최신 상태로 실행 (" + staleCount + ")")
       : (typeof window !== "undefined" && window.t ? window.t("재시작 후 실행") : "재시작 후 실행");
+    // 메뉴 항목은 [그림 + 글자] — 글자 칸째 갈아 끼워 그림을 지키고, 이미 번역한 글자라 번역은 한 번만.
+    if (typeof window !== "undefined" && typeof window.setRunBarIcon === "function") window.setRunBarIcon(btn, "refresh", label);
+    else btn.textContent = label;
     btn.title = nbT(staleCount > 0
       ? "커널을 비우고 모든 셀을 위에서부터 실행해 오래된 결과를 최신 상태로 맞춥니다."
       : "커널을 재시작한 뒤 모든 셀을 처음부터 실행");

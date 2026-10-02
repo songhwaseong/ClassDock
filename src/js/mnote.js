@@ -352,8 +352,9 @@ function mountMnoteEditor(doc){
   const saveBtn = document.createElement("button");
   saveBtn.type = "button";
   saveBtn.className = "run-save mnote-save";          // .run-save → 전역 Ctrl+S 가 이 버튼을 클릭한다
-  saveBtn.textContent = "💾 저장";
+  saveBtn.textContent = "저장";
   saveBtn.title = "블록 문서 저장 (Ctrl+S)";
+  if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
   saveBtn.dataset.shortcutAction = "saveCurrent";
   saveBtn.addEventListener("click", async () => {
     if (history) history.flush();               // 저장 시점을 독립된 되돌리기 기준점으로 남긴다.

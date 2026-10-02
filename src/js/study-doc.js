@@ -130,6 +130,7 @@ function mountStudyEditor(doc){
   let shuffleOn = false;                                   // 순서 섞기 — ⋯ 메뉴의 켬/끔 항목이다(도구막대 자리를 아끼려고 접었다)
   const learnBtn = studyButton("학습 시작", "고른 카드로 암기 학습 시작", "study-btn study-primary", "play");
   const saveBtn = studyButton("저장", "암기 카드 저장 (Ctrl+S)", "study-btn study-primary run-save", "save", "run-save-label");
+  saveBtn.classList.add("study-ico", "save-ico");          // 그림만 — 글자 칸은 documents.js 가 갈아 끼우므로 남겨 두고 CSS 로 감춘다
   // CSV 들이기·내보내기는 자주 쓰지 않는데 글자가 길어 도구막대를 한 줄 더 밀어낸다 — ⋯ 로 접는다.
   const moreBtn = studyButton("", "더 보기 — CSV 들이기·내보내기·순서 섞기", "study-btn", "more");
   bar.append(titleInput, addBtn, undoBtn, redoBtn, search, filter, learnBtn, saveBtn, moreBtn);

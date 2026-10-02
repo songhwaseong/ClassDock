@@ -703,7 +703,7 @@ function mountReplayPlayer(doc, host, opts){
       window.setUiIconLabel(button, icon, label);
     else if (typeof setUiIcon === "function") setUiIcon(button, icon, button.title);
   };
-  setIcon(saveBtn, "save", "저장");
+  setIcon(saveBtn, "save");                               // 저장은 그림만 — 이름은 title·aria-label 로 읽힌다
   bar.append(playBtn, restartBtn, seek, timeLabel, speedSel);
   let sound = null, soundBtn = null;
   const soundEnd = () => (opts.audio && lessonFinite(opts.audio.duration) && opts.audio.duration > 0) ? opts.audio.duration

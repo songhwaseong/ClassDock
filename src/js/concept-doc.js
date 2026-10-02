@@ -684,6 +684,7 @@ function mountConceptEditor(doc){
   const zoomTools = document.createElement("div"); zoomTools.className = "concept-zoom-tools"; const zoomOutBtn = conceptButton("−", "축소 (Ctrl+마우스 휠 아래)"), zoomResetBtn = conceptButton("100%", "배율 100%로 되돌리고 관계도를 화면 가운데로 (Home 키는 화면에 맞춤)"), zoomInBtn = conceptButton("＋", "확대 (Ctrl+마우스 휠 위)"); zoomTools.append(zoomOutBtn, zoomResetBtn, zoomInBtn);
   const tableBtn = conceptButton("표·개요", "엑셀·CSV 표나 개요 글에서 카드 가져오기 · 관계 CSV·개요 내보내기");
   const presentBtn = conceptButton("▶ 큰 카드", "개념을 하나씩 크게 보여주기"), buildPresentBtn = conceptButton("전개 발표", "Space 키로 카드와 관계를 순서대로 공개", "concept-btn concept-build-start"), printBtn = conceptButton("🖨 인쇄", "관계도를 인쇄하거나 PDF로 저장"), saveBtn = conceptButton("저장", "개념 관계도 저장 (Ctrl+S)", "concept-btn concept-primary run-save");
+  if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
   const edgePicked = document.createElement("div"); edgePicked.className = "concept-edge-picked"; edgePicked.hidden = true; edgePicked.setAttribute("aria-live", "polite");
   const edgePickedCount = document.createElement("span"), edgePickedClear = conceptButton("선택 해제", "고른 관계선을 모두 놓기 (Esc)", "concept-edge-picked-clear");
   const edgeWeightBtn = conceptButton("강도 설정", "선택한 관계선의 강도를 한꺼번에 변경", "concept-edge-picked-weight");

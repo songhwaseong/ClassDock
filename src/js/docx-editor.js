@@ -607,8 +607,9 @@ const MNDocxEditor = (() => {
     redoBtn.title = "다시 실행 (Ctrl+Y)"; redoBtn.hidden = true;
     // class="run-save" 로 두면 Ctrl+S(saveCurrent)가 app.js 의 공통 경로로 이 버튼을 눌러 준다.
     const saveBtn = document.createElement("button");
-    saveBtn.type = "button"; saveBtn.className = "docx-editmode-btn run-save"; saveBtn.textContent = "💾 저장";
+    saveBtn.type = "button"; saveBtn.className = "docx-editmode-btn run-save"; saveBtn.textContent = "저장";
     saveBtn.title = "고친 문단을 원래 파일에 저장 (Ctrl+S)"; saveBtn.hidden = true;
+    if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
     const status = document.createElement("span");
     status.className = "docx-editor-status";
     status.setAttribute("aria-live", "polite");

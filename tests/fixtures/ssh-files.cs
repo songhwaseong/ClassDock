@@ -18,6 +18,8 @@ static partial class ClassDockSshTerminal
         public bool WrongId, Changed, Special, BadPacket, Denied;
         public long GreatestOffset;
         public int Reads, Opens;
+        public int DirectoryReads, DirectoryCloses;
+        public bool LargeDirectory, EmptyDirectory, MalformedDirectory;
         public Action OnRead;
         public int MaxRead = 65536;
         readonly MemoryStream pending = new MemoryStream();
@@ -50,6 +52,23 @@ static partial class ClassDockSshTerminal
                 else if(op==16){Require(incoming.Text().StartsWith("/"),"absolute path");answer.Byte(104);answer.UInt(id);answer.UInt(1);answer.Text("/resolved/한글 'file'.txt");answer.Text("");Attrs(answer);}
                 else if(op==17 || op==8){if(op==17)incoming.Text();else incoming.Bytes();answer.Byte(105);answer.UInt(id);Attrs(answer);}
                 else if(op==3){incoming.Text();Require(incoming.UInt()==1,"open must be read-only");Require(incoming.UInt()==0,"no mutation attributes");Opens++;answer.Byte(102);answer.UInt(id);answer.Bytes(new byte[]{7});}
+                else if(op==11){incoming.Text();DirectoryReads=0;answer.Byte(102);answer.UInt(id);answer.Bytes(new byte[]{8});}
+                else if(op==12)
+                {
+                    incoming.Bytes();DirectoryReads++;
+                    if(EmptyDirectory || (!LargeDirectory && DirectoryReads>1))Status(answer,1,id);
+                    else
+                    {
+                        string[] names=LargeDirectory?new string[100]:new string[]{".","..","한글 'folder'","$(literal).txt","link","bad/name","bad\nname","unknown"};
+                        answer.Byte(104);answer.UInt(id);answer.UInt(MalformedDirectory?20001u:(uint)names.Length);
+                        for(int n=0;n<names.Length;n++)
+                        {
+                            answer.Text(LargeDirectory?"file-"+DirectoryReads+"-"+n:names[n]);answer.Text("not parsed");
+                            if(!LargeDirectory && n==7)answer.UInt(0);
+                            else {answer.UInt(13);answer.Long(12);answer.UInt(n==2?0x41edu:n==4?0xa1ffu:0x81a4u);answer.UInt(100);answer.UInt(100);}
+                        }
+                    }
+                }
                 else if(op==5)
                 {
                     incoming.Bytes();long offset=incoming.Long();uint size=incoming.UInt();GreatestOffset=Math.Max(GreatestOffset,offset);Reads++;
@@ -58,7 +77,7 @@ static partial class ClassDockSshTerminal
                     if(offset>=Content.LongLength)Status(answer,1,id);
                     else{int length=(int)Math.Min(Math.Min(size,MaxRead),Content.LongLength-offset);byte[] bytes=new byte[length];Buffer.BlockCopy(Content,(int)offset,bytes,0,length);answer.Byte(103);answer.UInt(id);answer.Bytes(bytes);}
                 }
-                else if(op==4){incoming.Bytes();Status(answer,0,id);}
+                else if(op==4){byte[] closed=incoming.Bytes();if(closed[0]==8)DirectoryCloses++;Status(answer,0,id);}
                 else throw new Exception("Unexpected write-capable SFTP command: "+op);
             }
             byte[] packet=answer.Array();SftpPacket frame=new SftpPacket();frame.UInt(BadPacket ? 2000000u : (uint)packet.Length);
@@ -138,6 +157,22 @@ static partial class ClassDockSshTerminal
         byte[] bytes=new byte[2*1024*1024+17];for(int n=0;n<bytes.Length;n++)bytes[n]=(byte)('a'+n%26);
         FakeSftp wire=new FakeSftp(bytes);FilePeer peer=TestPeer(session.Id,wire);RemoteFile file=TestRemote(peer,wire);
         Require(peer.Reader.RealPath("/literal/$(echo x)")=="/resolved/한글 'file'.txt","UTF-8 canonical path");
+        bool limited; int skipped;
+        List<DirectoryEntry> listing=peer.Reader.ListDirectory("/folder",delegate{},out limited,out skipped);
+        Require(listing.Count==4 && !limited && skipped==2,"listing filters dot entries and unsafe names");
+        Require(listing[0].Name=="한글 'folder'" && (listing[0].Attributes.Mode&0xf000)==0x4000,"directory name and type");
+        Require(listing[1].Name=="$(literal).txt" && listing[3].Attributes.Flags==0,"literal names and optional attributes");
+        Require(wire.DirectoryCloses==1,"directory handle is closed");
+        wire.LargeDirectory=true;listing=peer.Reader.ListDirectory("/large",delegate{},out limited,out skipped);
+        Require(limited && listing.Count==2000 && wire.DirectoryReads==20,"directory work and response are bounded");wire.LargeDirectory=false;
+        wire.EmptyDirectory=true;listing=peer.Reader.ListDirectory("/empty",delegate{},out limited,out skipped);
+        Require(listing.Count==0 && !limited,"empty directory");wire.EmptyDirectory=false;
+        wire.MalformedDirectory=true;
+        Fails(delegate{bool l;int s;peer.Reader.ListDirectory("/malformed",delegate{},out l,out s);},"protocol");wire.MalformedDirectory=false;
+        wire.Denied=true;Fails(delegate{bool l;int s;peer.Reader.ListDirectory("/denied",delegate{},out l,out s);},"permission");wire.Denied=false;
+        int previousCloses=wire.DirectoryCloses;
+        Fails(delegate{bool l;int s;peer.Reader.ListDirectory("/cancel",delegate{throw FileError("cancelled");},out l,out s);},"cancelled");
+        Require(wire.DirectoryCloses==previousCloses+1,"cancelled listing closes its handle");
         byte[] handle=peer.Reader.Open(file.Path);
         Require(peer.Reader.Read(handle,(long)uint.MaxValue+5,16)==null,"large offset EOF");
         Require(wire.GreatestOffset==(long)uint.MaxValue+5,"64-bit offset must not wrap");peer.Reader.Close(handle);
@@ -192,7 +227,17 @@ static partial class ClassDockSshTerminal
         string inspected=FileJobs[requestId].FileId;FileJob forged=new FileJob();forged.Id=Guid.NewGuid().ToString("N");forged.Op="save-pick";forged.State="selected";
         forged.FileId=inspected;forged.PeerId="other-peer";forged.Destination=Path.Combine(temp,"forged.txt");FileJobs[forged.Id]=forged;
         Fails(delegate{FileRequest("download",TestBundle(Guid.NewGuid().ToString("N"),inspected,forged.Id));},"destination");
-        FileJobs.Remove(forged.Id);ShutdownFiles();
+        FileJobs.Remove(forged.Id);
+        string listId=Guid.NewGuid().ToString("N");
+        FileRequest("list",TestBundle(listId,peer.Id,"/folder"));
+        deadline=DateTime.UtcNow.AddSeconds(3);
+        while(!FileJobs[listId].Done && DateTime.UtcNow<deadline)Thread.Sleep(1);
+        Require(FileJobs[listId].State=="complete","directory job completes");
+        string listingJson=FileStatus(listId);
+        Require(listingJson.Contains("\"kind\":\"directory\"") && listingJson.Contains("\"modified\":null"),"listing metadata serialized");
+        FileRequest("release",TestBundle(Guid.NewGuid().ToString("N"),listId));
+        Require(FileJobs[listId].Entries==null,"released listing frees its entries");
+        ShutdownFiles();
         Sessions.Remove(session.Id);
     }
 }

@@ -675,6 +675,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   // 글자는 .run-save-label 칸에 담는다 — documents.js 가 이 칸만 갈아 끼워야 아이콘이 살아남는다.
   const saveBtn = setBtnIcon(mkBtn("", "현재 이미지를 " + fmtLabel(saveFormat) + "로 저장",
     () => downloadEditedImage(state, file, saveFormat, ownerDoc), "run-save"), "save", "저장", "run-save-label");
+  saveBtn.classList.add("img-ico", "save-ico");            // 그림만 — 글자 칸은 남겨 두고 CSS 로 감춘다
   const altFormatBtn = mkIconBtn("save", fmtLabel(altFormat) + "로 저장", "현재 이미지를 " + fmtLabel(altFormat) + "로 저장",
     () => downloadEditedImage(state, file, altFormat, ownerDoc), "img-tool-altfmt");
   const memoBtn = mkIconBtn("camera", "메모로 보내기", "현재 이미지를 메모에 넣기 — 자르기 영역을 선택해 두었으면 그 부분만",

@@ -1,9 +1,11 @@
 "use strict";
 
 // EXE 전용 SSH 원격 터미널. Windows OpenSSH + ConPTY의 바이트 스트림을 xterm.js에 연결한다.
-// 저장하는 값은 호스트·포트·계정·인증 방식뿐이며 비밀번호·키 암호·개인키 경로는 브라우저 저장소에 넣지 않는다.
+// 접속 정보와 즐겨찾기 이름·그룹만 저장하며 비밀번호·키 암호·개인키 경로는 브라우저 저장소에 넣지 않는다.
 const MNRemoteTerminal = (() => {
   const PROFILE_KEY = "classdockSshProfileV1";
+  const FAVORITES_KEY = "classdockSshFavoritesV1";
+  const RECENTS_KEY = "classdockSshRecentsV1";
   const DOCK_KEY = "classdockSshDockV3";        // 작업공간 id -> 도킹 배치
   const LEGACY_DOCK_KEY = "classdockSshDockV2"; // 작업공간 구분이 없던 단일 배치
   const FONT_KEY = "classdockSshFontV1";
@@ -174,6 +176,56 @@ const MNRemoteTerminal = (() => {
     } catch(_){ return {}; }
   };
 
+  // Whitelist persisted fields: credentials and key paths must never enter these collections.
+  const cleanProfile = (value) => {
+    if (!value || typeof value !== "object") return null;
+    const host = String(value.host || "").trim().slice(0,253), user = String(value.user || "").trim().slice(0,128);
+    const port = Number(value.port || 22);
+    if (!host || !user || /[\s\u0000-\u001f]/.test(host) || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+    return { host, user, port:String(port), authentication:value.authentication === "private-key" ? "private-key" : "password" };
+  };
+  const profileIdentity = (profile) => JSON.stringify([profile.host,profile.port,profile.user,profile.authentication]);
+  const readProfiles = (key) => {
+    try {
+      const values = JSON.parse(localStorage.getItem(key) || "[]");
+      if (!Array.isArray(values)) return [];
+      return values.slice(0,100).map(value => {
+        const profile = cleanProfile(value);
+        return profile && { ...profile, id:String(value.id || "").slice(0,80), name:String(value.name || "").slice(0,80), group:String(value.group || "").slice(0,40) };
+      }).filter(Boolean);
+    } catch(_){ return []; }
+  };
+
+  // Read rendered cells, not raw escape sequences. Coordinates include wide/combined characters
+  // and physical rows so a match spanning a soft wrap selects the right cells.
+  const terminalSnapshot = (term, query="") => {
+    const buffer = term?.buffer?.active, lines = [], matches = [];
+    let text = "", starts = [], ends = [], limited = false;
+    const flush = () => {
+      lines.push(text);
+      if(query) for(let at=text.indexOf(query);at>=0;at=text.indexOf(query,at+Math.max(1,query.length))){
+        if(matches.length>=5000){limited=true;break;}
+        const start=starts[at], end=ends[at+query.length-1];
+        matches.push({row:Math.floor(start/term.cols),column:start%term.cols,length:end-start});
+      }
+      text="";starts=[];ends=[];
+    };
+    if(!buffer)return {text:"",matches,limited};
+    for(let y=0;y<buffer.length;y++){
+      const line=buffer.getLine(y);if(!line)continue;
+      if(y&&!line.isWrapped)flush();
+      let last=term.cols-1;
+      while(last>=0){const cell=line.getCell(last);if(cell?.getChars() || cell?.getWidth()===0)break;last--;}
+      for(let x=0;x<=last;x++){
+        const cell=line.getCell(x), width=cell?.getWidth();if(!width)continue;
+        const chars=cell.getChars()||" ";text+=chars;
+        if(query)for(let n=0;n<chars.length;n++){starts.push(y*term.cols+x);ends.push(y*term.cols+x+width);}
+      }
+    }
+    flush();while(lines.length&&lines[lines.length-1]==="")lines.pop();
+    return {text:lines.join("\n"),matches,limited};
+  };
+
   const loadFontState = () => {
     try {
       const value = JSON.parse(localStorage.getItem(FONT_KEY) || "null");
@@ -217,6 +269,8 @@ const MNRemoteTerminal = (() => {
     let uploadCloseButton = null, uploadProgress = null, uploadStatus = null;
     let fontSelect = null, fontSizeOutput = null, lineHeightButton = null;
     let terminal = null, sessionId = "", outputOffset = 0, generation = 0, inputQueue = [];
+    let profilesRefresh = () => {}, profileControls = [];
+    let searchPanel = null, searchInput = null, searchStatus = null, searchIndex = -1, searchQuery = "";
     let inputTimer = 0, inputSending = false, resizeObserver = null, resizeTimer = 0;
     let layoutFrame = 0;
     let currentCols = 100, currentRows = 30;
@@ -242,11 +296,15 @@ const MNRemoteTerminal = (() => {
 
     const storeProfile = () => {
       try {
-        if (!rememberInput.checked) { localStorage.removeItem(PROFILE_KEY); return; }
-        localStorage.setItem(PROFILE_KEY, JSON.stringify({
+        if (!rememberInput.checked) { localStorage.removeItem(PROFILE_KEY); localStorage.removeItem(RECENTS_KEY); return; }
+        const profile = cleanProfile({
           host:hostInput.value.trim(), port:portInput.value.trim(), user:userInput.value.trim(),
           authentication:authMethodInput.value === "private-key" ? "private-key" : "password"
-        }));
+        });
+        if(!profile)return;
+        localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+        const recents=readProfiles(RECENTS_KEY).filter(row=>profileIdentity(row)!==profileIdentity(profile));
+        localStorage.setItem(RECENTS_KEY,JSON.stringify([profile,...recents].slice(0,10)));
       } catch(_){}
     };
 
@@ -359,6 +417,30 @@ const MNRemoteTerminal = (() => {
 
     const button = (copy, className="btn") => {
       const el = document.createElement("button"); el.type = "button"; el.className = className; el.textContent = copy; return el;
+    };
+    // 아이콘만 보이는 단추. 이름은 숨긴 글자로 남겨 화면 낭독기·이름 풍선·글자로 단추를 찾는 시험이 그대로 쓴다.
+    const iconButton = (copy, icon, className, label=copy) => {
+      const el = button(copy, className); el.setAttribute("aria-label", label);
+      if (typeof window.uiIcon === "function") el.innerHTML = window.uiIcon(icon) + '<span class="ssh-tool-label">' + label + "</span>";
+      return el;
+    };
+    // 연결 화면의 보조 단추 — 그림만, 이름은 숨긴 글자·title 풍선으로.
+    const formIconButton = (copy, icon, label=copy, extra="", base="btn") => {
+      const el = iconButton(copy, icon, base + " ssh-form-ico" + (extra ? " " + extra : ""), label); el.title = label; return el;
+    };
+    // 접속 단추도 그림만 — "확인 중…"은 그림(시계)과 title·aria-label 로 알리고, 글자는 숨긴 칸에 남긴다.
+    const setConnectLabel = (copy, busy=false) => {
+      connectButton.title = copy === "접속" ? "SSH 서버에 접속" : copy;
+      connectButton.setAttribute("aria-label", connectButton.title);
+      if (typeof window.uiIcon !== "function") { connectButton.textContent = copy; return; }
+      connectButton.innerHTML = window.uiIcon(busy ? "clock" : "terminal") + '<span class="ssh-tool-label"></span>';
+      const slot = connectButton.querySelector(".ssh-tool-label");
+      if (slot) slot.textContent = copy;
+    };
+    const setIconLabel = (el, copy) => {
+      const label = el.querySelector && el.querySelector(".ssh-tool-label");
+      if (label) label.textContent = copy; else el.textContent = copy;
+      el.setAttribute("aria-label", copy);
     };
 
     const formatBytes = (value) => {
@@ -664,9 +746,9 @@ const MNRemoteTerminal = (() => {
       const subtitle = document.createElement("p"); subtitle.className = "sub"; subtitle.textContent = "IP 주소와 Linux 계정으로 SSH 서버에 접속합니다.";
       headingCopy.append(title, subtitle);
       const headingActions = document.createElement("div"); headingActions.className = "ssh-heading-actions";
-      const formSwap = button("⇄", "btn ssh-dock-swap"); formSwap.title = "터미널 좌우 위치 교환"; formSwap.setAttribute("aria-label", "터미널 좌우 위치 교환");
-      const formCollapse = button("접기", "btn ssh-dock-collapse"); formCollapse.title = "연결 화면 접기";
-      const formClose = button("닫기", "btn ssh-close"); formClose.setAttribute("aria-label", "원격 터미널 닫기");
+      const formSwap = iconButton("⇄", "arrowBoth", "ssh-head-btn ssh-dock-swap", "터미널 좌우 위치 교환"); formSwap.title = "터미널 좌우 위치 교환";
+      const formCollapse = iconButton("접기", "chevronRight", "ssh-head-btn ssh-dock-collapse", "연결 화면 접기"); formCollapse.title = "연결 화면 접기";
+      const formClose = iconButton("닫기", "close", "ssh-head-btn ssh-close", "원격 터미널 닫기"); formClose.title = "원격 터미널 닫기";
       headingActions.append(formSwap, formCollapse, formClose);
       heading.append(headingCopy, headingActions);
 
@@ -682,12 +764,78 @@ const MNRemoteTerminal = (() => {
       credentialLabel = document.createElement("span"); credentialLabel.textContent = "비밀번호";
       passwordWrap.append(credentialLabel, passwordInput);
       const keyPicker = document.createElement("div"); keyPicker.className = "ssh-key-picker";
-      keyButton = button("개인키 선택…", "btn");
+      keyButton = formIconButton("개인키 선택…", "key", "개인키 파일 선택");
       keyNameEl = document.createElement("span"); keyNameEl.textContent = "선택된 키 없음"; keyNameEl.title = "개인키 경로는 브라우저에 전달하거나 저장하지 않습니다.";
       keyPicker.append(keyButton, keyNameEl);
       keyField = field("개인키 파일", keyPicker); keyField.classList.add("ssh-key-field"); keyField.hidden = true;
       const grid = document.createElement("div"); grid.className = "ssh-connect-grid";
       grid.append(field("호스트", hostInput), field("포트", portInput), field("계정", userInput), field("인증 방식", authMethodInput), keyField, passwordWrap);
+
+      const profiles = document.createElement("section"); profiles.className = "ssh-profiles";
+      const profilesTitle = document.createElement("strong"); profilesTitle.textContent = "서버 즐겨찾기";
+      const profileSearch = document.createElement("input"); profileSearch.type = "search"; profileSearch.placeholder = "이름·그룹·주소 검색";profileSearch.setAttribute("aria-label",profileSearch.placeholder);
+      const favorites = document.createElement("select"); favorites.setAttribute("aria-label","서버 즐겨찾기");
+      const favoriteName = document.createElement("input");favoriteName.maxLength=80;favoriteName.placeholder="예: 실습 서버";
+      const favoriteGroup = document.createElement("input");favoriteGroup.maxLength=40;favoriteGroup.placeholder="예: 학교";
+      const profileFields = document.createElement("div");profileFields.className="ssh-profile-fields";
+      profileFields.append(field("즐겨찾기 이름",favoriteName),field("그룹 (선택)",favoriteGroup));
+      const profileActions = document.createElement("div");profileActions.className="ssh-profile-actions";
+      const saveFavorite=formIconButton("즐겨찾기 저장","bookmark"), deleteFavorite=formIconButton("선택 삭제","delete","선택한 즐겨찾기 삭제","is-danger");
+      const recentSelect=document.createElement("select");recentSelect.setAttribute("aria-label","최근 접속 요청");
+      const clearRecents=formIconButton("최근 기록 지우기","eraser");
+      profileActions.append(saveFavorite,deleteFavorite,clearRecents);
+      profiles.append(profilesTitle,profileSearch,favorites,profileFields,profileActions,field("최근 접속 요청",recentSelect));
+      profiles.addEventListener("keydown",event=>{if(event.key==="Enter"&&event.target.tagName!=="BUTTON")event.preventDefault();});
+      profileControls=[profileSearch,favorites,favoriteName,favoriteGroup,saveFavorite,deleteFavorite,recentSelect,clearRecents];
+      const option=(select,value,copy)=>{const item=document.createElement("option");item.value=value;item.textContent=copy;select.append(item);};
+      profilesRefresh=()=>{
+        const selected=favorites.value, term=profileSearch.value.toLocaleLowerCase();
+        favorites.replaceChildren();option(favorites,"","새 즐겨찾기 / 저장한 서버 선택");
+        const rows=readProfiles(FAVORITES_KEY).filter(row=>(row.name+" "+row.group+" "+row.host+" "+row.user).toLocaleLowerCase().includes(term))
+          .sort((a,b)=>a.group.localeCompare(b.group)||a.name.localeCompare(b.name));
+        rows.forEach(row=>option(favorites,row.id,(row.group?"["+row.group+"] ":"")+(row.name||row.host)+" · "+row.user+"@"+row.host+":"+row.port));
+        favorites.value=rows.some(row=>row.id===selected)?selected:"";
+        recentSelect.replaceChildren();option(recentSelect,"","최근 10개 접속 요청");
+        readProfiles(RECENTS_KEY).slice(0,10).forEach((row,index)=>option(recentSelect,String(index),row.user+"@"+row.host+":"+row.port+" · "+(row.authentication==="private-key"?"개인키":"비밀번호")));
+        recentSelect.value="";
+      };
+      const useProfile=row=>{
+        if(!row||connectButton.disabled||keyPicking)return;
+        hostInput.value=row.host;portInput.value=row.port;userInput.value=row.user;authMethodInput.value=row.authentication;
+        passwordInput.value="";selectedKeyId="";selectedKeyName="";keyPickGeneration++;keyNameEl.textContent="선택된 키 없음";updateAuthenticationUi();
+        statusEl.textContent="접속 정보를 불러왔습니다. 인증 정보를 입력한 뒤 접속하세요.";statusEl.classList.remove("error");
+      };
+      favorites.addEventListener("change",()=>{
+        const row=readProfiles(FAVORITES_KEY).find(item=>item.id===favorites.value);
+        favoriteName.value=row?.name||"";favoriteGroup.value=row?.group||"";useProfile(row);
+      });
+      recentSelect.addEventListener("change",()=>{
+        if(recentSelect.value==="")return;
+        favorites.value="";favoriteName.value="";favoriteGroup.value="";useProfile(readProfiles(RECENTS_KEY)[Number(recentSelect.value)]);
+      });
+      profileSearch.addEventListener("input",profilesRefresh);
+      saveFavorite.addEventListener("click",()=>{
+        const profile=cleanProfile({host:hostInput.value,port:portInput.value,user:userInput.value,authentication:authMethodInput.value});
+        if(!profile){statusEl.textContent="호스트·계정과 올바른 포트를 입력하세요.";statusEl.classList.add("error");return;}
+        const rows=readProfiles(FAVORITES_KEY), existing=rows.find(row=>row.id===favorites.value);
+        if(!existing&&rows.length>=100){statusEl.textContent="즐겨찾기는 최대 100개입니다. 사용하지 않는 항목을 삭제하세요.";return;}
+        const id=existing?.id||Date.now().toString(36)+Math.random().toString(36).slice(2);
+        const row={...profile,id,name:favoriteName.value.trim()||profile.host,group:favoriteGroup.value.trim()};
+        try{
+          localStorage.setItem(FAVORITES_KEY,JSON.stringify([...rows.filter(item=>item.id!==id),row]));
+          profileSearch.value="";profilesRefresh();favorites.value=id;favoriteName.value=row.name;
+          statusEl.textContent="즐겨찾기를 저장했습니다. 비밀번호·키 암호·개인키 경로는 저장하지 않습니다.";statusEl.classList.remove("error");
+        }catch(_){statusEl.textContent="즐겨찾기를 저장하지 못했습니다. 브라우저 저장 공간을 확인하세요.";statusEl.classList.add("error");}
+      });
+      deleteFavorite.addEventListener("click",()=>{
+        if(!favorites.value)return;
+        try{localStorage.setItem(FAVORITES_KEY,JSON.stringify(readProfiles(FAVORITES_KEY).filter(row=>row.id!==favorites.value)));favorites.value="";favoriteName.value="";favoriteGroup.value="";profilesRefresh();statusEl.textContent="즐겨찾기를 삭제했습니다.";}
+        catch(_){statusEl.textContent="즐겨찾기를 삭제하지 못했습니다.";}
+      });
+      clearRecents.addEventListener("click",()=>{
+        try{localStorage.removeItem(RECENTS_KEY);localStorage.removeItem(PROFILE_KEY);profilesRefresh();statusEl.textContent="최근 접속 기록을 지웠습니다.";}
+        catch(_){statusEl.textContent="최근 접속 기록을 지우지 못했습니다.";}
+      });
 
       const remember = document.createElement("label"); remember.className = "settings-check ssh-remember";
       rememberInput = document.createElement("input"); rememberInput.type = "checkbox"; rememberInput.checked = true;
@@ -698,9 +846,10 @@ const MNRemoteTerminal = (() => {
       statusEl = document.createElement("div"); statusEl.className = "ssh-connect-status"; statusEl.setAttribute("role", "status"); statusEl.setAttribute("aria-live", "polite");
       const actions = document.createElement("div"); actions.className = "modal-actions";
       const spacer = document.createElement("span"); spacer.className = "spacer";
-      connectButton = button("접속", "btn primary"); connectButton.type = "submit";
+      connectButton = button("접속", "btn primary ssh-connect-btn ssh-form-ico"); connectButton.type = "submit";
+      setConnectLabel("접속");
       actions.append(spacer, connectButton);
-      formView.append(heading, grid, remember, security, statusEl, actions);
+      formView.append(heading, profiles, grid, remember, security, statusEl, actions);
 
       terminalView = document.createElement("section"); terminalView.className = "ssh-session-view"; terminalView.hidden = true;
       const terminalHead = document.createElement("div"); terminalHead.className = "ssh-session-head";
@@ -708,18 +857,25 @@ const MNRemoteTerminal = (() => {
       terminalTitle = document.createElement("strong"); terminalTitle.textContent = "SSH";
       terminalStatus = document.createElement("span"); terminalStatus.className = "ssh-session-status"; terminalStatus.textContent = "접속 준비";
       terminalIdentity.append(terminalTitle, terminalStatus);
+      // 머리에는 이름과 창 조작(접기·닫기)만 두고, 작업 도구는 터미널 옆 세로 레일에 아이콘으로 모은다.
       const terminalActions = document.createElement("div"); terminalActions.className = "ssh-session-actions";
-      const terminalSwap = button("⇄", "btn ssh-dock-swap"); terminalSwap.title = "터미널 좌우 위치 교환"; terminalSwap.setAttribute("aria-label", "터미널 좌우 위치 교환");
-      const terminalCollapse = button("접기", "btn ssh-dock-collapse"); terminalCollapse.title = "SSH 연결을 유지하고 터미널 접기";
-      uploadButton = button("파일 업로드", "btn ssh-upload-open"); uploadButton.title = "Windows 파일을 원격 서버로 업로드";
-      filesButton = button("원격 파일", "btn ssh-files-open"); filesButton.title = "원격 파일 미리보기와 다운로드";
-      fileCancelButton = button("다운로드 취소", "btn danger"); fileCancelButton.hidden = true;
-      disconnectButton = button("연결 끊기", "btn ssh-disconnect");
-      retryButton = button("재접속", "btn primary ssh-retry"); retryButton.hidden = true;
-      const changeServer = button("접속 정보", "btn ssh-reconnect");
-      const terminalClose = button("닫기", "btn primary ssh-terminal-close");
-      terminalActions.append(terminalSwap, terminalCollapse, uploadButton, filesButton, fileCancelButton, disconnectButton, retryButton, changeServer, terminalClose);
-      const fontControls = document.createElement("div"); fontControls.className = "ssh-font-controls"; fontControls.setAttribute("role", "group"); fontControls.setAttribute("aria-label", "터미널 글꼴 설정");
+      const terminalCollapse = iconButton("접기", "chevronRight", "ssh-head-btn ssh-dock-collapse"); terminalCollapse.title = "SSH 연결을 유지하고 터미널 접기";
+      const terminalClose = iconButton("닫기", "close", "ssh-head-btn ssh-terminal-close"); terminalClose.title = "원격 터미널 닫기";
+      terminalActions.append(terminalCollapse, terminalClose);
+      const toolRail = document.createElement("div"); toolRail.className = "ssh-session-rail";
+      toolRail.setAttribute("role", "toolbar"); toolRail.setAttribute("aria-orientation", "vertical"); toolRail.setAttribute("aria-label", "원격 터미널 도구");
+      const railSeparator = () => { const el = document.createElement("span"); el.className = "ssh-rail-sep"; el.setAttribute("aria-hidden", "true"); return el; };
+      uploadButton = iconButton("파일 업로드", "export", "ssh-rail-btn ssh-upload-open");
+      filesButton = iconButton("원격 파일", "folder", "ssh-rail-btn ssh-files-open");
+      fileCancelButton = iconButton("다운로드 취소", "close", "ssh-rail-btn danger"); fileCancelButton.hidden = true;
+      const searchButton = iconButton("출력 찾기", "search", "ssh-rail-btn"), saveOutput = iconButton("출력 저장", "save", "ssh-rail-btn", "출력을 텍스트 파일로 저장");
+      const fontButton = iconButton("글꼴", "text", "ssh-rail-btn ssh-font-open"); fontButton.setAttribute("aria-pressed", "false");
+      const terminalSwap = iconButton("⇄", "arrowBoth", "ssh-rail-btn ssh-dock-swap", "좌우 위치 바꾸기");
+      const changeServer = iconButton("접속 정보", "info", "ssh-rail-btn ssh-reconnect");
+      disconnectButton = iconButton("연결 끊기", "unplug", "ssh-rail-btn ssh-disconnect");
+      retryButton = iconButton("재접속", "refresh", "ssh-rail-btn primary ssh-retry"); retryButton.hidden = true;
+      toolRail.append(uploadButton, filesButton, fileCancelButton, searchButton, saveOutput, railSeparator(), fontButton, terminalSwap, railSeparator(), changeServer, disconnectButton, retryButton);
+      const fontControls = document.createElement("div"); fontControls.className = "ssh-font-controls"; fontControls.hidden = true; fontControls.setAttribute("role", "group"); fontControls.setAttribute("aria-label", "터미널 글꼴 설정");
       fontSelect = document.createElement("select"); fontSelect.className = "ssh-font-select"; fontSelect.setAttribute("aria-label", "터미널 글꼴");
       [["cascadia","Cascadia Mono"],["consolas","Consolas"],["d2coding","D2Coding"],["nanum","나눔고딕코딩"],["system","시스템 고정폭"]].forEach(([value, label]) => {
         const option = document.createElement("option"); option.value = value; option.textContent = label; fontSelect.appendChild(option);
@@ -729,16 +885,52 @@ const MNRemoteTerminal = (() => {
       const fontPlus = button("+", "ssh-font-step"); fontPlus.title = "터미널 글자 크게"; fontPlus.setAttribute("aria-label", "터미널 글자 크게");
       lineHeightButton = button("줄 1.15", "ssh-line-height");
       fontControls.append(fontSelect, fontMinus, fontSizeOutput, fontPlus, lineHeightButton);
-      terminalHead.append(terminalIdentity, terminalActions, fontControls);
+      terminalHead.append(terminalIdentity, terminalActions);
+      fontButton.addEventListener("click", () => {
+        fontControls.hidden = !fontControls.hidden;
+        fontButton.setAttribute("aria-pressed", String(!fontControls.hidden));
+        sendResize();
+      });
+
+      searchPanel=document.createElement("div");searchPanel.className="ssh-output-search";searchPanel.hidden=true;
+      searchInput=document.createElement("input");searchInput.type="search";searchInput.maxLength=256;searchInput.placeholder="출력에서 찾기 (대소문자 구분)";searchInput.setAttribute("aria-label",searchInput.placeholder);
+      searchStatus=document.createElement("span");searchStatus.setAttribute("role","status");
+      const previousMatch=formIconButton("이전","chevronUp","이전 찾기 (Shift+Enter)"), nextMatch=formIconButton("다음","chevronDown","다음 찾기 (Enter)"), closeSearch=formIconButton("찾기 닫기","close","찾기 닫기 (Esc)");
+      searchPanel.append(searchInput,previousMatch,nextMatch,closeSearch,searchStatus);
+      const findOutput=direction=>{
+        if(!terminal)return;
+        const query=searchInput.value;
+        const result=terminalSnapshot(terminal,query);
+        if(query!==searchQuery){searchIndex=-1;searchQuery=query;}
+        if(!query||!result.matches.length){searchStatus.textContent=query?"일치하는 출력 없음":"검색어를 입력하세요.";terminal.clearSelection();searchIndex=-1;return;}
+        searchIndex=searchIndex<0?(direction<0?result.matches.length-1:0):(searchIndex+direction+result.matches.length)%result.matches.length;
+        const match=result.matches[searchIndex];terminal.select(match.column,match.row,match.length);terminal.scrollToLine(match.row);
+        searchStatus.textContent=(searchIndex+1)+" / "+result.matches.length+(result.limited?" (처음 5,000곳)":"");
+      };
+      const showSearch=()=>{remoteFiles.hide();searchPanel.hidden=false;setTimeout(()=>searchInput.focus(),0);sendResize();};
+      searchButton.addEventListener("click",showSearch);
+      closeSearch.addEventListener("click",()=>{searchPanel.hidden=true;terminal?.clearSelection();sendResize();terminal?.focus();});
+      previousMatch.addEventListener("click",()=>findOutput(-1));nextMatch.addEventListener("click",()=>findOutput(1));
+      searchInput.addEventListener("input",()=>{searchIndex=-1;searchStatus.textContent="Enter로 찾기 · Shift+Enter로 이전 찾기";});
+      searchInput.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();findOutput(event.shiftKey?-1:1);}if(event.key==="Escape"){event.preventDefault();searchPanel.hidden=true;sendResize();terminal?.focus();}});
+      terminalView.addEventListener("keyup",event=>event.stopPropagation());
+      saveOutput.addEventListener("click",async()=>{
+        if(!terminal)return;
+        const current=terminal;await new Promise(resolve=>current.write("",resolve));
+        if(current!==terminal)return;
+        const name="ssh-"+terminalTitle.textContent.replace(/[^a-zA-Z0-9가-힣._-]/g,"_").slice(0,100)+"-"+new Date().toISOString().replace(/[:.]/g,"-")+".txt";
+        const ok=MNDownload.saveText(terminalSnapshot(current).text,name);
+        searchPanel.hidden=false;searchStatus.textContent=ok?"현재 출력의 텍스트 파일 다운로드를 요청했습니다.":"출력 파일을 저장하지 못했습니다.";sendResize();
+      });
 
       uploadPanel = document.createElement("section"); uploadPanel.className = "ssh-upload-panel"; uploadPanel.hidden = true;
       const uploadHeading = document.createElement("div"); uploadHeading.className = "ssh-upload-heading";
       const uploadTitle = document.createElement("strong"); uploadTitle.textContent = "Windows 파일 업로드";
-      uploadCloseButton = button("닫기", "ssh-upload-close"); uploadCloseButton.setAttribute("aria-label", "파일 업로드 닫기");
+      uploadCloseButton = formIconButton("닫기", "close", "파일 업로드 닫기", "", "ssh-upload-close");
       uploadHeading.append(uploadTitle, uploadCloseButton);
       const uploadGrid = document.createElement("div"); uploadGrid.className = "ssh-upload-grid";
       const uploadPicker = document.createElement("div"); uploadPicker.className = "ssh-upload-picker";
-      uploadFileButton = button("파일 선택…", "btn");
+      uploadFileButton = formIconButton("파일 선택…", "file", "업로드할 파일 선택");
       uploadFileSummary = document.createElement("span"); uploadFileSummary.textContent = "선택된 파일 없음";
       uploadPicker.append(uploadFileButton, uploadFileSummary);
       uploadPathInput = document.createElement("input"); uploadPathInput.type = "text"; uploadPathInput.value = "./";
@@ -758,25 +950,34 @@ const MNRemoteTerminal = (() => {
       uploadProgress = document.createElement("progress"); uploadProgress.className = "ssh-upload-progress"; uploadProgress.max = 100; uploadProgress.hidden = true;
       uploadStatus = document.createElement("div"); uploadStatus.className = "ssh-upload-status"; uploadStatus.setAttribute("role", "status"); uploadStatus.setAttribute("aria-live", "polite");
       const uploadActions = document.createElement("div"); uploadActions.className = "ssh-upload-actions";
-      uploadCancelButton = button("업로드 취소", "btn danger"); uploadCancelButton.hidden = true;
-      uploadStartButton = button("업로드 시작", "btn primary"); uploadStartButton.disabled = true;
+      uploadCancelButton = formIconButton("업로드 취소", "stop", "업로드 취소", "danger"); uploadCancelButton.hidden = true;
+      // 업로드 시작도 그림만 — 주 단추라 파란 바탕은 그대로 둔다.
+      uploadStartButton = formIconButton("업로드 시작", "export", "선택한 파일을 원격 서버로 업로드", "ssh-connect-btn", "btn primary"); uploadStartButton.disabled = true;
       uploadActions.append(uploadCancelButton, uploadStartButton);
       uploadPanel.append(uploadHeading, uploadGrid, uploadNote, uploadProgress, uploadStatus, uploadActions);
 
       terminalHost = document.createElement("div"); terminalHost.className = "ssh-xterm-host";
-      terminalView.append(terminalHead, uploadPanel, terminalHost);
+      const sessionMain = document.createElement("div"); sessionMain.className = "ssh-session-main";
+      sessionMain.append(searchPanel, fontControls, uploadPanel, terminalHost);
+      const sessionBody = document.createElement("div"); sessionBody.className = "ssh-session-body";
+      sessionBody.append(toolRail, sessionMain);
+      terminalView.append(terminalHead, sessionBody);
       remoteFiles = MNRemoteFilesUI.create({
         getSession:() => ({ id:sessionId, identity:terminalTitle.textContent, authentication:authMethodInput.value }),
         getDirectory:() => currentRemoteDirectory,
         onVisibility:(visible) => {
           terminalHost.hidden = visible;
+          if (visible) searchPanel.hidden = true;
           if (visible) uploadPanel.hidden = true;
           terminalView.classList.toggle("ssh-files-visible", visible);
           if (!visible) setTimeout(() => { sendResize(); terminal?.focus(); }, 0);
         },
-        onBusy:(downloading) => { filesButton.textContent = downloading ? "원격 파일 · 다운로드 중" : "원격 파일"; fileCancelButton.hidden = !downloading; }
+        onBusy:(downloading) => {
+          setIconLabel(filesButton, downloading ? "원격 파일 · 다운로드 중" : "원격 파일");
+          filesButton.classList.toggle("busy", downloading); fileCancelButton.hidden = !downloading;
+        }
       });
-      terminalView.append(remoteFiles.panel);
+      sessionMain.append(remoteFiles.panel);
       filesButton.addEventListener("click", () => remoteFiles.show());
       fileCancelButton.addEventListener("click", () => remoteFiles.cancel());
       card.append(formView, terminalView); dock.append(rail, card); main.append(divider, dock);
@@ -823,6 +1024,7 @@ const MNRemoteTerminal = (() => {
 
     const showForm = (message="", focusPassword=false) => {
       formView.hidden = false; terminalView.hidden = true;
+      profilesRefresh();
       setFormBusy(false, message);
       setTimeout(() => (focusPassword ? passwordInput : hostInput).focus(), 0);
     };
@@ -850,7 +1052,8 @@ const MNRemoteTerminal = (() => {
       connectButton.disabled = busy;
       hostInput.disabled = busy; portInput.disabled = busy; userInput.disabled = busy; authMethodInput.disabled = busy;
       passwordInput.disabled = busy; rememberInput.disabled = busy; keyButton.disabled = busy || keyPicking;
-      connectButton.textContent = busy ? "확인 중…" : "접속";
+      profileControls.forEach(control=>{control.disabled=busy;});
+      setConnectLabel(busy ? "확인 중…" : "접속", busy);
       statusEl.textContent = copy;
       statusEl.classList.remove("error");
     };
@@ -970,6 +1173,7 @@ const MNRemoteTerminal = (() => {
           : { background:"#101827", foreground:"#edf2f7", cursor:"#67e8f9", selectionBackground:"#345b7d" }
       });
       terminal.open(terminalHost);
+      searchIndex=-1;searchQuery="";searchStatus.textContent="";
       const size = terminalDimensions(); currentCols = size.cols; currentRows = size.rows; terminal.resize(currentCols, currentRows);
       terminal.onData(queueInput);
       if (resizeObserver) resizeObserver.disconnect();

@@ -46,6 +46,17 @@
 .ssh-file-line{display:block;min-height:1.6em}.ssh-file-line::before{content:attr(data-line);display:inline-block;width:5em;padding-right:1em;text-align:right;color:var(--code-muted);user-select:none}
 .ssh-file-table{border-collapse:collapse;font:12px/1.5 Consolas,monospace;background:var(--panel)}.ssh-file-table td{border:1px solid var(--border);padding:5px 8px;white-space:pre-wrap;min-width:60px;max-width:500px;overflow-wrap:anywhere}
 .ssh-file-match{background:#fde68a!important;color:#111827!important}
+.ssh-file-browser{display:flex;flex-direction:column;gap:8px;border:1px solid var(--border);border-radius:8px;padding:10px;min-width:0}
+.ssh-file-list{max-height:260px;overflow:auto;min-width:0}.ssh-file-entry{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:3px 8px;padding:5px 0;border-bottom:1px solid var(--border)}
+.ssh-file-entry>.btn{text-align:left;overflow-wrap:anywhere;white-space:normal;min-width:0}.ssh-file-entry>.btn[aria-pressed=true]{outline:2px solid var(--accent,#2563eb);outline-offset:-2px}
+.ssh-file-entry>span,.ssh-file-entry>small{color:var(--muted);font-size:11px}.ssh-file-entry>small{grid-column:1/-1;padding-left:8px}
+.ssh-profiles{display:flex;flex-direction:column;gap:9px;margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:9px;min-width:0}
+.ssh-profiles>input,.ssh-profiles>select{width:100%;min-width:0;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);font:12px inherit}
+.ssh-profile-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}.ssh-profile-fields input{min-width:0;width:100%}
+.ssh-profile-actions{display:flex;flex-wrap:wrap;gap:6px}.ssh-profile-actions .btn{font-size:12px;padding:5px 8px}
+.ssh-output-search{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 12px;background:#172338;color:#e5edf8;border-bottom:1px solid #40516a;flex-shrink:0}
+.ssh-output-search[hidden]{display:none}.ssh-output-search input{flex:1;min-width:130px;padding:7px;border:1px solid #40516a;border-radius:6px;background:#101827;color:#f8fafc;font:12px inherit}
+.ssh-output-search .btn{padding:5px 8px;border-color:#40516a;background:#1e2c43;color:#e5edf8;font-size:12px}.ssh-output-search>span{width:100%;font-size:12px;color:#bae6fd}
 .modal.ssh-confirm-front{z-index:1270}
 .ssh-dock{position:relative;order:2;z-index:20;display:flex;flex:0 0 min(var(--ssh-dock-width,520px),calc(68vw / var(--ui-zoom, 1)));width:min(var(--ssh-dock-width,520px),calc(68vw / var(--ui-zoom, 1)));min-width:0;height:100%;overflow:hidden;border-left:1px solid var(--border);background:var(--panel,#fff);box-shadow:-8px 0 24px rgba(15,23,42,.12)}
 /* .ssh-dock 은 display:flex 를 직접 선언해 UA의 [hidden] 규칙을 이긴다. 닫은 dock 이 빈 패널로 남지 않게 명시한다. */
@@ -85,24 +96,47 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-connect-status{min-height:22px;margin-top:12px;color:#2563eb;font-size:13px;font-weight:700}
 .ssh-connect-status.error{color:#dc2626}
 .ssh-session-view{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;background:#101827}
-.ssh-session-head{align-items:center;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid #28374d;background:#152033;color:#e5edf8}
-.ssh-session-head>div:first-child{display:flex;min-width:0;flex-direction:column;gap:2px}
+.ssh-session-head{align-items:center;flex-wrap:nowrap;gap:10px;padding:8px 8px 8px 12px;border-bottom:1px solid #28374d;background:#152033;color:#e5edf8}
+.ssh-session-head>div:first-child{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px}
 .ssh-session-head strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 14px/1.3 "Cascadia Mono",Consolas,monospace}
 .ssh-session-status{color:#93a4b8;font-size:11.5px}
 .ssh-session-status.error{color:#fca5a5;font-weight:700}
-.ssh-session-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
-.ssh-session-actions .btn{min-height:32px;padding:5px 10px;border-color:#40516a;background:#1e2c43;color:#e5edf8}
-.ssh-session-actions .btn:hover{background:#293a55}
-.ssh-session-actions .primary{border-color:#2563eb;background:#2563eb}
-.ssh-session-actions .ssh-upload-open{border-color:#0e7490;background:#155e75}.ssh-session-actions .ssh-upload-open:hover{background:#0e7490}.ssh-session-actions .ssh-upload-open:disabled{cursor:not-allowed;opacity:.45}
+/* 머리에는 접기·닫기만, 작업 도구는 터미널 옆 세로 레일에 아이콘으로 둔다(시안 E). */
+.ssh-session-actions{display:flex;align-items:center;gap:2px;flex:0 0 auto}
+.ssh-head-btn,.ssh-rail-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:32px;height:32px;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:#cbd5e1;font:inherit;cursor:pointer}
+.ssh-head-btn .ui-icon,.ssh-rail-btn .ui-icon{width:18px;height:18px;vertical-align:0}
+.ssh-head-btn:hover,.ssh-rail-btn:hover:not(:disabled){background:#22314a;color:#fff}
+.ssh-head-btn:focus-visible,.ssh-rail-btn:focus-visible{outline:2px solid #60a5fa;outline-offset:1px}
+.ssh-rail-btn[hidden]{display:none}
+.ssh-rail-btn:disabled{cursor:not-allowed;opacity:.4}
+.ssh-rail-btn[aria-pressed=true]{border-color:#40516a;background:#26334a;color:#fff}
+.ssh-rail-btn.ssh-disconnect,.ssh-rail-btn.danger{color:#fca5a5}
+.ssh-rail-btn.ssh-disconnect:hover,.ssh-rail-btn.danger:hover{background:#3b1d24;color:#fecaca}
+.ssh-rail-btn.primary,.ssh-rail-btn.primary:hover{background:#2563eb;color:#fff}
+.ssh-rail-btn.busy{color:#7dd3fc}
+.ssh-rail-btn.busy::after{content:"";position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:#38bdf8}
+main.ssh-dock-left .ssh-dock-collapse .ui-icon{transform:scaleX(-1)}
+/* 연결 화면은 밝은 판이라 같은 아이콘 단추를 판 색에 맞춰 칠한다. */
+.ssh-heading-actions{gap:2px}
+.ssh-heading-actions .ssh-head-btn{color:var(--muted,#64748b)}
+.ssh-heading-actions .ssh-head-btn:hover{background:var(--panel-2,#f1f5f9);color:var(--ink)}
+.ssh-heading-actions .ssh-head-btn:focus-visible{outline-color:var(--accent,#2563eb)}
+.ssh-session-body{display:flex;flex:1;min-width:0;min-height:0}
+.ssh-session-rail{position:relative;z-index:3;display:flex;flex:0 0 auto;flex-direction:column;align-items:center;gap:4px;padding:8px 5px;border-right:1px solid #28374d;background:#0f1622}
+.ssh-rail-sep{flex:0 0 auto;width:20px;height:1px;margin:3px 0;background:#2c3a52}
+.ssh-session-main{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0}
+/* 단추 이름은 평소 숨겨 두고(화면 낭독기용), 레일에서는 마우스·키보드 초점이 오면 오른쪽 풍선으로 보인다. */
+.ssh-tool-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.ssh-rail-btn:hover .ssh-tool-label,.ssh-rail-btn:focus-visible .ssh-tool-label{left:calc(100% + 9px);top:50%;width:auto;height:auto;overflow:visible;clip:auto;transform:translateY(-50%);padding:3px 8px;border-radius:5px;background:#334155;color:#e2e8f0;font-size:11.5px;line-height:1.4;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.35)}
 .ssh-upload-panel{flex:0 0 auto;padding:12px;border-bottom:1px solid #28374d;background:#172338;color:#e5edf8}
 .ssh-upload-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.ssh-upload-heading strong{font-size:13px}.ssh-upload-close{border:0;background:transparent;color:#cbd5e1;cursor:pointer;font:12px inherit}.ssh-upload-close:hover{color:#fff}.ssh-upload-close:disabled{opacity:.4;cursor:not-allowed}
 .ssh-upload-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(160px,1fr);gap:10px 12px}.ssh-upload-grid .ssh-field{color:#cbd5e1}.ssh-upload-grid .ssh-field input{height:36px;border-color:#40516a;background:#101827;color:#f8fafc}.ssh-upload-file-field{grid-column:1/-1}
-.ssh-upload-picker{display:flex;align-items:center;min-width:0;gap:9px}.ssh-upload-picker .btn{flex:0 0 auto;min-height:34px;border-color:#40516a;background:#1e2c43;color:#e5edf8}.ssh-upload-picker .btn:hover:not(:disabled){border-color:#536784;background:#293a55;color:#fff}.ssh-upload-picker .btn:focus-visible{border-color:#60a5fa;background:#293a55;color:#fff;outline:2px solid #60a5fa;outline-offset:1px}.ssh-upload-picker span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dbeafe;font-size:12px;font-weight:600}
+.ssh-upload-picker{display:flex;align-items:center;min-width:0;gap:9px}.ssh-upload-picker .btn{flex:0 0 auto;min-height:34px;border-color:#40516a;background:#1e2c43;color:#e5edf8}.ssh-upload-picker .btn:hover:not(:disabled){border-color:#536784;background:#293a55;color:#fff}.ssh-upload-picker .btn:focus-visible{border-color:#60a5fa;background:#293a55;color:#fff;outline:2px solid #60a5fa;outline-offset:1px}.ssh-upload-picker>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dbeafe;font-size:12px;font-weight:600}
 .ssh-upload-path-picker{display:grid;grid-template-columns:minmax(0,1fr);gap:6px 7px}.ssh-upload-path-picker input{min-width:0}.ssh-upload-path-hint{overflow:hidden;color:#93c5fd;font-size:10.5px;font-weight:500;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
 .ssh-upload-note{margin:9px 0 7px;color:#93a4b8;font-size:11.5px;line-height:1.45}.ssh-upload-progress{display:block;width:100%;height:8px;margin:7px 0;accent-color:#22c55e}.ssh-upload-progress[hidden]{display:none}
 .ssh-upload-status{min-height:18px;color:#bae6fd;font-size:12px;font-weight:700}.ssh-upload-status.success{color:#86efac}.ssh-upload-status.error{color:#fca5a5}.ssh-upload-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:8px}.ssh-upload-actions .btn{min-height:32px;padding:5px 10px;border-color:#40516a;background:#1e2c43;color:#e5edf8}.ssh-upload-actions .primary{border-color:#2563eb;background:#2563eb}.ssh-upload-actions .danger{border-color:#b91c1c;background:#991b1b}
-.ssh-font-controls{display:flex;align-items:center;gap:5px;width:100%;padding-top:8px;border-top:1px solid rgba(148,163,184,.18)}
+.ssh-font-controls{display:flex;flex-shrink:0;align-items:center;flex-wrap:wrap;gap:5px;padding:8px 12px;border-bottom:1px solid #40516a;background:#172338}
+.ssh-font-controls[hidden]{display:none}
 .ssh-font-select{min-width:0;max-width:180px;height:30px;padding:0 7px;border:1px solid #40516a;border-radius:7px;background:#1e2c43;color:#e5edf8;font:12px inherit;cursor:pointer}
 .ssh-font-step,.ssh-line-height{height:30px;min-width:30px;padding:3px 8px;border:1px solid #40516a;border-radius:7px;background:#1e2c43;color:#e5edf8;font:12px inherit;cursor:pointer}
 .ssh-font-step{font-size:17px;line-height:1}.ssh-font-step:hover,.ssh-line-height:hover,.ssh-font-select:hover{background:#293a55}
@@ -123,6 +157,17 @@ main.ssh-dock-collapsed .ssh-terminal-card{display:none}
 .ssh-xterm-host .xterm .xterm-screen canvas{position:absolute;left:0;top:0}
 .ssh-xterm-host .xterm-char-measure-element{position:absolute;left:-9999em;top:0;display:inline-block;visibility:hidden;line-height:normal}
 .ssh-xterm-host .xterm-viewport{border-radius:4px}
+/* 연결 화면·업로드 창·출력 찾기 줄의 보조 단추는 그림만(.ssh-form-ico) — 이름은 title 풍선과 숨긴 글자.
+   각 칸의 .btn 규칙(.ssh-output-search .btn 등)보다 뒤에 두어 크기를 정사각형으로 맞춘다. */
+.ssh-terminal-card .ssh-form-ico{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:34px;height:34px;min-height:34px;padding:0}
+.ssh-terminal-card .ssh-form-ico .ui-icon{width:17px;height:17px;vertical-align:0}
+.ssh-terminal-card .ssh-output-search .ssh-form-ico,.ssh-terminal-card .ssh-upload-panel .ssh-form-ico{width:30px;height:30px;min-height:30px}
+.ssh-terminal-card .ssh-output-search .ssh-form-ico .ui-icon,.ssh-terminal-card .ssh-upload-panel .ssh-form-ico .ui-icon{width:16px;height:16px}
+.ssh-terminal-card .ssh-form-ico.is-danger:hover:not(:disabled){color:#dc2626;border-color:#dc2626}
+.ssh-terminal-card .ssh-upload-close.ssh-form-ico{border-radius:6px}
+.ssh-terminal-card .ssh-upload-close.ssh-form-ico:hover:not(:disabled){background:#293a55}
+/* 접속·업로드 시작도 그림만 — 주 단추라 파란 바탕을 유지하고 조금 넓게 둔다. */
+.ssh-terminal-card .ssh-connect-btn.ssh-form-ico{width:44px}
 html[data-theme="dark"] .ssh-terminal-card{background:#111827}
 html[data-theme="dark"] .ssh-field input,html[data-theme="dark"] .ssh-field select{background:#0f172a;color:#e5edf8;border-color:#334155}
 html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
@@ -132,8 +177,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .ssh-heading{flex-direction:column;gap:10px}.ssh-heading-actions{width:100%;justify-content:flex-end}
   .ssh-connect-grid{grid-template-columns:1fr}
   .ssh-field:nth-child(3),.ssh-field:nth-child(4){grid-column:1}
-  .ssh-session-head{align-items:flex-start;flex-direction:column}
-  .ssh-session-actions{width:100%;flex-wrap:wrap}
   .ssh-upload-grid{grid-template-columns:1fr}.ssh-upload-file-field{grid-column:1}
 }
   [data-theme="dark"]{
@@ -431,10 +474,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   header .header-open-files{color:#60a5fa}
   header .header-open-folder{color:#fbbf24}
   header .header-save{color:#c084fc}
-  header .header-run{color:#22d86f}
-  header .header-run svg{fill:currentColor;stroke:currentColor}
-  header .header-run.is-running{border-color:rgba(34,216,111,.4);background:rgba(34,197,94,.16)}
-  header .header-terminal{color:#dbeafe}
   header #settingsOpen{color:#bfdbfe}
   header .header-zoom-value{width:58px;height:34px;box-sizing:border-box;padding:0 7px;border:1px solid rgba(148,163,184,.3);border-radius:8px;
     background:rgba(15,23,42,.58);color:#eef2ff;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;box-shadow:none}
@@ -4671,20 +4710,33 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
      기본 규칙은 :where 로 특이도를 낮춰 둔다 — html.hide-tool-* 숨김과 켜짐 상태(.is-on·.recording·.is-ok…)가 그대로 이겨야 한다. */
   .run-bar.run-bar-icons{gap:8px}
   .run-bar-icons :where(.run-trace,.run-analyze,.run-grade,.run-save,.run-revert,.run-link,.run-nbconvert,.run-ink,.run-rec,.run-pkg,.run-diag,
-    .run-output-tab,.run-font,.run-newpy,.run-practice,.run-warning-toggle,.run-layout,.spellcheck-trigger,.run-dedupe){
-    display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;min-height:0;min-width:0;box-sizing:border-box;
-    padding:0 10px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
+    .run-output-tab,.run-font,.run-newpy,.run-newjava,.run-java-examples,.run-practice,.run-warning-toggle,.run-layout,.spellcheck-trigger,.run-dedupe){
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;min-height:0;min-width:30px;box-sizing:border-box;
+    padding:0 7px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
     font:inherit;font-size:12.5px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
   .run-bar-icons :where(.run-trace,.run-analyze,.run-grade,.run-save,.run-revert,.run-link,.run-nbconvert,.run-ink,.run-rec,.run-pkg,.run-diag,
-    .run-output-tab,.run-font,.run-newpy,.run-practice,.run-warning-toggle,.run-layout,.spellcheck-trigger,.run-dedupe):not(.is-on,.is-active,.recording,.is-ok,.is-warn,.has-selection,[aria-pressed="true"]):hover{background:var(--panel-hover);color:var(--ink)}
+    .run-output-tab,.run-font,.run-newpy,.run-newjava,.run-java-examples,.run-practice,.run-warning-toggle,.run-layout,.spellcheck-trigger,.run-dedupe):not(.is-on,.is-active,.recording,.is-ok,.is-warn,.has-selection,[aria-pressed="true"]):hover{background:var(--panel-hover);color:var(--ink)}
   .run-bar-icons :where(button):disabled{opacity:.45;cursor:default}
+  /* 단추는 그림만 — 글자 칸(.run-bar-label)은 이름·번역·갈아 끼우기용으로 남기고 감춘다. 이름은 title·aria-label 이 맡는다. */
+  .run-bar-icons .run-bar-label{display:none}
+  /* 라이브러리를 고르면 그림 오른쪽 위에 개수 배지 — 글자 "라이브러리 2"가 감춰져도 개수가 보이게. */
+  .run-bar-icons .run-pkg[data-count]:not([data-count=""]),.nbv-bar .nbv-js-library[data-count]:not([data-count=""]){position:relative}
+  .run-bar-icons .run-pkg[data-count]:not([data-count=""])::after,.nbv-bar .nbv-js-library[data-count]:not([data-count=""])::after{content:attr(data-count);position:absolute;top:-6px;right:-6px;min-width:15px;height:15px;
+    padding:0 4px;box-sizing:border-box;border-radius:999px;background:var(--accent);color:#fff;font:700 10px/15px system-ui,sans-serif;text-align:center}
+  /* 자바 글꼴 고르기는 겉 칸 아이콘이 없어 왼쪽 자리를 비우지 않는다. */
+  .run-bar-icons.java-run-bar .run-fontpick{padding:0 6px}
+  /* 편집기 폭이 좁아 자바 보조 도구가 ⋯ 메뉴로 접히면 메뉴 안에서는 이름을 함께 보인다(글자 크기 단추만 그림 그대로). */
+  @container (max-width:760px){
+    .run-bar-icons .java-run-more-menu>button,.run-bar-icons .java-run-more-menu .run-practice{justify-content:flex-start;gap:8px}
+    .run-bar-icons .java-run-more-menu :not(.run-font)>.run-bar-label{display:inline}
+  }
   .run-bar-icons .ui-icon{width:15px;height:15px;vertical-align:0}
   [data-theme="dark"] .run-bar-icons :where(.run-trace,.run-analyze,.run-grade){background:var(--field);border-color:var(--border);color:var(--ink)}
   .run-bar-icons .run-go{height:30px}
   .run-bar-icons .run-link{display:none}
   #content.study-mode .run-bar-icons .run-link{display:inline-flex}
-  .run-bar.run-bar-icons .spellcheck-trigger{padding:0 10px;line-height:1;color:var(--ink)}
-  .run-bar-icons .run-font{padding:0 9px;font-weight:600}
+  .run-bar.run-bar-icons .spellcheck-trigger{padding:0 7px;line-height:1;color:var(--ink)}
+  .run-bar-icons .run-font{padding:0 7px;font-weight:600}
   .run-bar-icons .run-newpy{font-weight:600}
   /* 터미널은 탭 묶음 틀 없이 다른 단추와 같은 낱개 단추로 */
   .run-bar-icons .run-output-tabs{overflow:visible;border:0;border-radius:0;background:none}
@@ -4698,7 +4750,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .run-bar-icons .run-warning-toggle:has(input:checked) .run-warning-icon{color:#d97706}
   [data-theme="dark"] .run-bar-icons .run-warning-toggle:has(input:checked) .run-warning-icon{color:#fbbf24}
   .run-bar-icons .run-warning-toggle:has(input:not(:checked)){color:var(--muted)}
-  .run-bar-icons .run-warning-toggle:has(input:not(:checked)) .run-bar-label{text-decoration:line-through}
+  .run-bar-icons .run-warning-toggle:has(input:not(:checked)) .run-warning-icon{opacity:.5}
   .run-bar-icons .run-warning-toggle:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
   .run-warning-icon{display:inline-flex}
   /* 글꼴 고르기 — select 에는 SVG 를 못 넣어 겉 칸에 아이콘을 겹친다. */
@@ -4908,6 +4960,15 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .nbv-bar button{font:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--border);background:var(--panel);
     color:var(--ink);border-radius:6px;padding:4px 10px;cursor:pointer}
   [data-theme="dark"] .nbv-bar button{background:var(--panel-2)}
+  /* JS 노트북의 라이브러리 단추는 그림만 — 글자 칸(이름·개수)은 감추고, 고른 개수는 배지로 보인다. */
+  /* 노트북 도구 줄 단추는 그림만(.nbv-ico) — 글자 칸(이름·개수·저장 상태)은 감추고 title·aria-label 로 이름을 전한다.
+     ▾ 드롭다운 안의 항목은 글자 그대로다. 숨김 설정(html.hide-tool-*)이 이기도록 특이도를 낮게 둔다. */
+  .nbv-bar .nbv-ico{display:inline-flex;align-items:center;justify-content:center;min-width:30px;padding:4px 7px}
+  .nbv-bar .nbv-ico[hidden]{display:none}
+  .nbv-bar .nbv-ico .run-bar-label{display:none}
+  .nbv-bar .nbv-ico .ui-icon{width:15px;height:15px;vertical-align:0}
+  .nbv-bar .nbv-run-group>.nbv-ico{padding:4px 8px}
+  .nbv-bar .nbv-save.is-failed{border-color:#dc2626;color:#dc2626}
   .nbv-bar button:hover{border-color:#7c3aed;color:#7c3aed}
   .nbv-bar button:disabled{opacity:.42;cursor:default;border-color:var(--border);color:var(--muted)}
   .nbv-font-group{display:inline-flex;align-items:center}
@@ -5035,8 +5096,12 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .nbv-run-menu{position:absolute;top:calc(100% + 5px);left:0;z-index:30;display:flex;flex-direction:column;gap:2px;
     padding:5px;min-width:max-content;background:var(--panel);border:1px solid var(--border);border-radius:9px;box-shadow:0 10px 26px rgba(0,0,0,.24)}
   .nbv-run-menu[hidden]{display:none}
-  .nbv-bar .nbv-run-menu .nbv-run-menu-item{display:block;width:100%;text-align:left;white-space:nowrap;
+  /* ▾ 메뉴 항목은 [그림 + 글자] — 글자는 개수·상태가 바뀌어 그대로 보인다(그림만은 도구 줄 단추에만). */
+  .nbv-bar .nbv-run-menu .nbv-run-menu-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;white-space:nowrap;
     background:transparent;border:0;border-radius:6px;padding:6px 9px;color:var(--ink)}
+  .nbv-bar .nbv-run-menu .nbv-run-menu-item .ui-icon{width:15px;height:15px;vertical-align:0;color:var(--muted)}
+  .nbv-bar .nbv-run-menu .nbv-run-menu-item:hover .ui-icon,.nbv-bar .nbv-run-menu .nbv-run-menu-item.is-active .ui-icon,
+  .nbv-bar .nbv-run-menu .nbv-run-menu-item.is-missing .ui-icon{color:inherit}
   .nbv-bar .nbv-run-menu .nbv-run-menu-item:hover{background:var(--panel-2);color:var(--ink)}
   .nbv-bar .nbv-run-menu .nbv-local-kernel.is-active{color:#047857;background:rgba(16,185,129,.12)}
   .nbv-bar .nbv-run-menu .nbv-run-menu-item.is-missing{color:#b45309;background:rgba(245,158,11,.12)}
@@ -9347,6 +9412,12 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .diary-btn:disabled{opacity:.38;cursor:default}
 .diary-btn.diary-ico{width:32px;padding:0}
 .diary-btn.diary-ico .run-save-label{display:none}
+/* 그림만 보이는 저장 단추(암기장·티어표·뽑기·대진표·이미지) — 글자 칸은 documents.js 가 갈아 끼우므로 남기고 감춘다. */
+.run-save.save-ico .run-save-label{display:none}
+/* 원래 글자만 있던 저장 단추(window.setSaveIcon)는 자기 정사각형 규칙이 없어 여기서 좁힌다. */
+.run-save.save-ico:not(.tier-ico,.study-ico,.img-ico,.diary-ico){display:inline-flex;align-items:center;justify-content:center;gap:0;min-width:32px;padding-left:8px;padding-right:8px}
+.run-save.save-ico:not(.tier-ico,.study-ico,.img-ico,.diary-ico)[hidden]{display:none}
+.run-save.save-ico:not(.tier-ico,.study-ico,.img-ico,.diary-ico) .ui-icon{width:16px;height:16px;vertical-align:0}
 .diary-btn.is-on{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--field))}
 .diary-primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .diary-primary:hover:not(:disabled){background:var(--accent-d);color:#fff}

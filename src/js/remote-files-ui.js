@@ -165,21 +165,55 @@ const MNRemoteFilesUI = (() => {
     const secretField=field("파일 연결 인증",secret);
     grid.append(field("원격 파일 경로",path),secretField);
     const directoryHint=el("div","","ssh-file-note");
-    const note=el("p","Bash 접속에서는 현재 폴더를 자동으로 채웁니다. 뒤에 파일명을 입력하세요. 직접 수정한 경로는 유지하며, 입력칸을 비우면 자동 경로를 다시 사용합니다. 파일은 원래 연결한 서버·계정에서 읽으므로 다른 SSH·sudo·컨테이너 안의 경로는 직접 확인하세요.","ssh-file-note");
+    const note=el("p","폴더 경로를 입력하고 ‘폴더 목록’을 누르세요. 폴더 이름을 누르면 이동하고, 파일은 선택 후 미리보기·다운로드하거나 더블클릭해 엽니다. 파일은 원래 연결한 서버·계정에서 읽습니다. 입력칸을 비우면 Bash의 자동 경로를 다시 사용합니다.","ssh-file-note");
     const actions=el("div","","ssh-file-tools"), preview=button("미리보기"), download=button("다운로드…"), refresh=button("새로고침"), cancel=button("작업 취소");
-    actions.append(preview,download,refresh,cancel);cancel.hidden=true;
+    const list=button("폴더 목록"), parent=button("상위 폴더"), reload=button("목록 새로고침");
+    actions.append(list,preview,download,refresh,cancel);cancel.hidden=true;
+    const browser=el("section","","ssh-file-browser"), browserTools=el("div","","ssh-file-tools");browser.hidden=true;
+    const browserPath=el("div","","ssh-file-path"), filter=el("input"), listingNote=el("div","","ssh-file-note"), listing=el("div","","ssh-file-list");
+    filter.type="search";filter.placeholder="현재 목록에서 파일명 찾기";filter.setAttribute("aria-label",filter.placeholder);
+    browserTools.append(parent,reload,filter);browser.append(browserPath,browserTools,listingNote,listing);
     const status=el("div","","ssh-file-status"), progress=el("progress"), meta=el("div","","ssh-file-meta"), viewport=el("div","","ssh-file-preview");
     status.setAttribute("role","status");status.setAttribute("aria-live","polite");progress.max=100;progress.hidden=true;
-    panel.append(heading,grid,directoryHint,resolved,note,actions,status,progress,meta,viewport);
+    panel.append(heading,grid,directoryHint,resolved,note,actions,status,progress,browser,meta,viewport);
     let peerId="", peerSession="", currentJob="", generation=0, busy=false, action="", viewer=null, previewData=null, rendering=null;
     let automaticPath=true, automaticValue="";
+    let listingData=null;
+    const choosePath=value=>{path.value=value;automaticPath=false;updatePath();};
+    const renderListing=()=>{
+      listing.replaceChildren();
+      if(!listingData)return;
+      const data=listingData, term=filter.value.toLocaleLowerCase();
+      const entries=data.entries.filter(entry=>entry.name.toLocaleLowerCase().includes(term)).sort((a,b)=>
+        Number(b.kind==="directory")-Number(a.kind==="directory") || a.name.localeCompare(b.name));
+      browserPath.textContent="열린 폴더: "+data.path;
+      listingNote.textContent=entries.length+" / "+data.entries.length+"개"+(data.limited?" · 큰 폴더는 처음 2,000개 항목까지만 읽습니다. 하위 폴더 경로를 직접 입력해 이동할 수 있습니다.":"")+(data.skipped?" · 표시할 수 없는 이름 "+data.skipped+"개 제외":"");
+      if(!entries.length){listing.append(el("p",term?"일치하는 파일이 없습니다.":"빈 폴더입니다."));return;}
+      entries.forEach(entry=>{
+        const row=el("div","","ssh-file-entry"), open=button((entry.kind==="directory"?"📁 ":entry.kind==="link"?"↗ ":"📄 ")+entry.name);
+        const fullPath=(data.path==="/"?"/":data.path.replace(/\/$/,"")+"/")+entry.name;
+        open.title=entry.name;open.setAttribute("aria-pressed",String(path.value===fullPath));
+        open.onclick=()=>{
+          if(busy)return;
+          choosePath(fullPath);
+          if(entry.kind==="directory")return run("list");
+          listing.querySelectorAll("button").forEach(node=>node.setAttribute("aria-pressed",String(node===open)));
+          status.textContent="선택: "+entry.name+(entry.kind==="link"?" · 폴더 연결이면 ‘폴더 목록’을 누르세요.":" · 미리보기 또는 다운로드를 누르세요.");
+        };
+        open.ondblclick=()=>{if(!busy&&entry.kind!=="directory"){choosePath(fullPath);return run("preview");}};
+        open.onkeydown=event=>{if(event.key==="Enter"&&entry.kind!=="directory"){event.preventDefault();if(!busy){choosePath(fullPath);return run("preview");}}};
+        const modified=entry.modified==null?"":new Date(Number(entry.modified)*1000).toLocaleString();
+        row.append(open,el("span",entry.kind==="directory"?"폴더":entry.size==null?"—":policy.formatBytes(entry.size)),el("small",modified));
+        listing.append(row);
+      });
+    };
     const authUi=()=>{
       const session=getSession(); secretField.hidden=!!peerId;
       secretField.firstElementChild.textContent=session.authentication==="private-key" ? "파일 연결 키 암호 (암호화된 키만)" : "파일 연결 SSH 비밀번호";
       secret.placeholder=session.authentication==="private-key" ? "암호 없는 키는 비워 두세요" : "별도 파일 연결에 다시 입력";
     };
     const setBusy = value => {
-      busy=value;preview.disabled=download.disabled=refresh.disabled=path.disabled=secret.disabled=value;
+      busy=value;preview.disabled=download.disabled=refresh.disabled=list.disabled=parent.disabled=reload.disabled=path.disabled=secret.disabled=value;
       cancel.hidden=!value; progress.hidden=!value; if(value)progress.removeAttribute("value");
       onBusy(value && action==="download");
       if(!value)updateDirectory();
@@ -214,7 +248,7 @@ const MNRemoteFilesUI = (() => {
         if(op==="connect" && result.peerId && result.connected){peerId=result.peerId;peerSession=getSession().id;}
         // A failed authentication never leaves a reusable connection ID or a hidden credential field.
         if(result.connected===false){peerId="";peerSession="";authUi();}
-        const labels={waiting:"요청 준비 중…",authenticating:"파일 연결 인증 중…",inspecting:"파일 정보 확인 중…",reading:"파일을 가져오는 중…",choosing:"Windows 저장창에서 위치를 선택하세요.",saving:"파일 저장 중…"};
+        const labels={waiting:"요청 준비 중…",authenticating:"파일 연결 인증 중…",listing:"폴더 목록 읽는 중…",inspecting:"파일 정보 확인 중…",reading:"파일을 가져오는 중…",choosing:"Windows 저장창에서 위치를 선택하세요.",saving:"파일 저장 중…"};
         if(!result.done)status.textContent=labels[result.state]||"처리 중…";
         if(result.state==="reading"){
           status.textContent+=" "+policy.formatBytes(result.bytes)+" / "+policy.formatBytes(result.total);
@@ -226,18 +260,26 @@ const MNRemoteFilesUI = (() => {
         catch(error){if(++failures>=3){post("cancel",[requestId]).catch(()=>{});throw error;}status.textContent="파일 상태 확인 재시도 "+failures+"/3";}
       }
     };
-    const run=async(mode,usePrevious=false)=>{
+    const run=async(mode,usePrevious=false,overridePath="")=>{
       if(busy)return;
       const session=getSession();if(!session.id){status.textContent="먼저 SSH 서버에 접속하세요.";return;}
       const epoch=++generation, renderAbort=new AbortController();rendering=renderAbort;action=mode;setBusy(true);
       let newViewer=null, previewJob="", fileToRelease="";
       try{
-        const requestedPath=usePrevious&&previewData ? previewData.path : policy.resolvePath(path.value);
+        const requestedPath=policy.resolvePath(overridePath || (usePrevious&&previewData ? previewData.path : path.value));
         if(peerSession!==session.id)abandonPeer();
         if(!peerId){
           const password=secret.value;secret.value="";
           if(session.authentication!=="private-key"&&!password)throw new Error("파일 연결 SSH 비밀번호를 입력하세요.");
           const opened=await waitJob("connect",[session.id,password],epoch);peerId=opened.peerId;peerSession=session.id;authUi();
+        }
+        if(mode==="list"){
+          const data=await waitJob("list",[peerId,requestedPath],epoch);previewJob=data.id;
+          if(epoch!==generation)return;
+          listingData={...data,entries:Array.isArray(data.entries)?data.entries:[]};
+          choosePath(data.path);filter.value="";browser.hidden=false;renderListing();
+          status.textContent="폴더 목록을 불러왔습니다. 파일을 선택하세요.";
+          return;
         }
         const info=await waitJob("inspect",[peerId,requestedPath],epoch);
         fileToRelease=info.fileId;
@@ -282,12 +324,19 @@ const MNRemoteFilesUI = (() => {
       panel.hidden=true;secret.value="";viewer?.dispose();viewer=null;previewData=null;viewport.replaceChildren();meta.textContent="";
       onVisibility(false);
     };
-    const reset=()=>{cancelWork();abandonPeer();hide();path.value="";automaticValue="";automaticPath=true;};
+    const reset=()=>{cancelWork();abandonPeer();hide();path.value="";automaticValue="";automaticPath=true;listingData=null;listing.replaceChildren();browser.hidden=true;};
     const show=()=>{
       panel.hidden=false;identity.textContent="원격 파일 · "+getSession().identity;authUi();onVisibility(true);updateDirectory();
       if(!busy)setTimeout(()=>path.focus(),0);
     };
     preview.onclick=()=>run("preview");download.onclick=()=>run("download");refresh.onclick=()=>run("preview",true);cancel.onclick=cancelWork;close.onclick=hide;
+    list.onclick=()=>run("list");filter.oninput=renderListing;
+    reload.onclick=()=>listingData&&run("list",false,listingData.path);
+    parent.onclick=()=>{
+      if(!listingData)return;
+      const directory=listingData.path.replace(/\/+$/,"");
+      return run("list",false,directory.slice(0,directory.lastIndexOf("/"))||"/");
+    };
     path.onkeydown=event=>{if(event.key==="Enter"){event.preventDefault();run("preview");}};
     panel.addEventListener("keydown",event=>{if(event.key==="Escape"){event.stopPropagation();hide();}});
     return {panel,show,hide,reset,updateDirectory,cancel:cancelWork};

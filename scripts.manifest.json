@@ -699,6 +699,7 @@
       "app.js"
     ],
     "remote-terminal.js": [
+      "download.js",
       "lazy.js",
       "remote-files-ui.js",
       "interaction-core.js"

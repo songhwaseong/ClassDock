@@ -79,7 +79,10 @@ function buildJsLibraryPicker(bar, button, storageKey, options){
   const countSelected = () => state.builtins.length + state.npm.length + state.custom.length;
   const syncButton = () => {
     const count = countSelected();
-    button.textContent = count ? ("라이브러리 " + count) : "라이브러리";
+    const label = count ? ("라이브러리 " + count) : "라이브러리";
+    // 실행 바 단추는 그림만이라 글자 칸째 갈아 끼우고, 고른 개수는 작은 배지(data-count)로 보인다.
+    if (typeof window.setRunBarIcon === "function") window.setRunBarIcon(button, "layers", label); else button.textContent = label;
+    button.dataset.count = count ? String(count) : "";
     button.classList.toggle("has-selection", count > 0);
     button.title = count ? ("이 문서에 라이브러리 " + count + "개 적용 중") : "이 문서에서 사용할 JavaScript 라이브러리 추가";
   };
@@ -362,18 +365,26 @@ function renderJsRunnable(context){
   if (ownerDoc && typeof ownerDoc.savedText !== "string") ownerDoc.savedText = text;
 
   // ── 실행 바 ──
-  const bar = document.createElement("div"); bar.className = "run-bar";
+  const bar = document.createElement("div"); bar.className = "run-bar run-bar-icons";
+  // 단추는 그림만(파이썬·자바 실행 바와 같은 모양) — 글자는 감춘 칸에 남겨 화면 낭독·번역이 쓴다.
+  const barIcon = (btn, icon, label) => {
+    if (typeof window.setRunBarIcon === "function") window.setRunBarIcon(btn, icon, label);
+    else if (label) btn.textContent = label;
+    return btn;
+  };
   const runBtn = document.createElement("button"); runBtn.className = "run-go"; runBtn.type = "button"; runBtn.textContent = "▶";
   runBtn.title = "실행";
   runBtn.dataset.shortcutAction = "runCode"; runBtn.dataset.shortcutTitle = "실행"; runBtn.dataset.shortcutAria = "true";
   const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button";
   saveBtn.textContent = /\.mjs$/i.test(saveName) ? ".mjs 저장" : ".js 저장";
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "자바스크립트 파일 저장";
+  if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
   const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade run-js-grade"; gradeBtn.type = "button";
   gradeBtn.textContent = "채점"; gradeBtn.title = "입력값과 기대 출력을 기준으로 현재 코드를 자동 채점";
   const libraryBtn = document.createElement("button"); libraryBtn.className = "run-pkg run-js-library"; libraryBtn.type = "button";
   const revertBtn = document.createElement("button"); revertBtn.className = "run-revert"; revertBtn.type = "button";
-  revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
+  revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true; barIcon(revertBtn, "undo", "원본으로");
+  barIcon(gradeBtn, "check");
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 파이썬·자바 실행 화면과 같은 버튼. 결과가 한 번 보인 뒤에만 노출한다.
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
   const status = document.createElement("span"); status.className = "run-status";
@@ -442,7 +453,7 @@ function renderJsRunnable(context){
   const applyOutputLayout = () => {
     split.classList.toggle("stack-v", outputStacked);
     divider.setAttribute("aria-orientation", outputStacked ? "horizontal" : "vertical");
-    layoutBtn.textContent = outputStacked ? "Side" : "Below";
+    barIcon(layoutBtn, outputStacked ? "arrow" : "arrowDown", outputStacked ? "Side" : "Below");
     layoutBtn.title = jsT(outputStacked ? "실행 결과를 편집기 오른쪽 옆으로" : "실행 결과를 편집기 아래로");
     layoutBtn.setAttribute("aria-label", layoutBtn.title);
     syncOutputHideButton(outputStacked);

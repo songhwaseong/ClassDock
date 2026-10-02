@@ -5429,8 +5429,9 @@ async function mountMapEditor(doc){
   const saveBtn = document.createElement("button");
   saveBtn.type = "button";
   saveBtn.className = "run-save map-save";     // .run-save → 전역 Ctrl+S 가 이 버튼을 클릭한다
-  saveBtn.textContent = "💾 저장";
+  saveBtn.textContent = "저장";
   saveBtn.title = "지도 저장 (Ctrl+S)";
+  if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
   saveBtn.dataset.shortcutAction = "saveCurrent";
 
   const coord = document.createElement("span");

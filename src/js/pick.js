@@ -236,7 +236,7 @@ function mountPickEditor(doc){
   const gameBtn = pickButton("게임 선택", "게임 고르기", "tier-btn pick-game-btn", pickSvg("grid", "", true));
   gameBtn.insertAdjacentHTML("beforeend", pickUiIcon("chevronDown"));
   const undoBtn = pickButton("", "실행 취소 (Ctrl+Z)", "tier-btn", pickUiIcon("undo")), redoBtn = pickButton("", "다시 실행 (Ctrl+Y)", "tier-btn", pickUiIcon("redo"));
-  const saveBtn = pickButton("저장하기", "명단 저장 (Ctrl+S)", "tier-btn tier-primary run-save", pickUiIcon("save"));
+  const saveBtn = pickButton("저장하기", "명단 저장 (Ctrl+S)", "tier-btn tier-primary run-save tier-ico save-ico", pickUiIcon("save"));
   const moreBtn = pickButton("", "설정 — 효과음·움직임·뽑힌 사람 빼기·참가자 한꺼번에", "tier-btn", pickUiIcon("settings"));
   const actions = document.createElement("div"); actions.className = "pick-actions"; actions.append(gameBtn, undoBtn, redoBtn, saveBtn, moreBtn);
   bar.append(brand, actions);

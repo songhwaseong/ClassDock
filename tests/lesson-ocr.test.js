@@ -210,6 +210,6 @@ test("리플레이 재생 바는 색 이모지 대신 단색 아이콘을 쓴다
   const source = fs.readFileSync(path.join(__dirname, "../src/js/lesson-replay.js"), "utf8");
   assert.doesNotMatch(source, /mk\("[^"]*[\u{1F000}-\u{1FAFF}]/u, "단추 글자에 이모지가 없어야 한다");
   assert.match(source, /setIcon\(soundBtn, muted \? "mute" : "volume"\)/);
-  assert.match(source, /setIcon\(saveBtn, "save", "저장"\)/);
+  assert.match(source, /setIcon\(saveBtn, "save"\)/);
   assert.match(source, /setIcon\(videoBtn, "video", "MP4"\)/);
 });

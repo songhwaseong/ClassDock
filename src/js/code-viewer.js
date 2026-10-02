@@ -1793,6 +1793,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       const bar = document.createElement("div"); bar.className = "run-bar text-edit-bar";
       const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "run-save"; saveBtn.textContent = "저장";
       saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "파일 저장";
+      if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
       const viewBtn = document.createElement("button"); viewBtn.type = "button"; viewBtn.className = "run-revert"; viewBtn.textContent = "보기로"; viewBtn.disabled = false;
       const fontDown = document.createElement("button"); fontDown.type = "button"; fontDown.className = "run-font"; fontDown.textContent = "A−"; fontDown.title = "글자 작게 (Ctrl+−)";
       const fontUp = document.createElement("button"); fontUp.type = "button"; fontUp.className = "run-font"; fontUp.textContent = "A+"; fontUp.title = "글자 크게 (Ctrl++)";
@@ -2114,6 +2115,9 @@ async function renderCode(file, host, ext, profile, runCtx){
     const slot = document.createElement("span"); slot.className = "run-bar-label" + (labelCls ? " " + labelCls : "");
     slot.textContent = label;
     btn.appendChild(slot);
+    // 글자 칸은 CSS 로 감춰 그림만 보인다 — 이름은 aria-label 로 읽히고, 설명이 따로 없으면 풍선에도 이름을 띄운다.
+    btn.setAttribute("aria-label", label);
+    if (!btn.title) btn.title = label;
     return btn;
   };
   const runBtn = document.createElement("button"); runBtn.className = "run-go"; runBtn.type = "button"; runBtn.textContent = "▶";
@@ -2126,9 +2130,12 @@ async function renderCode(file, host, ext, profile, runCtx){
   gradeBtn.title = "입력값과 기대 출력을 기준으로 현재 코드를 자동 채점";
   const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button"; setBarIcon(saveBtn, "save", ".py 저장", "run-save-label");
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "Python 파일 저장";
+  saveBtn.classList.add("save-ico");                       // 저장은 그림만 — 글자 칸은 documents.js 가 갈아 끼우므로 남기고 CSS 로 감춘다
   // 일반 텍스트 편집기의 '보기로'도 run-revert 스타일을 공유하므로, 설정에서 숨길 Python 전용 표식은 따로 둔다.
-  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-py-revert"; revertBtn.type = "button"; setBarIcon(revertBtn, "undo", "원본으로");   // "원본" 단독은 i18n 사전에서 화이트보드의 "Actual size" 와 겹친다 revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
+  const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-py-revert"; revertBtn.type = "button"; setBarIcon(revertBtn, "undo", "원본으로");   // "원본" 단독은 i18n 사전에서 화이트보드의 "Actual size" 와 겹친다
+  revertBtn.title = "편집 전 원본 코드로 되돌리기";
   const pkgBtn = document.createElement("button"); pkgBtn.className = "run-pkg run-py-pkg"; pkgBtn.type = "button"; setBarIcon(pkgBtn, "layers", "라이브러리"); pkgBtn.hidden = true;
+  pkgBtn.title = "파이썬 라이브러리 설치";
   const diagBtn = document.createElement("button"); diagBtn.className = "run-diag"; diagBtn.type = "button"; setBarIcon(diagBtn, "python", "Py Env"); diagBtn.title = "Python 실행 환경 진단";
   const outputTabs = document.createElement("span"); outputTabs.className = "run-output-tabs";
   // 터미널은 실행 결과와 분리된 모달 창으로 연다.
@@ -2218,15 +2225,15 @@ async function renderCode(file, host, ext, profile, runCtx){
   });
   const status = document.createElement("span"); status.className = "run-status";
   const fontGroup = document.createElement("span"); fontGroup.className = "run-font-group";
-  const fontDown = document.createElement("button"); fontDown.className = "run-font"; fontDown.type = "button"; fontDown.textContent = "A−"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)";
-  const fontUp = document.createElement("button"); fontUp.className = "run-font"; fontUp.type = "button"; fontUp.textContent = "A+"; fontUp.title = "코드·결과 글자 크게 (Ctrl++)";
+  const fontDown = document.createElement("button"); fontDown.className = "run-font"; fontDown.type = "button"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)"; setBarIcon(fontDown, "textSmaller", "글자 작게");
+  const fontUp = document.createElement("button"); fontUp.className = "run-font"; fontUp.type = "button"; fontUp.title = "코드·결과 글자 크게 (Ctrl++)"; setBarIcon(fontUp, "textLarger", "글자 크게");
   fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host));
   fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
   fontGroup.append(fontDown, fontUp, buildCodeFontPicker(undefined, ownerDoc || host));
   // 편집 흐름상 "고치다가 새로 열기"가 잦아서, 글자 크기 옆에 새 파이썬 코드 버튼을 둔다(사이드바 버튼은 그대로).
   const inFolder = !!(ownerDoc && ownerDoc.archiveCtx && runPathDir(normalizedRunPath(ownerDoc.relPath || ownerDoc.workspacePath || "")));
   const newPyTitle = inFolder ? "이 폴더에 새 파이썬 파일 · 같은 폴더 모듈 import 가능" : "새 파이썬 코드";
-  const newPyBtn = document.createElement("button"); newPyBtn.className = "run-newpy"; newPyBtn.type = "button"; newPyBtn.textContent = "+Py";
+  const newPyBtn = document.createElement("button"); newPyBtn.className = "run-newpy"; newPyBtn.type = "button"; setBarIcon(newPyBtn, "filePlus", "새 파이썬");
   newPyBtn.dataset.shortcutAction = "newPython"; newPyBtn.dataset.shortcutTitle = newPyTitle; newPyBtn.dataset.shortcutAria = "true";
   newPyBtn.addEventListener("click", () => { if (typeof newPythonScratch === "function") newPythonScratch(); });
   // 정상 종료된 stderr 경고만 결과에서 숨기는 표시 설정. 실행 중 stderr는 보류하고 실제 오류는 완료 뒤 표시한다.
@@ -2383,7 +2390,7 @@ async function renderCode(file, host, ext, profile, runCtx){
     pkgWrap.querySelectorAll("button, input").forEach(el => { el.disabled = !!busy; });
     pkgBtn.disabled = !!busy;
     if (busy){ pkgBtn.setAttribute("aria-busy", "true"); pkgBtn.title = "라이브러리 설치가 끝나면 다시 열 수 있어요"; }
-    else { pkgBtn.removeAttribute("aria-busy"); pkgBtn.removeAttribute("title"); }
+    else { pkgBtn.removeAttribute("aria-busy"); pkgBtn.title = "파이썬 라이브러리 설치"; }   // 그림만 있는 단추라 이름 풍선은 남긴다
   };
   // 패널은 실행 바의 자식으로 두고 절대 위치로 띄운다. 그래서 열어도 편집기 높이가 줄지 않는다.
   bar.appendChild(pkgWrap);

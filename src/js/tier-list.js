@@ -328,7 +328,7 @@ function mountTierEditor(doc){
   const cupBtn = tierButton("월드컵", "월드컵(토너먼트) — 카드 둘 중 더 좋은 쪽을 골라 올라가며 우승을 뽑고, 결과를 줄에 놓을 수 있어요", "tier-btn tier-cup-btn", "");
   cupBtn.innerHTML = tierSvg("trophy") + "<span>월드컵</span>";
   const undoBtn = tierButton("", "실행 취소 (Ctrl+Z)", "tier-btn", "undo"), redoBtn = tierButton("", "다시 실행 (Ctrl+Y)", "tier-btn", "redo");
-  const saveBtn = tierButton("저장하기", "티어표 저장 (Ctrl+S)", "tier-btn tier-primary run-save", "save");
+  const saveBtn = tierButton("저장하기", "티어표 저장 (Ctrl+S)", "tier-btn tier-primary run-save tier-ico save-ico", "save");
   const moreBtn = tierButton("", "더 보기 — 줄 추가·칠판으로·그림으로 저장·줄 틀·카드 크기", "tier-btn", "more");
   const actions = document.createElement("div"); actions.className = "tier-actions"; actions.append(textBtn, photoBtn, cupBtn, undoBtn, redoBtn, saveBtn, moreBtn);
   const mascot = document.createElement("div"); mascot.className = "tier-mascot"; mascot.setAttribute("aria-hidden", "true");

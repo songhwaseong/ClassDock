@@ -1635,7 +1635,10 @@ function updateSaveStatusBadge(doc){
       const labelSlot = button.querySelector(".run-save-label");
       if (labelSlot) labelSlot.textContent = actionLabel;
       else button.textContent = actionLabel;
-      button.title = target.mode ? _t(target.title) : "";
+      // 그림만 보이는 저장 단추는 풍선 설명이 유일한 이름이라, 처음 달아 둔 설명을 지우지 않고 되살린다.
+      if (button.dataset.saveTitle === undefined) button.dataset.saveTitle = button.title || "";
+      button.title = target.mode ? _t(target.title) : button.dataset.saveTitle;
+      if (button.classList.contains("save-ico")) button.setAttribute("aria-label", button.title || actionLabel);
       button.dataset.shortcutTitle = target.mode ? actionLabel : _t("파일 저장");
     });
   }

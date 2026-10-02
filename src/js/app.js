@@ -28,20 +28,7 @@ function updateHeaderCommandDock(){
   if (zoomLabel) zoomLabel.textContent = Math.round(((pdf && doc.zoom) || 1) * 100) + "%";
   const fullscreen = byId("btnOfficeFullscreen"), canFullscreen = !!doc;
   if (fullscreen){ fullscreen.hidden = !canFullscreen; fullscreen.disabled = !canFullscreen; }
-  const runControl = activeDocumentControl(".run-go");
-  const run = byId("headerRun");
-  if (run){
-    run.hidden = !runControl;
-    run.disabled = !runControl || !!runControl.disabled;
-    run.classList.toggle("is-running", !!(runControl && (runControl.classList.contains("running") || /중지|취소|stop/i.test(runControl.textContent || ""))));
-  }
-  const terminalControl = activeDocumentControl(".run-output-tab");
-  const terminal = byId("headerTerminal");
-  if (terminal){
-    terminal.hidden = !terminalControl;
-    terminal.disabled = !terminalControl || !!terminalControl.disabled;
-    terminal.classList.toggle("active", !!(terminalControl && terminalControl.classList.contains("active")));
-  }
+  // 실행(▶)·터미널은 편집기 바로 위 실행 바에만 둔다 — 헤더에 같은 단추를 또 두면 한 화면에 둘씩 보였다.
 }
 function saveFromHeader(){
   if (!state) return;
@@ -380,19 +367,9 @@ function wire(){
   byId("headerZoomOut").onclick = () => { if (state && state.kind === "pdf") setPdfZoom((state.zoom || 1) / 1.25); };
   byId("headerZoomLabel").onclick = () => { if (state && state.kind === "pdf") setPdfZoom(1); };
   byId("headerZoomIn").onclick = () => { if (state && state.kind === "pdf") setPdfZoom((state.zoom || 1) * 1.25); };
-  byId("headerRun").onclick = () => {
-    const button = activeDocumentControl(".run-go");
-    if (button && !button.disabled) button.click();
-    setTimeout(updateHeaderCommandDock, 0);
-  };
-  byId("headerTerminal").onclick = () => {
-    const button = activeDocumentControl(".run-output-tab");
-    if (button && !button.disabled) button.click();
-    setTimeout(updateHeaderCommandDock, 0);
-  };
   updateHeaderCommandDock();
   document.addEventListener("click", (event) => {
-    if (event.target && event.target.closest && event.target.closest(".run-go,.run-save,.run-output-tab")) setTimeout(updateHeaderCommandDock, 0);
+    if (event.target && event.target.closest && event.target.closest(".run-save")) setTimeout(updateHeaderCommandDock, 0);
   });
   byId("studyToggle").onclick = toggleStudyMode;
   if (byId("studyRoleSwap")) byId("studyRoleSwap").onclick = () => {         // 두 칸 사이 ⇄: 좌우/위아래 위치 바꾸기

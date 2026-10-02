@@ -459,7 +459,10 @@ function buildJavaLibraryPicker(bar, button, storageKey, options){
   const specOf = (row) => row.id || row.coordinate;
   const syncButton = () => {
     const count = state.ids.length;
-    button.textContent = count ? javaT("라이브러리") + " " + count : javaT("라이브러리");
+    const label = count ? javaT("라이브러리") + " " + count : javaT("라이브러리");
+    // 실행 바 단추는 그림만이라 글자 칸째 갈아 끼우고, 고른 개수는 작은 배지(data-count)로 보인다.
+    if (typeof window.setRunBarIcon === "function") window.setRunBarIcon(button, "layers", label); else button.textContent = label;
+    button.dataset.count = count ? String(count) : "";
     button.classList.toggle("has-selection", count > 0);
     button.title = count
       ? javaTf("이 문서에 라이브러리 {count}개 적용 중", { count })
@@ -1240,13 +1243,20 @@ function renderJavaRunnable(context){
   if (ownerDoc && typeof ownerDoc.savedText !== "string") ownerDoc.savedText = text;
 
   // ── 실행 바 ──
-  const bar = document.createElement("div"); bar.className = "run-bar java-run-bar";
+  const bar = document.createElement("div"); bar.className = "run-bar run-bar-icons java-run-bar";
+  // 단추는 그림만(파이썬 실행 바와 같은 모양) — 글자는 감춘 칸에 남겨 ⋯ 메뉴·화면 낭독·번역이 쓴다.
+  const barIcon = (btn, icon, label) => {
+    if (typeof window.setRunBarIcon === "function") window.setRunBarIcon(btn, icon, label);
+    else if (label) btn.textContent = label;
+    return btn;
+  };
   const runBtn = document.createElement("button"); runBtn.className = "run-go"; runBtn.type = "button"; runBtn.textContent = "▶";
   runBtn.title = "실행";
   runBtn.dataset.shortcutAction = "runCode"; runBtn.dataset.shortcutTitle = "실행"; runBtn.dataset.shortcutAria = "true";
   const saveBtn = document.createElement("button"); saveBtn.className = "run-save"; saveBtn.type = "button";
   saveBtn.textContent = ".java 저장";
   saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "자바 파일 저장";
+  if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
   const gradeBtn = document.createElement("button"); gradeBtn.className = "run-grade run-java-grade"; gradeBtn.type = "button";
   gradeBtn.textContent = "채점"; gradeBtn.title = "입력값과 기대 출력을 기준으로 현재 코드를 자동 채점";
   const libBtn = document.createElement("button"); libBtn.className = "run-pkg run-java-library"; libBtn.type = "button";
@@ -1262,12 +1272,14 @@ function renderJavaRunnable(context){
   const importsBtn = document.createElement("button"); importsBtn.className = "run-pkg run-java-imports"; importsBtn.type = "button";
   importsBtn.textContent = "import 정리"; importsBtn.title = "중복·사용하지 않는 import를 지우고 명확한 누락 import 추가";
   const revertBtn = document.createElement("button"); revertBtn.className = "run-revert run-java-revert"; revertBtn.type = "button";
-  revertBtn.textContent = "↩ 원본"; revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true;
+  revertBtn.title = "편집 전 원본 코드로 되돌리기"; revertBtn.disabled = true; barIcon(revertBtn, "undo", "원본으로");
+  barIcon(gradeBtn, "check"); barIcon(libBtn, "layers"); barIcon(envBtn, "javaCup"); barIcon(configBtn, "sliders");
+  barIcon(junitBtn, "flask"); barIcon(formatBtn, "indent"); barIcon(importsBtn, "importIn");
   const fontGroup = document.createElement("span"); fontGroup.className = "run-java-font-group";
   const fontDown = document.createElement("button"); fontDown.className = "run-font"; fontDown.type = "button";
-  fontDown.textContent = "A−"; fontDown.title = "코드·결과 글자 작게 (Ctrl+−)";
+  fontDown.title = "코드·결과 글자 작게 (Ctrl+−)"; barIcon(fontDown, "textSmaller", "글자 작게");
   const fontUp = document.createElement("button"); fontUp.className = "run-font"; fontUp.type = "button";
-  fontUp.textContent = "A+"; fontUp.title = "코드·결과 글자 크게 (Ctrl++)";
+  fontUp.title = "코드·결과 글자 크게 (Ctrl++)"; barIcon(fontUp, "textLarger", "글자 크게");
   fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host));
   fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
   const fontPick = document.createElement("select"); fontPick.className = "run-font run-fontpick";
@@ -1296,14 +1308,14 @@ function renderJavaRunnable(context){
 
   const practiceGroup = document.createElement("span"); practiceGroup.className = "run-java-practice-group";
   const practiceBtn = document.createElement("button"); practiceBtn.className = "run-practice"; practiceBtn.type = "button";
-  practiceBtn.textContent = "따라치기";
   practiceBtn.title = "이 코드를 흐리게 두고 그 위에 똑같이 따라 쳐 보기 — 맞으면 제 색, 틀리면 빨강 (Esc: 그만두기)";
+  barIcon(practiceBtn, "task", "따라치기");
   const practiceInfo = document.createElement("span"); practiceInfo.className = "run-practice-info"; practiceInfo.hidden = true;
   practiceInfo.setAttribute("aria-live", "polite");
   practiceGroup.append(practiceBtn, practiceInfo);
   const setPracticeChrome = (on) => {
     practiceBtn.classList.toggle("is-on", on);
-    practiceBtn.textContent = on ? "그만두기" : "따라치기";
+    barIcon(practiceBtn, on ? "stop" : "task", on ? "그만두기" : "따라치기");
     practiceInfo.hidden = !on;
     if (!on) practiceInfo.textContent = "";
   };
@@ -1327,11 +1339,11 @@ function renderJavaRunnable(context){
     toast("줄 앞 들여쓰기는 자동으로 넘어가요. 틀리면 빨갛게 표시되니 지우고 다시 치면 돼요. (Esc: 그만두기)", 4600);
   });
   const newJavaBtn = document.createElement("button"); newJavaBtn.className = "run-newjava"; newJavaBtn.type = "button";
-  newJavaBtn.textContent = "+Java"; newJavaBtn.title = "새 자바 코드";
+  newJavaBtn.title = "새 자바 코드"; barIcon(newJavaBtn, "filePlus", "새 자바 코드");
   newJavaBtn.addEventListener("click", () => { if (typeof newJavaScratch === "function") newJavaScratch(); });
   // 예제 갤러리를 자바 탭으로 연다 — 고치다가 다른 예제를 꺼내 보는 흐름이 잦다(+Java 옆).
   const examplesBtn = document.createElement("button"); examplesBtn.className = "run-java-examples"; examplesBtn.type = "button";
-  examplesBtn.textContent = "예제"; examplesBtn.title = "자바 예제 갤러리";
+  examplesBtn.title = "자바 예제 갤러리"; barIcon(examplesBtn, "notebook", "예제");
   examplesBtn.addEventListener("click", () => { if (typeof openSnippetGallery === "function") openSnippetGallery("java"); });
   // 실행 결과 위치 토글(편집기 옆 ↔ 아래) — 파이썬 실행 화면과 같은 버튼. 결과가 한 번 보인 뒤에만 노출한다.
   const layoutBtn = document.createElement("button"); layoutBtn.className = "run-layout"; layoutBtn.type = "button"; layoutBtn.hidden = true;
@@ -1339,7 +1351,8 @@ function renderJavaRunnable(context){
   // 넓을 때는 보조 도구를 그대로 펼치고, 편집기 폭이 좁으면 같은 노드를 ⋯ 메뉴로 접는다(CSS container query).
   const moreGroup = document.createElement("span"); moreGroup.className = "java-run-more";
   const moreBtn = document.createElement("button"); moreBtn.className = "java-run-more-toggle"; moreBtn.type = "button";
-  moreBtn.textContent = "⋯"; moreBtn.title = "자바 보조 도구"; moreBtn.setAttribute("aria-haspopup", "menu"); moreBtn.setAttribute("aria-expanded", "false");
+  moreBtn.title = "자바 보조 도구"; moreBtn.setAttribute("aria-label", moreBtn.title);
+  if (typeof window.uiIcon === "function") moreBtn.innerHTML = window.uiIcon("more"); else moreBtn.textContent = "⋯"; moreBtn.setAttribute("aria-haspopup", "menu"); moreBtn.setAttribute("aria-expanded", "false");
   const moreMenu = document.createElement("span"); moreMenu.className = "java-run-more-menu"; moreMenu.setAttribute("role", "menu");
   moreMenu.append(configBtn, junitBtn, formatBtn, importsBtn, revertBtn, fontGroup, practiceGroup, newJavaBtn, examplesBtn, layoutBtn);
   moreGroup.append(moreBtn, moreMenu);
@@ -1402,7 +1415,7 @@ function renderJavaRunnable(context){
   const applyOutputLayout = () => {
     split.classList.toggle("stack-v", outputStacked);
     divider.setAttribute("aria-orientation", outputStacked ? "horizontal" : "vertical");
-    layoutBtn.textContent = outputStacked ? "Side" : "Below";
+    barIcon(layoutBtn, outputStacked ? "arrow" : "arrowDown", outputStacked ? "Side" : "Below");
     layoutBtn.title = javaT(outputStacked ? "실행 결과를 편집기 오른쪽 옆으로" : "실행 결과를 편집기 아래로");
     layoutBtn.setAttribute("aria-label", layoutBtn.title);
     syncOutputHideButton(outputStacked);

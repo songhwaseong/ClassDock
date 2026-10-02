@@ -1478,6 +1478,7 @@ const MNDbClient = (() => {
       "접속 정보와 SQL 을 .dbconn 파일에 저장합니다 (Ctrl+S · 비밀번호는 저장하지 않습니다)");
     saveButton.dataset.shortcutAction = "saveCurrent";
     saveButton.dataset.shortcutTitle = "접속 문서 저장";
+    if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveButton);
     const disconnectButton = button("연결 끊기", "db-btn db-btn-quiet");
     const layoutButton = button("Side", "db-btn db-btn-quiet db-layout-btn",
       "실행 결과를 SQL 편집기 오른쪽에 표시합니다");

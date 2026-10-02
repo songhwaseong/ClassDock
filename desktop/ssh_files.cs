@@ -37,8 +37,13 @@ static partial class ClassDockSshTerminal
     sealed class FileAttributes
     {
         public long Size;
-        public uint Modified, Mode;
+        public uint Modified, Mode, Flags;
         public bool Same(FileAttributes other) { return other != null && Size == other.Size && Modified == other.Modified && Mode == other.Mode; }
+    }
+    sealed class DirectoryEntry
+    {
+        public string Name;
+        public FileAttributes Attributes;
     }
     sealed class RemoteFile
     {
@@ -53,6 +58,10 @@ static partial class ClassDockSshTerminal
         public long Bytes, Total, Reserved;
         public bool Done, Cancelled, Partial, DestinationExisted, Committing, Released;
         public long DestinationSize;
+        public string DirectoryPath;
+        public List<DirectoryEntry> Entries;
+        public bool ListingLimited;
+        public int ListingSkipped;
         public DateTime DestinationWrite, LastSeen = DateTime.UtcNow, Created = DateTime.UtcNow;
     }
 
@@ -120,19 +129,63 @@ static partial class ClassDockSshTerminal
             if (reply.UInt() != 1) throw FileError("protocol");
             return ValidateRemoteFilePath(reply.Text());
         }
-        static FileAttributes Attributes(SftpPacket p)
+        static FileAttributes Attributes(SftpPacket p, bool regular)
         {
             uint flags = p.UInt(); FileAttributes a = new FileAttributes();
+            a.Flags = flags;
+            if ((flags & ~0x8000000fu) != 0) throw FileError("protocol");
             if ((flags & 1) != 0) a.Size = p.Long();
             if ((flags & 2) != 0) { p.UInt(); p.UInt(); }
             if ((flags & 4) != 0) a.Mode = p.UInt();
             if ((flags & 8) != 0) { p.UInt(); a.Modified = p.UInt(); }
-            if ((flags & 13) != 13) throw FileError("attributes-unavailable");
-            if ((a.Mode & 0xf000) != 0x8000) throw FileError("not-regular");
+            if ((flags & 0x80000000u) != 0)
+            {
+                uint count = p.UInt(); if (count > 64) throw FileError("protocol");
+                for (uint n = 0; n < count; n++) { p.Bytes(); p.Bytes(); }
+            }
+            if (regular && (flags & 13) != 13) throw FileError("attributes-unavailable");
+            if (regular && (a.Mode & 0xf000) != 0x8000) throw FileError("not-regular");
             return a;
         }
-        public FileAttributes Stat(string path) { return Attributes(Request(17, delegate(SftpPacket p) { p.Text(path); }, 105, false)); }
-        public FileAttributes Stat(byte[] handle) { return Attributes(Request(8, delegate(SftpPacket p) { p.Bytes(handle); }, 105, false)); }
+        public FileAttributes Stat(string path) { return Attributes(Request(17, delegate(SftpPacket p) { p.Text(path); }, 105, false), true); }
+        public FileAttributes Stat(byte[] handle) { return Attributes(Request(8, delegate(SftpPacket p) { p.Bytes(handle); }, 105, false), true); }
+        public List<DirectoryEntry> ListDirectory(string path, Action check, out bool limited, out int skipped)
+        {
+            limited = false; skipped = 0;
+            SftpPacket opened = Request(11, delegate(SftpPacket p) { p.Text(path); }, 102, false);
+            byte[] handle = opened.Bytes();
+            if (handle.Length == 0 || handle.Length > 256) throw FileError("protocol");
+            List<DirectoryEntry> entries = new List<DirectoryEntry>();
+            int examined = 0;
+            try
+            {
+                while (examined < 2000)
+                {
+                    check();
+                    SftpPacket reply = Request(12, delegate(SftpPacket p) { p.Bytes(handle); }, 104, true);
+                    if (reply == null) return entries;
+                    uint count = reply.UInt();
+                    if (count == 0 || count > 20000) throw FileError("protocol");
+                    for (uint n = 0; n < count; n++)
+                    {
+                        string name = reply.Text(); reply.Bytes(); // longname is presentation text, never parsed.
+                        FileAttributes attributes = Attributes(reply, false);
+                        examined++;
+                        if (name != "." && name != "..")
+                        {
+                            bool valid = name.Length > 0 && name.Length <= 1024 && name.IndexOf('/') < 0;
+                            foreach (char c in name) if (char.IsControl(c)) valid = false;
+                            if (valid) { DirectoryEntry entry = new DirectoryEntry(); entry.Name = name; entry.Attributes = attributes; entries.Add(entry); }
+                            else skipped++;
+                        }
+                        if (examined >= 2000) { limited = true; return entries; }
+                    }
+                    if (reply.Remaining != 0) throw FileError("protocol");
+                }
+                limited = true; return entries;
+            }
+            finally { Close(handle); }
+        }
         public byte[] Open(string path)
         {
             SftpPacket p = Request(3, delegate(SftpPacket q) { q.Text(path); q.UInt(1); q.UInt(0); }, 102, false);
@@ -189,6 +242,7 @@ static partial class ClassDockSshTerminal
     static void DropFileCache(FileJob job)
     {
         job.Released = true;
+        job.Entries = null;
         // A writer or content reader may still hold the file. Keep its quota until deletion succeeds.
         if (job.CachePath != null) { try { File.Delete(job.CachePath); } catch { return; } }
         job.CachePath = null;
@@ -349,7 +403,7 @@ static partial class ClassDockSshTerminal
     public static string FileRequest(string operation, byte[] body)
     {
         EnsureFileManager();
-        int count = operation == "connect" || operation == "inspect" || operation == "download" ? 3 : 2;
+        int count = operation == "connect" || operation == "inspect" || operation == "download" || operation == "list" ? 3 : 2;
         string[] request;
         try { request = ReadBundle(body, count, 64 * 1024); }
         finally { if (body != null) Array.Clear(body, 0, body.Length); }
@@ -368,7 +422,7 @@ static partial class ClassDockSshTerminal
             }
             return "{}";
         }
-        if (operation != "connect" && operation != "inspect" && operation != "preview" && operation != "save-pick" && operation != "download") throw FileError("request");
+        if (operation != "connect" && operation != "inspect" && operation != "preview" && operation != "save-pick" && operation != "download" && operation != "list") throw FileError("request");
         if (!Regex.IsMatch(request[0], "^[a-f0-9]{32}$")) throw FileError("request");
         string signature = operation + "\n" + request[1] + (count == 3 && operation != "connect" ? "\n" + request[2] : "");
         FileJob task; FilePeer connection = null; RemoteFile file = null; byte[] secret = null;
@@ -396,7 +450,7 @@ static partial class ClassDockSshTerminal
             }
             else
             {
-                if (operation == "inspect")
+                if (operation == "inspect" || operation == "list")
                 {
                     ValidateRemoteFilePath(request[2]);
                     if (!FilePeers.TryGetValue(request[1], out connection)) throw FileError("closed");
@@ -430,6 +484,15 @@ static partial class ClassDockSshTerminal
             try
             {
                 if (operation == "connect") { SetFileState(task, "authenticating"); ConnectFiles(connection, secret); secret = null; }
+                else if (operation == "list")
+                {
+                    CheckFileJob(task, connection); SetFileState(task, "listing");
+                    string canonical = connection.Reader.RealPath(request[2]);
+                    bool limited; int skipped;
+                    List<DirectoryEntry> entries = connection.Reader.ListDirectory(canonical,
+                        delegate { CheckFileJob(task, connection); }, out limited, out skipped);
+                    lock (FileGate) { task.DirectoryPath = canonical; task.Entries = entries; task.ListingLimited = limited; task.ListingSkipped = skipped; }
+                }
                 else if (operation == "inspect")
                 {
                     CheckFileJob(task, connection); SetFileState(task, "inspecting");
@@ -516,8 +579,25 @@ static partial class ClassDockSshTerminal
             + ",\"error\":" + JsonString(job.Error) + ",\"bytes\":" + JsonString(job.Bytes.ToString()) + ",\"total\":" + JsonString(job.Total.ToString())
             + ",\"kind\":" + JsonString(job.Kind) + ",\"partial\":" + (job.Partial ? "true" : "false")
             + ",\"connected\":" + (peer != null && !peer.Closed ? "true" : "false")
-            + ",\"path\":" + JsonString(file == null ? "" : file.Path) + ",\"size\":" + JsonString(file == null ? "0" : file.Attributes.Size.ToString())
+            + ",\"path\":" + JsonString(job.DirectoryPath ?? (file == null ? "" : file.Path)) + ",\"size\":" + JsonString(file == null ? "0" : file.Attributes.Size.ToString())
+            + (job.Op == "list" && job.Done && job.State == "complete" ? DirectoryJson(job) : "")
             + ",\"readAt\":" + JsonString(job.Created.ToString("o")) + "}";
+    }
+    static string DirectoryJson(FileJob job)
+    {
+        StringBuilder json = new StringBuilder(",\"limited\":" + (job.ListingLimited ? "true" : "false")
+            + ",\"skipped\":" + job.ListingSkipped + ",\"entries\":[");
+        if (job.Entries != null) for (int n = 0; n < job.Entries.Count; n++)
+        {
+            DirectoryEntry entry = job.Entries[n]; FileAttributes a = entry.Attributes;
+            uint mode = a.Mode & 0xf000;
+            string kind = mode == 0x4000 ? "directory" : mode == 0x8000 ? "file" : mode == 0xa000 ? "link" : "other";
+            if (n > 0) json.Append(',');
+            json.Append("{\"name\":").Append(JsonString(entry.Name)).Append(",\"kind\":").Append(JsonString(kind))
+                .Append(",\"size\":").Append((a.Flags & 1) != 0 ? JsonString(a.Size.ToString()) : "null")
+                .Append(",\"modified\":").Append((a.Flags & 8) != 0 ? a.Modified.ToString() : "null").Append('}');
+        }
+        return json.Append(']').ToString();
     }
     public static byte[] FileContent(string id)
     {

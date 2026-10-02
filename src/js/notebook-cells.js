@@ -1140,9 +1140,13 @@ function updateNbSaveButton(ownerDoc, btn){
     : autosaveState === "failed" ? "자동 저장에 실패했습니다. 복구본은 유지되며 저장 버튼으로 다시 시도할 수 있습니다."
     : target && target.mode ? target.title
     : dirty ? "저장되지 않은 변경 내용이 있습니다." : "노트북 저장";
-  btn.textContent = nbT(label);
+  // 도구 줄 저장 단추는 그림만이라 감춘 글자 칸만 바꾼다 — textContent 로 쓰면 그림까지 지워진다.
+  const slot = btn.querySelector && btn.querySelector(".run-bar-label");
+  if (slot) slot.textContent = nbT(label); else btn.textContent = nbT(label);
   btn.title = nbT(title);
+  if (slot) btn.setAttribute("aria-label", nbT(label) + " — " + btn.title);
   btn.classList.toggle("is-dirty", dirty);
+  btn.classList.toggle("is-failed", autosaveState === "failed");
 }
 
 // 모델 → .ipynb 직렬화 후 기존 저장 경로(saveTextDoc: 원본 파일/서버/다운로드)로 기록.

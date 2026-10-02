@@ -20,7 +20,7 @@ const response = (data={}) => ({ ok:true, json:async () => data, text:async () =
 class Element {
   constructor(tag){
     this.tag = tag; this.value = ""; this.hidden = false; this.children = []; this.dataset = {};
-    this.className = ""; this.textContent = ""; this.listeners = new Map();
+    this.className = ""; this.textContent = ""; this.listeners = new Map();this.attributes={};
     this.clientWidth = 640; this.clientHeight = 480;
     const classes = new Set();
     this.classList = {
@@ -38,9 +38,9 @@ class Element {
   appendChild(child){ this.append(child); }
   get firstElementChild(){ return this.children[0]; }
   addEventListener(type, listener){ this.listeners.set(type, listener); }
-  fire(type){ return this.listeners.get(type)?.({ preventDefault(){}, stopPropagation(){} }); }
-  setAttribute(){} removeAttribute(){} getAttribute(){ return null; }
-  querySelector(){ return null; } focus(){} remove(){} replaceChildren(){}
+  fire(type, properties={}){ return this.listeners.get(type)?.({ preventDefault(){}, stopPropagation(){}, target:this, ...properties }); }
+  setAttribute(name,value){this.attributes[name]=value;} removeAttribute(){} getAttribute(name){ return this.attributes[name]||null; }
+  querySelector(){ return null; } focus(){} remove(){} replaceChildren(...children){this.children=children;}
   setSelectionRange(start, end){ this.selectionStart=start; this.selectionEnd=end; }
 }
 const find = (element, predicate) => {
@@ -53,7 +53,7 @@ const button = (root, copy) => find(root, (el) => el.tag === "button" && el.text
 const input = (root, label) => find(root, (el) => el.tag === "label" && el.firstElementChild?.textContent === label).children[1];
 
 function harness(storage=new Map()){
-  const main = new Element("main"), events = new Map(), calls = [], terminals = [], inputs = [];
+  const main = new Element("main"), events = new Map(), calls = [], terminals = [], inputs = [], downloads=[];
   const pendingPolls = new Map(), pendingStops = new Map();
   const timers = new Map(); let nextTimer = 0;
   const context = {
@@ -67,9 +67,11 @@ function harness(storage=new Map()){
     setTimeout:(callback, delay=0) => { const id=++nextTimer; timers.set(id,{callback,delay}); return id; },
     clearTimeout:(id) => timers.delete(id), requestAnimationFrame:() => 1,
     MNLazy:{ tryNeed:async () => true },
+    MNDownload:{saveText:(text,name)=>{downloads.push({text,name});return true;}},
     Terminal:class {
       constructor(options){ this.options = options; this.output = ""; terminals.push(this); }
       open(){} dispose(){} focus(){} onData(){}
+      clearSelection(){this.selection=null;} select(column,row,length){this.selection={column,row,length};} scrollToLine(row){this.scrolled=row;}
       resize(cols, rows){ this.cols = cols; this.rows = rows; }
       write(bytes, done){ this.output += Buffer.from(bytes).toString("utf8"); done(); }
       writeln(text){ this.output += text + "\n"; }
@@ -122,10 +124,102 @@ function harness(storage=new Map()){
   const flushTimers = (delay) => {
     for(const [id,timer] of [...timers])if(timer.delay===delay){timers.delete(id);timer.callback();}
   };
-  return { main, calls, inputs, terminals, pendingStops, api:context.api, switchTo, open, connect, pollReply, flushTimers, resize:()=>events.get("resize")?.() };
+  return { main, calls, inputs, terminals, downloads, pendingStops, api:context.api, switchTo, open, connect, pollReply, flushTimers, resize:()=>events.get("resize")?.() };
 }
 
 const directoryReply=(session, directory)=>"\x1b]7;file://classdock-"+session+directory+"\x07";
+
+test("search and export buttons use rendered output without sending remote commands",async()=>{
+  const h=harness(), dock=await h.open("A");await h.connect(dock,"server.test");
+  const {Terminal}=require("../vendor/xterm.js"), parser=new Terminal({cols:12,rows:3});
+  try{
+    await new Promise(resolve=>parser.write("한글 test\r\n한글 result",resolve));
+    const terminal=h.terminals[0];terminal.buffer=parser.buffer;terminal.cols=12;
+    button(dock,"출력 찾기").fire("click");
+    const search=find(dock,node=>node.placeholder==="출력에서 찾기 (대소문자 구분)");
+    search.value="한글";search.fire("input");button(dock,"다음").fire("click");
+    assert.equal(terminal.selection.row,0);assert.equal(terminal.selection.length,4);
+    button(dock,"다음").fire("click");assert.equal(terminal.selection.row,1);
+    search.fire("keydown",{key:"Enter",shiftKey:true});assert.equal(terminal.selection.row,0);
+    search.value="missing";button(dock,"다음").fire("click");assert.equal(terminal.selection,null);
+    await button(dock,"출력 저장").fire("click");
+    assert.equal(h.downloads[0].text,"한글 test\n한글 result");assert.match(h.downloads[0].name,/^ssh-.*\.txt$/);
+    assert.equal(h.inputs.length,0);
+  }finally{parser.dispose();await h.api.close();}
+});
+
+test("session tools sit in a vertical rail and font settings open from the rail",async()=>{
+  const h=harness(), dock=await h.open("A");await h.connect(dock,"server.test");
+  try{
+    const head=byClass(dock,"ssh-session-actions"), rail=byClass(dock,"ssh-session-rail");
+    assert.deepEqual(head.children.map(node=>node.textContent),["접기","닫기"]);
+    assert.equal(rail.attributes.role,"toolbar");assert.equal(rail.attributes["aria-orientation"],"vertical");
+    for(const copy of ["파일 업로드","원격 파일","출력 찾기","출력 저장","글꼴","⇄","접속 정보","연결 끊기"])
+      assert.ok(find(rail,node=>node.tag==="button"&&node.textContent===copy),copy);
+    const fonts=byClass(dock,"ssh-font-controls");assert.equal(fonts.hidden,true);
+    button(rail,"글꼴").fire("click");assert.equal(fonts.hidden,false);assert.equal(button(rail,"글꼴").attributes["aria-pressed"],"true");
+    button(rail,"글꼴").fire("click");assert.equal(fonts.hidden,true);
+  }finally{await h.api.close();}
+});
+
+test("connect form helper buttons are icon buttons with names kept for tooltips and screen readers",async()=>{
+  const h=harness(), dock=await h.open("A");
+  try{
+    for(const [copy,label] of [["개인키 선택…","개인키 파일 선택"],["즐겨찾기 저장","즐겨찾기 저장"],["선택 삭제","선택한 즐겨찾기 삭제"],["최근 기록 지우기","최근 기록 지우기"]]){
+      const el=button(dock,copy);
+      assert.ok(el.className.split(" ").includes("ssh-form-ico"),copy);
+      assert.equal(el.title,label);assert.equal(el.attributes["aria-label"],label);
+    }
+    assert.ok(button(dock,"접속").className.includes("ssh-connect-btn"));
+    // 업로드 창·출력 찾기 줄도 그림만(업로드 시작은 주 단추라 그림 + 글자).
+    for(const [copy,label] of [["파일 선택…","업로드할 파일 선택"],["업로드 취소","업로드 취소"],["닫기","파일 업로드 닫기"],
+      ["이전","이전 찾기 (Shift+Enter)"],["다음","다음 찾기 (Enter)"],["찾기 닫기","찾기 닫기 (Esc)"]]){
+      const el=find(dock,node=>node.tag==="button"&&node.textContent===copy&&node.className.includes("ssh-form-ico"));
+      assert.ok(el,copy);assert.equal(el.title,label);assert.equal(el.attributes["aria-label"],label);
+    }
+    // 주 단추(접속·업로드 시작)도 그림만 — 이름은 title·aria-label 로.
+    const start=button(dock,"업로드 시작");assert.ok(start.className.includes("ssh-form-ico"));
+    assert.equal(start.attributes["aria-label"],"선택한 파일을 원격 서버로 업로드");
+    const connect=button(dock,"접속");assert.ok(connect.className.includes("ssh-form-ico"));
+    assert.equal(connect.title,"SSH 서버에 접속");assert.equal(connect.attributes["aria-label"],"SSH 서버에 접속");
+  }finally{await h.api.close();}
+});
+
+test("favorites persist only allowed fields, support groups and search, and load without connecting or credentials",async()=>{
+  const storage=new Map(), h=harness(storage), dock=await h.open("A");
+  input(dock,"호스트").value="server.test";input(dock,"계정").value="student";
+  input(dock,"비밀번호").value="never-persist";input(dock,"즐겨찾기 이름").value="실습 서버";input(dock,"그룹 (선택)").value="학교";
+  await button(dock,"즐겨찾기 저장").fire("click");
+  let saved=JSON.parse(storage.get("classdockSshFavoritesV1"));
+  assert.equal(saved[0].name,"실습 서버");assert.equal(saved[0].group,"학교");
+  assert.deepEqual(Object.keys(saved[0]).sort(),["authentication","group","host","id","name","port","user"]);
+  assert.doesNotMatch(storage.get("classdockSshFavoritesV1"),/never-persist/);
+  const select=find(dock,node=>node.attributes["aria-label"]==="서버 즐겨찾기");
+  input(dock,"호스트").value="changed.test";select.value=saved[0].id;select.fire("change");
+  assert.equal(input(dock,"호스트").value,"server.test");assert.equal(input(dock,"비밀번호").value,"");
+  assert.equal(h.calls.some(url=>url==="/ssh-session-open"),false);
+  const search=find(dock,node=>node.placeholder==="이름·그룹·주소 검색");
+  search.value="학교";search.fire("input");assert.equal(select.children.length,2);
+  search.value="없는 서버";search.fire("input");assert.equal(select.children.length,1);
+  search.value="";search.fire("input");select.value=saved[0].id;
+  input(dock,"즐겨찾기 이름").value="수정한 이름";button(dock,"즐겨찾기 저장").fire("click");
+  saved=JSON.parse(storage.get("classdockSshFavoritesV1"));assert.equal(saved.length,1);assert.equal(saved[0].name,"수정한 이름");
+  const other=await h.open("B"), otherSelect=find(other,node=>node.attributes["aria-label"]==="서버 즐겨찾기");
+  assert.equal(otherSelect.children.length,2);
+  otherSelect.value=saved[0].id;button(other,"선택 삭제").fire("click");assert.deepEqual(JSON.parse(storage.get("classdockSshFavoritesV1")),[]);
+});
+
+test("recent requests are deduplicated, clearable and omit credentials",async()=>{
+  const storage=new Map(), h=harness(storage), dock=await h.open("A");
+  await h.connect(dock,"server.test");
+  assert.equal(JSON.parse(storage.get("classdockSshRecentsV1")).length,1);
+  assert.doesNotMatch(storage.get("classdockSshRecentsV1"),/secret|password.*:/);
+  await button(dock,"접속 정보").fire("click");await h.connect(dock,"server.test");
+  assert.equal(JSON.parse(storage.get("classdockSshRecentsV1")).length,1);
+  await button(dock,"접속 정보").fire("click");button(dock,"최근 기록 지우기").fire("click");
+  assert.equal(storage.has("classdockSshRecentsV1"),false);assert.equal(storage.has("classdockSshProfileV1"),false);
+  await h.api.close();
+});
 
 test("현재 폴더는 명령 입력 없이 자동으로 채우고 파일명과 업로드 수동 경로는 유지한다",async()=>{
   const h=harness(), dock=await h.open("A");await h.connect(dock,"server-A");
