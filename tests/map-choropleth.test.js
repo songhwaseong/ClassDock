@@ -215,5 +215,5 @@ test("경계 자료는 지연 로드 묶음이고 출처·라이선스가 함께
   assert.match(read("vendor/korea-regions.js"), /공공누리 제1유형[\s\S]*CC BY 4\.0/);
   const editor = read("src/js/map-viewer.js");
   assert.match(editor, /interactive:false, color:"#475569"/, "경계층은 지도 클릭·우클릭을 가로채지 않는다");
-  assert.match(editor, /"\.map-choro-hover"\]/, "마우스를 올린 지역 글자는 캡처에서 감춘다");
+  assert.match(editor, /MAP_CAPTURE_HIDDEN_PANES = \[[^\n]*"\.map-choro-hover"/, "마우스를 올린 지역 글자는 캡처에서 감춘다");
 });

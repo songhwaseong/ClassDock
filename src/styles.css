@@ -8928,6 +8928,25 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .leaflet-marker-icon.map-weather-tag{display:inline-flex;align-items:center;gap:3px;width:auto!important;height:auto!important;padding:2px 8px 2px 4px;border:2px solid #fff;border-radius:999px;background:#1d4f73;color:#fff;box-shadow:0 1px 5px #0006;font:700 12px/18px sans-serif;white-space:nowrap}
 .leaflet-marker-icon.map-weather-tag.is-here{background:#b45309}
 .map-weather-tag-glyph{font-size:15px;line-height:1;font-family:"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif}
+.map-wind-canvas{position:absolute;pointer-events:none}
+.map-wind-canvas[hidden],.map-wind-legend[hidden]{display:none}
+.map-wind-color-label{display:flex;align-items:center;gap:6px}
+.map-wind-mode-label{display:flex;align-items:center;gap:8px;margin:8px 0}
+.map-wind-mode,.map-wind-scope,.map-wind-level{flex:1;min-width:0}
+.map-wind-mode-label[hidden]{display:none}
+.map-wind-timeline{margin-top:12px;padding:10px;border:1px solid #98b9bd66;border-radius:8px}
+.map-wind-selected-time{display:block;font-weight:700;font-variant-numeric:tabular-nums}
+.map-wind-time{display:block;width:100%;margin:10px 0;accent-color:#087f8c}
+.map-wind-time-ends{display:flex;justify-content:space-between;gap:10px;font-size:10px;opacity:.8}
+.map-wind-timeline .map-weather-tools{margin:8px 0 0}
+.map-wind-spot{padding:10px;margin-top:10px;border-radius:8px;background:#98b9bd1f}
+.map-wind-spot[hidden],.map-wind-ramp[hidden],.map-wind-ticks[hidden]{display:none}
+.map-wind-spot-values{white-space:pre-line;margin:5px 0;font-variant-numeric:tabular-nums}
+.map-wind-spot small{opacity:.8}
+.map-wind-legend{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);z-index:650;pointer-events:none;box-sizing:border-box;width:min(300px,calc(100% - 28px));padding:8px 14px;border-radius:9px;background:#142a39ed;color:#fff;box-shadow:0 2px 10px #0004;font:11px/1.5 sans-serif;text-align:center}
+.map-wind-ramp{height:8px;margin:5px 0 1px;border-radius:4px}
+.map-wind-ticks{position:relative;height:18px;margin:0 3px}
+.map-wind-ticks span{position:absolute;transform:translateX(-50%);font-variant-numeric:tabular-nums}
 /* 차량 그림의 중심을 실제 좌표에 맞추고 크기를 24px로 고정한다. */
 .map-live-vehicle-icon{position:relative;display:grid;place-items:center;box-sizing:border-box;width:24px;height:24px;border:1px solid currentColor;border-radius:6px;background:#fff;box-shadow:0 0 0 1px #fff,0 1px 4px #0006}
 .map-live-vehicle-image{display:block;width:20px;height:20px;max-width:none;pointer-events:none}

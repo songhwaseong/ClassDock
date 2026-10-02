@@ -21,7 +21,7 @@ test("SSH 서버는 미수신 종료 출력을 보존하고 수신 완료·명�
     const exe = path.join(temp, "retention.exe");
     const compiled = spawnSync(csc, ["/nologo", "/target:exe", "/main:SshSessionRetentionTest",
       "/r:System.IO.Compression.dll", "/r:System.Security.dll", "/out:" + exe,
-      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"),
+      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"), path.join(root, "desktop/world_wind.cs"),
       path.join(root, "desktop/ssh_files.cs"),
       path.join(__dirname, "fixtures/ssh-session-retention.cs")
     ], { encoding:"utf8", timeout:30000, windowsHide:true });

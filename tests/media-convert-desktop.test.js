@@ -23,7 +23,7 @@ test("영상 변환은 호환 스트림 보존·GPU 실패 대체·취소와 실
       .map((name) => "/resource:" + resource + "," + name);
     const compiled = spawnSync(csc, [...resources,"/nologo", "/target:exe", "/main:MediaConvertTest",
       "/r:System.IO.Compression.dll", "/r:System.Security.dll", "/out:" + exe,
-      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"),
+      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"), path.join(root, "desktop/world_wind.cs"),
       path.join(root, "desktop/ssh_files.cs"), path.join(__dirname, "fixtures/media-convert.cs")
     ], { encoding:"utf8", timeout:30000, windowsHide:true });
     assert.equal(compiled.status, 0, compiled.error?.message || compiled.stdout + compiled.stderr);

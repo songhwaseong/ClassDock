@@ -195,7 +195,7 @@ test("실제 목록 렌더러는 반경 필터·거리순·검색·해제를 함
 test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출력 전용 요약을 정리한다", async () => {
   const h=controller(); const {context}=h;
   h.controls.startRadius({lat:0,lng:0});
-  let captured=null, fail=false, busFrozen=false;
+  let captured=null, fail=false, busFrozen=false, windFrozen=false;
   Object.assign(context,{
     setAdding(){},drawingMode:null,waitForTiles:async()=>{},driveLayer:null,
     // 캡처는 실시간 열차 층이 걸어 두는 역 이름 훅도 부른다(꺼져 있으면 빈 배열).
@@ -205,8 +205,10 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
     flights:{freeze(){return ()=>{};},captureNote:()=>""},
     ships:{freeze(){return ()=>{};},captureNote:()=>""},
     weather:{freeze(){return ()=>{};},captureNote:()=>""},
+    wind:{freeze(){windFrozen=true;return ()=>{windFrozen=false;};},captureNote:()=>"wind snapshot"},
     mapCaptureDataUrl:async(stage,attribution)=>{
       assert.equal(busFrozen,true); assert.match(attribution,/bus snapshot/);
+      assert.equal(windFrozen,true); assert.match(attribution,/wind snapshot/);
       const summary=vm.runInContext("radiusExport",context);
       captured={hidden:summary.hidden,text:summary.textContent};
       if(fail) throw new Error("capture failed");
@@ -219,6 +221,7 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
   vm.runInContext(source.slice(start,end)+"\n globalThis.captureRadius=captureMapPng;",context);
   assert.equal(await context.captureRadius(),"test-png");
   assert.equal(busFrozen,false);
+  assert.equal(windFrozen,false);
   assert.equal(captured.hidden,false);
   assert.match(captured.text,/1\.00 km/);
   assert.match(captured.text,/학교 1/);
@@ -235,6 +238,7 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
   fail=true;
   await assert.rejects(context.captureRadius(),/capture failed/);
   assert.equal(busFrozen,false);
+  assert.equal(windFrozen,false);
   assert.equal(vm.runInContext("radiusExport.hidden",context),true);
   h.context.doc.cleanupFns.forEach(fn=>fn());
 });

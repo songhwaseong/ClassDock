@@ -29,7 +29,7 @@ test("설정·작업공간 저장은 교체 실패와 파일 잠금에서 원본
       .map(name => "/resource:" + stub + "," + name);
     const compiled = spawnSync(csc, [...resources, "/nologo", "/target:exe", "/main:WorkspaceAtomicSaveTest",
       "/r:System.IO.Compression.dll", "/r:System.Security.dll", "/out:" + exe, launcher,
-      path.join(root, "desktop/ssh_terminal.cs"), path.join(root, "desktop/ssh_files.cs"),
+      path.join(root, "desktop/ssh_terminal.cs"), path.join(root, "desktop/world_wind.cs"), path.join(root, "desktop/ssh_files.cs"),
       path.join(__dirname, "fixtures/workspace-atomic-save.cs")
     ], { encoding:"utf8", timeout:30000, windowsHide:true });
     assert.equal(compiled.status, 0, compiled.error?.message || compiled.stdout + compiled.stderr);

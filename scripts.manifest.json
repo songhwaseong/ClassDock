@@ -93,6 +93,7 @@
     "ship-map.js",
     "weather-api.js",
     "weather-map.js",
+    "weather-wind.js",
     "kosis-api.js",
     "kosis-choro.js",
     "korea-coords.js",
@@ -276,6 +277,7 @@
         "ship-map.js",
         "weather-api.js",
         "weather-map.js",
+        "weather-wind.js",
         "kosis-api.js",
         "kosis-choro.js",
         "korea-coords.js",
@@ -480,6 +482,7 @@
       "flight-map.js",
       "ship-map.js",
       "weather-map.js",
+      "weather-wind.js",
       "kosis-choro.js"
     ],
     "timeline.js": [

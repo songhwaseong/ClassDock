@@ -24,7 +24,7 @@ test("실제 HTTP 저장 경로는 불완전 본문·교체 실패에서 원본�
       .map(name => "/resource:" + stub + "," + name);
     const compiled = spawnSync(csc, [...resources, "/nologo", "/target:exe", "/main:LocalFileSaveTest",
       "/r:System.IO.Compression.dll", "/r:System.Security.dll", "/out:" + exe,
-      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"),
+      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"), path.join(root, "desktop/world_wind.cs"),
       path.join(root, "desktop/ssh_files.cs"), path.join(__dirname, "fixtures/local-file-save.cs")
     ], { encoding:"utf8", timeout:30000, windowsHide:true });
     assert.equal(compiled.status, 0, compiled.error?.message || compiled.stdout + compiled.stderr);

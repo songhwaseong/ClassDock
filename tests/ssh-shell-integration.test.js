@@ -16,7 +16,7 @@ test("Bash session bootstrap reports cwd without editing profiles and preserves 
   try{
     const exe=path.join(temp,"shell-command.exe"), resource=path.join(root,"desktop/ssh_shell_integration.bash");
     const compiled=spawnSync(csc,["/nologo","/target:exe","/main:SshShellCommandTest","/r:System.IO.Compression.dll","/r:System.Security.dll","/out:"+exe,
-      "/resource:"+resource+",ssh_shell_integration.bash",path.join(root,"desktop/launcher.cs"),path.join(root,"desktop/ssh_terminal.cs"),path.join(root,"desktop/ssh_files.cs"),path.join(__dirname,"fixtures/ssh-shell-command.cs")],{encoding:"utf8",timeout:30000,windowsHide:true});
+      "/resource:"+resource+",ssh_shell_integration.bash",path.join(root,"desktop/launcher.cs"),path.join(root,"desktop/ssh_terminal.cs"),path.join(root,"desktop/world_wind.cs"),path.join(root,"desktop/ssh_files.cs"),path.join(__dirname,"fixtures/ssh-shell-command.cs")],{encoding:"utf8",timeout:30000,windowsHide:true});
     assert.equal(compiled.status,0,compiled.stdout+compiled.stderr);
     const token="0123456789abcdef0123456789abcdef";
     const built=spawnSync(exe,[token],{encoding:"utf8",timeout:5000,windowsHide:true});

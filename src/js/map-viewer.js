@@ -2511,7 +2511,7 @@ async function mapStampCapture(pngUrl, attribution, labels){
    확대·이동 단추는 정지 그림에서 쓸모가 없고, 말풍선·이름표는 더 고약하다 — Leaflet 은 닫은
    말풍선을 페이드아웃으로 지워서 closePopup() 뒤에도 200ms 가량 DOM 에 남는다. 그대로 찍으면
    편집 서식이 지도 한복판에 박힌 그림이 나온다(실측 확인). display:none 이면 시점과 무관하다. */
-const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel", ".map-flight-panel", ".map-ship-panel", ".map-subway-arrival-panel", ".map-choro-hover"];
+const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel", ".map-flight-panel", ".map-ship-panel", ".map-subway-arrival-panel", ".map-choro-hover", ".map-wind-panel"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
    html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다.
@@ -6369,6 +6369,8 @@ async function mountMapEditor(doc){
   // 기상청 날씨(지도 가운데·전국 주요 도시). 같은 공공데이터포털 키를 쓴다.
   const weather = typeof MNWeatherMap !== "undefined" ? MNWeatherMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     resolveArea:mapWeatherAreaAt, movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  const wind = typeof MNWeatherWind !== "undefined" ? MNWeatherWind.mount({ map, stage, toolRow:toolChips, doc,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
 
   /* ── 되돌리기 ──
      내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이
@@ -7811,6 +7813,7 @@ async function mountMapEditor(doc){
     if (!adding){
       /* 거리선·면적에서 올라온 클릭은 그 도형의 말풍선이 열릴 자리다(우클릭 메뉴와 같은 판정).
          여기서 걸러 내지 않으면 방금 열린 그 말풍선을 이 안내가 덮어 버린다. */
+      if (!e.propagatedFrom && wind && wind.inspectAt(e.latlng)) return;
       if (spotInfo && spotReady && !popupWasOpen && !e.propagatedFrom) showSpotInfo(e.latlng);
       return;
     }
@@ -8806,7 +8809,8 @@ async function mountMapEditor(doc){
   const captureMapPng = async () => {
     const resume = jejuBus ? jejuBus.freeze() : () => {};
     const resumeFlights = flights ? flights.freeze() : () => {};
-    try { return await captureMapPngFrozen(); } finally { resume(); resumeFlights(); }
+    const resumeWind = wind ? wind.freeze() : () => {};
+    try { return await captureMapPngFrozen(); } finally { resume(); resumeFlights(); resumeWind(); }
   };
   const captureMapPngFrozen = async () => {
     map.closePopup();
@@ -8872,7 +8876,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote()].filter(Boolean).join(" · "), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote(), wind && wind.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 

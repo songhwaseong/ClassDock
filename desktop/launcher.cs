@@ -17,6 +17,8 @@ using System.Xml;
 
 class ClassDockLauncher
 {
+    static readonly WorldWindService WorldWind = new WorldWindService(Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "world-wind-v1"));
     [DllImport("user32.dll")]
     static extern bool AllowSetForegroundWindow(int dwProcessId);
     [DllImport("user32.dll")]
@@ -1038,6 +1040,7 @@ class ClassDockLauncher
             if (path == "/can-proxy-flight" || path.StartsWith("/flight-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-ship" || path.StartsWith("/ship-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-weather" || path.StartsWith("/weather-", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-world-wind" || path.StartsWith("/world-wind-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
             if (path == "/tago-key-status") return true;
@@ -3428,6 +3431,29 @@ class ClassDockLauncher
                     else
                         WriteResponse(stream, error == "kakao-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
                             "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(error));
+                }
+                else if (method == "GET" && path == "/can-proxy-world-wind")
+                {
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && (path == "/world-wind-catalog" || path.StartsWith("/world-wind-frame?", StringComparison.Ordinal)))
+                {
+                    try
+                    {
+                        if (path == "/world-wind-catalog")
+                            WriteResponse(stream, "200 OK", "application/json; charset=utf-8", WorldWind.Catalog());
+                        else
+                        {
+                            int hour, level; bool cached;
+                            if (!Int32.TryParse(QueryValue(path, "hour"), NumberStyles.None, CultureInfo.InvariantCulture, out hour)
+                                || !Int32.TryParse(QueryValue(path, "level"), NumberStyles.None, CultureInfo.InvariantCulture, out level)) throw new ArgumentException();
+                            byte[] data = WorldWind.Frame(QueryValue(path, "cycle"), hour, level, out cached);
+                            WriteResponse(stream, "200 OK", "application/octet-stream", data);
+                        }
+                    }
+                    catch (ArgumentException) { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("world-wind-query")); }
+                    catch (InvalidDataException) { WriteResponse(stream, "502 Bad Gateway", "text/plain", Encoding.UTF8.GetBytes("world-wind-data")); }
+                    catch (Exception) { WriteResponse(stream, "503 Service Unavailable", "text/plain", Encoding.UTF8.GetBytes("world-wind-network")); }
                 }
                 else if (method == "GET" && (path == "/can-proxy-jeju-bus" || path == "/can-proxy-flight" || path == "/can-proxy-ship" || path == "/can-proxy-weather"))
                 {

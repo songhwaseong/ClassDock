@@ -27,7 +27,7 @@ test("실제 수락 루프는 한도를 넘는 연결에 곧바로 503 을 주�
       .map(name => "/resource:" + stub + "," + name);
     const compiled = spawnSync(csc, [...resources, "/nologo", "/target:exe", "/main:ExamReceiveLimitTest",
       "/r:System.IO.Compression.dll", "/r:System.Security.dll", "/out:" + exe,
-      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"),
+      path.join(root, "desktop/launcher.cs"), path.join(root, "desktop/ssh_terminal.cs"), path.join(root, "desktop/world_wind.cs"),
       path.join(root, "desktop/ssh_files.cs"), path.join(__dirname, "fixtures/exam-receive-limit.cs")
     ], { encoding:"utf8", timeout:30000, windowsHide:true });
     assert.equal(compiled.status, 0, compiled.error?.message || compiled.stdout + compiled.stderr);
