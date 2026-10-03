@@ -685,6 +685,7 @@ function askText(opts){
   opts = opts || {};
   return new Promise((resolve) => {
     const modal = byId("textModal"), input = byId("textInput");
+    modal.setAttribute("data-i18n-ui", "");
     const sub = byId("textSub"), okButton = byId("textOk");
     const baseMessage = opts.message || "";
     byId("textTitle").textContent = opts.title || "이름 입력";
@@ -742,6 +743,7 @@ function confirmDialog(message, okText, cancelText, opts){
   const altText = opts.altText || "";
   return new Promise((resolve) => {
     const modal = byId("confirmModal");
+    modal.setAttribute("data-i18n-ui", "");
     const altBtn = byId("confirmAlt");
     byId("confirmSub").textContent = message || "계속하시겠어요?";
     byId("confirmOk").textContent = okText || "계속";

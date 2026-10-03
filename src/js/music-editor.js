@@ -3840,6 +3840,7 @@ async function mountMusicEditor(doc){
   function renderMusicContextLayer(items, depth){
     const menu = document.createElement("div");
     menu.className = depth ? "music-context-menu music-context-sub" : "music-context-menu";
+    menu.setAttribute("data-i18n-ui", "");
     menu.setAttribute("role", "menu");
     menu.addEventListener("pointerenter", cancelContextSubClose);
     for (const item of items){
@@ -3889,6 +3890,7 @@ async function mountMusicEditor(doc){
       }
       menu.appendChild(button);
     }
+    if (window.MNI18N) window.MNI18N.translateTree(menu);
     return menu;
   }
 

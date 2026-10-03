@@ -1224,7 +1224,7 @@ function renderWhiteboard(doc, host){
       ctx.beginPath(); ctx.moveTo(d, 0); ctx.lineTo(d, major ? 15 : 8); ctx.stroke();
       if (major && d > 0.5) ctx.fillText(String(Math.round(d / cm)), d + 3, 16);
     }
-    ctx.fillText("자 (cm)", 22, RULER_THICKNESS - 18);   // 왼쪽 길이 손잡이를 피해 살짝 안쪽에
+    ctx.fillText(window.t ? window.t("자 (cm)") : "자 (cm)", 22, RULER_THICKNESS - 18);
     ctx.restore();
     const nx = -Math.sin(edge.angle), ny = Math.cos(edge.angle);
     drawGearHandle(edge.a.x + nx * RULER_THICKNESS / 2, edge.a.y + ny * RULER_THICKNESS / 2, false);  // 왼쪽=길이
@@ -1255,7 +1255,7 @@ function renderWhiteboard(doc, host){
     }
     ctx.beginPath(); ctx.arc(0, 0, gearUi(4), 0, Math.PI * 2); ctx.fill();
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillText("각도기", -18, 8);
+    ctx.fillText(window.t ? window.t("각도기") : "각도기", -18, 8);
     ctx.restore();
     const angle = protractor.angle || 0;
     drawGearHandle(protractor.x - Math.cos(angle) * radius, protractor.y - Math.sin(angle) * radius, false);  // 왼쪽=크기
@@ -6826,6 +6826,8 @@ function renderWhiteboard(doc, host){
   requestAnimationFrame(resize);
 
   if (!doc.cleanupFns) doc.cleanupFns = [];
+  window.addEventListener("mni18nchange", redraw);
+  doc.cleanupFns.push(() => window.removeEventListener("mni18nchange", redraw));
   doc.cleanupFns.push(() => { clearTimeout(boardRecoveryTimer); clearTimeout(focusFlashTimer); if (hoverFrame) cancelAnimationFrame(hoverFrame); if (focusDragCleanup) focusDragCleanup(); boardClosed = true; document.removeEventListener("lesson-mic-changed", onRecordMicChanged); if (doc.recorder){ doc.recorder.active = false; if (doc.recorder.audio) doc.recorder.audio.cancel(); } stage.removeEventListener("contextmenu",onFocusContextMenu); focusContextMenu.remove(); symbolPicker.remove(); document.removeEventListener("pointerdown", onPointerDownOutside, true); document.removeEventListener("keydown", onKey, true); document.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onWindowBlur); document.removeEventListener("copy", onCopy); document.removeEventListener("cut", onCut); document.removeEventListener("paste", onPaste); if (ro) ro.disconnect(); offScreenRatio(); if (focusFloat) focusFloat.destroy(); if (eduFloat) eduFloat.destroy(); if (bgFloat) bgFloat.destroy(); if (transformFloat) transformFloat.destroy(); imageUrls.forEach(u => { try { URL.revokeObjectURL(u); } catch(_){} }); });
 }
 

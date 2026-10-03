@@ -2608,6 +2608,7 @@ function openUserManual(){
     }
     if (_manualUrl) url = _manualUrl;
   }
+  if (window.MNI18N && window.MNI18N.lang === "en") url += "#English-guide";
   const opened = window.open(url, "_blank");
   if (opened){
     try { opened.opener = null; } catch(_){}

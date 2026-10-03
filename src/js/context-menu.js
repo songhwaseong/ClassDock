@@ -130,6 +130,7 @@ const MNContextMenu = (() => {
       }
       menu.appendChild(button);
     }
+    if (window.MNI18N) window.MNI18N.translateTree(menu);
     return menu;
   };
 

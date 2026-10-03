@@ -1412,6 +1412,33 @@ function mapSubwayTextColor(hex){
    15초면 한 노선을 4시간 넘게 볼 수 있고, 그보다 자주 물어도 런처 캐시에 막혀 새 값이 오지 않는다. */
 const MAP_SUBWAY_POLL_MS = 15000;
 
+/* 화면에 역이 없더라도 역 사이 선이 지나면 현재 보기를 유지한다.
+   Leaflet이 그리는 것과 같은 투영 좌표로 화면 사각형과 구간의 교차를 검사한다. */
+function mapSubwayRouteInView(stations, neighbours, project, size){
+  const points = new Map(Object.entries(stations).map(([name, at]) => [name, project(at)]));
+  const inside = (p) => p.x >= 0 && p.x <= size.x && p.y >= 0 && p.y <= size.y;
+  for (const [name, a] of points){
+    if (inside(a)) return true;
+    for (const other of neighbours(name)){
+      const b = points.get(other);
+      if (!b) continue;
+      let enter = 0, leave = 1;
+      for (const [axis, max] of [["x", size.x], ["y", size.y]]){
+        const delta = b[axis] - a[axis];
+        if (delta === 0){
+          if (a[axis] < 0 || a[axis] > max){ leave = -1; break; }
+        } else {
+          const from = -a[axis] / delta, to = (max - a[axis]) / delta;
+          enter = Math.max(enter, Math.min(from, to));
+          leave = Math.min(leave, Math.max(from, to));
+        }
+      }
+      if (enter <= leave) return true;
+    }
+  }
+  return false;
+}
+
 /* ===== 장소 이름 검색 =====
    이름 검색은 런처의 /geocode 만 쓴다. 카카오를 고르면 주소 → 장소명 순서로 찾고, 키가 없거나
    결과가 없으면 OSM 으로 자동 재검색한다. API 키는 appSettings/localStorage 에 두지 않고 런처가
@@ -5285,14 +5312,18 @@ async function mountMapEditor(doc){
   prepareBtn.title = "실제로 본 지역은 자동으로 보관됩니다 — 현황을 확인하거나 비울 수 있어요";
 
   /* 실시간 열차도 런처가 대신 받아 줄 때만 뜻이 있다(아래에서 표시를 결정한다).
-     노선을 고르는 칸과 켜고 끄는 단추가 한 벌이다 — 하루 조회 한도가 있어 한 번에 한 노선만 본다. */
+     노선을 고르면 바로 표시하고 같은 메뉴에서 숨긴다 — 한 번에 한 노선만 본다. */
   /* 노선 칸은 직접 그린 목록이다 — 기본 select 는 선택지 안에 노선도 모양을 그릴 수 없다.
-     값은 여전히 숨긴 select 가 들고 있어 저장·되살리기·change 처리(아래)와 시험의 selectOption 이
-     그대로 산다. 고르면 select 값을 바꾸고 change 를 쏘는 것뿐이다. */
+     값은 숨긴 select 가 들고 있어 change 처리(아래)와 시험의 selectOption 이 그대로 산다.
+     고르면 select 값을 바꾸고 change 를 쏘는 것뿐이다. */
   const subwayLineSelect = document.createElement("select");
   subwayLineSelect.className = "map-subway-line";
   subwayLineSelect.tabIndex = -1;
   subwayLineSelect.setAttribute("aria-hidden", "true");
+  const subwayLineNone = document.createElement("option");
+  subwayLineNone.value = "";
+  subwayLineNone.textContent = "실시간 열차";
+  subwayLineSelect.appendChild(subwayLineNone);
   for (const line of Object.keys(typeof SUBWAY_LINES !== "undefined" ? SUBWAY_LINES : {})){
     const option = document.createElement("option");
     option.value = line; option.textContent = line;
@@ -5305,11 +5336,11 @@ async function mountMapEditor(doc){
   subwayLineTrigger.className = "map-subway-picker-btn";
   subwayLineTrigger.title = "실시간으로 볼 노선";
   subwayLineTrigger.setAttribute("aria-label", "실시간 열차 노선");
-  subwayLineTrigger.setAttribute("aria-haspopup", "listbox");
+  subwayLineTrigger.setAttribute("aria-haspopup", "menu");
   subwayLineTrigger.setAttribute("aria-expanded", "false");
   const subwayLineList = document.createElement("div");
   subwayLineList.className = "map-subway-picker-list";
-  subwayLineList.setAttribute("role", "listbox");
+  subwayLineList.setAttribute("role", "menu");
   subwayLineList.setAttribute("aria-label", "노선 선택");
   subwayLineList.hidden = true;
   subwayLinePicker.append(subwayLineSelect, subwayLineTrigger, subwayLineList);
@@ -5328,11 +5359,15 @@ async function mountMapEditor(doc){
   };
   const syncSubwayPicker = () => {
     const option = subwayLineSelect.selectedOptions[0];
-    subwayLineTrigger.replaceChildren(...(option ? subwayLineMark(option) : []));
+    subwayLineTrigger.replaceChildren(...(option && option.value ? subwayLineMark(option) : [mapT("실시간 열차")]));
+    subwayLineTrigger.classList.toggle("is-on", !!subwayLineSelect.value);
+    subwayLineTrigger.setAttribute("aria-label", subwayLineSelect.value
+      ? mapTf("실시간 열차 · {line}", { line:subwayLineSelect.value }) : mapT("실시간 열차"));
   };
   syncSubwayPicker();
 
-  const subwayLineItems = () => [...subwayLineList.querySelectorAll(".map-subway-picker-item")];
+  let subwayViewAll = () => {};
+  const subwayLineItems = () => [...subwayLineList.querySelectorAll(".map-subway-picker-item:not(:disabled)")];
   const subwayLineOutside = (event) => { if (!subwayLinePicker.contains(event.target)) closeSubwayPicker(false); };
   const closeSubwayPicker = (refocus) => {
     if (subwayLineList.hidden) return;
@@ -5360,7 +5395,7 @@ async function mountMapEditor(doc){
     head.append(icon, title);
     subwayLineList.replaceChildren(head);
     for (const [numeric, name] of [[true, "1–9호선"], [false, "광역·경전철"]]){
-      const options = [...subwayLineSelect.options].filter((option) => /^\d/.test(option.value) === numeric);
+      const options = [...subwayLineSelect.options].filter((option) => option.value && /^\d/.test(option.value) === numeric);
       if (!options.length) continue;
       const heading = document.createElement("div");
       heading.className = "map-subway-picker-heading";
@@ -5374,18 +5409,33 @@ async function mountMapEditor(doc){
         const item = document.createElement("button");
         item.type = "button";
         item.className = "map-subway-picker-item";
-        item.setAttribute("role", "option");
-        item.setAttribute("aria-selected", String(option.selected));
+        item.setAttribute("role", "menuitemradio");
+        item.setAttribute("aria-checked", String(option.selected));
         item.dataset.line = option.value;
         item.append(...subwayLineMark(option, true));
         group.appendChild(item);
       }
       subwayLineList.append(heading, group);
     }
+    const actions = document.createElement("div");
+    actions.className = "map-subway-picker-actions";
+    actions.setAttribute("role", "group");
+    for (const [action, text] of [["view", "노선 전체 보기"], ["hide", "노선·열차 숨기기"]]){
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "map-subway-picker-item";
+      item.setAttribute("role", "menuitem");
+      item.dataset.action = action;
+      item.textContent = mapT(text);
+      item.disabled = !subwayLineSelect.value;
+      actions.appendChild(item);
+    }
+    subwayLineList.appendChild(actions);
+    mapTranslate(subwayLineList);
     subwayLineList.hidden = false;
     subwayLineTrigger.setAttribute("aria-expanded", "true");
     document.addEventListener("pointerdown", subwayLineOutside, true);
-    const selected = subwayLineList.querySelector('[aria-selected="true"]') || subwayLineItems()[0];
+    const selected = subwayLineList.querySelector('[aria-checked="true"]') || subwayLineItems()[0];
     if (selected){ selected.focus(); selected.scrollIntoView({ block:"nearest" }); }
   };
   subwayLineTrigger.addEventListener("click", () => {
@@ -5399,7 +5449,11 @@ async function mountMapEditor(doc){
   });
   subwayLineList.addEventListener("click", (event) => {
     const item = event.target.closest(".map-subway-picker-item");
-    if (item) chooseSubwayLine(item.dataset.line);
+    if (!item || item.disabled) return;
+    if (item.dataset.action === "view"){
+      closeSubwayPicker(true);
+      subwayViewAll();
+    } else chooseSubwayLine(item.dataset.action === "hide" ? "" : item.dataset.line);
   });
   subwayLineList.addEventListener("keydown", (event) => {
     const items = subwayLineItems();
@@ -5415,12 +5469,6 @@ async function mountMapEditor(doc){
     event.preventDefault();
     items[next].focus();
   });
-  const subwayBtn = document.createElement("button");
-  subwayBtn.type = "button";
-  subwayBtn.className = "map-btn map-subway map-toolvis-subway";
-  subwayBtn.textContent = "🚇 실시간 열차";
-  subwayBtn.title = "지금 운행 중인 열차를 지도 위에 보여 줍니다 — 역 사이는 이어서 그립니다";
-  subwayBtn.setAttribute("aria-pressed", "false");
 
   const imageBtn = document.createElement("button");
   imageBtn.type = "button"; imageBtn.className = "map-btn map-image-pick map-toolvis-image";
@@ -5601,7 +5649,7 @@ async function mountMapEditor(doc){
     [nearbyBtn, "building"], [regionBtn, "barChart"], [choroBtn, "palette"], [imageBtn, "foldedMap"], [csvImportBtn, "database"],
     [csvTemplateBtn, "table"], [csvExportBtn, "fileExport"], [csvMemoBtn, "tableMemo"],
     [clearItemsBtn, "eraser"], [geoExportBtn, "download"], [boardBtn, "board"], [memoBtn, "memo"], [pngBtn, "image"],
-    [printBtn, "print"], [taskBtn, "target"], [imageClearBtn, "trash"], [prepareBtn, "cloud"], [subwayBtn, "train"],
+    [printBtn, "print"], [taskBtn, "target"], [imageClearBtn, "trash"], [prepareBtn, "cloud"], [subwayLineTrigger, "train"],
     [toolsToggleBtn, "panel"], [searchBtn, "search"]
   ]) mapSetToolIcon(element, icon);              // 저장은 빼 둔다 — setSaveIcon 이 이미 그림을 넣어 두 번 그려진다
   mapSetToolIcon(searchWrap, "pin");               // 검색칸 왼쪽 안쪽의 핀(CSS 가 칸 안에 띄운다)
@@ -6113,14 +6161,13 @@ async function mountMapEditor(doc){
 
   /* ── 실시간 열차 위치 ──
      지도 문서(.map)에는 아무것도 남기지 않는다. 열차는 지금 이 순간의 값이라, 파일에 담으면
-     다음에 열 때 어제 열차가 되살아난다. 켜 둔 사실조차 문서가 아니라 이 브라우저에 남긴다 —
+     다음에 열 때 어제 열차가 되살아난다. 지도를 열 때마다 표시하지 않은 상태로 시작한다 —
      지도를 남에게 건넸을 때 그 사람에게는 인증키가 없어 켜진 채로 열리면 오류만 보인다.
      그래서 표시(marker) 목록·CSV·GPX·발표 모드에도 이 층은 아예 닿지 않는다.
 
      캡처(칠판·PNG·인쇄)에는 일부러 남긴다. 정지 그림이라도 '이 순간 열차가 여기 있었다' 는
      수업 자료가 되기 때문이다. 이름표(tooltip)는 캡처에서 통째로 감춰지므로 점만 찍힌다. */
   if (typeof MNSubwayLive !== "undefined" && await mapSubwayProxyReady()){
-    const SUBWAY_LINE_KEY = "mapSubwayLine";
     // 열차 점은 표시(markerPane 600)보다 위, 말풍선(popupPane 700)보다 아래에 둔다.
     const subwayPane = map.createPane("mapSubwayPane");
     subwayPane.style.zIndex = "640";
@@ -6135,15 +6182,12 @@ async function mountMapEditor(doc){
     let subwayTimer = 0;
     let subwayFrame = 0;
     let subwayFetching = false;
+    let subwayRequestSeq = 0;
     const subwayTrains = new Map();          // 열차 → 최근 이벤트(방향·되돌림 판정에 쓴다)
     const subwayMarkers = new Map();
     const subwayLayer = L.layerGroup([], { pane:"mapSubwayPane" });
     const subwayRouteLayer = L.layerGroup([], { pane:"mapSubwayRoutePane" });
 
-    try {
-      const saved = localStorage.getItem(SUBWAY_LINE_KEY);
-      if (saved && subwayLineSelect.querySelector(`option[value="${CSS.escape(saved)}"]`)) subwayLineSelect.value = saved;
-    } catch(_){}
     syncSubwayPicker();
 
     const subwayColor = () => MAP_SUBWAY_COLORS[subwayLineSelect.value] || "#c0392b";
@@ -6293,19 +6337,20 @@ async function mountMapEditor(doc){
       if (document.hidden || !stage.offsetParent) return;
       subwayFetching = true;
       const line = subwayLineSelect.value;
+      const seq = ++subwayRequestSeq;
       try {
         const response = await fetch("/subway-position?line=" + encodeURIComponent(line), { cache:"no-store" });
         if (!response.ok) throw new Error((await response.text()).trim() || "HTTP " + response.status);
         const body = await response.json();
-        if (!subwayOn || subwayLineSelect.value !== line) return;   // 그 사이 끄거나 노선을 바꿨다
+        if (!subwayOn || seq !== subwayRequestSeq || subwayLineSelect.value !== line) return;
         const rows = Array.isArray(body.realtimePositionList) ? body.realtimePositionList : [];
         const alive = MNSubwayLive.ingest(subwayTrains, rows, line);
         for (const key of [...subwayTrains.keys()]) if (!alive.has(key)) subwayTrains.delete(key);
         subwaySay(rows.length ? "" : mapT("지금은 운행 중인 열차가 없어요."));
       } catch(error){
-        if (subwayOn) subwayFail(error && error.message);
+        if (subwayOn && seq === subwayRequestSeq) subwayFail(error && error.message);
       } finally {
-        subwayFetching = false;
+        if (seq === subwayRequestSeq) subwayFetching = false;
       }
     };
 
@@ -6434,6 +6479,8 @@ async function mountMapEditor(doc){
 
     const subwayStop = () => {
       subwayOn = false;
+      subwayRequestSeq++;
+      subwayFetching = false;
       clearInterval(subwayTimer); subwayTimer = 0;
       cancelAnimationFrame(subwayFrame); subwayFrame = 0;
       subwayTrains.clear();
@@ -6446,10 +6493,20 @@ async function mountMapEditor(doc){
       subwayRouteLayer.clearLayers();
       map.removeLayer(subwayRouteLayer);
       map.removeLayer(subwayLayer);
-      subwayBtn.classList.remove("is-on");
-      subwayBtn.setAttribute("aria-pressed", "false");
+      subwayLineSelect.value = "";
+      syncSubwayPicker();
       subwayCloseArrivals();
     };
+
+    const subwayFitRoute = (force = false) => {
+      const line = subwayLineSelect.value;
+      const stations = MNSubwayLive.stationsOf(line);
+      if (!stations || !Object.keys(stations).length) return;
+      if (!force && mapSubwayRouteInView(stations, (name) => MNSubwayLive.neighbours(line, name),
+        (at) => map.latLngToContainerPoint(at), map.getSize())) return;
+      map.fitBounds(Object.values(stations), { padding:[32,32], maxZoom:14, animate:true });
+    };
+    subwayViewAll = () => subwayFitRoute(true);
 
     const subwayStart = () => {
       subwayOn = true;
@@ -6460,38 +6517,27 @@ async function mountMapEditor(doc){
       subwayRouteLayer.addTo(map);
       subwayLayer.addTo(map);
       map.on("zoomend", subwaySyncLabels);
-      subwayBtn.classList.add("is-on");
-      subwayBtn.setAttribute("aria-pressed", "true");
+      syncSubwayPicker();
+      subwayFitRoute();
       subwayPoll();
       subwayTimer = setInterval(subwayPoll, MAP_SUBWAY_POLL_MS);
       subwayFrame = requestAnimationFrame(subwayRender);
     };
 
-    subwayBtn.addEventListener("click", () => {
-      if (subwayOn){ subwayStop(); setStatus(""); }
-      else subwayStart();
-    });
     subwayLineSelect.addEventListener("change", () => {
-      try { localStorage.setItem(SUBWAY_LINE_KEY, subwayLineSelect.value); } catch(_){}
-      syncSubwayPicker();
-      if (!subwayOn) return;
-      // 노선을 바꾸면 앞 노선의 열차와 이력은 버린다 — 남겨 두면 없는 선 위에 점이 떠 있게 된다.
-      subwayTrains.clear();
-      subwayMarkers.clear();
-      subwayLayer.clearLayers();
-      subwayShown = -1;
-      subwayDrawRoute();                     // 새 노선의 역·선으로 갈아 끼운다
-      subwayNote = mapT("열차 정보를 받는 중…");
-      setStatus(subwayNote);
-      subwayPoll();
+      const line = subwayLineSelect.value;
+      // 앞 노선의 표시·조회·도착 정보를 정리한 뒤 새 노선으로 바꾼다.
+      subwayStop();
+      if (!line){ setStatus(""); return; }
+      subwayLineSelect.value = line;
+      subwayStart();
     });
 
     toolChips.appendChild(subwayLinePicker);
-    toolChips.appendChild(subwayBtn);
     mapTranslate(toolRow);
 
     if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
-    doc.cleanupFns.push(() => { if (subwayOn) subwayStop(); subwayArrivalPanel.remove(); });
+    doc.cleanupFns.push(() => { closeSubwayPicker(false); if (subwayOn) subwayStop(); subwayArrivalPanel.remove(); });
   }
 
   const jejuBus = typeof MNJejuBusMap !== "undefined" ? MNJejuBusMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
@@ -9494,7 +9540,7 @@ if (typeof module !== "undefined" && module.exports){
     mapCsvLooksLikeTimeline, mapTimelineEventsToPending,
     mapMarkersFromCsv, mapMarkersToCsv, mapMarkersToRows, mapMarkersToMemoRows, mapMarkersTemplateRows,
     mapGeoJsonImport, mapGeoJsonExport, mapGpxImport, mapGpxExport, mapKmlImport, mapKmlExport,
-    mapPointInPolygon, mapMarkersInArea, mapClusterPixelGroups, mapKakaoRoadviewUrl,
+    mapPointInPolygon, mapMarkersInArea, mapClusterPixelGroups, mapKakaoRoadviewUrl, mapSubwayRouteInView,
     MAP_GEO_IMPORT_MAX_ITEMS,
     mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces,
     mapCirclePoints, mapShapeLabelAnchor, mapRegionNameOf, mapRegionTally,

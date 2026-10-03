@@ -592,6 +592,7 @@ const MNDocxEditor = (() => {
   /* renderDocx 가 미리보기를 그린 뒤 부른다. 편집 모드로 들어가기 전에는 zip 을 풀지 않는다
      (문서를 열기만 하고 안 고치는 경우가 훨씬 많다). */
   async function attach(file, host, doc, previewEl){
+    previewEl.setAttribute("data-i18n-ignore", "");
     if (!canEditDocs() || !doc) return;
 
     const bar = document.createElement("div");
@@ -1767,6 +1768,7 @@ const MNDocxEditor = (() => {
         }
         menu.appendChild(button);
       }
+      if (window.MNI18N) window.MNI18N.translateTree(menu);
       return menu;
     };
     const openDocxContextMenu = (x, y, items) => {

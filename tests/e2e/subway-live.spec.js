@@ -94,10 +94,11 @@ test("켜면 열차가 그려지고, 시간이 지나면 스스로 움직인다"
   await page.goto("/");
   await page.evaluate(() => newMapScratch());
 
-  const toggle = page.locator(".map-subway");
-  await expect(toggle).toHaveCount(1);
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  await expect(page.locator(".map-subway-line")).toHaveValue("1호선");
+  const picker = page.locator(".map-subway-picker-btn");
+  await expect(picker).toHaveCount(1);
+  await expect(picker).toHaveText("실시간 열차");
+  await expect(page.locator(".map-subway-line")).toHaveValue("");
+  await expect(page.locator(".map-subway")).toHaveCount(0);
 
   /* 새 지도는 전국이 보이는 확대 7단계로 열린다 — 그 배율에서는 열차가 몇 초 움직여도
      1픽셀이 안 된다. 좌표 입력은 네트워크 없이 바로 이동하므로 그것으로 서울 도심에 붙인다. */
@@ -106,8 +107,7 @@ test("켜면 열차가 그려지고, 시간이 지나면 스스로 움직인다"
   await page.waitForTimeout(300);
 
   await page.locator(".map-subway-line").selectOption("2호선");
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(picker).toHaveClass(/is-on/);
   await expect(trains(page)).toHaveCount(2);
   await expect(page.locator(".map-status")).toContainText("2호선");
 
@@ -137,8 +137,9 @@ test("켜면 열차가 그려지고, 시간이 지나면 스스로 움직인다"
   await trains(page).nth(1).hover();
   await expect(page.locator(".map-subway-train-tip").first()).toContainText("급행");
 
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await picker.click();
+  await page.getByRole("menuitem", { name:"노선·열차 숨기기" }).click();
+  await expect(page.locator(".map-subway-line")).toHaveValue("");
   await expect(trains(page)).toHaveCount(0);
   expect(errors).toEqual([]);
 });
@@ -153,7 +154,6 @@ test("노선을 켜면 그 노선의 역과 선이 함께 깔리고 끄면 같�
 
   await expect(stations(page)).toHaveCount(0);      // 켜기 전에는 아무것도 없다
   await page.locator(".map-subway-line").selectOption("2호선");
-  await page.locator(".map-subway").click();
   await expect(stations(page)).toHaveCount(51);     // 본선 43 + 성수지선 4 + 신정지선 4
   await expect(segments(page)).toHaveCount(51);     // 순환선이라 역 수와 구간 수가 같다
 
@@ -173,7 +173,7 @@ test("노선을 켜면 그 노선의 역과 선이 함께 깔리고 끄면 같�
   await expect(page.locator(".leaflet-tooltip").first()).toContainText(first[0]);
   await expect(page.locator(".leaflet-tooltip").first()).toHaveText(/\S/);
 
-  await page.locator(".map-subway").click();
+  await page.locator(".map-subway-line").selectOption("");
   await expect(stations(page)).toHaveCount(0);
   await expect(segments(page)).toHaveCount(0);
 });
@@ -185,7 +185,6 @@ test("가까이 가면 역 이름이 늘 붙고 멀어지면 접힌다", async (
   await page.goto("/");
   await page.evaluate(() => newMapScratch());
   await page.locator(".map-subway-line").selectOption("2호선");
-  await page.locator(".map-subway").click();
 
   // 새 지도는 전국이 보이는 7단계 — 이때는 이름을 붙이지 않는다(점만).
   await expect(stations(page)).toHaveCount(51);
@@ -205,7 +204,7 @@ test("가까이 가면 역 이름이 늘 붙고 멀어지면 접힌다", async (
   // 다시 다가가 켜 둔 채로 끄면 이름도 함께 사라진다.
   await page.locator(".leaflet-control-zoom-in").click();
   await expect(labels(page)).toHaveCount(51);
-  await page.locator(".map-subway").click();
+  await page.locator(".map-subway-line").selectOption("");
   await expect(labels(page)).toHaveCount(0);
 });
 
@@ -218,7 +217,6 @@ test("실시간 열차는 지도 파일에 한 글자도 남기지 않는다", a
   await expect(page.locator(".map-stage.leaflet-container")).toHaveCount(1);
   const before = await mapModel(page);
   await page.locator(".map-subway-line").selectOption("2호선");
-  await page.locator(".map-subway").click();
   await expect(trains(page)).toHaveCount(2);
 
   /* 열차는 지금 이 순간의 값이라 문서에 담으면 다음에 열 때 어제 열차가 되살아난다.
@@ -252,10 +250,10 @@ test("인증키가 없으면 이유를 밝히고 계속 조르지 않는다", as
   let asked = 0;
   page.on("request", (request) => { if (request.url().includes("/subway-position")) asked++; });
 
-  await page.locator(".map-subway").click();
+  await page.locator(".map-subway-line").selectOption("1호선");
   await expect(page.locator(".map-status")).toContainText("인증키");
   // 키가 없으면 더 물어도 소용없다 — 스스로 꺼져야 한다(하루 조회 한도를 헛되이 쓰지 않게).
-  await expect(page.locator(".map-subway")).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".map-subway-line")).toHaveValue("");
   await expect(trains(page)).toHaveCount(0);
   const first = asked;
   await page.waitForTimeout(1200);
@@ -267,9 +265,44 @@ test("운행 중인 열차가 없으면 빈 화면 대신 그렇다고 말한다
   await stubLauncher(page, { empty:true });
   await page.goto("/");
   await page.evaluate(() => newMapScratch());
-  await page.locator(".map-subway").click();
+  await page.locator(".map-subway-line").selectOption("1호선");
   await expect(page.locator(".map-status")).toContainText("운행 중인 열차가 없어요");
   await expect(trains(page)).toHaveCount(0);
+  await expect(page.locator(".map-subway-line")).toHaveValue("1호선");
+  await expect(stations(page)).not.toHaveCount(0);
+});
+
+test("화면 밖 노선은 자동으로 전체 보기, 노선 안에서는 현재 확대를 유지한다", async ({ page }) => {
+  await openApp(page);
+  await stubLauncher(page, { empty:true });
+  await page.goto("/");
+  await page.evaluate(() => newMapScratch());
+  await page.locator(".map-goto").fill("35.1796, 129.0756");
+  await page.locator(".map-goto").press("Enter");
+  await expect.poll(async () => (await mapModel(page)).center[0]).toBeCloseTo(35.1796, 3);
+
+  await page.locator(".map-subway-picker-btn").click();
+  await page.getByRole("menuitemradio", { name:"신분당선", exact:true }).click();
+  const wholeLineVisible = () => page.evaluate(points => {
+    const doc = docs.find(d => d.kind === "map");
+    return doc.mapInstance.getBounds().contains(L.latLngBounds(points));
+  }, Object.values(table.SUBWAY_LINES["신분당선"].s));
+  await expect.poll(wholeLineVisible).toBe(true);
+
+  const at = Object.values(table.SUBWAY_LINES["신분당선"].s)[0];
+  await page.locator(".map-goto").fill(at.join(", "));
+  await page.locator(".map-goto").press("Enter");
+  await expect.poll(async () => (await mapModel(page)).zoom).toBe(14);
+  const before = await mapModel(page);
+  await page.locator(".map-subway-line").selectOption("");
+  await page.locator(".map-subway-line").selectOption("신분당선");
+  const after = await mapModel(page);
+  expect(after.center).toEqual(before.center);
+  expect(after.zoom).toBe(before.zoom);
+
+  await page.locator(".map-subway-picker-btn").click();
+  await page.getByRole("menuitem", { name:"노선 전체 보기" }).click();
+  await expect.poll(wholeLineVisible).toBe(true);
 });
 
 test("소식이 끊긴 열차는 화면에서 사라진다", async ({ page }) => {
@@ -279,7 +312,6 @@ test("소식이 끊긴 열차는 화면에서 사라진다", async ({ page }) =>
   await page.goto("/");
   await page.evaluate(() => newMapScratch());
   await page.locator(".map-subway-line").selectOption("2호선");
-  await page.locator(".map-subway").click();
   await page.waitForTimeout(800);
   await expect(trains(page)).toHaveCount(0);
 });
@@ -305,7 +337,6 @@ test("역 점을 누르면 원래 역 이름으로 도착 정보를 묻고 보�
   await page.goto("/");
   await page.evaluate(() => newMapScratch());
   await page.locator(".map-subway-line").selectOption("7호선");
-  await page.locator(".map-subway").click();
   const at = table.SUBWAY_LINES["7호선"].s["이수"];
   await page.locator(".map-goto").fill(at[0] + ", " + at[1]);
   await page.locator(".map-goto").press("Enter");
@@ -331,6 +362,6 @@ test("역 점을 누르면 원래 역 이름으로 도착 정보를 묻고 보�
   expect((await mapModel(page)).markers.length).toBe(before.markers.length);
 
   // 끄면 도착 칸도 함께 닫힌다.
-  await page.locator(".map-subway").click();
+  await page.locator(".map-subway-line").selectOption("");
   await expect(panel).toBeHidden();
 });

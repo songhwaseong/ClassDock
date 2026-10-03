@@ -1063,7 +1063,7 @@ test("편집 도구는 접을 수 있고 머리말 줄은 창 모드에 남는�
     assert.ok(chips[1].includes(moved), moved + " 는 칩 칸에 있어야 한다");
   // 오프라인 지도·실시간 열차·버스(런처 전용)도 머리말이 아니라 도구 줄 칩 칸에 붙는다.
   assert.match(source, /toolChips\.appendChild\(prepareBtn\)/);
-  assert.match(source, /toolChips\.appendChild\(subwayBtn\)/);
+  assert.match(source, /toolChips\.appendChild\(subwayLinePicker\)/);
   assert.match(source, /MNJejuBusMap\.mount\(\{ map, stage, toolRow:toolChips,/);
   // 아이콘은 글자가 아니라 CSS 변수로 건다 — textContent 를 갈아 끼워도, 우클릭 메뉴가 글자를 읽어도 안전하다.
   assert.match(source, /element\.style\.setProperty\("--map-icon", url\)/);
