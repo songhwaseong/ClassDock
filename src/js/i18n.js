@@ -3045,7 +3045,7 @@
     "표시·경로·영역과 색·메모를 가장 잘 보존": "Best preserves pins, routes, areas, colors, and notes",
     "GPS 기기·운동 기록 앱과 경로 교환": "Exchange routes with GPS devices and activity apps",
     "Google Earth 등에서 표시·경로·영역 열기": "Open pins, routes, and areas in apps such as Google Earth",
-    "🧾 표로 메모": "🧾 Table to notes",
+    "🧾 표로 메모": "🧾 Table notes",
     "같은 표를 파일 대신 메모창에 표로 넣어요 — 메모에서 CSV 저장·표 편집기·복사로 이어집니다":
       "Put the same table into Notes instead of a file — from there you can save as CSV, open the table editor, or copy",
     "영역 이름": "Area name",
@@ -3092,7 +3092,7 @@
     "전체화면 — 지도만 남겼어요. H 를 누르거나 지도를 오른쪽 버튼으로 누르면 도구가 다시 나와요.":
       "Fullscreen — only the map is left. Press H or right-click the map to bring the tools back.",
     // 위경도 격자 · 축척 · 표시 목록 · PNG/인쇄
-    "🌐 위경도 격자": "🌐 Lat/long grid",
+    "🌐 위경도 격자": "🌐 Coordinate grid",
     "위선·경선을 눈금으로 그려요 — 적도와 본초자오선은 굵게 표시됩니다":
       "Draws parallels and meridians as a grid — the equator and prime meridian are highlighted",
     "위선·경선을 눈금으로 그렸어요 — 붉은 선이 적도와 본초자오선입니다.":
@@ -3120,7 +3120,7 @@
     "표시 {count}개 · 전체 {distance}": "{count} pins · {distance} total",
     // 자동차 길찾기(카카오모빌리티) — 곧은 선 대신 실제 도로를 따라 잇는다
     "🚗 자동차 길찾기": "🚗 Driving route",
-    "🚗 길찾기 비교·설정": "🚗 Compare & set routes",
+    "🚗 길찾기 비교·설정": "🚗 Route options",
     "길찾기 비교·상세 설정": "Route comparison & details",
     "직선 거리와 자동차 경로를 비교하고 우선순위·회피·차량 옵션을 설정합니다 (카카오 REST API 키 필요)":
       "Compare straight-line and driving distances and set routing, avoidance, and vehicle options (Kakao REST API key required)",
@@ -3566,16 +3566,18 @@
     "장소·좌표 검색": "Search places or coordinates",
     "배경지도 선택": "Choose base map",
     "표시 추가": "Add marker",
-    "주소 자동": "Automatic addresses",
+    "주소 자동": "Auto address",
     "장소 정보": "Place details",
     "거리선": "Distance line",
-    "위경도 격자": "Latitude/longitude grid",
+    "위경도 격자": "Coordinate grid",
+    "이름 보이기": "Show names",
+    "내 지도": "My map",
     "표시 이름 보이기": "Show marker names",
     "표시 묶기": "Group markers",
     "표시 잇기": "Connect markers",
-    "길찾기 비교·설정": "Compare routes and settings",
-    "발표 모드": "Presentation mode",
-    "표로 메모": "Notes as a table",
+    "길찾기 비교·설정": "Route options",
+    "발표 모드": "Present",
+    "표로 메모": "Table notes",
     "지도 내용 지우기": "Clear map content",
     "칠판으로 보내기": "Send to whiteboard",
     "지도 문제 만들기": "Create map questions",
@@ -10790,6 +10792,10 @@
     var raw = String(value), core = raw.trim();
     var translated = DICT[core];
     if (element && element.closest) {
+      if (element.closest(".settings-tabs")) {
+        var settingsTabs = { "문서": "Documents", "단축키": "Shortcuts", "진단": "Diagnostics" };
+        if (settingsTabs[core] != null) translated = settingsTabs[core];
+      }
       if (element.closest(".music-bar, .music-tools, .music-beginner-tools, .music-context-menu")) {
         var music = { "온": "Whole", "2분": "Half", "4분": "Quarter", "8분": "Eighth", "16분": "Sixteenth", "점": "Dot" };
         if (music[core] != null) translated = music[core];

@@ -1136,6 +1136,16 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     -webkit-appearance:none;appearance:none}
   .map-tile-select>.map-select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .map-tile-select>.map-select option{color:var(--ink);background:var(--panel)}
+  /* 영어 타일만 같은 폭으로 맞춘다. 아이콘은 고정하고 라벨에는 두 줄 공간을 둔다.
+     lang 를 되돌리면 위의 한국어용 크기와 배치가 그대로 적용된다. */
+  html[lang="en"] .map-tools-main>.map-btn,
+  html[lang="en"] .map-tools-main>.map-tile-select{flex:0 0 92px;width:92px;min-width:0;height:68px}
+  html[lang="en"] .map-tools-main>.map-btn{position:relative;display:block;padding:35px 6px 6px;
+    white-space:normal;overflow-wrap:anywhere;line-height:1.2;text-align:center}
+  html[lang="en"] .map-tools-main>.map-btn::before{position:absolute;top:10px;left:50%;transform:translateX(-50%)}
+  html[lang="en"] .map-tools-main>.map-btn[hidden]{display:none}
+  html[lang="en"] .map-tools-main>.map-tile-select>.map-select{width:100%;min-width:0;padding:35px 6px 6px;
+    overflow:hidden;text-overflow:ellipsis}
   /* 머리말 줄 — 검색칸이 남는 폭을 차지하고, 핀 아이콘과 돋보기 단추를 한 칸 안에 넣는다. */
   .map-bar>.map-title{flex:0 1 200px}
   .map-bar>.map-search{flex:1 1 280px;min-width:200px;align-items:stretch;gap:0;border:1px solid var(--border);
@@ -2671,6 +2681,10 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .settings-tab{flex:1 1 auto;min-width:64px;border:1px solid transparent;border-radius:8px;padding:7px 10px;background:transparent;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;transition:background .12s,color .12s,border-color .12s}
   .settings-tab:hover{color:var(--ink)}
   .settings-tab.active{background:var(--panel);border-color:var(--border);color:var(--accent);box-shadow:0 2px 7px rgba(0,0,0,.08)}
+  /* 영어 설정 탭은 글자 길이에 상관없이 4열·2행으로 맞춘다. 한국어는 기존 배치를 쓴다. */
+  html[lang="en"] .settings-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:1fr}
+  html[lang="en"] .settings-tab{min-width:0;min-height:36px;padding:7px 6px;line-height:1.3;
+    white-space:normal;overflow-wrap:anywhere;text-align:center}
   .settings-section[hidden]{display:none}
   .settings-section{flex:1 1 auto;min-height:0;overflow:auto}
   .settings-section > .settings-row:last-child,.settings-section > .settings-check:last-child,.settings-section > .settings-save-folder:last-child{border-bottom:none}
