@@ -43,13 +43,13 @@ test("도구 레지스트리는 전체 화면의 선택 도구를 담고 필수 
   assert.equal(new Set(ids).size, ids.length, "id 는 중복이 없어야 한다");
   assert.equal(TOGGLEABLE_TOOLS.length, 189);
   assert.deepEqual(
-    Object.fromEntries(["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]
+    Object.fromEntries(["header", "pdf", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]
       .map(target => [target, TOGGLEABLE_TOOLS.filter(tool => tool.target === target).length])),
-    { header:12, py:15, javascript:2, java:12, notebook:7, image:12, whiteboard:38, map:38, music:53 }
+    { header:10, pdf:2, py:15, javascript:2, java:12, notebook:7, image:12, whiteboard:38, map:38, music:53 }
   );
   for (const tool of TOGGLEABLE_TOOLS){
     assert.ok(tool.cls && typeof tool.cls === "string", tool.id + " 는 클래스명이 있어야 한다");
-    assert.ok(["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"].includes(tool.target));
+    assert.ok(["header", "pdf", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"].includes(tool.target));
   }
   // 필수 버튼은 노출 설정 대상이 아니어야 한다.
   assert.ok(!TOGGLEABLE_TOOLS.some(t => t.cls === "run-go" || t.cls === "run-save"));
@@ -91,7 +91,7 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   // 설정 UI: 화면별 하위 탭 + 비노출/노출 좌우 이동 목록 + 저장·부팅 적용
   assert.match(htmlSource, /data-settings-tab="tools"/);
   assert.match(htmlSource, /id="settingToolScopeTabs"/);
-  for (const target of ["header", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]){
+  for (const target of ["header", "pdf", "py", "javascript", "java", "notebook", "image", "whiteboard", "map", "music"]){
     assert.match(htmlSource, new RegExp('data-tool-target="' + target + '"'));
   }
   assert.match(htmlSource, /id="settingToolsHidden"[^>]*multiple/);

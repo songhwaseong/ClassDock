@@ -520,7 +520,8 @@ function spreadsheetConvertedDocOptions(ownerDoc, name, aoa, hasHeader){
     // CSV 파일 핸들은 절대 넘기지 않는다. 부모 폴더 핸들만 전달해 같은 폴더에 새 XLSX를 만든다.
     fsHandle:null,
     fsDirHandle:ownerDoc && ownerDoc.fsDirHandle || null,
-    originalSaveMode:false
+    nativeAbsolutePath:toXlsxPath(ownerDoc && ownerDoc.nativeAbsolutePath),
+    originalSaveMode:!!(ownerDoc && ownerDoc.originalSaveMode)
   };
 }
 function spreadsheetDirectSaveKind(doc){
@@ -1376,7 +1377,7 @@ function renderCsvPreview(text, host, filename, ownerDoc){
       toXlsx.disabled = true;
       try {
         const aoa = [];
-        for (let i = 0; i < rowStarts.length; i++) aoa.push(parseCsvRecord(recordAt(i), delimiter));
+        for (let i = 0; i < rowStarts.length; i++) aoa.push(parseCsvRecord(recordAt(i), delimiter).map(value => spreadsheetTools.numericCellValue(value)));
         // 변환 직전 '첫 줄을 머리글로?'를 한 번 확인(추정 결과를 추천으로). 취소면 변환 중단.
         const useHeader = await promptCsvHeaderChoice(aoa[0], hasHeader);
         if (useHeader == null) return;
@@ -1387,7 +1388,13 @@ function renderCsvPreview(text, host, filename, ownerDoc){
         const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         if (typeof handleFiles === "function"){
           const openOptions = spreadsheetConvertedDocOptions(ownerDoc, name, aoa, useHeader);
-          await handleFiles([new File([out], name, { type:mime })], openOptions);
+          const convertedFile = new File([out], name, { type:mime });
+          const convertedDoc = await handleFiles([convertedFile], openOptions);
+          // 새 변환본도 첫 저장 전부터 복원한다. CSV 원본의 백업은 그대로 둔다.
+          if (convertedDoc && convertedDoc.sourceFile === convertedFile){
+            if (typeof markDocumentDirty === "function") markDocumentDirty(convertedDoc);
+            if (typeof saveDocumentRecoverySnapshot === "function") await saveDocumentRecoverySnapshot(convertedDoc, out, mime);
+          }
           toast(useHeader ? "XLSX로 변환해 편집 탭을 열었어요(첫 줄=머리글)." : "XLSX로 변환해 편집 탭을 열었어요(첫 줄=데이터).", 2400);
         } else {
           downloadSpreadsheetFile(out, name, mime);
@@ -2063,6 +2070,9 @@ async function renderXlsx(file, host, doc){
       const row = [];
       for (let c = 1; c <= colN; c++){
         const cell = ws.getCell(r, c);
+        // 이전 CSV 변환본의 숫자 텍스트도 계산·저장 시 숫자로 다룬다.
+        // 수식 결과·리치텍스트·하이퍼링크와 명시적인 텍스트 서식은 보존한다.
+        if (typeof cell.value === "string") cell.value = spreadsheetTools.numericCellValue(cell.value, cell.numFmt);
         let style = {}; try { style = cloneSpreadsheetValue(cell.style || {}); } catch(_){ style = {}; }
         const f = cellFormula(cell);
         if (f && name) sheetsWithFormula.add(name);
@@ -2092,7 +2102,7 @@ async function renderXlsx(file, host, doc){
       const source = csvFastAoa[r] || [];
       const row = new Array(colN);
       for (let c = 0; c < colN; c++){
-        const value = source[c] == null ? "" : source[c];
+        const value = spreadsheetTools.numericCellValue(source[c] == null ? "" : source[c]);
         row[c] = { v:value, xv:value === "" ? null : value, nf:null, style:{}, f:null };
       }
       model.push(row);
@@ -5345,6 +5355,9 @@ async function renderXlsx(file, host, doc){
     } catch(e){ console.error(e); return null; }
   };
   const saveBytesToDocumentHandle = async (out) => {
+    if (doc && !doc.fsHandle && doc.workspacePath && typeof loadFsHandle === "function"){
+      try { doc.fsHandle = await loadFsHandle(doc.workspacePath); } catch(_){}
+    }
     const kind = spreadsheetDirectSaveKind(doc);
     if (!kind) return { handled:false };
     const requiresOriginal = kind === "existing" || !!(doc && doc.originalSaveMode);
@@ -5352,6 +5365,7 @@ async function renderXlsx(file, host, doc){
     const mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     const result = await saveViaFileHandle(out, (doc && doc.name) || (base + ".xlsx"), doc, {
       existingOnly:kind === "existing",
+      createIfMissing:true,
       mime,
       pickerTypes:[{
         description:"Excel 통합 문서",

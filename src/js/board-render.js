@@ -36,6 +36,7 @@ function patternInk(pattern, bg){
    맞춰 깔린다 — 창 크기를 바꾸면 보이는 칸 수만 늘고 줄 뿐, 이미 쓴 판서와 칸이 어긋나지 않는다.
    선은 한 번의 stroke() 로 모아 긋는다. 나눠 그으면 교차점마다 알파가 겹쳐 점이 찍힌 것처럼 보인다. */
 function drawPattern(ctx, pattern, area, bg){
+  if (pattern.id === "chalk"){ drawChalkTexture(ctx, pattern, area, bg); return; }
   const size = Math.max(4, Number(pattern.size) || 40);
   const x0 = area.x, y0 = area.y, x1 = area.x + area.w, y1 = area.y + area.h;
   const start = (from, step) => Math.floor(from / step) * step;
@@ -90,6 +91,294 @@ function drawPattern(ctx, pattern, area, bg){
     }
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+/* ----- 칠판 질감 -----
+   선 무늬와 달리 결이 있는 '판'이라, 한 칸(타일)을 계산해 두고 보드 원점에 맞춰 반복해 깐다.
+   저장되는 건 다른 무늬와 같은 이름·크기·진하기뿐이다 — 타일은 고정 씨앗으로 매번 똑같이 다시 만든다
+   (편집 화면·리플레이·내보내기가 같은 결을 보여야 하므로 Math.random 을 쓰지 않는다).
+   타일 한 칸 안에는 두 층이 있다:
+     light — 분필 가루(무늬 색): 고르지 않은 가루 안개 + 지우개 획(결 줄무늬·누르는 힘) + 알갱이·잔 흠집
+     dark  — 판 자체의 얼룩·결(검정)
+   모든 계산은 타일 가장자리에서 반대편으로 이어지게(감싸기) 해 반복 이음매가 보이지 않는다.
+   캔버스 없이 숫자 배열만 다루므로 노드 테스트에서도 같은 값이 나온다. */
+const CHALK_TILE = 1536;            // 보드 px. 화면 하나에 반복이 두 번 넘게 보이지 않을 크기
+const CHALK_SEED = 20261004;
+const CHALK_GAIN = 1.4;             // 진하기 기본값(.7)에서 '여러 번 지운 칠판' 정도가 되게 맞춘 배율
+const chalkFieldCache = new Map();
+const chalkTileCache = new Map();
+function chalkRandom(seed){
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), s | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function chalkNormalize(field){
+  let mean = 0; for (let i = 0; i < field.length; i++) mean += field[i];
+  mean /= field.length;
+  let variance = 0; for (let i = 0; i < field.length; i++){ field[i] -= mean; variance += field[i] * field[i]; }
+  const inv = 1 / (Math.sqrt(variance / field.length) || 1);
+  for (let i = 0; i < field.length; i++) field[i] *= inv;
+  return field;
+}
+// 감싸지는 값 잡음 여러 겹. octaves 는 [주기(px), 세기] — 칸 수가 정수라 타일 끝이 처음과 이어진다.
+function chalkNoise(rand, n, octaves){
+  const out = new Float32Array(n * n);
+  for (const [period, amp] of octaves){
+    const c = Math.max(1, Math.round(n / period));
+    const grid = new Float32Array(c * c);
+    for (let i = 0; i < grid.length; i++) grid[i] = rand() * 2 - 1;
+    const i0 = new Int32Array(n), i1 = new Int32Array(n), w = new Float32Array(n);
+    for (let i = 0; i < n; i++){
+      const f = i * c / n, k = Math.floor(f), t = f - k;
+      i0[i] = k % c; i1[i] = (k + 1) % c; w[i] = t * t * (3 - 2 * t);
+    }
+    for (let y = 0; y < n; y++){
+      const r0 = i0[y] * c, r1 = i1[y] * c, wy = w[y], row = y * n;
+      for (let x = 0; x < n; x++){
+        const wx = w[x], a = grid[r0 + i0[x]], b = grid[r0 + i1[x]], d = grid[r1 + i0[x]], e = grid[r1 + i1[x]];
+        const top = a + (b - a) * wx, bottom = d + (e - d) * wx;
+        out[row + x] += (top + (bottom - top) * wy) * amp;
+      }
+    }
+  }
+  return chalkNormalize(out);
+}
+// 감싸는 상자 흐림(가로·세로). passes 번 거듭하면 가우스 흐림에 가까워진다.
+function chalkBlur(field, n, r, passes){
+  if (r < 1) return field;
+  let src = field, dst = new Float32Array(n * n);
+  const inv = 1 / (2 * r + 1), wrap = (i) => ((i % n) + n) % n, sums = new Float32Array(n);
+  for (let p = 0; p < passes; p++){
+    for (let y = 0; y < n; y++){
+      const row = y * n; let sum = 0;
+      for (let k = -r; k <= r; k++) sum += src[row + wrap(k)];
+      for (let x = 0; x < n; x++){
+        dst[row + x] = sum * inv;
+        const add = x + r + 1, sub = x - r;
+        sum += src[row + (add >= n ? add - n : add)] - src[row + (sub < 0 ? sub + n : sub)];
+      }
+    }
+    [src, dst] = [dst, src];
+    // 세로는 열마다 내려가지 않고 줄 단위로 합을 굴린다(메모리를 차례로 읽어 훨씬 빠르다).
+    sums.fill(0);
+    for (let k = -r; k <= r; k++){ const row = wrap(k) * n; for (let x = 0; x < n; x++) sums[x] += src[row + x]; }
+    for (let y = 0; y < n; y++){
+      const row = y * n, add = wrap(y + r + 1) * n, sub = wrap(y - r) * n;
+      for (let x = 0; x < n; x++){ dst[row + x] = sums[x] * inv; sums[x] += src[add + x] - src[sub + x]; }
+    }
+    [src, dst] = [dst, src];
+  }
+  return src;
+}
+// 지우개 한 번이 지나간 길: 손목으로 휘두른 큰 호, 또는 좌우로 문지른 지그재그.
+function chalkEraserPaths(rand, n, count){
+  const paths = [];
+  for (let s = 0; s < count; s++){
+    const cx = rand() * n, cy = rand() * n, width = 45 + rand() * 40, alpha = .1 + rand() * .14;
+    if (rand() < .55){
+      const R = 380 + rand() * 720, span = Math.min(.35 + rand() * .55, 650 / R);
+      const mid = -Math.PI / 2 + (rand() - .5) + (rand() < .3 ? Math.PI : 0);
+      const arc = (offset) => {
+        const points = [];
+        for (let i = 0; i <= 40; i++){
+          const t = mid - span / 2 + span * i / 40;
+          points.push([cx + R * Math.cos(t), cy + R + R * Math.sin(t) + offset]);
+        }
+        return points;
+      };
+      paths.push({ points:arc(0), width, alpha });
+      if (rand() < .5) paths.push({ points:arc(width * (.5 + rand() * .3)), width, alpha });
+    } else {
+      const span = 220 + rand() * 380, rows = 2 + Math.floor(rand() * 4), tilt = (rand() - .5) * .24;
+      const points = [];
+      for (let r = 0; r < rows; r++){
+        const y = cy + r * width * (.45 + rand() * .25);
+        let xa = cx - span / 2 + (rand() - .5) * 60, xb = cx + span / 2 + (rand() - .5) * 60;
+        if (r % 2) [xa, xb] = [xb, xa];
+        points.push([xa, y + tilt * (xa - cx)], [xb, y + tilt * (xb - cx)]);
+      }
+      paths.push({ points, width, alpha });
+    }
+  }
+  return paths;
+}
+// 길을 1px 간격 점과 그 자리의 법선으로 고르게 다시 찍는다(결 줄을 길 따라 나란히 긋기 위해).
+function chalkResample(points){
+  const out = [];
+  for (let i = 1; i < points.length; i++){
+    const [x0, y0] = points[i - 1], [x1, y1] = points[i];
+    const len = Math.hypot(x1 - x0, y1 - y0); if (!len) continue;
+    const nx = -(y1 - y0) / len, ny = (x1 - x0) / len;
+    for (let d = 0; d < len; d++){ const t = d / len; out.push(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, nx, ny); }
+  }
+  return out;
+}
+function chalkTextureFields(size, seed){
+  const n = Math.max(64, Math.round((Number(size) || CHALK_TILE) / 4) * 4);   // 몸통을 1/4 크기로 칠하므로 4의 배수
+  const key = n + ":" + (seed >>> 0 || CHALK_SEED);
+  if (chalkFieldCache.has(key)) return chalkFieldCache.get(key);
+  const rand = chalkRandom(seed >>> 0 || CHALK_SEED);
+  const N = n * n, area = N / (CHALK_TILE * CHALK_TILE);
+  const wrap = (i) => ((i % n) + n) % n;
+
+  const mottle = chalkNoise(rand, n, [[768, 1], [384, .6], [96, .3], [48, .16], [12, .08]]);
+  const cloud = chalkNoise(rand, n, [[384, 1], [192, .6], [96, .35], [24, .2]]);
+  const press = chalkNoise(rand, n, [[512, 1], [192, .7], [96, .4]]);
+
+  // 지우개 획 몸통: 획마다 가장자리가 무르게 퍼지므로 1/4 크기로 칠한 뒤 흐려서 키운다.
+  const q = 4, m = n / q;
+  let body = new Float32Array(m * m);
+  const streak = new Float32Array(N);
+  const paths = chalkEraserPaths(rand, n, Math.max(1, Math.round(26 * area)));
+  for (const path of paths){
+    const pts = path.points, half = path.width / 2, reach = (half + q) * (half + q);
+    const xy = new Float64Array(pts.length * 2);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach(([x, y], i) => { xy[i * 2] = x; xy[i * 2 + 1] = y; minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); });
+    for (let py = Math.floor((minY - half) / q) - 1; py <= Math.ceil((maxY + half) / q) + 1; py++){
+      for (let px = Math.floor((minX - half) / q) - 1; px <= Math.ceil((maxX + half) / q) + 1; px++){
+        const X = (px + .5) * q, Y = (py + .5) * q;
+        let best = Infinity;
+        for (let i = 2; i < xy.length; i += 2){
+          const ax = xy[i - 2], ay = xy[i - 1], dx = xy[i] - ax, dy = xy[i + 1] - ay;
+          let t = ((X - ax) * dx + (Y - ay) * dy) / (dx * dx + dy * dy || 1);
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          const ex = ax + dx * t - X, ey = ay + dy * t - Y, dist = ex * ex + ey * ey;
+          if (dist < best) best = dist;
+        }
+        if (best >= reach) continue;
+        const cover = Math.max(0, Math.min(1, (half - Math.sqrt(best)) / q + .5));
+        if (!cover) continue;
+        const j = (((py % m) + m) % m) * m + (((px % m) + m) % m);
+        body[j] = 1 - (1 - body[j]) * (1 - path.alpha * cover);
+      }
+    }
+    // 결: 지우개 천이 남기는 가는 줄을 길 따라 나란히 긋는다. 줄마다 세기가 다르고 군데군데 끊긴다.
+    const line = chalkResample(pts), lines = Math.max(3, Math.round(path.width / 2.2));
+    for (let k = 0; k < lines; k++){
+      const offset = (k / (lines - 1) - .5) * path.width * .92, value = .15 + rand() * rand() * .85;
+      let on = rand() < .75;
+      for (let i = 0; i < line.length; i += 4){
+        if (rand() < (on ? 1 / 70 : 1 / 25)) on = !on;
+        if (!on) continue;
+        const x = line[i] + line[i + 2] * offset, y = line[i + 1] + line[i + 3] * offset;
+        const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+        const r0 = wrap(y0) * n, r1 = wrap(y0 + 1) * n, c0 = wrap(x0), c1 = wrap(x0 + 1);
+        streak[r0 + c0] += value * (1 - fx) * (1 - fy); streak[r0 + c1] += value * fx * (1 - fy);
+        streak[r1 + c0] += value * (1 - fx) * fy;       streak[r1 + c1] += value * fx * fy;
+      }
+    }
+  }
+  body = chalkBlur(body, m, 3, 3);
+  const streakSoft = chalkBlur(streak, n, 1, 1);
+
+  // 판의 고운 결: 두 크기를 섞어 디지털 잡음처럼 보이지 않게 한다.
+  const raw = new Float32Array(N);
+  for (let i = 0; i < N; i++) raw[i] = rand() - .5;   // 흐리고 나면 고르게 퍼진 잡음도 종 모양에 가까워진다
+  const fineA = chalkNormalize(chalkBlur(raw.slice(), n, 1, 1)), fineB = chalkNormalize(chalkBlur(raw, n, 2, 2));
+
+  const lightF = new Float32Array(N);
+  const dark = new Uint8ClampedArray(N);
+  // 몸통(1/4 크기)을 감싸며 쌍선형으로 키운다 — 가로 자리는 줄마다 같으니 한 번만 센다.
+  const cols0 = new Int32Array(n), cols1 = new Int32Array(n), colT = new Float32Array(n);
+  for (let x = 0; x < n; x++){
+    const fx = (x + .5) / q - .5, k = Math.floor(fx);
+    cols0[x] = ((k % m) + m) % m; cols1[x] = (((k + 1) % m) + m) % m; colT[x] = fx - k;
+  }
+  const darkScale = 255 * CHALK_GAIN;
+  for (let y = 0; y < n; y++){
+    const fy = (y + .5) / q - .5, by0 = Math.floor(fy), ty = fy - by0;
+    const br0 = ((by0 % m) + m) % m * m, br1 = (((by0 + 1) % m) + m) % m * m, row = y * n;
+    for (let x = 0; x < n; x++){
+      const i = row + x, c0 = cols0[x], c1 = cols1[x], tx = colT[x];
+      const b = (body[br0 + c0] * (1 - tx) + body[br0 + c1] * tx) * (1 - ty) + (body[br1 + c0] * (1 - tx) + body[br1 + c1] * tx) * ty;
+      let p = press[i] * .16 + .55; p = p < 0 ? 0 : p > 1 ? 1 : p;
+      const st = streakSoft[i] > 1 ? 1 : streakSoft[i];
+      let stroke = b * p * (.5 + .8 * st); if (stroke > 1) stroke = 1;
+      let c = cloud[i] * .18 + .5; c = c < 0 ? 0 : c > 1 ? 1 : c;
+      const haze = .07 * c * Math.sqrt(c);
+      const g = fineA[i] * .7 + fineB[i] * .5;
+      let mo = mottle[i]; mo = mo < -3 ? -3 : mo > 3 ? 3 : mo;
+      const lift = (mo > 0 ? mo * .006 : 0) + (g > 0 ? g * .01 : 0);
+      lightF[i] = 1 - (1 - haze) * (1 - stroke) * (1 - lift);
+      dark[i] = ((mo < 0 ? -mo * .016 : 0) + (g < 0 ? -g * .028 : 0)) * darkScale + .5;
+    }
+  }
+  // 분필 알갱이(가루가 많은 곳에 더 몰린다)와 잔 흠집.
+  const deposit = (x, y, v) => {
+    const xi = wrap(Math.round(x)), yi = wrap(Math.round(y));
+    lightF[yi * n + xi] = 1 - (1 - lightF[yi * n + xi]) * (1 - v);
+  };
+  let maxDust = 0; for (let i = 0; i < N; i++) if (lightF[i] > maxDust) maxDust = lightF[i];
+  for (let placed = 0, tries = 0, want = Math.round(1500 * area); placed < want && tries < want * 40; tries++){
+    const x = Math.floor(rand() * n), y = Math.floor(rand() * n);
+    if (rand() * (maxDust + .05) > lightF[y * n + x] + .05) continue;
+    const v = Math.pow(.2 + rand() * .8, 2) * .35;
+    deposit(x, y, v);
+    if (v > .12){ deposit(x + 1, y, v * .45); deposit(x, y + 1, v * .45); deposit(x - 1, y, v * .3); deposit(x, y - 1, v * .3); }
+    placed++;
+  }
+  for (let s = 0, want = Math.round(520 * area); s < want; s++){
+    const x = rand() * n, y = rand() * n, len = 10 + rand() * 80;
+    const angle = rand() < .7 ? (rand() - .5) * .7 : rand() * Math.PI, v = (.25 + rand() * .35) * .05;
+    for (let d = 0; d < len; d++) deposit(x + Math.cos(angle) * d, y + Math.sin(angle) * d, v);
+  }
+  const light = new Uint8ClampedArray(N);
+  for (let i = 0; i < N; i++) light[i] = Math.round(255 * Math.min(1, lightF[i] * CHALK_GAIN));
+  const fields = { size:n, light, dark };
+  chalkFieldCache.set(key, fields);
+  return fields;
+}
+// 자동 색이 흰색이면 아주 옅게 누런 분필 색으로 — 새하얀 가루는 칠판 위에서 형광처럼 떠 보인다.
+function chalkInk(pattern, bg){
+  const ink = patternInk(pattern, bg);
+  return (!pattern.color && String(ink).toLowerCase() === "#ffffff") ? "#e4e9e0" : ink;
+}
+function chalkCanvas(n){
+  if (typeof document !== "undefined" && document && typeof document.createElement === "function"){
+    const canvas = document.createElement("canvas"); canvas.width = n; canvas.height = n; return canvas;
+  }
+  if (typeof OffscreenCanvas === "function") return new OffscreenCanvas(n, n);
+  return null;
+}
+// 색마다 한 장. 가루층(무늬 색)을 판 얼룩층(검정) 위에 얹은 결과를 한 픽셀로 미리 합쳐 둔다.
+function chalkTile(ink){
+  if (chalkTileCache.has(ink)) return chalkTileCache.get(ink);
+  const hex = /^#([0-9a-f]{6})$/i.exec(String(ink || "")) ? String(ink).slice(1) : "e4e9e0";
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  const fields = chalkTextureFields(CHALK_TILE, CHALK_SEED), n = fields.size;
+  const canvas = chalkCanvas(n), c = canvas && canvas.getContext("2d");
+  if (!c) return null;
+  const image = c.createImageData(n, n), data = image.data;
+  for (let i = 0, j = 0; i < n * n; i++, j += 4){
+    const l = fields.light[i] / 255, d = fields.dark[i] / 255, a = l + d * (1 - l);
+    const k = a ? l / a : 0;
+    data[j] = r * k; data[j + 1] = g * k; data[j + 2] = b * k; data[j + 3] = Math.round(a * 255);
+  }
+  c.putImageData(image, 0, 0);
+  chalkTileCache.set(ink, canvas);
+  if (chalkTileCache.size > 6) chalkTileCache.delete(chalkTileCache.keys().next().value);
+  return canvas;
+}
+// 크기 100 = 타일 한 칸이 보드 1536px. 타일 배경 그림과 같은 규칙으로 보드 원점에 맞춰 반복된다.
+function drawChalkTexture(ctx, pattern, area, bg){
+  if (typeof ctx.createPattern !== "function") return;
+  const tile = chalkTile(chalkInk(pattern, bg));
+  const fill = tile && ctx.createPattern(tile, "repeat");
+  if (!fill) return;
+  const scale = Math.max(.05, (Number(pattern.size) || 100) / 100);
+  if (scale !== 1 && typeof DOMMatrix === "function" && typeof fill.setTransform === "function"){
+    try { fill.setTransform(new DOMMatrix().scaleSelf(scale, scale)); } catch(_){}
+  }
+  ctx.save();
+  ctx.globalAlpha = Math.max(.05, Math.min(1, Number(pattern.opacity) || .7));
+  ctx.fillStyle = fill;
+  ctx.fillRect(area.x, area.y, area.w, area.h);
   ctx.restore();
 }
 /* 배경 그림 한 장. 일반 이미지 항목과 달리 현재 보드 화면(area) 자체를 종이처럼 채운다.
@@ -472,5 +761,5 @@ function ungroupItem(group, measureText){
   return group.items.map(scaleOne);
 }
 
-return Object.freeze({ applyStroke, drawItem, drawItems, paintBackground, drawPattern, drawBackgroundImage, isSelectable, itemBounds, hitTestItem, translateItem, rotateItem, ungroupItem });
+return Object.freeze({ applyStroke, drawItem, drawItems, paintBackground, drawPattern, chalkTextureFields, drawBackgroundImage, isSelectable, itemBounds, hitTestItem, translateItem, rotateItem, ungroupItem });
 })();

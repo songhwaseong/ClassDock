@@ -15,7 +15,7 @@
   const hasDoc  = () => !!curState();
   const hasMultipleDocs = () => { try { return docs.length > 1; } catch(_){ return false; } };
   const canRun  = () => { const s = curState(); return !!(s && s.el && s.el.querySelector(".run-go")); };
-  const canPrint= () => { const t = $("officeTools"); return !!(t && !t.hidden); };
+  const canPrint= () => { const s = curState(); return !!(s && s.kind !== "pdf"); };   // 헤더 인쇄 단추와 같은 조건(PDF 는 저장으로)
   const canStudy = () => { const b = $("studyToggle"); return !!(b && !b.hidden); };
   const clickId = (id) => { const el = $(id); if (el) el.click(); };
   const callFn  = (name, ...args) => { if (typeof window[name] === "function") window[name](...args); };

@@ -139,6 +139,21 @@ test("무늬 설정은 이름·간격·진하기를 늘 같은 모양으로 맞�
   assert.equal(normalizeBoardPattern({ id:"staff", size:"" }).size, boardPatternPreset("staff").size);
 });
 
+test("칠판 질감은 무늬 목록에 있고 크기는 결 크기(%)다", () => {
+  const chalk = normalizeBoardPattern({ id:"chalk" });
+  assert.equal(chalk.id, "chalk");
+  assert.equal(chalk.size, 100);
+  assert.equal(chalk.opacity, .7);
+  // 짝이 되는 실제 칠판색 프리셋 — 어두워서 무늬 색 자동은 밝은 분필 쪽을 고른다.
+  assert.match(read("src/js/state.js"), /\{ id:"slate",  color:"#2c4639", label:"교실 칠판", labelEn:"Classroom chalkboard" \}/);
+  assert.equal(boardPatternAutoColor("#2c4639"), "#ffffff");
+  const wb = read("src/js/whiteboard.js");
+  assert.match(wb, /pattern\.id === "chalk" \? "결 크기" : "간격"/);
+  // 선 무늬 코드 대신 질감 타일로 그린다.
+  const render = read("src/js/board-render.js");
+  assert.match(render, /if \(pattern\.id === "chalk"\)\{ drawChalkTexture\(ctx, pattern, area, bg\); return; \}/);
+});
+
 test("무늬 없음·모르는 이름·손상된 값은 모두 무늬 없음(null)이다", () => {
   // 무늬가 없던 시절의 스냅샷이 그리기 코드까지 흘러가면 안 된다.
   assert.equal(normalizeBoardPattern(null), null);

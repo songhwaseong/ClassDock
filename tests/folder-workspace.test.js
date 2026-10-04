@@ -29,7 +29,7 @@ test("original-save folders keep their mode and file handles across restore and 
   assert.match(source, /nextPathSet\.add\(workspaceOriginalSaveMarkerPath\(selectedRootName\)\)/);
   assert.match(source, /doc\.fsHandle = file\.__fsHandle \|\| doc\.fsHandle \|\| null/);
   assert.match(source, /doc\.originalSaveMode = !!root\.originalSaveMode/);
-  assert.match(codeSource, /restoreFolderOriginalFileHandle\(ownerDoc, name,[\s\S]*!!options\.existingOnly && !createInOriginalFolder, !!options\.noPermissionPrompt\)/);
+  assert.match(codeSource, /restoreFolderOriginalFileHandle\(ownerDoc, name,[\s\S]*!!options\.existingOnly && !createInOriginalFolder, !!options\.noPermissionPrompt, !!options\.createIfMissing\)/);
   assert.match(codeSource, /loadRememberedFolderHandle\(root\.name\)/);
   assert.match(codeSource, /prepareNativeOriginalSaveRoot\(ownerDoc, !options\.noPermissionPrompt\)/);
   assert.match(codeSource, /브라우저 권한창 없이 원본에 저장하도록/);
@@ -128,7 +128,7 @@ test("원본 폴더에서 만든 새 Python 파일은 원본 저장 모드와 �
   assert.match(codeSource, /originalSaveMode:!!\(originalRoot && originalRoot\.originalSaveMode\)/);
   assert.match(codeSource, /const initialDocPath = ownerDoc && \(ownerDoc\.workspacePath \|\| ownerDoc\.relPath\)/);
   assert.match(codeSource, /setSavedPath\(initialDocPath, \{ original:true, pending:!!\(ownerDoc\.isScratch && !ownerDoc\._named\) \}\)/);
-  assert.match(codeSource, /const createInOriginalFolder = !!\(ownerDoc && ownerDoc\.originalSaveMode\s+&& \(ownerDoc\.isScratch \|\| options\.createIfMissing\)\)/);
+  assert.match(codeSource, /const createInOriginalFolder = !!\(ownerDoc && ownerDoc\.originalSaveMode\s+&& ownerDoc\.isScratch\)/);
   assert.match(codeSource, /!!options\.existingOnly && !createInOriginalFolder/);
 });
 

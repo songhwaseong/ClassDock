@@ -130,6 +130,20 @@ const MNSpreadsheetFormula = (() => {
       }
       return node;
     }
+    function parseCellRange(a, sheet){
+      let node = { t:"ref", c:a.c, r:a.r };
+      if (sheet !== undefined) node.sheet = sheet;
+      // 연속된 ':'는 각 참조를 포함하는 직사각형 범위를 만든다.
+      // 중간 셀은 중복해서 더하지 않고, 역순 참조도 범위에 포함한다.
+      while (peek()?.text === ":" && toks[i + 1]?.type === "ref"){
+        next(); const b = parseA1Ref(next().text);
+        node = node.t === "ref"
+          ? { t:"range", c1:node.c, r1:node.r, c2:b.c, r2:b.r, ...(sheet !== undefined ? {sheet} : {}) }
+          : { ...node, c1:Math.min(node.c1, node.c2, b.c), r1:Math.min(node.r1, node.r2, b.r),
+            c2:Math.max(node.c1, node.c2, b.c), r2:Math.max(node.r1, node.r2, b.r) };
+      }
+      return node;
+    }
     function parsePrimary(){
       const tk = peek();
       if (!tk) throw new Error("수식이 갑자기 끝남");
@@ -146,11 +160,7 @@ const MNSpreadsheetFormula = (() => {
         }
         if (!rt || rt.type !== "ref") throw new Error("시트 참조 뒤에 셀이 와야 함");
         const a = parseA1Ref(rt.text); if (!a) throw new Error("셀 참조 오류");
-        if (peek() && peek().text === ":" && toks[i + 1] && toks[i + 1].type === "ref"){
-          next(); const b = parseA1Ref(next().text);
-          return { t:"range", c1:a.c, r1:a.r, c2:b.c, r2:b.r, sheet };
-        }
-        return { t:"ref", c:a.c, r:a.r, sheet };
+        return parseCellRange(a, sheet);
       };
       if (tk.type === "sheetq"){
         next(); expect("!");
@@ -163,11 +173,7 @@ const MNSpreadsheetFormula = (() => {
       if (tk.type === "ref"){
         if (toks[i+1] && toks[i+1].text === "!"){ next(); next(); return refWithSheet(tk.text); }
         next(); const a = parseA1Ref(tk.text); if (!a) throw new Error("셀 참조 오류");
-        if (peek() && peek().text === ":" && toks[i + 1] && toks[i + 1].type === "ref"){
-          next(); const b = parseA1Ref(next().text);
-          return { t:"range", c1:a.c, r1:a.r, c2:b.c, r2:b.r };
-        }
-        return { t:"ref", c:a.c, r:a.r };
+        return parseCellRange(a);
       }
       if (tk.type === "name"){
         next(); const up = tk.text.toUpperCase();
@@ -713,7 +719,7 @@ const MNSpreadsheetFormula = (() => {
         out+=tk.text+"!";i++;
         if(!options.includeSheetRefs){
           if(toks[i+1])out+=toks[++i].text;
-          if(toks[i+1]?.text===":" && toks[i+2]){out+=":"+toks[i+2].text;i+=2;}
+          while(toks[i+1]?.text===":" && toks[i+2]?.type==="ref"){out+=":"+toks[i+2].text;i+=2;}
         }
         prev="!";continue;
       }

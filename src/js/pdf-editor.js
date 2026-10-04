@@ -58,8 +58,6 @@ function setPdfZoom(z, doc){
 }
 function updateZoomLabel(){
   const z = (state && state.kind === "pdf") ? (state.zoom || 1) : 1;
-  const lbl = byId("zoomLabel");
-  if (lbl) lbl.textContent = Math.round(z * 100) + "%";
   const headerLbl = byId("headerZoomLabel");
   if (headerLbl) headerLbl.textContent = Math.round(z * 100) + "%";
   const fsLbl = byId("fsZoomLabel");

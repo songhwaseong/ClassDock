@@ -26,6 +26,13 @@ const MNSpreadsheetTools = (() => {
     }
     return text;
   }
+  // CSV와 이전 CSV→XLSX 변환본의 숫자 텍스트를 숫자로 복원한다.
+  // 날짜·일반 텍스트는 원문을, 텍스트 서식·앞자리 0·긴 번호는 입력 규칙대로 보존한다.
+  function numericCellValue(value, numberFormat){
+    if (typeof value !== "string") return value;
+    const parsed = inputValue(value, numberFormat);
+    return typeof parsed === "number" ? parsed : value;
+  }
   function validationFor(cell){
     if(cell.validation?.type==="list" && cell.dv?.values && cell.validation.formulae?.[0]==='"'+cell.dv.values.join(",")+'"')return clone(cell.validation);
     if (cell.dv && cell.dv.values) return { type:"list", allowBlank:true, showErrorMessage:true, errorStyle:"stop",
@@ -303,6 +310,6 @@ const MNSpreadsheetTools = (() => {
     return zip.generate({type:"uint8array",compression:"DEFLATE"});
   }
 
-  return { customFunctionDefinition,writeDefinedNames,renameTableReferences,expandReferences,readSettings,writeSettings,validationError, duplicateRows, pivotGrid, inputValue, validationFor, writeValidation, readConditionalRules, remapStructure, stableSort };
+  return { customFunctionDefinition,writeDefinedNames,renameTableReferences,expandReferences,readSettings,writeSettings,validationError, duplicateRows, pivotGrid, inputValue, numericCellValue, validationFor, writeValidation, readConditionalRules, remapStructure, stableSort };
 })();
 if (typeof module === "object" && module.exports) module.exports = MNSpreadsheetTools;

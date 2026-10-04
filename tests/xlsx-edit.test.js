@@ -262,6 +262,11 @@ test("CSV 변환 문서는 원본 CSV 대신 같은 폴더의 XLSX를 저장 대
   assert.equal(options.originalSaveMode, false);
   assert.equal(options.spreadsheetAoa, aoa);
   assert.equal(options.spreadsheetHasHeader, true);
+  const restoredCsv=spreadsheetConvertedDocOptions({parentId:"folder-1",workspacePath:"자료/성적.csv",
+    nativeAbsolutePath:"D:/자료/성적.csv",originalSaveMode:true},"성적.xlsx",aoa,true);
+  assert.equal(restoredCsv.originalSaveMode,true);
+  assert.equal(restoredCsv.nativeAbsolutePath,"D:/자료/성적.xlsx");
+  assert.equal(restoredCsv.fsHandle,null);
 
   assert.equal(spreadsheetDirectSaveKind({ convertedFromCsv:true }), "create");
   assert.equal(spreadsheetDirectSaveKind({ convertedFromCsv:true, fsHandle:{} }), "existing");

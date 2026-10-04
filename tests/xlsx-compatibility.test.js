@@ -7,6 +7,36 @@ const T=require("../src/js/spreadsheet-tools.js");
 const V=require("../src/js/spreadsheet-viewer.js");
 const ExcelJS=require("../vendor/exceljs.min.js");
 
+test("연속 콜론 참조는 중복 없이 전체 범위를 합산한다",()=>{
+  const grid=[[1,2,3,4,5,6],[10,20,30,52,58,55]];
+  const res=(c,r,sheet)=>sheet && sheet!=="성적"?F.FORMULA_ERR("#REF!"):grid[r]?.[c]??"";
+  for(const f of ["=SUM(D2:E2:F2)","SUM(F2:E2:D2)","SUM(D2:F2:E2)",
+    "SUM(D2:E2:E2:F2)","SUM( $D$2 : E2 : $F2 )","SUM('성적'!D2:E2:F2)",
+    "SUM(성적!D2:E2:F2)","SUM(D2:F2)","SUM(D2,E2,F2)"])
+    assert.equal(F.evaluateFormula(f,res),165,f);
+  assert.equal(F.evaluateFormula("AVERAGE(D2:E2:F2)",res),55);
+  assert.equal(F.evaluateFormula("COUNT(D2:E2:F2)",res),3);
+  assert.equal(F.evaluateFormula("SUM(A1:C2:B1)",res),66);
+  assert.equal(F.evaluateFormula("SUM(D2:E2:F2)",(c,r)=>r===1?({3:52,4:60,5:55}[c]??""):""),167);
+  assert.equal(F.evaluateFormula("SUM('없는 시트'!D2:E2:F2)",res),"#REF!");
+});
+
+test("연속 콜론 참조는 복사할 때 절대참조와 시트 범위를 지킨다",()=>{
+  const shift=(c,r,a)=>({c:a.colAbs?c:c+1,r:a.rowAbs?r:r+1});
+  assert.equal(F.remapFormulaRefs("SUM($D$2:E2:F2)",shift),"SUM($D$2:F3:G3)");
+  assert.equal(F.remapFormulaRefs("SUM('성적'!D2:E2:F2)+A1",shift),"SUM('성적'!D2:E2:F2)+B2");
+  assert.equal(F.remapFormulaRefs("SUM('성적'!D2:E2:F2)",shift,{includeSheetRefs:true}),"SUM('성적'!E3:F3:G3)");
+});
+
+test("CSV 숫자 텍스트 변환은 명시적 텍스트·앞자리 0·긴 번호·날짜 원문을 보존한다",()=>{
+  for(const [value,expected] of [["52",52],[" 58 ",58],["55.5",55.5],["0",0],["-2.5",-2.5],
+    ["00123","00123"],["1234567890123456","1234567890123456"],["2026-10-04","2026-10-04"],
+    ["김가온","김가온"],["=SUM(A1:A2)","=SUM(A1:A2)"],["'52","'52"],["",""]])
+    assert.equal(T.numericCellValue(value),expected);
+  assert.equal(T.numericCellValue("52","@"),"52");
+  assert.equal(F.evaluateFormula("SUM(A1:B1:C1)",(c)=>["52","58","55"][c]),0);
+});
+
 test("Excel 반올림: 음수 절반, 소수 오차, 음수 자릿수",()=>{
   for(const [f,expected] of [["ROUND(-1.5,0)",-2],["ROUND(-1.475,2)",-1.48],["ROUND(1.005,2)",1.01],["ROUND(-50.55,-2)",-100],["ROUND(2.15,1)",2.2]])
     assert.equal(F.evaluateFormula(f),expected,f);

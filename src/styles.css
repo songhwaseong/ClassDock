@@ -2214,9 +2214,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   #content.pdf-night .page{background:#20242b}
   #content.pdf-night .page > canvas:first-child{filter:invert(.92) hue-rotate(180deg)}
   .overlay{position:absolute;inset:0}
-  .zoom-ctl{display:flex;align-items:center;gap:4px}
-  .zoom-ctl button{min-width:34px;text-align:center;padding:7px 10px}
-  #zoomLabel{min-width:52px}
   /* 페이지 이동: [현재] / 총 — 헤더 줌 옆 + 전체화면 컨트롤 공용 */
   .page-ctl{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#fff;font-variant-numeric:tabular-nums}
   .page-ctl input{width:42px;text-align:center;font:inherit;font-size:12.5px;color:#fff;
@@ -2341,15 +2338,19 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   #content.study-mode.study-stacked.study-swapped.pdf-active .view-page-ctl{right:10px;top:10px}
   #content:fullscreen .view-page-ctl,
   body.viewer-fullscreen #content .view-page-ctl{display:none!important}  /* 전체화면은 fs 컨트롤 사용(네이티브·폴백 모두) */
-  /* 뷰어 컨트롤 클러스터: 줌·전체화면을 페이지 표시줄(pill) 안으로 모음 — 문서에 작용하는 기능을 문서 위에 배치 */
-  .view-page-ctl .zoom-ctl{display:inline-flex;align-items:center;gap:2px}
-  .view-page-ctl .zoom-ctl button,.view-page-ctl .page-fs-btn{font:inherit;font-size:12.5px;line-height:1;
-    border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);color:#fff;border-radius:6px;padding:4px 7px;cursor:pointer}
-  .view-page-ctl .zoom-ctl button:hover,.view-page-ctl .page-fs-btn:hover{background:rgba(255,255,255,.2)}
-  .view-page-ctl #zoomLabel{min-width:44px;text-align:center;font-variant-numeric:tabular-nums}
-  .view-page-ctl .page-fs-btn{display:inline-flex;align-items:center;justify-content:center}
-  .view-page-ctl .page-fs-btn svg{display:block;width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-  .view-page-ctl .page-fs-btn.active{background:var(--accent);border-color:var(--accent)}
+  /* PDF 위 도구 줄: 이 PDF 에만 쓰는 편집·페이지 메뉴를 문서 위에 둔다. 확대/축소·전체화면은 헤더에만 있다.
+     메뉴 단추는 옆의 보기 방식 단추와 같은 옷을 입히고, 펼친 판은 단추 오른쪽 끝에 맞춰 왼쪽으로
+     펼친다(.tool-menu-pop 의 right:0) — 알약이 화면 오른쪽 끝에 붙어 있어 오른쪽으로 펴면 잘린다. */
+  .view-page-ctl .pv-menus{display:inline-flex;align-items:center;gap:4px}
+  .view-page-ctl .tool-menu summary{width:auto;height:auto;padding:4px 6px;border:1px solid rgba(255,255,255,.22);
+    border-radius:6px;background:rgba(255,255,255,.10);color:#fff}
+  .view-page-ctl .tool-menu summary svg{display:block;width:16px;height:16px;stroke-width:1.9}
+  .view-page-ctl .tool-menu summary:hover{background:rgba(255,255,255,.2)}
+  .view-page-ctl .tool-menu[open] summary{background:var(--accent);border-color:var(--accent)}
+  .view-page-ctl .tool-menu-pop{top:calc(100% + 10px);font-size:13px;white-space:nowrap}
+  /* 헤더에 있을 땐 header button 규칙이 입혀 주던 모양 — 여기서는 직접 준다. */
+  .view-page-ctl .tool-menu-pop button{font:inherit;font-size:13px;line-height:normal;border:1px solid var(--border);
+    padding:7px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;transition:.12s}
   .view-page-ctl .pv-divider{width:1px;align-self:stretch;background:rgba(255,255,255,.2);margin:1px 2px}
   /* 보기 방식(한 장씩 / 이어보기) · 페이지 넘기기(◀ ▶). 줌·전체화면 단추와 같은 옷을 입혀 한
      줄로 읽히게 한다. 아이콘은 이모지가 아니라 인라인 SVG 다 — 이모지는 글꼴에 따라 빈 네모로
@@ -4192,6 +4193,11 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   /* 선택 외곽선은 border 폭을 바꾸지 않고 셀 안쪽에 그려, 선택 중 열 너비와 글자가 흔들리지 않게 한다. */
   /* 셀 테두리(얇게 포함)는 --cell-border 로 격자 위에 덧그림 → border-collapse 충돌과 무관하게 네 면 모두 보임 */
   .selectable-sheet td{--cell-border:0 0 transparent;box-shadow:var(--cell-border)}
+  /* 고정(sticky) 칸이 제 격자선을 들고 함께 머물도록 칸마다 오른쪽·아래 선을 직접 그린다.
+     border-collapse 이면 선은 표가 제자리에 그리고 칸 배경은 그 자리를 칠하지 않아, 스크롤 때
+     틀 고정 행·머리글 경계 1px 로 뒤로 지나가는 행의 글자가 비쳤다. */
+  .selectable-sheet table{border-collapse:separate;border-spacing:0}
+  .selectable-sheet td,.selectable-sheet th{border-width:0 1px 1px 0}
   .selectable-sheet .sheet-selected{
     --sheet-sel-top:transparent;--sheet-sel-right:transparent;
     --sheet-sel-bottom:transparent;--sheet-sel-left:transparent;
@@ -4432,6 +4438,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
      클래스만 토글하므로 이미 열려 있는 편집기·노트북 툴바에도 즉시 반영된다. */
   /* 헤더 — 문서와 무관한 전역 버튼이라 <html> 클래스만으로 바로 사라진다. */
   html.hide-tool-hdrSidebar .hdr-tool-sidebar,
+  /* PDF 위 도구 줄의 편집·페이지 메뉴(예전 헤더 메뉴라 id 가 hdr* 그대로) */
   html.hide-tool-hdrPdfEdit .hdr-tool-pdfedit,
   html.hide-tool-hdrPdfPage .hdr-tool-pdfpage,
   html.hide-tool-hdrMemo .hdr-tool-memo,
@@ -6397,7 +6404,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .vv-batch-cancel:hover:not(:disabled){border-color:#dc2626;color:#dc2626}
   .vv-batch-cancel:disabled{opacity:.6;cursor:default}
   @media print{
-    header,.hint,.toast,#dropzone,#saveTargetBar,#tools,#officeTools,#loading,.img-zoom,#sidebar,#scratchpad,#imageMemo,#imageMemoPreview{display:none!important}
+    header,.hint,.toast,#dropzone,#saveTargetBar,#tools,#loading,.img-zoom,#sidebar,#scratchpad,#imageMemo,#imageMemoPreview{display:none!important}
     main{position:static;overflow:visible}
     .office,.viewer{position:static;overflow:visible;padding:0;background:#fff}
     .page,.docx-host,.pptx-host,.xlsx-sheet,.md-host,.txt-host{box-shadow:none!important}

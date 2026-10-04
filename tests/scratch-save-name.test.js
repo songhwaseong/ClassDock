@@ -38,6 +38,15 @@ async function rename(doc, typed, options={}){
   return named;
 }
 
+test("CSV 변환본 첫 저장 이름은 재시작 시 복원할 탭·문서 키에도 반영한다",async()=>{
+  const doc={name:"성적.xlsx",isScratch:true,workspacePath:"자료/성적.xlsx",workspaceRestorePath:"자료/성적.xlsx",stableRestoreKey:"자료/성적.xlsx"};
+  assert.equal(await rename(doc,"성적12"),"성적12.xlsx");
+  assert.equal(doc.workspacePath,"자료/성적12.xlsx");assert.equal(doc.workspaceRestorePath,doc.workspacePath);
+  assert.equal(doc.stableRestoreKey,doc.workspacePath);
+  const convertedNotebook={name:"노트.py",isScratch:true,workspacePath:"자료/노트.py",workspaceRestorePath:"자료/노트.ipynb"};
+  await rename(convertedNotebook,"연습");assert.equal(convertedNotebook.workspaceRestorePath,"자료/노트.ipynb");
+});
+
 test("첫 저장에서 정한 이름은 원래 확장자를 유지하되 저장 성공 전에는 확정하지 않는다", async () => {
   const doc = { name:"새 표.xlsx", isScratch:true, workspacePath:"새 표.xlsx" };
   assert.equal(await rename(doc, "성적표"), "성적표.xlsx");

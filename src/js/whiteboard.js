@@ -6092,7 +6092,7 @@ function renderWhiteboard(doc, host){
   const patternTitle = document.createElement("div"); patternTitle.className = "wb-bg-section"; patternTitle.textContent = "무늬";
   const patternChoices = document.createElement("div"); patternChoices.className = "wb-bg-patterns";
   const patternChipEls = [];
-  const PATTERN_CHIP_CELL = { grid:10, dots:10, graph:10, lines:9, staff:4, cells:11 };
+  const PATTERN_CHIP_CELL = { grid:10, dots:10, graph:10, lines:9, staff:4, cells:11, chalk:30 };
   // 이름만 늘어놓으면 "원고지"와 "모눈종이"를 골라 보기 전에는 구분하기 어렵다 — 칩마다 실제
   // 그리기 코드로 축소판을 그려 둔다(같은 함수라 고른 결과와 미리보기가 어긋날 수 없다).
   const drawPatternChip = (canvasEl, id) => {
@@ -6123,6 +6123,7 @@ function renderWhiteboard(doc, host){
     input.title = label; input.setAttribute("aria-label", label);
     input.addEventListener("input", () => onInput(Number(input.value)));
     row.append(caption, input); patternDetails.appendChild(row);
+    input.__caption = caption;
     return input;
   };
   const patternSizeInput = mkPatternRange("간격",
@@ -6337,6 +6338,12 @@ function renderWhiteboard(doc, host){
     }
     patternDetails.hidden = !pattern;
     if (!pattern) return;
+    // 칠판 질감은 선 사이 간격이 아니라 결의 크기를 바꾼다.
+    const sizeLabel = pattern.id === "chalk" ? "결 크기" : "간격";
+    if (patternSizeInput.__caption.textContent !== sizeLabel){
+      patternSizeInput.__caption.textContent = sizeLabel;
+      patternSizeInput.title = sizeLabel; patternSizeInput.setAttribute("aria-label", sizeLabel);
+    }
     patternSizeInput.value = String(pattern.size);
     patternOpacityInput.value = String(Math.round(pattern.opacity * 100));
     for (const swatch of patternColorEls) swatch.setAttribute("aria-pressed", String(swatch.dataset.patternColor === (pattern.color || "")));

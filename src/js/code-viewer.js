@@ -3720,9 +3720,15 @@ async function applyScratchDocName(ownerDoc, typed, name, options={}){
     }
   }
   if (ownerDoc){
+    if (typeof workspaceUnindexDocument === "function") workspaceUnindexDocument(ownerDoc);
     ownerDoc.name = fname;
     ownerDoc.workspacePath = nextPath;
     if (ownerDoc.relPath || ownerDoc.archiveCtx) ownerDoc.relPath = nextPath;
+    // 변환본의 첫 저장 이름과 자동 복원의 탭 키가 같은 파일을 가리켜야 한다.
+    if (normalizedRunPath(ownerDoc.workspaceRestorePath || "") === oldPath) ownerDoc.workspaceRestorePath = nextPath;
+    if (normalizedRunPath(ownerDoc.stableRestoreKey || "") === oldPath) ownerDoc.stableRestoreKey = nextPath;
+    if (ownerDoc.nativeAbsolutePath) ownerDoc.nativeAbsolutePath = refreshWorkspacePath(ownerDoc.nativeAbsolutePath, fname);
+    if (typeof workspaceIndexDocument === "function") workspaceIndexDocument(ownerDoc);
     if (javaPrepared && typeof javaApplyPreparedFileRename === "function")
       javaApplyPreparedFileRename(ownerDoc, javaPrepared, { saved:false });
     // 폴더 묶음에는 createScratchInFolder 시점의 임시 이름이 들어 있으므로 첫 저장 이름도 함께 반영한다.
@@ -3747,6 +3753,8 @@ async function applyScratchDocName(ownerDoc, typed, name, options={}){
   }
   if (typeof renderTabs === "function") renderTabs();
   if (typeof renderSidebar === "function") renderSidebar();
+  if (typeof persistTabState === "function") persistTabState();
+  if (typeof workspaceSchedulePersist === "function") workspaceSchedulePersist();
   return fname;
 }
 
@@ -4003,7 +4011,9 @@ async function prepareNativeOriginalSaveRoot(ownerDoc, allowPicker){
   if (!ownerDoc || !ownerDoc.originalSaveMode || typeof nativeSourceSupported !== "function"
       || !(await nativeSourceSupported())) return { supported:false, handle:null, cancelled:false };
   const root = originalSaveRootForDoc(ownerDoc);
-  if (!root) return { supported:true, handle:null, cancelled:false, reason:"no-folder-root" };
+  // 낱개 파일로 연 문서는 이미 가진 파일/폴더 핸들로 저장한다.
+  if (!root || ownerDoc.fsHandle && ownerDoc.fsHandle.__classdockNativeHandle)
+    return { supported:false, handle:null, cancelled:false };
   let handle = root.folderHandle && root.folderHandle.__classdockNativeHandle ? root.folderHandle : null;
   if (!handle && typeof restoreNativeSourceFolder === "function") handle = await restoreNativeSourceFolder(root.name);
   if (!handle && !allowPicker) return { supported:true, handle:null, cancelled:false, reason:"native-root-not-restored" };
@@ -4052,7 +4062,7 @@ function noteFileHandleSaveFailure(reason, error, ownerDoc, options){
 // 원본 파일 핸들을 못 찾은 이유. 저장 실패 토스트는 "권한을 확인하세요" 한 가지뿐이라,
 // 실제로 어느 갈래에서 막혔는지 진단 로그에 남길 때 쓴다(noteFileHandleSaveFailure).
 let lastOriginalHandleMiss = "";
-async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noPermissionPrompt=false){
+async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noPermissionPrompt=false, createIfMissing=false){
   const miss = (reason) => { lastOriginalHandleMiss = reason; return null; };
   lastOriginalHandleMiss = "";
   if (!ownerDoc || !ownerDoc.originalSaveMode) return miss("not-original-save-mode");
@@ -4080,7 +4090,14 @@ async function restoreFolderOriginalFileHandle(ownerDoc, name, existingOnly, noP
   const fileName = parts.pop() || ownerDoc.name || name;
   let dirHandle = rootHandle;
   for (const part of parts) dirHandle = await dirHandle.getDirectoryHandle(part);
-  const handle = await dirHandle.getFileHandle(fileName, { create:!existingOnly });
+  let handle;
+  try { handle = await dirHandle.getFileHandle(fileName, { create:!existingOnly }); }
+  catch(error){
+    // 예전 사본 저장본을 복원하면 원본 폴더에 아직 XLSX가 없을 수 있다.
+    // 직접 누른 저장에서만 새로 만들며 권한 거부·파일 잠금은 그대로 실패한다.
+    if (!createIfMissing || error.name !== "NotFoundError") throw error;
+    handle = await dirHandle.getFileHandle(fileName, { create:true });
+  }
   ownerDoc.fsDirHandle = dirHandle;
   ownerDoc.fsHandle = handle;
   ownerDoc.nativeAbsolutePath = handle.nativePath || ownerDoc.nativeAbsolutePath || null;
@@ -4116,7 +4133,11 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
       if (dperm !== "granted" && options.noPermissionPrompt) return deny("folder-permission-not-granted");
       if (dperm !== "granted" && ownerDoc.fsDirHandle.requestPermission) dperm = await ownerDoc.fsDirHandle.requestPermission({ mode: "readwrite" });
       if (dperm === "granted"){
-        handle = await ownerDoc.fsDirHandle.getFileHandle(ownerDoc.name || name, { create: !options.existingOnly });
+        try { handle = await ownerDoc.fsDirHandle.getFileHandle(ownerDoc.name || name, { create: !options.existingOnly }); }
+        catch(error){
+          if (!options.createIfMissing || error.name !== "NotFoundError") throw error;
+          handle = await ownerDoc.fsDirHandle.getFileHandle(ownerDoc.name || name, { create:true });
+        }
         ownerDoc.fsHandle = handle;            // 이후 저장은 이 .py 파일을 그대로 덮어쓴다
       } else if (options.existingOnly){
         return deny("folder-permission-denied");
@@ -4128,9 +4149,9 @@ async function saveViaFileHandle(text, name, ownerDoc, options={}){
     // 사람이 직접 누른 저장에서만 만든다(createIfMissing) — 조용한 자동·일괄 저장은 예전대로,
     // 이미 있는 파일만 덮어써 잘못된 위치에 새 파일이 생기지 않게 한다.
     const createInOriginalFolder = !!(ownerDoc && ownerDoc.originalSaveMode
-      && (ownerDoc.isScratch || options.createIfMissing));
+      && ownerDoc.isScratch);
     if (!handle) handle = await restoreFolderOriginalFileHandle(ownerDoc, name,
-      !!options.existingOnly && !createInOriginalFolder, !!options.noPermissionPrompt);
+      !!options.existingOnly && !createInOriginalFolder, !!options.noPermissionPrompt, !!options.createIfMissing);
     if (!handle){
       if (options.existingOnly) return deny("original-file-handle:" + (lastOriginalHandleMiss || "unknown"));
       if (typeof window.showSaveFilePicker !== "function") return "unsupported";

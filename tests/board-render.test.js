@@ -133,3 +133,34 @@ test("반전 그룹 렌더링은 그룹만 뒤집고 내부 글자 방향은 다
   assert.ok(calls.some((call) => Array.isArray(call) && call[0] === "scale" && call[1] === -1 && call[2] === 1));
   assert.ok(calls.some((call) => Array.isArray(call) && call[0] === "text" && call[1] === "L"));
 });
+
+test("칠판 질감 타일은 고정 씨앗으로 만들고 가장자리가 반대편과 이어진다", () => {
+  const n = 256;
+  const fields = renderer.chalkTextureFields(n, 7);
+  assert.equal(fields.size, n);
+  assert.equal(fields.light.length, n * n);
+  assert.equal(fields.dark.length, n * n);
+  // 같은 씨앗은 같은 결(리플레이·내보내기가 편집 화면과 같아야 한다), 다른 씨앗은 다른 결.
+  assert.equal(renderer.chalkTextureFields(n, 7), fields);
+  const other = renderer.chalkTextureFields(n, 8);
+  assert.ok(other.light.some((value, i) => value !== fields.light[i]));
+  // 가루층은 판 전체를 덮지 않는다 — 옅은 안개 위에 군데군데 짙은 지우개 자국.
+  let sum = 0, max = 0;
+  for (const value of fields.light){ sum += value; if (value > max) max = value; }
+  const mean = sum / fields.light.length;
+  assert.ok(mean > 5 && mean < 80, "가루층 평균 " + mean);
+  assert.ok(max > mean * 2, "지우개 자국이 안개보다 짙어야 한다");
+  // 반복 이음매: 마지막 열→첫 열 차이가 이웃한 열끼리의 차이와 비슷해야 한다.
+  const column = (x) => { let s = 0; for (let y = 0; y < n; y++) s += fields.light[y * n + x]; return s / n; };
+  let neighbor = 0;
+  for (let x = 1; x < n; x++) neighbor += Math.abs(column(x) - column(x - 1));
+  neighbor /= n - 1;
+  assert.ok(Math.abs(column(0) - column(n - 1)) < neighbor * 4 + 1);
+});
+
+test("칠판 질감은 그릴 캔버스가 없으면 조용히 건너뛴다", () => {
+  const calls = [];
+  const ctx = { save(){}, restore(){}, fillRect(){ calls.push("fill"); } };
+  renderer.drawPattern(ctx, { id:"chalk", size:100, opacity:.7, color:"" }, { x:0, y:0, w:100, h:100 }, "#2c4639");
+  assert.deepEqual(calls, []);
+});

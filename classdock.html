@@ -38,23 +38,10 @@
     </button>
   </div>
   <div class="header-actions">
+  <!-- 문서가 열려 있으면 늘 보이는 헤더 도구 칸(메모). 예전엔 PDF용 #tools 와 그 밖의 #officeTools 로
+       나뉘어 같은 메모 단추가 두 벌 있었는데, PDF 메뉴가 문서 위 도구 줄로 옮겨 가 하나로 합쳤다. -->
   <div class="tools" id="tools" hidden>
-    <details class="tool-menu hdr-tool-pdfedit"><summary title="PDF 편집" aria-label="PDF 편집"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10zM13.5 7.5l3 3"/></svg><span class="header-action-label">편집</span></summary><div class="tool-menu-pop">
-      <button id="btnSign">서명</button><button id="btnText">텍스트</button><button id="btnDate">날짜</button><button id="btnCheck">✓ 체크</button><button id="btnPen" type="button" title="PDF 위에 펜·형광펜으로 필기">✏️ 필기</button><button id="btnCodeLink" type="button" title="현재 Python 줄을 PDF에 연결">코드 연결</button>
-    </div></details>
-    <details class="tool-menu hdr-tool-pdfpage"><summary title="PDF 페이지" aria-label="PDF 페이지"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6V4h12v15h-2"/><rect x="5" y="6" width="12" height="15" rx="1.5"/><path d="M8 10h6M8 14h6M8 18h4"/></svg><span class="header-action-label">페이지</span></summary><div class="tool-menu-pop">
-      <button id="btnOutline" type="button" title="문서 목차(책갈피)로 이동" disabled>목차</button>
-      <button id="btnPages" type="button" title="페이지 썸네일·추출·정리">썸네일·정리</button>
-      <button id="btnMergePdf" type="button" title="현재 PDF 뒤에 다른 PDF 합치기">PDF 합치기</button>
-      <button id="btnPdfNight" type="button" title="PDF 페이지 색을 반전해 눈부심 줄이기 (화면 표시만 바뀌고 저장에는 영향 없음)">야간 보기</button>
-    </div></details>
     <input type="file" id="mergePdfInput" accept=".pdf,application/pdf" multiple hidden>
-    <span class="spacer"></span>
-    <button class="scratchpad-open hdr-tool-memo" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
-    </button>
-  </div>
-  <div class="tools" id="officeTools" hidden>
     <span class="spacer"></span>
     <button class="scratchpad-open hdr-tool-memo" data-scratchpad-open data-shortcut-action="scratchpad" data-shortcut-title="임시 메모" data-shortcut-aria="true" type="button" title="임시 메모 (Ctrl+M)" aria-label="임시 메모 열기" aria-controls="scratchpad" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg><span>메모</span>
@@ -387,11 +374,20 @@
       <span class="study-direction-stack" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"></path></svg></span>
       <span class="study-direction-side" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4"></path></svg></span>
     </button>
-    <span class="page-ctl view-page-ctl" id="pageCtl" title="페이지 번호 입력 후 Enter로 이동">
-      <span class="zoom-ctl">
-        <button id="zoomOut" type="button" title="축소 (Ctrl+-)">－</button>
-        <button id="zoomLabel" type="button" title="원래대로(맞춤)">100%</button>
-        <button id="zoomIn" type="button" title="확대 (Ctrl++)">＋</button>
+    <!-- PDF 위 도구 줄: 이 PDF 에만 쓰는 편집·페이지 메뉴와 보기 방식·페이지·찾기. 확대/축소와 전체화면은
+         헤더에만 둔다(같은 단추가 두 군데 있던 것을 정리). 메뉴 클래스(hdr-tool-*)·단추 id 는 설정의 도구
+         숨김·명령 팔레트가 그대로 쓰므로 바꾸지 않는다. -->
+    <span class="page-ctl view-page-ctl" id="pageCtl">
+      <span class="pv-menus">
+      <details class="tool-menu hdr-tool-pdfedit"><summary title="PDF 편집" aria-label="PDF 편집"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.2-1 10-10a2.1 2.1 0 0 0-3-3l-10 10zM13.5 7.5l3 3"/></svg><span class="header-action-label">편집</span></summary><div class="tool-menu-pop">
+        <button id="btnSign">서명</button><button id="btnText">텍스트</button><button id="btnDate">날짜</button><button id="btnCheck">✓ 체크</button><button id="btnPen" type="button" title="PDF 위에 펜·형광펜으로 필기">✏️ 필기</button><button id="btnCodeLink" type="button" title="현재 Python 줄을 PDF에 연결">코드 연결</button>
+      </div></details>
+      <details class="tool-menu hdr-tool-pdfpage"><summary title="PDF 페이지" aria-label="PDF 페이지"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6V4h12v15h-2"/><rect x="5" y="6" width="12" height="15" rx="1.5"/><path d="M8 10h6M8 14h6M8 18h4"/></svg><span class="header-action-label">페이지</span></summary><div class="tool-menu-pop">
+        <button id="btnOutline" type="button" title="문서 목차(책갈피)로 이동" disabled>목차</button>
+        <button id="btnPages" type="button" title="페이지 썸네일·추출·정리">썸네일·정리</button>
+        <button id="btnMergePdf" type="button" title="현재 PDF 뒤에 다른 PDF 합치기">PDF 합치기</button>
+        <button id="btnPdfNight" type="button" title="PDF 페이지 색을 반전해 눈부심 줄이기 (화면 표시만 바뀌고 저장에는 영향 없음)">야간 보기</button>
+      </div></details>
       </span>
       <span class="pv-divider" aria-hidden="true"></span>
       <button id="btnPdfPageMode" type="button" class="page-mode-btn" title="한 장씩 보기 — 페이지를 한 장씩 넘겨 봅니다" aria-label="한 장씩 보기" aria-pressed="false">
@@ -399,11 +395,10 @@
         <span class="page-mode-flow" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="9" rx="1.5"></rect><rect x="6" y="13" width="12" height="9" rx="1.5"></rect></svg></span>
       </button>
       <button id="pagePrev" type="button" class="page-step-btn" title="이전 페이지 (PageUp)" aria-label="이전 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"></path></svg></button>
-      <input id="pageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지">
+      <input id="pageNum" type="text" inputmode="numeric" autocomplete="off" aria-label="현재 페이지" title="페이지 번호 입력 후 Enter로 이동">
       <span class="page-sep" id="pageTotal">/ 1</span>
       <button id="pageNext" type="button" class="page-step-btn" title="다음 페이지 (PageDown)" aria-label="다음 페이지" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg></button>
       <button id="btnPdfFind" type="button" class="page-find-btn" data-shortcut-action="findInDocument" data-shortcut-title="PDF에서 찾기" data-shortcut-aria="true" aria-label="PDF에서 찾기"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg></button>
-      <button id="btnFullscreen" type="button" class="page-fs-btn" title="문서 영역 전체화면" aria-label="문서 영역 전체화면"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"></path></svg></button>
     </span>
     <div class="dropzone" id="dropzone">
       <div class="dz-inner" id="dzInner">
@@ -790,6 +785,7 @@
       <p class="settings-hint">화면을 고른 뒤 필요한 도구를 오른쪽 <strong>노출</strong> 목록으로 옮기세요. 여러 항목은 Ctrl·Shift로 함께 선택할 수 있습니다. (변경은 저장 즉시 적용)</p>
       <div id="settingToolScopeTabs" class="settings-tool-scope-tabs" role="tablist" aria-label="도구를 설정할 화면">
         <button class="settings-tool-scope-tab active" type="button" role="tab" aria-selected="true" tabindex="0" data-tool-target="header">헤더 <span class="settings-tool-scope-count"></span></button>
+        <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="pdf">PDF <span class="settings-tool-scope-count"></span></button>
         <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="py">Python <span class="settings-tool-scope-count"></span></button>
         <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="javascript">JavaScript <span class="settings-tool-scope-count"></span></button>
         <button class="settings-tool-scope-tab" type="button" role="tab" aria-selected="false" tabindex="-1" data-tool-target="java">Java <span class="settings-tool-scope-count"></span></button>

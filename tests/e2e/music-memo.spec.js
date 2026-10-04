@@ -96,7 +96,6 @@ test("악보를 메모로 보내고, 메모에서 다시 열어 고치면 같은
 
   // ④ 그 탭을 닫고 다시 열면 메모에 담긴 악보가 그대로 되살아난다
   // "✏️ 악보로"는 새 탭이 보이도록 메모를 닫는다 — 탭이 남아 있는 동안 다시 열어 둔다
-  // (머리말 메모 단추는 문서 종류에 따라 두 곳(#tools·#officeTools)에 있으니 보이는 쪽을 누른다).
   await page.locator("button[title='임시 메모 (Ctrl+M)']:visible").first().click();
   await expect(sheetBtn).toBeVisible();
   await page.evaluate((id) => closeDoc(id), source.id);

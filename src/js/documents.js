@@ -301,10 +301,7 @@ function syncFullscreenButtons(){
   const on = isViewerFullscreen();
   const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
   const title = _t(on ? "전체화면 종료" : "문서 영역 전체화면");
-  // PDF 전체화면은 페이지 표시줄(pill) 안의 아이콘 버튼 — 라벨을 덮어쓰지 않고 툴팁·상태만 갱신
-  const pdfFs = byId("btnFullscreen");
-  if (pdfFs){ pdfFs.title = title; pdfFs.setAttribute("aria-label", title); pdfFs.classList.toggle("active", on); }
-  // 아이콘형 헤더 버튼은 그림을 유지하고 툴팁·상태만 갱신한다.
+  // 전체화면 단추는 헤더에 하나만 둔다(PDF 위 도구 줄에 있던 것은 정리). 그림은 두고 툴팁·상태만 갱신한다.
   const offFs = byId("btnOfficeFullscreen");
   if (offFs){ offFs.title = title; offFs.setAttribute("aria-label", title); offFs.classList.toggle("active", on); }
   if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock();
@@ -349,6 +346,7 @@ function studyInteractionBusy(){
   for (const id of ["studyPageCtl", "pageCtl"]){
     const ctl = byId(id);
     if (ctl && ae && ctl.contains(ae)) return true;
+    if (ctl && ctl.querySelector("details[open]")) return true;   // 편집·페이지 메뉴를 펼친 동안
   }
   const pen = byId("btnStudyPen");
   if (pen && pen.classList.contains("active")) return true;
@@ -380,11 +378,13 @@ function pdfControlsActive(){
   const c = byId("content");
   return !!(c && c.classList.contains("pdf-active") && !c.classList.contains("study-mode") && !isViewerFullscreen());
 }
-// 페이지 번호 입력 중·찾기창 열림 중에는 숨기지 않는다
+// 페이지 번호 입력 중·메뉴 펼침 중·찾기창 열림 중에는 숨기지 않는다
 function pdfControlsBusy(){
   const ae = document.activeElement;
   const ctl = byId("pageCtl");
   if (ctl && ae && ctl.contains(ae)) return true;
+  // 편집·페이지 메뉴를 펼친 채 알약이 흐려지면 메뉴까지 같이 사라지고 눌리지도 않는다.
+  if (ctl && ctl.querySelector("details[open]")) return true;
   if (document.querySelector(".pdf-find:not([hidden])")) return true;
   return false;
 }
@@ -541,7 +541,7 @@ function setActiveDoc(id){
   // 학습 화면의 고정 PDF는 이 함수 끝의 applyStudyLayout 이 다시 표시한다.
   if (prev && prev !== d) prev.el.hidden = true;
   if (d) d.el.hidden = false;
-  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; updateSaveStatusBadge(null); byId("tools").hidden=true; byId("officeTools").hidden=true; updateModeBadges(); renderTabs(); updateDocEmptyState(); updateSidebarActive(); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); return; }
+  if (!d){ state=null; viewer=null; byId("activeFileName").textContent=""; byId("activeFileName").removeAttribute("data-cat"); byId("activeDocEncoding").hidden=true; updateSaveStatusBadge(null); byId("tools").hidden=true; updateModeBadges(); renderTabs(); updateDocEmptyState(); updateSidebarActive(); if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock(); return; }
   updateDocEmptyState();
   state = d;
   viewer = d.el;
@@ -549,8 +549,7 @@ function setActiveDoc(id){
     kind:d.kind || "document", extension:(String(d.name || d.fileName || "").match(/\.([a-z0-9]{1,12})$/i) || [])[1] || "",
     dirty:!!d.dirty, openDocuments:docs.length
   });
-  byId("tools").hidden = (d.kind !== "pdf");
-  byId("officeTools").hidden = (d.kind === "pdf");
+  byId("tools").hidden = false;
   byId("btnPages").classList.toggle("primary", !!(d.kind === "pdf" && d.pagePanelOpen));
   if (typeof updatePdfOutlineButton === "function") updatePdfOutlineButton(d);   // 목차 버튼 상태를 활성 PDF 기준으로
   updateDocumentEncoding(d);
@@ -1118,6 +1117,8 @@ function applyStudyLayout(){
   if (typeof updatePdfPageModeButton === "function") updatePdfPageModeButton();
   if (typeof updatePdfPageStepButtons === "function") updatePdfPageStepButtons();
   updateModeBadges();
+  // 헤더 줌 툴팁은 분할 여부에 따라 '작업 문서' 를 밝힌다 — 분할을 켜고 끌 때마다 다시 맞춘다.
+  if (typeof updateHeaderCommandDock === "function") updateHeaderCommandDock();
 }
 
 // 분할바 가운데 종료 버튼 — 마지막에 클릭한(테두리 표시) 칸의 문서만 남기고 분할을 끝낸다.
@@ -1377,12 +1378,15 @@ function markDocumentDirty(doc, dirty=true){
 // v2: v1 시절엔 여행일지가 탭을 열기만 해도(지도가 저절로 움직여) 저장 안 됨으로 적혀, 그 거짓 표식을 버린다.
 const UNSAVED_DOCS_KEY = "classdock-unsaved-docs:v2";
 const RESTORE_UNSAVED_KINDS = new Set(["trip", "diary", "timeline", "concept", "study", "tier", "bracket", "pick", "map", "mnote", "music"]);
+function documentRestoresUnsaved(doc){
+  return !!doc && (RESTORE_UNSAVED_KINDS.has(doc.kind) || doc.kind === "office" && /\.xlsx$/i.test(doc.name || ""));
+}
 function persistUnsavedDocKeys(){
   if (typeof tabRestoreInProgress !== "undefined" && tabRestoreInProgress) return;   // 반쯤 연 목록으로 덮어쓰지 않게
   if (window.__tabActive === false) return;
   try {
     localStorage.removeItem("classdock-unsaved-docs:v1");
-    const keys = docs.filter(d => d && d.hasUnsavedEdits && RESTORE_UNSAVED_KINDS.has(d.kind))
+    const keys = docs.filter(d => d && d.hasUnsavedEdits && documentRestoresUnsaved(d))
       .map(docStableKey).filter(Boolean);
     if (keys.length) localStorage.setItem(UNSAVED_DOCS_KEY, JSON.stringify(keys));
     else localStorage.removeItem(UNSAVED_DOCS_KEY);
@@ -1395,7 +1399,7 @@ function restoreUnsavedDocMarks(){
   const wanted = new Set(keys.map(String));
   let marked = 0;
   docs.forEach(doc => {
-    if (!doc || !RESTORE_UNSAVED_KINDS.has(doc.kind) || !wanted.has(docStableKey(doc))) return;
+    if (!documentRestoresUnsaved(doc) || !wanted.has(docStableKey(doc))) return;
     doc.restoredUnsaved = true;
     doc.workspaceRecovery = true;              // 폴더 동기화가 디스크 원본으로 덮어쓰지 않게
     markDocumentDirty(doc, true);

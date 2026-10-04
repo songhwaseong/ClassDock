@@ -26,6 +26,16 @@ function updateHeaderCommandDock(){
   }
   const zoomLabel = byId("headerZoomLabel");
   if (zoomLabel) zoomLabel.textContent = Math.round(((pdf && doc.zoom) || 1) * 100) + "%";
+  // 분할 작업에서 헤더 줌은 작업 칸 PDF 만 움직인다(참고 칸은 칸 폭에 저절로 맞춤) — 어느 칸인지 툴팁에 밝힌다.
+  const content = byId("content"), split = !!(content && content.classList.contains("study-mode"));
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  for (const [id, plain, inSplit] of [
+    ["headerZoomOut", "축소 (Ctrl+-)", "작업 문서 축소 (Ctrl+-)"],
+    ["headerZoomLabel", "원래대로(맞춤)", "작업 문서 원래대로(맞춤)"],
+    ["headerZoomIn", "확대 (Ctrl++)", "작업 문서 확대 (Ctrl++)"]
+  ]){
+    const button = byId(id); if (button) button.title = _t(split ? inSplit : plain);
+  }
   const fullscreen = byId("btnOfficeFullscreen"), canFullscreen = !!doc;
   if (fullscreen){ fullscreen.hidden = !canFullscreen; fullscreen.disabled = !canFullscreen; }
   // 실행(▶)·터미널은 편집기 바로 위 실행 바에만 둔다 — 헤더에 같은 단추를 또 두면 한 화면에 둘씩 보였다.
@@ -362,7 +372,6 @@ function wire(){
     if (state && state.kind === "diary" && typeof state.printDiary === "function"){ state.printDiary(); return; }
     window.print();
   };
-  byId("btnFullscreen").onclick = toggleViewerFullscreen;
   byId("btnOfficeFullscreen").onclick = toggleViewerFullscreen;
   byId("headerZoomOut").onclick = () => { if (state && state.kind === "pdf") setPdfZoom((state.zoom || 1) / 1.25); };
   byId("headerZoomLabel").onclick = () => { if (state && state.kind === "pdf") setPdfZoom(1); };
@@ -410,10 +419,7 @@ function wire(){
     if (e.key !== "Escape" || e.repeat || !isViewerFullscreen()) return;
     setTimeout(() => { if (!e.defaultPrevented && isViewerFullscreen()) exitViewerFullscreen(); }, 0);
   });
-  // 화면 확대/축소 (PDF)
-  byId("zoomIn").onclick  = () => setPdfZoom(((state && state.zoom) || 1) * 1.25);
-  byId("zoomOut").onclick = () => setPdfZoom(((state && state.zoom) || 1) / 1.25);
-  byId("zoomLabel").onclick = () => setPdfZoom(1);
+  // 화면 확대/축소(PDF)는 헤더(headerZoom*)에만 둔다 — 위의 단추 연결 참고.
   /* 보기 방식(이어보기 ↔ 한 장씩)과 페이지 넘기기. 넘기기 단추는 한 장씩 볼 때만 나오고,
      같은 짝을 세 곳에 둔다 — 문서 위 알약(작업 칸), 전체화면, 분할 작업의 참고 칸. 알약마다
      제 칸의 PDF 를 조작한다: 분할에서 두 칸이 서로 다른 PDF 일 수 있기 때문이다. */
@@ -1615,18 +1621,19 @@ function wire(){
     });
     syncHeaderMoreAvailability();
   })();
-  // 헤더 PDF 메뉴(편집·페이지)도 마찬가지로 숨김과 동시에 접는다.
+  // PDF 위 도구 줄의 편집·페이지 메뉴도 마찬가지로 숨김과 동시에 접는다.
   document.addEventListener("mn-tool-visibility", (ev) => {
     const vis = (ev && ev.detail) || {};
     for (const [id, sel] of [["hdrPdfEdit", ".hdr-tool-pdfedit"], ["hdrPdfPage", ".hdr-tool-pdfpage"]]){
       if (vis[id] !== false) continue;
-      document.querySelectorAll("header details" + sel + "[open]").forEach((d) => { d.open = false; });
+      document.querySelectorAll("details" + sel + "[open]").forEach((d) => { d.open = false; });
     }
   });
   // '도구' 탭 — 화면별 하위 탭에서 비노출/노출 목록 사이로 옮긴다. 저장 형식은 예전 체크박스와
   // 같은 { 도구id:boolean } 이라 기존 설정·실제 툴바 숨김 CSS 는 그대로 이어 쓴다.
   const TOOL_VISIBILITY_TARGETS = Object.freeze([
     { id:"header", fixed:"설정 · 저장 · 집중 모드 · 분할 작업" },
+    { id:"pdf", fixed:"보기 방식 · 페이지 번호 · 찾기" },
     { id:"py", fixed:"실행 · 저장" },
     { id:"javascript", fixed:"실행 · 저장 · 원본 되돌리기" },
     { id:"java", fixed:"실행 · 저장" },

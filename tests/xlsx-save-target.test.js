@@ -2,7 +2,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const vm=require("node:vm");
-const {spreadsheetDirectSaveKind}=require("../src/js/spreadsheet-viewer.js");
+const {spreadsheetDirectSaveKind,spreadsheetConvertedDocOptions}=require("../src/js/spreadsheet-viewer.js");
 const spreadsheet=fs.readFileSync(require.resolve("../src/js/spreadsheet-viewer.js"),"utf8");
 const code=fs.readFileSync(require.resolve("../src/js/code-viewer.js"),"utf8");
 const documents=fs.readFileSync(require.resolve("../src/js/documents.js"),"utf8");
@@ -16,7 +16,11 @@ function fixture(options={}){
       if(options.writeFails)throw new Error("locked");
       return {write:async value=>events.writes.push(new Uint8Array(await value.arrayBuffer())),close:async()=>{events.closed=true;}};
     }};
-  const directory={getFileHandle:async(name,flags)=>{events.files.push({name,create:flags.create});return handle;}};
+  const directory={getFileHandle:async(name,flags)=>{
+    events.files.push({name,create:flags.create});
+    if(options.missingFile && !flags.create)throw Object.assign(new Error("source-entry-not-found"),{name:"NotFoundError"});
+    return handle;
+  }};
   const root={nodeId:"root",type:"group",folderRefreshRootId:"root",name:"Folder",folderHandle:options.disconnected?null:{
     __classdockNativeHandle:!!options.native,nativePath:"D:/Folder",
     queryPermission:async()=>options.denied?"denied":"granted",requestPermission:async()=>options.denied?"denied":"granted",
@@ -41,8 +45,39 @@ function fixture(options={}){
   const ss=spreadsheet.indexOf("  const saveBytesToSaveRoot ="),se=spreadsheet.indexOf("  // ----- 현재 시트 인쇄",ss);
   const ds=documents.indexOf("function documentSaveTarget("),de=documents.indexOf("let saveTargetNoticeTimer",ds);
   vm.runInContext(code.slice(cs,ce)+documents.slice(ds,de)+spreadsheet.slice(ss,se)+"globalThis.save=quickSave;",context);
-  return {context,events,doc};
+  return {context,events,doc,handle};
 }
+
+test("복원 CSV에서 변환한 XLSX는 폴더 핸들이 문서에 없어도 같은 원본 폴더에 생성한다",async()=>{
+  const options=spreadsheetConvertedDocOptions({parentId:"root",workspacePath:"Folder/Sub/test.csv",originalSaveMode:true},"test.xlsx",[],true);
+  const {context,events}=fixture({native:true,doc:options});
+  await context.save();
+  assert.deepEqual(events.files,[{name:"test.xlsx",create:true}]);
+  assert.equal(events.writes.length,1);assert.equal(events.copies,0);
+});
+
+test("예전 사본 저장 XLSX를 복원했는데 원본 폴더 파일이 없으면 수동 저장에서만 생성한다",async()=>{
+  const {context,events}=fixture({native:true,missingFile:true});await context.save();
+  assert.deepEqual(events.files,[{name:"test.xlsx",create:false},{name:"test.xlsx",create:true}]);
+  assert.equal(events.writes.length,1);assert.equal(events.copies,0);assert.equal(events.saved,1);
+  const silent=fixture({native:true,missingFile:true});
+  assert.equal(await silent.context.saveViaFileHandle(new Uint8Array([1]),"test.xlsx",silent.doc,{existingOnly:true,noPermissionPrompt:true}),"denied");
+  assert.deepEqual(silent.events.files,[{name:"test.xlsx",create:false}]);assert.equal(silent.events.writes.length,0);
+});
+
+test("낱개로 연 XLSX는 폴더 트리가 없어도 보관한 파일 핸들로 저장한다",async()=>{
+  for(const native of [false,true]){
+    const {context,events,doc,handle}=fixture({native,doc:{parentId:null}});
+    doc.fsHandle=handle;context.navNodes=[];
+    await context.save();assert.equal(events.writes.length,1);assert.equal(events.copies,0);assert.equal(events.saved,1);
+  }
+});
+
+test("낱개 XLSX 복원본은 저장 전 기억한 파일 핸들을 다시 연결한다",async()=>{
+  const {context,events,doc,handle}=fixture({doc:{parentId:null,originalSaveMode:false}});
+  context.loadFsHandle=async path=>{assert.equal(path,doc.workspacePath);return handle;};
+  await context.save();assert.equal(doc.fsHandle,handle);assert.equal(events.writes.length,1);assert.equal(events.copies,0);
+});
 test("원본 칩이 있는 복원 XLSX는 파일 핸들이 없어도 원본 저장 경로를 선택한다",async()=>{
   const {context,events,doc}=fixture();
   assert.equal(context.documentSaveTarget(doc).mode,"original");

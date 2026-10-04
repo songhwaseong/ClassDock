@@ -175,8 +175,6 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   // ⚙ 설정·저장·집중(⏱)·분할 작업은 뺐다. 설정은 숨기면 되돌릴 길이 막히고, 저장은 필수,
   // 집중은 이미 '펫 집중 모드' 설정이 켜고 끄며, 분할 작업 버튼은 원래 CSS 로 숨겨둔 상태다.
   { id:"hdrSidebar",    label:"사이드 메뉴 접기·펼치기",       cls:"hdr-tool-sidebar",    target:"header" },
-  { id:"hdrPdfEdit",    label:"PDF 편집 메뉴(서명·텍스트·필기)",cls:"hdr-tool-pdfedit",    target:"header" },
-  { id:"hdrPdfPage",    label:"PDF 페이지 메뉴(목차·썸네일·합치기)",cls:"hdr-tool-pdfpage",target:"header" },
   { id:"hdrMemo",       label:"메모",                          cls:"hdr-tool-memo",       target:"header" },
   { id:"hdrFullscreen", label:"문서 전체화면",                 cls:"hdr-tool-fullscreen", target:"header" },
   { id:"hdrPrint",      label:"인쇄 / PDF로 저장",             cls:"hdr-tool-print",      target:"header" },
@@ -186,6 +184,10 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"hdrLang",       label:"EN(영어로 전환)",               cls:"hdr-tool-lang",       target:"header" },
   { id:"hdrHelp",       label:"도움말·단축키(?)",              cls:"hdr-tool-help",       target:"header" },
   { id:"hdrTheme",      label:"다크 모드 전환",                cls:"hdr-tool-theme",      target:"header" },
+  // PDF 위 도구 줄 (classdock.html #pageCtl) — 예전엔 헤더에 있던 메뉴라 id·cls 는 hdr* 그대로 둔다
+  // (이미 저장된 숨김 설정이 그대로 이어지게).
+  { id:"hdrPdfEdit",    label:"편집 메뉴(서명·텍스트·필기)",    cls:"hdr-tool-pdfedit",    target:"pdf" },
+  { id:"hdrPdfPage",    label:"페이지 메뉴(목차·썸네일·합치기)",cls:"hdr-tool-pdfpage",    target:"pdf" },
   // Python 실행 바 (code-viewer.js)
   { id:"pyTrace",     label:"단계 실행",       cls:"run-trace",           target:"py" },
   { id:"pyAnalyze",   label:"진단",            cls:"run-analyze",         target:"py" },
@@ -509,6 +511,8 @@ const BOARD_BG_PRESETS = Object.freeze([
   { id:"paper",  color:"#f1f5f9", label:"연회색",    labelEn:"Light gray" },
   { id:"cream",  color:"#fdf6e3", label:"크림",      labelEn:"Cream" },
   { id:"chalk",  color:"#0f5132", label:"칠판 초록", labelEn:"Chalkboard green" },
+  // 실제 교실 칠판은 위의 선명한 초록이 아니라 회색기 도는 짙은 녹색이다(무늬 '칠판 질감'과 짝).
+  { id:"slate",  color:"#2c4639", label:"교실 칠판", labelEn:"Classroom chalkboard" },
   { id:"night",  color:"#111827", label:"검정",      labelEn:"Black" }
 ]);
 function normalizeBoardBg(value){ return normalizeHexColor(value) || BOARD_BG_DEFAULT; }
@@ -526,7 +530,9 @@ const BOARD_PATTERNS = Object.freeze([
   { id:"graph",  size:40, opacity:.3,  label:"좌표평면", labelEn:"Coordinate plane" },
   { id:"lines",  size:44, opacity:.45, label:"줄 노트",  labelEn:"Ruled lines" },
   { id:"staff",  size:15, opacity:.6,  label:"오선지",   labelEn:"Music staff" },
-  { id:"cells",  size:46, opacity:.45, label:"원고지",   labelEn:"Manuscript grid" }
+  { id:"cells",  size:46, opacity:.45, label:"원고지",   labelEn:"Manuscript grid" },
+  // 칠판 질감은 선이 아니라 결이라 size 가 간격이 아니라 결 크기(%)다 — 100 이면 타일 한 칸이 보드 1536px.
+  { id:"chalk",  size:100, opacity:.7, label:"칠판 질감", labelEn:"Chalkboard texture" }
 ]);
 const BOARD_PATTERN_SIZE_MIN = 12, BOARD_PATTERN_SIZE_MAX = 160;
 const BOARD_PATTERN_OPACITY_DEFAULT = 0.3;

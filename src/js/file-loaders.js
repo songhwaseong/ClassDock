@@ -90,6 +90,9 @@ async function handleFiles(files, options={}){
       sqliteDiskPath: options.sqliteDiskPath || file.__sqliteDiskPath || null,
       nativeAbsolutePath: options.nativeAbsolutePath || file.__nativeAbsolutePath || null,
       workspacePath: options.transient ? null : (options.workspacePath || file.webkitRelativePath || (!options.parentId ? file.name : null)) };
+    if (opts.restoreFromWorkspace && !opts.fsHandle && opts.workspacePath && typeof loadFsHandle === "function"){
+      try { opts.fsHandle = await loadFsHandle(opts.workspacePath); } catch(_){}
+    }
     if (!options.transient && !opts.workspaceRestorePath){
       if (opts.workspacePath) opts.workspaceRestorePath = opts.workspacePath;
       else if (options.parentId){
@@ -2062,7 +2065,7 @@ function queueDroppedItems(dataTransfer){
           reportSkippedFolderEntries(snapshot.skipped);
           collected.push(...snapshot.files);
           folderPaths.push(...snapshot.folderPaths);
-        } else if ((modernHasDir || !files.length) && handle.kind === "file" && typeof handle.getFile === "function"){
+        } else if (handle.kind === "file" && typeof handle.getFile === "function"){
           try {
             const file = withFileHandle(await handle.getFile(), handle);
             setFileRelativePath(file, file.name);
@@ -2072,7 +2075,8 @@ function queueDroppedItems(dataTransfer){
       }
 
       if (!hasDir){
-        const regularFiles = files.length ? files : collected;
+        const regularFiles = files.length ? files.map(file => collected.find(candidate =>
+          candidate.name === file.name && candidate.size === file.size && candidate.lastModified === file.lastModified) || file) : collected;
         if (!regularFiles.length){
           toast("드롭한 폴더 정보를 읽지 못했어요.", 5200, { type:"error",
             action:{ label:"폴더 열기", onClick:() => pickFolderOrInput(byId("folderInput")) } });

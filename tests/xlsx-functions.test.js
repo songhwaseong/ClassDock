@@ -119,6 +119,102 @@ function viewerRuntime(){
   vm.createContext(context);vm.runInContext(source.slice(start,end)+"globalThis.run=recalcAll;",context);
   return {source,context};
 }
+test("실제 뷰어는 연속 콜론 수식을 계산하고 값 변경 시 재계산한다",()=>{
+  const {context}=viewerRuntime();
+  context.exModels.Data=[Array.from({length:7},()=>({v:""})),
+    ["","","",52,58,55].map(v=>({v})).concat({f:"SUM(D2:E2:F2)",xv:{result:{error:"#NAME?"}}})];
+  context.exModels.Other=[[{f:"SUM(Data!D2:E2:F2)"}]];
+  context.run();
+  assert.equal(context.exModels.Data[1][6].v,165);
+  assert.equal(context.exModels.Data[1][6].unsupportedFormula,false);
+  assert.equal(context.exModels.Other[0][0].v,165);
+  context.exModels.Data[1][4].v=60;context.run();
+  assert.equal(context.exModels.Data[1][6].v,167);
+  assert.equal(context.exModels.Other[0][0].v,167);
+});
+
+test("실제 XLSX 로드·모델 생성·저장 경로에서 연속 콜론 수식을 재계산한다",async()=>{
+  const {source,context}=viewerRuntime();
+  const input=new ExcelJS.Workbook(),inputSheet=input.addWorksheet("Data");
+  inputSheet.addRows([
+    ["번호","이름","모둠","수학","과학","영어"],
+    [1,"김가온",1,52,58,55,{formula:"SUM(D2:E2:F2)",result:0}],
+    [2,"김나래",1,59,69,68,{formula:"SUM(D3:E3:F3)",result:0}]
+  ]);
+  const workbook=await V.spreadsheetLoadExcelWorkbook(await input.xlsx.writeBuffer(),ExcelJS);
+  Object.assign(context,{doc:null,cloneSpreadsheetValue:V.cloneSpreadsheetValue,spreadsheetCellValueSnapshot:V.spreadsheetCellValueSnapshot});
+  const rawStart=source.indexOf("  const exRaw ="),rawEnd=source.indexOf("  const dateToSerial =",rawStart);
+  const start=source.indexOf("  const cellFormula ="),end=source.indexOf("  const buildCsvFastModel =",start);
+  vm.runInContext(source.slice(rawStart,rawEnd)+source.slice(start,end)+"globalThis.buildModel=buildExModel;",context);
+  const model=context.buildModel(workbook.getWorksheet("Data"),"Data");
+  context.exModels.Data=model;
+  context.run();
+  assert.equal(model[1][6].v,165);
+  assert.equal(model[2][6].v,196);
+  assert.equal(typeof model[1][3].v,"number");
+  const w=new ExcelJS.Workbook();V.writeStructuredSpreadsheetModel(w.addWorksheet("Data"),model,[]);
+  const loaded=new ExcelJS.Workbook();await loaded.xlsx.load(await w.xlsx.writeBuffer());
+  const ws=loaded.getWorksheet("Data");
+  assert.equal(ws.getCell("D2").value,52);
+  assert.equal(ws.getCell("G2").value.result,165);
+  assert.equal(ws.getCell("G2").value.formula,"SUM(D2:E2:F2)");
+  model[1][4].v=60;context.run();assert.equal(model[1][6].v,167);
+});
+
+test("이전 CSV 변환 XLSX의 숫자 텍스트는 다시 열어 합산하고 숫자로 저장한다",async()=>{
+  const {source,context}=viewerRuntime();
+  const rows=[
+    ["번호","이름","모둠","수학","과학","영어"],
+    ["1","김가온","1","52","58","55"],
+    ["2","김나래","1","59","69","68"]
+  ];
+  // 기존 변환 코드처럼 문자열 행을 그대로 XLSX로 기록한다.
+  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet(rows),"Data");
+  const bytes=XLSX.write(book,{type:"array",bookType:"xlsx"});
+  const workbook=await V.spreadsheetLoadExcelWorkbook(bytes,ExcelJS),ws=workbook.getWorksheet("Data");
+  assert.equal(ws.getCell("D2").value,"52");
+  Object.assign(context,{doc:null,cloneSpreadsheetValue:V.cloneSpreadsheetValue,spreadsheetCellValueSnapshot:V.spreadsheetCellValueSnapshot});
+  const rawStart=source.indexOf("  const exRaw ="),rawEnd=source.indexOf("  const dateToSerial =",rawStart);
+  const start=source.indexOf("  const cellFormula ="),end=source.indexOf("  const buildCsvFastModel =",start);
+  vm.runInContext(source.slice(rawStart,rawEnd)+source.slice(start,end)+"globalThis.buildModel=buildExModel;",context);
+  const model=context.buildModel(ws,"Data");context.exModels.Data=model;
+  model[1].push({f:"SUM(D2:E2:F2)"});model[2].push({f:"SUM(D3:E3:F3)"});context.run();
+  assert.equal(model[1][6].v,165);assert.equal(model[2][6].v,196);
+  assert.equal(model[1][3].xv,52);
+  const saved=new ExcelJS.Workbook();await saved.xlsx.load(await workbook.xlsx.writeBuffer());
+  assert.equal(saved.getWorksheet("Data").getCell("D2").value,52);
+  assert.equal(F.evaluateFormula("SUM(D2:E2:F2)",(c,r)=>saved.getWorksheet("Data").getCell(r+1,c+1).value),165);
+  model[1][4].v=60;context.run();assert.equal(model[1][6].v,167);
+  const text=workbook.addWorksheet("Text");
+  text.addRow(["52","00123","1234567890123456",{richText:[{text:"55"}]},{formula:'TEXT(58,"0")',result:"58"}]);
+  text.getCell("A1").numFmt="@";
+  const preserved=context.buildModel(text,"Text")[0];
+  assert.deepEqual(Array.from(preserved,cell=>cell.v),["52","00123","1234567890123456","55","58"]);
+});
+
+test("CSV→XLSX 변환은 처음 생성하는 파일에도 점수를 숫자로 기록한다",async()=>{
+  const {source}=viewerRuntime();
+  const start=source.indexOf("        const aoa = [];"),end=source.indexOf("        const name = sheetBaseName",start);
+  const rows=["이름,수학,과학,영어","김가온,52,58,55","김나래,59,69,68"];
+  const context={XLSX,spreadsheetTools:T,rowStarts:rows.map((_,i)=>i),recordAt:i=>rows[i],delimiter:",",
+    parseCsvRecord:line=>line.split(","),promptCsvHeaderChoice:async()=>true,hasHeader:true};
+  await vm.runInNewContext("(async()=>{"+source.slice(start,end)+"globalThis.bytes=out;})()",context);
+  const loaded=await V.spreadsheetLoadExcelWorkbook(context.bytes,ExcelJS),ws=loaded.getWorksheet("Sheet1");
+  assert.equal(ws.getCell("B2").value,52);
+  assert.equal(ws.getCell("C2").value,58);
+  assert.equal(ws.getCell("D2").value,55);
+  assert.equal(F.evaluateFormula("SUM(B2:C2:D2)",(c,r)=>ws.getCell(r+1,c+1).value),165);
+});
+
+test("CSV에서 바로 편집할 때도 숫자 점수를 합산한다",async()=>{
+  const {source,context}=viewerRuntime();
+  Object.assign(context,{csvFastAoa:[["수학","과학","영어"],["52","58","55"]],doc:{},sheet:{}});
+  const start=source.indexOf("  const buildCsvFastModel ="),end=source.indexOf("  const exModelFor =",start);
+  vm.runInContext(source.slice(start,end)+"globalThis.buildCsv=buildCsvFastModel;",context);
+  const model=await context.buildCsv();context.exModels.Data=model;model[1].push({f:"SUM(A2:B2:C2)"});
+  context.run();assert.equal(model[1][3].v,165);
+});
+
 test("실제 뷰어는 등록한 함수를 두 시트에서 재계산하고 원본 결과 사용으로 오인하지 않는다",()=>{
   const {context}=viewerRuntime();context.run();
   assert.equal(context.exModels.Data[0][2].v,86);assert.equal(context.exModels.Other[0][0].v,80);

@@ -34,6 +34,28 @@ test("헤더 빠른 도구는 활성 문서의 기존 저장·확대 기능을 �
   assert.ok(documents.includes('typeof updateHeaderCommandDock === "function"'));
 });
 
+test("PDF 편집·페이지 메뉴는 문서 위 도구 줄에, 확대/축소·전체화면은 헤더에만 있다", () => {
+  const ctl = html.slice(html.indexOf('id="pageCtl"'), html.indexOf('id="dropzone"'));
+  assert.ok(ctl.includes("hdr-tool-pdfedit") && ctl.includes("hdr-tool-pdfpage"), "메뉴가 도구 줄 안에 있어야 한다");
+  const header = html.slice(0, html.indexOf("</header>"));
+  assert.ok(!header.includes("hdr-tool-pdfedit") && !header.includes("hdr-tool-pdfpage"), "헤더에는 PDF 메뉴가 없어야 한다");
+  for (const id of ["zoomOut", "zoomLabel", "zoomIn", "btnFullscreen"]){
+    assert.ok(!html.includes('id="' + id + '"'), id + " 는 헤더와 겹쳐 지웠다");
+    assert.ok(!app.includes('byId("' + id + '")'), id);
+  }
+  // 메뉴를 펼친 동안 도구 줄이 저절로 흐려지지 않는다(일반·분할 모두).
+  assert.equal((documents.match(/querySelector\("details\[open\]"\)/g) || []).length, 2);
+  // 분할 작업에서 헤더 줌은 작업 칸만 움직이므로 툴팁에 밝힌다.
+  assert.ok(app.includes('"작업 문서 확대 (Ctrl++)"'));
+});
+
+test("헤더 도구 칸은 #tools 하나다(메모 단추 한 벌)", () => {
+  assert.ok(!html.includes('id="officeTools"'));
+  assert.equal((html.match(/data-scratchpad-open/g) || []).length, 1);
+  assert.ok(documents.includes('byId("tools").hidden = false;'));
+  assert.ok(!documents.includes("officeTools"));
+});
+
 test("현재 문서에서 쓸 수 없는 빠른 도구와 빈 기능군은 완전히 숨긴다", () => {
   assert.ok(app.includes('save.hidden = !canSave'));
   assert.ok(app.includes('print.hidden = !canPrint'));
