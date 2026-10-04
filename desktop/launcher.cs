@@ -1040,6 +1040,7 @@ class ClassDockLauncher
             if (path == "/can-proxy-flight" || path.StartsWith("/flight-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-ship" || path.StartsWith("/ship-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-weather" || path.StartsWith("/weather-", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/market-days?", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-world-wind" || path.StartsWith("/world-wind-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
@@ -3499,7 +3500,8 @@ class ClassDockLauncher
                     || path.StartsWith("/flight-board?", StringComparison.Ordinal) || path.StartsWith("/flight-search?", StringComparison.Ordinal)
                     || path == "/ship-ports" || path.StartsWith("/ship-ports?", StringComparison.Ordinal)
                     || path.StartsWith("/ship-schedule?", StringComparison.Ordinal)
-                    || path.StartsWith("/weather-", StringComparison.Ordinal)))
+                    || path.StartsWith("/weather-", StringComparison.Ordinal)
+                    || path.StartsWith("/market-days?", StringComparison.Ordinal)))
                 {
                     // 항공 운항(한국공항공사)도 같은 공공데이터포털 키·같은 캐시·같은 오류 알림을 쓴다. 조회 이름만 다르다.
                     int question = path.IndexOf('?');
@@ -3510,6 +3512,7 @@ class ClassDockLauncher
                         : route == "/weather-mid-land" ? "wx-mid-land" : route == "/weather-mid-temp" ? "wx-mid-temp"
                         : route == "/weather-day" ? "wx-day" : route == "/weather-holidays" ? "holidays" : route == "/weather-terms" ? "terms"
                         : route == "/weather-typhoon" ? "wx-typhoon" : route == "/weather-typhoon-fcst" ? "wx-typhoon-fcst"
+                        : route == "/market-days" ? "markets"
                         : route.StartsWith("/jeju-bus-", StringComparison.Ordinal) ? route.Substring("/jeju-bus-".Length) : "";
                     string value = kind == "cities" ? "all"
                         : (kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst") ? (QueryValue(path, "nx") ?? "").Trim() + "," + (QueryValue(path, "ny") ?? "").Trim()
@@ -3517,6 +3520,7 @@ class ClassDockLauncher
                         : kind == "wx-day" ? (QueryValue(path, "stn") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : kind == "holidays" || kind == "terms" ? (QueryValue(path, "year") ?? "").Trim() + (QueryValue(path, "month") ?? "").Trim().PadLeft(2, '0')
                         : kind == "wx-typhoon" ? "now"
+                        : kind == "markets" ? (QueryValue(path, "page") ?? "").Trim()
                         : kind == "wx-typhoon-fcst" ? (QueryValue(path, "seq") ?? "").Trim() + "-" + (QueryValue(path, "tmfc") ?? "").Trim()
                         : kind == "nearby" ? (QueryValue(path, "lat") ?? "").Trim() + "," + (QueryValue(path, "lng") ?? "").Trim()
                         : kind == "flights" ? String.Join("-", new[] { "airport", "io", "line", "page" }.Select(name => (QueryValue(path, name) ?? "").Trim()))
@@ -3525,7 +3529,8 @@ class ClassDockLauncher
                         : kind == "ships" ? (QueryValue(path, "port") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : (QueryValue(path, kind == "routes" ? "keyword" : kind == "arrivals" ? "nodeId" : "routeId") ?? "").Trim();
                     bool weather = kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp"
-                        || kind == "wx-day" || kind == "holidays" || kind == "terms" || kind == "wx-typhoon" || kind == "wx-typhoon-fcst";
+                        || kind == "wx-day" || kind == "holidays" || kind == "terms" || kind == "wx-typhoon" || kind == "wx-typhoon-fcst"
+                        || kind == "markets";
                     bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather;
                     string busCity = noCity ? "" : (QueryValue(path, "city") ?? "").Trim();
                     if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby"
@@ -5919,6 +5924,8 @@ class ClassDockLauncher
             DateTime kst = KmaKstNow();
             return at >= kst.AddDays(-10) && at <= kst.AddHours(1);
         }
+        // 전통시장(장날): 1000줄씩 쪽 번호만. 전국이 1,400곳 남짓이라 몇 쪽이면 끝난다.
+        if (kind == "markets") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9]$");
         if (kind == "holidays" || kind == "terms")
         {
             int year, month;
@@ -6029,6 +6036,12 @@ class ClassDockLauncher
                 query = "dataType=JSON&pageNo=1&numOfRows=100&tmFc=" + typhoon[1] + "&typSeq=" + typhoon[0];
                 break;
             }
+            // 전통시장(소상공인시장진흥공단 전국전통시장표준데이터). 장날은 '시장개설주기' 글로 온다(화면이 푼다).
+            // 갱신이 한 해 단위라 하루 캐시해도 넉넉하다.
+            case "markets":
+                service = MarketBase; operation = "tn_pubr_public_trdit_mrkt_api"; needsCity = false;
+                query = "type=json&numOfRows=1000&pageNo=" + value;
+                break;
             case "holidays": case "terms":
                 service = KasiBase + "SpcdeInfoService/"; operation = kind == "holidays" ? "getRestDeInfo" : "get24DivisionsInfo"; needsCity = false;
                 query = "_type=json&numOfRows=50&solYear=" + value.Substring(0, 4) + "&solMonth=" + value.Substring(4);
@@ -6036,7 +6049,7 @@ class ClassDockLauncher
             default: return false;
         }
         bool kac = kind == "flights" || kind == "flight";
-        bool dataGo = kind.StartsWith("wx-", StringComparison.Ordinal) || kind == "holidays" || kind == "terms";
+        bool dataGo = kind.StartsWith("wx-", StringComparison.Ordinal) || kind == "holidays" || kind == "terms" || kind == "markets";
         // 서울은 근처 정류장도 서울 API 로 묻는다(TAGO 좌표 조회에는 서울 정류장이 없다). 도시 목록은 TAGO 것 그대로.
         bool seoul = city == SeoulBusCity && kind != "cities";
         if (seoul)
@@ -6180,6 +6193,8 @@ class ClassDockLauncher
        HTTP 403 으로 온다(2026-09-19 실측) → BusHttpGet 이 키 문제로 바꾼다. 기상청은 dataType=JSON, 천문연은 _type=json. */
     const string KmaBase = "https://apis.data.go.kr/1360000/";
     const string KasiBase = "https://apis.data.go.kr/B090041/openapi/service/";
+    // 표준데이터 API 는 주소가 다르다(api.data.go.kr/openapi). 봉투·결과 코드는 같다.
+    const string MarketBase = "https://api.data.go.kr/openapi/";
     static DateTime KmaKstNow() { return DateTime.UtcNow.AddHours(9); }
     // 중기예보는 매일 06·18시 발표. 공개 처리 시간을 감안해 한 시간 지난 발표를 사용한다.
     static string KmaMidBaseTime(DateTime kst)
@@ -6335,6 +6350,8 @@ class ClassDockLauncher
                 var root = parser.DeserializeObject(text) as Dictionary<string, object>;
                 object value;
                 var response = root != null && root.TryGetValue("response", out value) ? value as Dictionary<string, object> : null;
+                // 표준데이터 API(api.data.go.kr/openapi)는 response 껍질 없이 header·body 를 바로 준다(2026-10-04 실측).
+                if (response == null && root != null && root.ContainsKey("header")) response = root;
                 var header = response != null && response.TryGetValue("header", out value) ? value as Dictionary<string, object> : null;
                 // 게이트웨이 오류 모양: {"OpenAPI_ServiceResponse":{"cmmMsgHeader":{"returnReasonCode":"30",…}}} (2026-09 실측, HTTP 403 과 함께 옴)
                 var gateway = root != null && root.TryGetValue("OpenAPI_ServiceResponse", out value) ? value as Dictionary<string, object> : null;

@@ -206,6 +206,7 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
     ships:{freeze(){return ()=>{};},captureNote:()=>""},
     weather:{freeze(){return ()=>{};},captureNote:()=>""},
     wind:{freeze(){windFrozen=true;return ()=>{windFrozen=false;};},captureNote:()=>"wind snapshot"},
+    markets:{captureNote:()=>""},
     mapCaptureDataUrl:async(stage,attribution)=>{
       assert.equal(busFrozen,true); assert.match(attribution,/bus snapshot/);
       assert.equal(windFrozen,true); assert.match(attribution,/wind snapshot/);

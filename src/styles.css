@@ -4576,6 +4576,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapShip .map-toolvis-ship,
   html.hide-tool-mapWeather .map-toolvis-weather,
   html.hide-tool-mapWind .map-toolvis-wind,
+  html.hide-tool-mapMarket .map-toolvis-market,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
   html.hide-tool-musicKey .music-toolvis-key,
@@ -9007,6 +9008,30 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-typhoon-plan{margin-top:6px;font-size:12px}
 .map-typhoon-plan summary{cursor:pointer;font-weight:700}
 .map-typhoon-plan p{margin:3px 0 3px 12px}
+/* 지도 장날 층(market-days.js) — 판은 날씨 창 모양을 같이 쓴다 */
+.map-market-tools{flex-wrap:nowrap}
+.map-market-prev,.map-market-next{min-width:32px;justify-content:center;font-size:16px;line-height:1}
+.map-market-date-box{position:relative;flex:1 1 auto;min-width:0;display:flex}
+.map-market-date-btn{flex:1 1 auto;min-height:30px;text-align:left;font-weight:600}
+/* 달력만 빌려 쓰는 감춘 날짜 칸. 달력이 단추 아래에서 열리게 단추 자리에 겹쳐 둔다. */
+.map-market-date{position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;border:0;padding:0}
+.map-market-check{display:inline-flex;align-items:center;gap:6px;margin-right:auto;cursor:pointer}
+.map-market-summary{font-weight:600;opacity:1}
+.map-market-list{list-style:none;margin:0;padding:0;max-height:min(320px,40vh);overflow:auto;border-top:1px solid #98b9bd55}
+.map-market-list:empty{display:none}
+.map-market-item{border-bottom:1px solid #98b9bd33}
+.map-market-go{all:unset;box-sizing:border-box;display:flex;flex-direction:column;width:100%;padding:6px 8px;cursor:pointer;border-left:3px solid #e8590c}
+.map-market-go:hover,.map-market-go:focus-visible{background:#e8590c14}
+.map-market-go:focus-visible{outline:2px solid #e8590c;outline-offset:-2px}
+.map-market-go-name{font-weight:700}
+.map-market-go-meta{font-size:11px;opacity:.75;font-variant-numeric:tabular-nums}
+.map-market-more{padding:6px 8px;font-size:11px;opacity:.75}
+.map-market-foot .map-market-refresh{padding:0 6px;min-height:22px;font-size:11px}
+.map-market-popup{font:12px/1.45 sans-serif;min-width:180px}
+.map-market-popup-name{display:block;margin-bottom:4px;font-size:14px;color:#c2410c}
+.map-market-popup-row{display:flex;gap:8px}
+.map-market-popup-key{flex:0 0 auto;min-width:40px;opacity:.65}
+.map-market-popup-link{display:inline-block;margin-top:4px;color:#087f8c}
 /* 예상 시각 이름표: 예상 위치 점 오른쪽 위. */
 .leaflet-marker-icon.map-typhoon-time-icon{overflow:visible;border:0;background:none}
 .map-typhoon-time{position:absolute;bottom:6px;left:8px;padding:0 5px;border-radius:4px;background:#fffffff0;color:#7f1d1d;box-shadow:0 1px 3px #0005;font:700 11px/16px sans-serif;white-space:nowrap}

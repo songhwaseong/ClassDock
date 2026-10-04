@@ -5167,6 +5167,7 @@ const MAP_TOOL_ICONS = {
   bus: '<rect x="4.5" y="3.5" width="15" height="14" rx="2.5"/><path d="M4.5 10h15M8 21v-3.5M16 21v-3.5"/><circle cx="8.3" cy="14" r="1" fill="#000"/><circle cx="15.7" cy="14" r="1" fill="#000"/>',
   plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
   sunCloud: '<circle cx="8" cy="8" r="3"/><path d="M8 2v1.3M2 8h1.3M3.8 3.8l.9.9M12.2 3.8l-.9.9"/><path d="M8.5 20a3.5 3.5 0 0 1-.4-7 5 5 0 0 1 9.6 1.2A3 3 0 0 1 17.5 20z"/>',
+  market: '<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 12v8.5h13V12M10 20.5v-5h4v5"/>',
   wind: '<path d="M3 8.5h9.5a2.5 2.5 0 1 0-2.5-2.5"/><path d="M3 12.5h14.5a3 3 0 1 1-3 3"/><path d="M3 16.5h6.5"/>',
   ship: '<path d="M12 10.2V14M12 2v3"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M19.4 20A11.6 11.6 0 0 0 21 14l-8.2-3.6a2 2 0 0 0-1.6 0L3 14a11.6 11.6 0 0 0 2.8 7.8"/><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
@@ -6552,6 +6553,9 @@ async function mountMapEditor(doc){
   const weather = typeof MNWeatherMap !== "undefined" ? MNWeatherMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     resolveArea:mapWeatherAreaAt, movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   const wind = typeof MNWeatherWind !== "undefined" ? MNWeatherWind.mount({ map, stage, toolRow:toolChips, doc,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // 오늘 장날(전국전통시장표준데이터). 같은 공공데이터포털 키를 쓴다.
+  const markets = typeof MNMarketDays !== "undefined" ? MNMarketDays.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
 
   /* ── 되돌리기 ──
@@ -9058,7 +9062,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote(), wind && wind.captureNote()].filter(Boolean).join(" · "), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote(), wind && wind.captureNote(), markets && markets.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 
