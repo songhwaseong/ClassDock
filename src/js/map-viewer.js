@@ -5165,6 +5165,7 @@ const MAP_TOOL_ICONS = {
   cloud: '<path d="M7 18a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 9.5a4 4 0 0 1 0 8.5"/><path d="M12 11v8M9.5 16.5 12 19l2.5-2.5"/>',
   train: '<rect x="5.5" y="3" width="13" height="14" rx="3"/><path d="M5.5 10.5h13"/><circle cx="9" cy="13.8" r="1" fill="#000"/><circle cx="15" cy="13.8" r="1" fill="#000"/><path d="m8 21 1.5-4M16 21l-1.5-4"/>',
   bus: '<rect x="4.5" y="3.5" width="15" height="14" rx="2.5"/><path d="M4.5 10h15M8 21v-3.5M16 21v-3.5"/><circle cx="8.3" cy="14" r="1" fill="#000"/><circle cx="15.7" cy="14" r="1" fill="#000"/>',
+  busStop: '<path d="M8 21V3"/><rect x="8" y="3" width="11" height="9" rx="2"/><path d="M11 7.5h5M5 21h6"/>',
   plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>',
   sunCloud: '<circle cx="8" cy="8" r="3"/><path d="M8 2v1.3M2 8h1.3M3.8 3.8l.9.9M12.2 3.8l-.9.9"/><path d="M8.5 20a3.5 3.5 0 0 1-.4-7 5 5 0 0 1 9.6 1.2A3 3 0 0 1 17.5 20z"/>',
   market: '<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 12v8.5h13V12M10 20.5v-5h4v5"/>',
@@ -6159,6 +6160,8 @@ async function mountMapEditor(doc){
   /* 캡처(칠판·PNG·인쇄)가 그림에 새길 역 이름. 실시간 층은 아래 if 블록 안에 있어 여기서
      보이지 않으므로, 그 블록이 이 자리에 함수를 걸어 준다(꺼져 있으면 빈 배열). */
   let subwayCaptureLabels = () => [];
+  /* 주변 교통(nearby-transit.js)이 역 점을 누를 때 여는 도착 창. 실시간 블록이 함수를 걸어 준다(없으면 null). */
+  let subwayOpenArrivals = null;
 
   /* ── 실시간 열차 위치 ──
      지도 문서(.map)에는 아무것도 남기지 않는다. 열차는 지금 이 순간의 값이라, 파일에 담으면
@@ -6470,6 +6473,7 @@ async function mountMapEditor(doc){
       subwayArrivalPanel.hidden = true;
       subwayArrivalBody.replaceChildren();
     };
+    subwayOpenArrivals = subwayShowArrivals;
     subwayArrivalRefresh.addEventListener("click", () => {
       if (subwayArrivalAt) subwayShowArrivals(subwayArrivalAt.line, subwayArrivalAt.name);
     });
@@ -6557,6 +6561,11 @@ async function mountMapEditor(doc){
   // 오늘 장날(전국전통시장표준데이터). 같은 공공데이터포털 키를 쓴다.
   const markets = typeof MNMarketDays !== "undefined" ? MNMarketDays.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // 주변 교통 자동 표시(지하철역은 내장 좌표, 버스 정류장은 같은 공공데이터포털 키). 버스 창·지하철 도착 창을 빌려 쓴다.
+  if (typeof MNNearbyTransit !== "undefined") MNNearbyTransit.mount({ map, stage, toolRow:toolChips, doc, t:mapT, bus:jejuBus,
+    subwayColors:MAP_SUBWAY_COLORS, say:setStatus,
+    subwayArrivals:(line, name) => { if (!subwayOpenArrivals) return false; subwayOpenArrivals(line, name); return true; },
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) });
 
   /* ── 되돌리기 ──
      내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이

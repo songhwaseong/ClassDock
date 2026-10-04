@@ -275,6 +275,61 @@ const MNJejuBusApi = (() => {
     result.stale=response.headers.get("X-ClassDock-Bus-Stale")==="1";
     return result;
   }
+  /* 좌표 근처 정류장 — 도시를 고르지 않아도 되게 어느 API 로 물을지를 좌표로 정한다.
+     서울 정류장은 TAGO 에 없고 서울 API 에만 있다. 그래서 서울 경계에서 얼마나 떨어졌는지로 가른다:
+     경계 안쪽으로 800m 넘게 들어가면 서울 API 만, 바깥으로 800m 넘게 나가면 TAGO 만, 그 사이 띠에서는 둘 다.
+     800m = 조회 반경 500m + 경계를 줄인 오차 200m + 여유 100m — 반대쪽 정류장이 조회 원에 걸릴 수 없는 거리다.
+     둘 다 물었는데 한쪽만 실패하면 받은 쪽을 보여 준다(서울 활용신청을 안 했어도 경기 정류장은 보인다).
+     모두 실패하면 서울 안이면 서울 쪽 오류를, 아니면 TAGO 오류를 던진다(error.city 로 어느 쪽인지 알린다).
+     ask 는 시험이 request 를 갈아 끼울 수 있게 받는다. */
+  // 서울특별시 바깥 고리 [위도, 경도, …] — tools/build-seoul-ring.mjs 가 vendor/korea-regions.js
+  // (통계청 SGIS 행정경계, 가공 vuski/admdongkor · CC BY 4.0)에서 200m 허용으로 줄여 뽑은 값이다.
+  const SEOUL_RING=[37.4601,126.8853,37.4625,126.8887,37.4795,126.8756,37.4885,126.8753,37.4951,126.8683,37.4816,126.8519,37.4817,126.8465,37.4745,126.8456,37.4776,126.8318,37.4747,126.8148,37.4885,126.823,37.4963,126.813,37.4992,126.8198,37.5083,126.8247,37.5162,126.8232,37.5267,126.8285,37.5349,126.8218,37.5407,126.8221,37.5431,126.8028,37.5358,126.7944,37.5437,126.7918,37.5483,126.7717,37.5541,126.7662,37.5567,126.7666,37.5575,126.7731,37.5737,126.7829,37.5888,126.8009,37.5966,126.7973,37.6041,126.8006,37.604,126.8049,37.5718,126.8536,37.5739,126.8541,37.5789,126.8771,37.5841,126.8767,37.5909,126.8822,37.5886,126.8873,37.5899,126.8998,37.6125,126.901,37.6418,126.9125,37.6489,126.9053,37.6447,126.9142,37.6456,126.9213,37.6589,126.9473,37.6548,126.9546,37.6314,126.9751,37.6366,126.9846,37.6407,126.9864,37.6549,126.9796,37.6665,126.9943,37.6795,126.9917,37.6838,126.998,37.6847,127.0083,37.6945,127.0088,37.701,127.0158,37.7006,127.0281,37.6917,127.0325,37.6954,127.0416,37.6924,127.0451,37.6939,127.0482,37.687,127.0508,37.6898,127.0651,37.6941,127.0688,37.6964,127.0773,37.6947,127.0838,37.6908,127.0849,37.6897,127.0928,37.6859,127.0963,37.6792,127.0918,37.6728,127.0956,37.6626,127.094,37.6581,127.0924,37.6559,127.086,37.6549,127.0928,37.6458,127.0945,37.6455,127.1066,37.6424,127.1112,37.6306,127.111,37.6231,127.1035,37.6193,127.1157,37.6074,127.1184,37.5994,127.114,37.595,127.1184,37.5919,127.1124,37.5847,127.1093,37.5841,127.1027,37.5736,127.1009,37.5709,127.1042,37.56,127.1011,37.5589,127.1138,37.5684,127.1338,37.5685,127.1492,37.5789,127.1666,37.5796,127.174,37.5691,127.1791,37.5458,127.1836,37.545,127.1632,37.5123,127.1411,37.5055,127.1411,37.5031,127.1576,37.4996,127.1614,37.4891,127.1576,37.4853,127.1498,37.4741,127.1434,37.4748,127.1326,37.4682,127.1327,37.4689,127.1251,37.4586,127.1167,37.4625,127.1063,37.4588,127.0982,37.4614,127.0963,37.4451,127.088,37.4412,127.0823,37.4424,127.0724,37.4301,127.0705,37.429,127.0657,37.4297,127.0509,37.4392,127.0359,37.4457,127.0384,37.4638,127.0347,37.4654,127.0299,37.4585,127.0261,37.4554,127.0111,37.4673,127.0034,37.4667,126.9963,37.4622,126.9968,37.4476,126.974,37.4456,126.9644,37.4408,126.9638,37.436,126.9386,37.4502,126.9287,37.4342,126.9093,37.4381,126.8994,37.4526,126.8941,37.4523,126.8897];
+  const SEOUL_EDGE_METRES=800;
+  const seoulArea=at=>at[0]>=37.40 && at[0]<=37.73 && at[1]>=126.75 && at[1]<=127.20;   // 서울 경계 + 800m 를 덮는 네모(빠른 거름)
+  const flatXY=(lat,lng)=>[lng*111320*Math.cos(37.55*Math.PI/180),lat*110950];
+  // 서울 경계까지의 부호 있는 거리(m) — 안쪽이면 양수, 바깥이면 음수.
+  function seoulEdgeMetres(at){
+    const [px,py]=flatXY(at[0],at[1]);
+    let inside=false,nearest=Infinity;
+    for (let i=0,j=SEOUL_RING.length-2;i<SEOUL_RING.length;j=i,i+=2){
+      const [ax,ay]=flatXY(SEOUL_RING[i],SEOUL_RING[i+1]),[bx,by]=flatXY(SEOUL_RING[j],SEOUL_RING[j+1]);
+      if ((ay>py)!==(by>py) && px<(bx-ax)*(py-ay)/(by-ay)+ax) inside=!inside;
+      const dx=bx-ax,dy=by-ay,length=dx*dx+dy*dy;
+      const t=Math.max(0,Math.min(1,length?((px-ax)*dx+(py-ay)*dy)/length:0));
+      nearest=Math.min(nearest,Math.hypot(px-ax-t*dx,py-ay-t*dy));
+    }
+    return inside?nearest:-nearest;
+  }
+  // 이 자리에서 물을 곳: {tago, seoul}.
+  function nearbySources(at){
+    if (!seoulArea(at)) return {tago:true,seoul:false,inside:false};
+    const edge=seoulEdgeMetres(at);
+    return {tago:edge<SEOUL_EDGE_METRES,seoul:edge>-SEOUL_EDGE_METRES,inside:edge>0};
+  }
+  function nearMetres(a,b){
+    const rad=Math.PI/180,x=(b[1]-a[1])*rad*Math.cos((a[0]+b[0])/2*rad),y=(b[0]-a[0])*rad;
+    return Math.sqrt(x*x+y*y)*6371000;
+  }
+  async function nearbyAt(at,{signal,jejuCodes=[]}={},ask=request){
+    const from=nearbySources(at);
+    const skip=Promise.resolve(null);
+    const [tago,seoul]=await Promise.allSettled([from.tago ? ask("nearby",at,{signal,jejuCodes}) : skip,
+      from.seoul ? ask("nearby",at,{signal,city:seoulCity}) : skip]);
+    const failed=r=>r.status==="rejected";
+    if ((!from.tago || failed(tago)) && (!from.seoul || failed(seoul))){
+      const useSeoul=from.seoul && (from.inside || !from.tago);
+      const error=useSeoul ? seoul.reason : tago.reason;
+      const thrown=error instanceof Error ? error : new Error("bus-fetch-failed");
+      thrown.city=useSeoul ? seoulCity : "";
+      throw thrown;
+    }
+    const seoulStops=seoul.status==="fulfilled" && seoul.value ? seoul.value : [];
+    const tagoStops=tago.status==="fulfilled" && tago.value ? tago.value : [];
+    // 경계 정류장이 양쪽에 다 실리면(이름 같고 30m 안) 서울 쪽만 남긴다 — 서울 API 가 서울 버스까지 알려 준다.
+    const kept=tagoStops.filter(stop=>!seoulStops.some(other=>other.name===stop.name && nearMetres(other.at,stop.at)<30));
+    return [...seoulStops,...kept];
+  }
   // 같은 이름·ID가 반복되어도 정류장 "등장 순서"로 구간을 고른다.
   function tripStopLabel(stop,index){
     return (Number.isInteger(stop.order) && stop.order>0?stop.order:index+1)+". "+stop.name
@@ -329,7 +384,7 @@ const MNJejuBusApi = (() => {
     return tripDataPromise;
   }
   return {provider,coords,rows,routes,route,positions,cities,arrivals,nearby,arrivalText,validNumber,
-    request,catalog,catalogGroups,loadCatalog,catalogJob,tripStopLabel,tripStopIndex,tripSection,tripEstimate,loadTripData,
+    request,nearbyAt,nearbySources,seoulEdgeMetres,catalog,catalogGroups,loadCatalog,catalogJob,tripStopLabel,tripStopIndex,tripSection,tripEstimate,loadTripData,
     seoulCity,seoulRows,seoulRoutes,seoulRoute,seoulPositions,seoulArrival,seoulArrivals,seoulNearby};
 })();
 if (typeof module!=="undefined" && module.exports) module.exports=MNJejuBusApi;

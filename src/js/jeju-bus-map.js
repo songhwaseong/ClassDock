@@ -356,8 +356,7 @@ const MNJejuBusMap = (() => {
       stopsLayer.clearLayers();map.removeLayer(stopsLayer);
       stopList.replaceChildren();stopList.hidden=true;arrivalBox.hidden=true;arrivalStation=null;
     }
-    // 대략의 서울 범위. TAGO 근처 조회가 비었을 때 '서울을 고르라'고 알려 주는 데만 쓴다.
-    const inSeoul=at=>at.lat>=37.41 && at.lat<=37.72 && at.lng>=126.76 && at.lng<=127.19;
+    // 위에서 고른 도시와 상관없이 지도 자리로 묻는다 — 서울이면 서울 API 도 함께(MNJejuBusApi.nearbyAt).
     async function findNearby(){
       const center=map.getCenter();
       stopGeneration++;if(stopAbort)stopAbort.abort();stopAbort=new AbortController();
@@ -366,8 +365,7 @@ const MNJejuBusMap = (() => {
       stopList.hidden=false;stopList.replaceChildren(el("p","map-jeju-bus-stop-note","근처 정류장을 찾는 중…"));
       try{
         const jejuCodes=cityList.filter(item=>item.code==="" && item.raw).map(item=>item.raw);
-        // 서울을 골랐으면 서울 API 로 묻는다(TAGO 좌표 조회에는 서울 정류장이 없다).
-        const found=await MNJejuBusApi.request("nearby",[center.lat,center.lng],{signal:controller.signal,jejuCodes,city:isSeoul(city)?city:""});
+        const found=await MNJejuBusApi.nearbyAt([center.lat,center.lng],{signal:controller.signal,jejuCodes},MNJejuBusApi.request);
         if(destroyed || seq!==stopGeneration || controller.signal.aborted)return;
         const here=[center.lat,center.lng];
         // 도시 경계 근처에선 같은 정류장이 이웃 도시 코드로도 온다(2026-09-18 실측: 대전역이 대전·계룡·세종·청주로 겹침).
@@ -375,8 +373,7 @@ const MNJejuBusMap = (() => {
         const cityLabel=stop=>stop.city===city?"":((cityList.find(item=>item.code===stop.city) || {}).name || stop.city || t("제주"));
         const list=found.map(stop=>({...stop,distance:MNJejuBusLive.metres(here,stop.at),cityLabel:cityLabel(stop)}))
           .sort((a,b)=>Math.round(a.distance)-Math.round(b.distance) || (a.cityLabel?1:0)-(b.cityLabel?1:0));
-        if(!list.length){stopList.replaceChildren(el("p","map-jeju-bus-stop-note",!isSeoul(city) && inSeoul(center)
-          ?"서울 정류장은 도시에서 '서울특별시'를 고른 뒤 찾아 주세요.":"지도 가운데 근처에 정류장이 없어요. 지도를 옮겨 다시 찾아 주세요."));return;}
+        if(!list.length){stopList.replaceChildren(el("p","map-jeju-bus-stop-note","지도 가운데 근처에 정류장이 없어요. 지도를 옮겨 다시 찾아 주세요."));return;}
         stopsLayer.addTo(map);
         const buttons=list.slice(0,12).map(stop=>{
           const item=button("","map-jeju-bus-stop");
@@ -394,7 +391,7 @@ const MNJejuBusMap = (() => {
         }
       }catch(error){
         if(controller.signal.aborted || seq!==stopGeneration)return;
-        stopList.replaceChildren(el("p","map-jeju-bus-stop-note",failureText(error,"근처 정류장을 받지 못했어요. 잠시 후 다시 찾아 주세요.","nearby",isSeoul(city)?city:"")));
+        stopList.replaceChildren(el("p","map-jeju-bus-stop-note",failureText(error,"근처 정류장을 받지 못했어요. 잠시 후 다시 찾아 주세요.","nearby",error && error.city || "")));
       }
     }
     async function showArrivals(stop,force=false){
@@ -557,6 +554,14 @@ const MNJejuBusMap = (() => {
     }).catch(()=>{});
     const controller={
       freeze(){frozen++;stopFrame();return ()=>{frozen=Math.max(0,frozen-1);nextPoll=0;tick();};},
+      // 주변 교통(nearby-transit.js)의 도착 창에서 노선을 누르면 버스 창을 열고 그 노선을 검색한다.
+      pickRoute(stop,item){
+        if(destroyed || toggle.disabled)return;
+        if(panel.hidden){panel.hidden=false;toggle.setAttribute("aria-expanded","true");}
+        pickArrivalRoute(stop,item);
+      },
+      failureText,colorFor,
+      jejuCodes(){return cityList.filter(item=>item.code==="" && item.raw).map(item=>item.raw);},
       captureNote(){return on && state.fetchedAt?t("버스 위치")+" · "+t("마지막 수신")+" "+new Date(state.fetchedAt).toLocaleString()+" · "+(active && isSeoul(active.city)?t("서울특별시"):"TAGO"):"";},
       destroy(){destroyed=true;cancelTrip();clearTripHighlight();stopLive();clearStops();clearInterval(timer);capability.abort();if(searchAbort)searchAbort.abort();if(detailAbort)detailAbort.abort();
         document.removeEventListener("visibilitychange",tick);map.off("zoomend",paint);panel.remove();toggle.remove();pane.remove();routePane.remove();}

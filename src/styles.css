@@ -4577,6 +4577,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapWeather .map-toolvis-weather,
   html.hide-tool-mapWind .map-toolvis-wind,
   html.hide-tool-mapMarket .map-toolvis-market,
+  html.hide-tool-mapTransit .map-toolvis-transit,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
   html.hide-tool-musicKey .music-toolvis-key,
@@ -8872,6 +8873,26 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-subway-arrival-tag.is-last{background:#475569}
 .map-subway-arrival-status{margin:4px 0 0;font-size:12px;opacity:.85}
 .map-jeju-bus-heading .map-jeju-bus-city{flex:1;min-width:0;max-width:170px;margin-left:auto}
+/* 주변 교통 자동 표시(nearby-transit.js) — 칩은 실시간 열차 칩 모양을 빌리고, 판은 그 아래로 펼친다. */
+.map-transit-picker{position:relative;display:inline-flex}
+.map-transit-btn{--map-icon-color:#0d9488}
+.map-transit-btn.is-on{--map-icon-color:currentColor}
+.map-transit-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:1200;display:flex;flex-direction:column;gap:4px;width:250px;
+  box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:14px;background:var(--panel);color:var(--ink);
+  box-shadow:0 12px 28px rgba(0,0,0,.16);font-size:12.5px}
+.map-transit-menu[hidden]{display:none}
+.map-transit-check{display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border-radius:8px;cursor:pointer}
+.map-transit-check:hover{background:var(--panel-hover)}
+.map-transit-check input{margin:2px 0 0;accent-color:var(--accent)}
+.map-transit-check input:disabled+.map-transit-check-text{opacity:.5}
+.map-transit-check-text{display:flex;flex-direction:column;gap:1px;font-weight:500}
+.map-transit-check-text small{color:var(--muted);font-size:11px;font-weight:400}
+.map-transit-hint{margin:4px 2px 0;padding-top:8px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;line-height:1.45}
+.map-transit-station-marker{background:none;border:0}
+.map-transit-station{display:flex;gap:1px;box-sizing:border-box;height:14px;padding:2px;border-radius:5px;background:#fff;
+  box-shadow:0 0 0 1px #0f172a66,0 1px 3px #0005;cursor:pointer}
+.map-transit-station-line{flex:1;width:5px;border-radius:2px}
+.map-transit-bus-panel{top:60px}
 .map-jeju-bus-stops{margin:4px 0 10px;padding-top:10px;border-top:1px solid #98b9bd66}
 .map-jeju-bus-stop-tools{display:flex;gap:8px;flex-wrap:wrap}
 .map-jeju-bus-stop-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;max-height:150px;overflow:auto}

@@ -96,6 +96,7 @@
     "weather-typhoon.js",
     "weather-wind.js",
     "market-days.js",
+    "nearby-transit.js",
     "kosis-api.js",
     "kosis-choro.js",
     "korea-coords.js",
@@ -282,6 +283,7 @@
         "weather-typhoon.js",
         "weather-wind.js",
         "market-days.js",
+        "nearby-transit.js",
         "kosis-api.js",
         "kosis-choro.js",
         "korea-coords.js",
@@ -488,6 +490,7 @@
       "weather-map.js",
       "weather-wind.js",
       "market-days.js",
+      "nearby-transit.js",
       "kosis-choro.js"
     ],
     "timeline.js": [
