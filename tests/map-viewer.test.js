@@ -30,7 +30,7 @@ function loadMapViewer(windowOverrides, contextOverrides){
       , mapGeoJsonImport, mapGeoJsonExport, mapGpxImport, mapGpxExport, mapKmlImport, mapKmlExport
       , mapPointInPolygon, mapMarkersInArea, mapClusterPixelGroups, mapKakaoRoadviewUrl, mapOpenKakaoRoadview
       , MAP_ROADVIEW_WINDOW_NAME, MAP_ROADVIEW_WINDOW_FEATURES, MAP_GEO_IMPORT_MAX_ITEMS
-      , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX
+      , MAP_KAKAO_CATEGORIES, MAP_REGION_UNKNOWN, MAP_GEOCODE_BATCH_MAX, MAP_PLACE_ICONS, mapPlaceIconUrl
       , mapKakaoPlaces, mapKakaoAddressInfo, mapKakaoRegionInfo, mapOsmReverseInfo, mapKakaoCategoryPlaces
       , mapKakaoSpotPlaces, mapKakaoCategoryTail, mapKakaoPlaceUrl, mapKakaoPlaceSlides, MAP_SPOT_MIN_ZOOM
       , openMapKakaoPlacePanel, mapOpenKakaoPlaceWindow, MAP_WEB_FRAME_SANDBOX
@@ -504,9 +504,9 @@ test("로드뷰는 별도 키 없이 좌표 공개 URL을 전용 창 하나에�
   assert.match(source, /mapGeoJsonImport\(csvText\)/);
 });
 
-test("장소 정보 버튼은 주변 시설 바로 다음에 로드뷰를 두고 상세 보기는 마지막에 둔다", () => {
+test("장소 정보 버튼은 주변 시설 바로 다음에 로드뷰, 그다음 주변 교통을 두고 상세 보기는 마지막에 둔다", () => {
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
-  assert.match(source, /actions\.append\(pinBtn, copyBtn, nearBtn, roadviewBtn, detailBtn\)/);
+  assert.match(source, /actions\.append\(pinBtn, copyBtn, nearBtn, roadviewBtn, transitBtn, detailBtn\)/);
 });
 
 test("두 런처의 타일 허용 목록은 서로 같다", () => {
@@ -2532,4 +2532,25 @@ test("경유지가 많으면 가까운 곳부터 잇고 꼬인 구간을 풀어 
   assert.equal(ordered[ordered.length - 1].id, "p13");
   assert.deepEqual(ordered.map(item => item.id).join(","), line.map(item => item.id).join(","));
   assert.equal(new Set(ordered.map(item => item.id)).size, 14);
+});
+
+test("주변 시설 미리보기 카드: 카카오 갈래마다 아이콘이 있고, 모르는 갈래는 핀 모양이다", () => {
+  const api = loadMapViewer();
+  for (const kind of api.MAP_KAKAO_CATEGORIES) assert.ok(api.MAP_PLACE_ICONS[kind.code], kind.code);
+  assert.match(api.mapPlaceIconUrl("CE7"), /^url\("data:image\/svg\+xml,/);
+  assert.equal(api.mapPlaceIconUrl("XX9"), api.mapPlaceIconUrl(""));
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  assert.match(styles, /\.leaflet-tooltip\.map-place-tip\{[\s\S]*?pointer-events:auto/);
+});
+
+test("찾은 곳 이름표는 카드 모양이고, 칠판 캡처에 찍혀도 되게 마스크 아이콘을 쓰지 않는다", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
+  const mover = /function mapSearchLocationMover\(([\s\S]*?)\n\}/.exec(source);
+  assert.match(mover[1], /className:"map-search-tip"/);
+  // 지도 고르기(칠판 보내기)는 moveToSearchLocation 을 그대로 넘겨 × 없이, 지도 문서는 × 로 지울 수 있다.
+  assert.match(source, /moveToSearchLocation\(lat, lng, zoom, label, place, \{ pick:detailed \? openSpot : null, closable:true \}\)/);
+  const styles = fs.readFileSync(path.join(__dirname, "../src/styles.css"), "utf8");
+  const rules = styles.split("\n").filter(line => /map-search-tip/.test(line)).join("\n");
+  assert.ok(rules.length > 0);
+  assert.doesNotMatch(rules, /mask/);
 });

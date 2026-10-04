@@ -18,6 +18,9 @@ const MNNearbyTransit = (() => {
   const CELL_LAT = 0.006, CELL_LNG = 0.0078;
   const CELL_MAX_AGE = 10 * 60 * 1000, BUS_DELAY = 700, BUS_MAX_STOPS = 800;
   const BUS_MAX_CELLS = 16, BUS_PARALLEL = 2;
+  // 마우스 올림 미리보기: 이만큼 머물러야 도착 정보를 묻고, 받은 것은 이만큼 다시 쓴다. 미리보기는 노선 몇 줄까지.
+  // 점에서 벗어나도 카드를 이만큼 남겨 카드로 옮겨 가 누를 수 있게 한다.
+  const PREVIEW_DELAY = 400, PREVIEW_MAX_AGE = 30 * 1000, PREVIEW_ROWS = 3, PREVIEW_GRACE = 300;
   const STORAGE_KEY = "mapNearbyTransit";
 
   function metres(a, b){
@@ -51,6 +54,23 @@ const MNNearbyTransit = (() => {
     for (let i = Math.floor(south / CELL_LAT); i <= Math.floor(north / CELL_LAT); i++)
       for (let j = Math.floor(west / CELL_LNG); j <= Math.floor(east / CELL_LNG); j++) list.push(cellAt(i, j));
     return list.map(cell => ({ cell, d:metres(center, cell.at) })).sort((a, b) => a.d - b.d).slice(0, max).map(item => item.cell);
+  }
+  // "용문마을회관[동]" → 이름과 방향 칩. 대괄호가 끝에 짧게 붙은 것만 뗀다.
+  function splitSide(name){
+    const text = String(name || ""), match = /^(.*\S)\s*\[([^\]]{1,8})\]$/.exec(text);
+    return match ? { name:match[1], side:match[2] } : { name:text, side:"" };
+  }
+  // 노선 동그라미에 넣을 짧은 이름 — "1호선" → "1", "경의중앙선" → "경의".
+  const SHORT_LINES = { "신분당선":"신분당", "우이신설선":"우이", "GTX-A":"GTX" };
+  function shortLine(line){
+    const text = String(line || "");
+    return SHORT_LINES[text] || (/^\d+호선$/.test(text) ? text.replace("호선", "") : text.replace(/선$/, "").slice(0, 2));
+  }
+  function inkOn(hex){
+    const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ""));
+    if (!match) return "#fff";
+    const [r, g, b] = match.slice(1).map(part => { const c = parseInt(part, 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.3 ? "#111" : "#fff";
   }
   function loadChoice(){
     try {
@@ -131,20 +151,28 @@ const MNNearbyTransit = (() => {
       const width = Math.min(entry.lines.length, 4) * 6 + 4;
       return L.divIcon({ html:box, className:"map-transit-station-marker", iconSize:[width, 14], iconAnchor:[width / 2, 7] });
     }
+    // 크게 확대하면 이름만 늘 붙인다. 마우스를 올리면 그 이름은 잠시 접고 미리보기 카드를 띄운다.
     function bindStationLabel(marker, entry){
       marker.unbindTooltip();
-      const text = entry.name + " · " + entry.lines.join(", ");
-      marker.bindTooltip(labelsShown ? entry.name : text, labelsShown
-        ? { permanent:true, direction:"top", offset:[0, -8], className:"map-subway-label" }
-        : { direction:"top", offset:[0, -8] });
+      if (labelsShown) marker.bindTooltip(entry.name, { permanent:true, direction:"top", offset:[0, -8], className:"map-subway-label" });
     }
     function stationMarker(entry){
       let marker = stationMarkers.get(entry);
       if (marker) return marker;
       marker = L.marker(entry.at, { pane:"mapTransitPane", keyboard:true, title:entry.name, icon:stationIcon(entry), bubblingMouseEvents:false });
-      marker.on("click", () => {
+      const open = () => {
         if (typeof subwayArrivals === "function" && subwayArrivals(entry.lines[0], entry.name)) return;
         announce(t("지하철 도착 정보는 ClassDock EXE에서 인증키를 넣으면 볼 수 있어요."));
+      };
+      marker.on("click", open);
+      const relabel = () => { if (labelsShown && marker.openTooltip) marker.openTooltip(); };
+      const enter = () => { if (labelsShown && marker.closeTooltip) marker.closeTooltip(); showStationPreview(entry, { pick:open, onHide:relabel }); };
+      const leave = () => leavePreview("subway:" + entry.name);
+      marker.on("mouseover", enter); marker.on("mouseout", leave);
+      // 키보드로 역에 머물러도 같은 카드를 보인다.
+      marker.on("add", () => {
+        const node = marker.getElement && marker.getElement();
+        if (node && !node._transitFocus){ node._transitFocus = true; node.addEventListener("focus", enter); node.addEventListener("blur", leave); }
       });
       bindStationLabel(marker, entry);
       stationMarkers.set(entry, marker);
@@ -170,7 +198,7 @@ const MNNearbyTransit = (() => {
       }
       subwayHint = count ? (english() ? count + " subway stations" : "지하철역 " + count + "곳") : t("이 둘레엔 수도권 지하철역이 없어요.");
     }
-    function stopSubway(){ subwayLayer.clearLayers(); map.removeLayer(subwayLayer); stationMarkers.clear(); labelsShown = false; subwayHint = ""; }
+    function stopSubway(){ hidePreview(); subwayLayer.clearLayers(); map.removeLayer(subwayLayer); stationMarkers.clear(); labelsShown = false; subwayHint = ""; }
 
     /* ── 버스 ── */
     const busStops = new Map();                // 도시:정류장 → { stop, marker }
@@ -182,10 +210,13 @@ const MNNearbyTransit = (() => {
     function addStop(stop){
       const key = (stop.city || "") + ":" + stop.id;
       if (busStops.has(key)) return;
-      const tip = el("span", ""); tip.textContent = stop.name + (stop.no ? " (" + stop.no + ")" : "");
       const marker = L.circleMarker(stop.at, { pane:"mapTransitPane", radius:5, color:"#ffffff", weight:2, fillColor:"#e67e22", fillOpacity:0.95,
-        bubblingMouseEvents:false, className:"map-transit-stop" }).bindTooltip(tip);
+        bubblingMouseEvents:false, className:"map-transit-stop" });
       marker.on("click", () => showArrivals(stop));
+      // 올린 점은 키워 어느 것인지 또렷하게 한다.
+      const shrink = () => { if (marker.setRadius) marker.setRadius(5); };
+      marker.on("mouseover", () => { if (marker.setRadius) marker.setRadius(7); showStopPreview(stop, { pick:() => showArrivals(stop), onHide:shrink }); });
+      marker.on("mouseout", () => leavePreview("bus:" + key));
       busStops.set(key, { stop, marker });
       busLayer.addLayer(marker);
     }
@@ -266,6 +297,7 @@ const MNNearbyTransit = (() => {
     function stopBus(){
       clearTimeout(busTimer); busTimer = 0; busGeneration++;
       if (busAbort){ busAbort.abort(); busAbort = null; }
+      hidePreview();
       busLayer.clearLayers(); map.removeLayer(busLayer); busStops.clear(); cells.clear();
       busHint = ""; busBlocked = "";
       closeArrivals();
@@ -318,6 +350,155 @@ const MNNearbyTransit = (() => {
     close.addEventListener("click", closeArrivals);
     panel.addEventListener("keydown", event => { if (event.key === "Escape"){ event.stopPropagation(); closeArrivals(); } });
 
+    /* ── 마우스 올림 미리보기 ──
+       정류장·역에 마우스를 올리면 이름과 곧 올 버스·열차 몇 줄을 카드로 보인다. 카드는 점에 묶지 않고
+       따로 띄운다(크게 확대하면 역에 이름이 늘 붙어 있어 묶은 말풍선은 뜨지 않는다).
+       조회 한도가 있어 ① PREVIEW_DELAY 넘게 머문 점만 묻고(스쳐 지나간 점은 묻지 않는다) ② 받은 것은
+       PREVIEW_MAX_AGE 동안 다시 쓴다(런처도 20초 캐시가 있다) ③ 키·한도 문제면 다시 켤 때까지 이름만 보인다.
+       점에서 마우스가 벗어나도 PREVIEW_GRACE 동안은 남겨, 카드로 옮겨 가 누를 수 있게 한다(누르면 전체 도착 창).
+       점을 떠나 있는 동안은 묻기를 미루고, 카드에 올라오면 바로 묻는다. */
+    let preview = null, previewKey = "", previewTimer = 0, previewHideTimer = 0, previewAbort = null, previewSeq = 0;
+    let previewStart = null, previewOnHide = null;   // 미룬 묻기 · 카드를 닫을 때 할 일(점 크기·역 이름 되돌리기)
+    const previewCache = new Map();             // 열쇠 → { at, rows, total }
+    const previewOff = { bus:false, subway:false };
+    function tipBadge(text, color){
+      const badge = el("span", "map-transit-tip-badge"); badge.textContent = text;
+      badge.style.backgroundColor = color; badge.style.color = inkOn(color);
+      return badge;
+    }
+    function previewCard(kind, name, side, no, lines){
+      const card = el("div", "map-transit-tip-card is-" + kind), head = el("div", "map-transit-tip-head");
+      const icon = el("span", "map-transit-tip-icon");
+      if (typeof mapToolIconUrl === "function") icon.style.setProperty("--map-icon", mapToolIconUrl(kind === "bus" ? "bus" : "train"));
+      const title = el("strong", "map-transit-tip-name"); title.textContent = name;
+      head.append(icon, title);
+      for (const line of lines.slice(0, 4)) head.appendChild(tipBadge(shortLine(line), lineColor(line)));
+      if (side){ const chip = el("span", "map-transit-tip-side"); chip.textContent = side; head.appendChild(chip); }
+      if (no){ const number = el("span", "map-transit-tip-no"); number.textContent = no; head.appendChild(number); }
+      const rows = el("ul", "map-transit-tip-rows"), note = el("p", "map-transit-tip-note");
+      card.append(head, rows, note);
+      return { card, rows, note };
+    }
+    function fillPreview(parts, data, emptyText){
+      parts.rows.replaceChildren(...data.rows.slice(0, PREVIEW_ROWS).map(row => {
+        const item = el("li", row.hot ? "is-soon" : "");
+        const label = el("span", "map-transit-tip-label"); label.textContent = row.label;
+        const when = el("span", "map-transit-tip-when"); when.textContent = row.when;
+        item.append(tipBadge(row.badge, row.color), label, when);
+        return item;
+      }));
+      const more = data.total - Math.min(data.rows.length, PREVIEW_ROWS);
+      parts.note.textContent = !data.rows.length ? emptyText
+        : more > 0 ? (english() ? more + " more · click to see all" : "외 " + more + "개 · 눌러서 전체 보기") : t("눌러서 전체 보기");
+      if (preview && preview.update) preview.update();     // 높이가 바뀌었으니 점 위로 다시 맞춘다
+    }
+    function hidePreview(key){
+      if (key && key !== previewKey) return;
+      previewSeq++; previewKey = ""; previewStart = null;
+      clearTimeout(previewTimer); previewTimer = 0;
+      clearTimeout(previewHideTimer); previewHideTimer = 0;
+      if (previewAbort){ previewAbort.abort(); previewAbort = null; }
+      if (preview) map.removeLayer(preview);
+      const done = previewOnHide; previewOnHide = null;
+      if (done) done();
+    }
+    // 점이나 카드에서 벗어났다 — 잠시 뒤에 닫는다(그 사이 카드나 점으로 돌아오면 그대로 둔다).
+    function leavePreview(key){
+      if (!key || key !== previewKey) return;
+      clearTimeout(previewTimer); previewTimer = 0;        // 아직 안 물었으면 미룬다(previewStart 는 남긴다)
+      clearTimeout(previewHideTimer);
+      previewHideTimer = setTimeout(() => hidePreview(key), PREVIEW_GRACE);
+    }
+    function stayPreview(now){
+      clearTimeout(previewHideTimer); previewHideTimer = 0;
+      if (!previewStart || previewTimer) return;
+      if (now) previewStart();
+      else previewTimer = setTimeout(() => { if (previewStart) previewStart(); }, PREVIEW_DELAY);
+    }
+    function openPreview(key, kind, at, offsetY, parts, load, emptyText, { pick = null, onHide = null } = {}){
+      if (key === previewKey && preview){ stayPreview(false); return; }   // 카드에서 점으로 돌아왔다
+      hidePreview();
+      if (typeof L.tooltip !== "function"){ if (onHide) onHide(); return; }
+      const seq = previewSeq; previewKey = key; previewOnHide = onHide;
+      preview = L.tooltip({ direction:"top", offset:[0, offsetY], className:"map-transit-tip", opacity:1, interactive:true });
+      preview.setLatLng(at).setContent(parts.card);
+      map.addLayer(preview);
+      if (L.DomEvent.disableClickPropagation) L.DomEvent.disableClickPropagation(parts.card);
+      parts.card.addEventListener("mouseenter", () => { if (seq === previewSeq) stayPreview(true); });
+      parts.card.addEventListener("mouseleave", () => { if (seq === previewSeq) leavePreview(key); });
+      parts.card.addEventListener("click", () => {
+        if (seq !== previewSeq) return;
+        hidePreview();
+        if (pick) pick();
+      });
+      const cached = previewCache.get(key);
+      if (cached && Date.now() - cached.at < PREVIEW_MAX_AGE){ fillPreview(parts, cached, emptyText); return; }
+      if (previewOff[kind]){ parts.note.textContent = t("눌러서 도착 정보 보기"); return; }
+      parts.note.textContent = t("도착 정보 확인 중…");
+      previewStart = async () => {
+        previewStart = null; clearTimeout(previewTimer); previewTimer = 0;
+        if (seq !== previewSeq || destroyed) return;
+        const controller = new AbortController(); previewAbort = controller;
+        try {
+          const data = await load(controller.signal);
+          previewCache.set(key, { at:Date.now(), ...data });
+          if (previewCache.size > 200) previewCache.delete(previewCache.keys().next().value);
+          if (seq === previewSeq && !destroyed) fillPreview(parts, data, emptyText);
+        } catch(error){
+          if (controller.signal.aborted || seq !== previewSeq || destroyed) return;
+          const reason = error && error.message || "";
+          // 키·한도·런처 없음은 다시 물어도 같다. 다시 켜기 전까지 미리보기에서는 묻지 않는다(누르면 창이 까닭을 알려 준다).
+          if (/^(bus-key-required|bus-key-invalid|bus-quota|subway-key-required|subway-key-invalid|transit-unavailable)$/.test(reason)) previewOff[kind] = true;
+          parts.note.textContent = t("눌러서 도착 정보 보기");
+          if (preview && preview.update) preview.update();
+        } finally { if (previewAbort === controller) previewAbort = null; }
+      };
+      stayPreview(false);
+    }
+    function showStopPreview(stop, options){
+      const key = (stop.city || "") + ":" + stop.id, { name, side } = splitSide(stop.name);
+      const parts = previewCard("bus", name, side, stop.no || "", []);
+      openPreview("bus:" + key, "bus", stop.at, -8, parts, async signal => {
+        const result = await MNJejuBusApi.request("arrivals", stop.id, { signal, city:stop.city || "" });
+        // 서울은 한 노선이 첫째·둘째 차로 두 줄 온다. 미리보기는 노선마다 가장 빠른 한 줄만.
+        const seen = new Set(), rows = [];
+        for (const item of result.items){
+          if (seen.has(item.number)) continue;
+          seen.add(item.number);
+          rows.push({ badge:item.number, color:colorFor(item.type), label:item.type ? t(item.type) : "",
+            when:MNJejuBusApi.arrivalText(item, t), hot:item.seconds != null && item.seconds < 60 });
+        }
+        return { rows, total:rows.length };
+      }, t("지금 오는 버스가 없어요."), options);
+    }
+    function showStationPreview(entry, options){
+      const parts = previewCard("subway", entry.name, "", "", entry.lines);
+      openPreview("subway:" + entry.name, "subway", entry.at, -10, parts, async signal => {
+        if (typeof MNSubwayLive === "undefined") throw new Error("transit-unavailable");
+        let response;
+        try {
+          response = await fetch("/subway-arrival?station=" + encodeURIComponent(MNSubwayLive.apiStationName(entry.lines[0], entry.name)),
+            { cache:"no-store", signal });
+        } catch(error){
+          if (signal.aborted) throw error;
+          throw new Error("transit-unavailable");         // 런처 없이 연 HTML
+        }
+        if (!response.ok){
+          const reason = (await response.text().catch(() => "")).trim();
+          throw new Error(response.status === 404 ? "transit-unavailable" : reason || "subway-fetch-failed");
+        }
+        const groups = MNSubwayLive.arrivals(await response.json(), entry.lines[0]);
+        // 노선·방향 묶음마다 맨 앞 열차 한 줄.
+        const rows = groups.filter(group => group.rows.length).map(group => {
+          const row = group.rows[0];
+          return { badge:shortLine(group.line), color:lineColor(group.line),
+            label:english() ? "to " + row.destination : row.destination + "행",
+            when:row.message, hot:/진입|도착/.test(row.message) && !/전역/.test(row.message) };
+        });
+        return { rows, total:rows.length };
+      }, t("지금은 이 역 도착 정보가 없어요."), options);
+    }
+
     /* ── 켜기·끄기 ── */
     function updateHint(){
       const parts = [];
@@ -360,10 +541,14 @@ const MNNearbyTransit = (() => {
       lastZoomHint = "";
       onMove();
     }
-    subwayCheck.box.addEventListener("change", () => { choice = { ...choice, subway:subwayCheck.box.checked }; saveChoice(choice); apply(); });
+    subwayCheck.box.addEventListener("change", () => {
+      choice = { ...choice, subway:subwayCheck.box.checked };
+      if (choice.subway) previewOff.subway = false;   // 다시 켜면 미리보기도 다시 묻는다
+      saveChoice(choice); apply();
+    });
     busCheck.box.addEventListener("change", () => {
       choice = { ...choice, bus:busCheck.box.checked };
-      if (choice.bus) busBlocked = "";        // 다시 켜면 키·한도를 다시 확인한다
+      if (choice.bus){ busBlocked = ""; previewOff.bus = false; }   // 다시 켜면 키·한도를 다시 확인한다
       saveChoice(choice); apply();
     });
 
@@ -384,6 +569,21 @@ const MNNearbyTransit = (() => {
     }).catch(() => {});
 
     const controller = {
+      /* 장소 말풍선의 '주변 교통' — 그 자리를 가운데로 버스 정류장이 보이는 확대까지 다가가고, 쓸 수 있는
+         것(지하철역 자료·EXE 버스)을 모두 켠다. 켠 상태는 체크와 같이 기억된다. */
+      showAround(at){
+        if (destroyed || !Array.isArray(at)) return false;
+        const subway = hasSubway, busOn = busReady;
+        if (!subway && !busOn){ announce(t("버스 정류장은 ClassDock EXE에서 인터넷 연결 후 볼 수 있어요.")); return false; }
+        if (busOn && !choice.bus){ busBlocked = ""; previewOff.bus = false; }
+        if (subway && !choice.subway) previewOff.subway = false;
+        choice = { subway:choice.subway || subway, bus:choice.bus || busOn };
+        saveChoice(choice); apply();
+        map.setView(at, Math.max(map.getZoom(), BUS_MIN_ZOOM));
+        announce(busOn ? t("이 자리 둘레의 지하철역·버스 정류장을 보여 줘요.")
+          : t("이 자리 둘레의 지하철역을 보여 줘요. 버스 정류장은 ClassDock EXE에서 볼 수 있어요."));
+        return true;
+      },
       destroy(){
         if (destroyed) return;
         destroyed = true; capability.abort();

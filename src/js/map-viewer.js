@@ -2359,7 +2359,40 @@ function mapSearchLocationMover(map){
   pane.classList.add("map-search-location-pane");
   pane.style.zIndex = "650";
   let marker = null;
-  const move = (lat, lng, zoom, label) => {
+  /* 찾은 곳 이름표 — 표시 미리보기 카드와 같은 모양의 작은 카드(이름 + 주소 한 줄 + 갈래).
+     칠판으로 보내는 지도 고르기에서는 이 칸이 그림에 그대로 찍히므로 마스크 아이콘 없이 CSS 로만 그린다.
+     pick 이 있으면 카드를 눌러 장소 말풍선을 다시 열고, closable 이면 × 로 지운다(Esc 와 같다). */
+  const card = (label, place, { pick = null, closable = false } = {}) => {
+    const make = (tag, cls, text) => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; return node; };
+    const text = String(label);
+    let title = String(place && place.title || ""), detail = String(place && (place.road || place.address) || "");
+    if (!title){
+      // 카카오 후보는 '이름 · 주소', OSM 은 '이름, 동, 구, 시, 나라' 한 줄로 온다.
+      const cut = text.indexOf(" · ") > 0 ? text.indexOf(" · ") : text.indexOf(", ");
+      title = cut > 0 ? text.slice(0, cut) : text;
+      if (!detail && cut > 0) detail = text.slice(cut + (text.startsWith(" · ", cut) ? 3 : 2));
+    }
+    if (detail === title) detail = "";
+    const box = make("div", "map-search-tip-card"), head = make("div", "map-search-tip-head");
+    head.append(make("span", "map-search-tip-dot"), make("strong", "map-search-tip-name", title));
+    const category = String(place && place.category || "");
+    if (category) head.appendChild(make("span", "map-search-tip-kind", category));
+    if (closable){
+      const close = make("button", "map-search-tip-close", "×");
+      close.type = "button"; close.title = mapT("지우기 (Esc)"); close.setAttribute("aria-label", mapT("찾은 곳 표시 지우기"));
+      close.addEventListener("click", (event) => { event.stopPropagation(); move.clear(); });
+      head.appendChild(close);
+    }
+    box.appendChild(head);
+    if (detail) box.appendChild(make("div", "map-search-tip-detail", detail));
+    if (pick){
+      box.title = mapT("눌러서 장소 정보 다시 보기");
+      box.addEventListener("click", () => pick());
+    }
+    if (pick || closable){ L.DomEvent.disableClickPropagation(box); L.DomEvent.disableScrollPropagation(box); }
+    return box;
+  };
+  const move = (lat, lng, zoom, label, place = null, options = {}) => {
     map.setView([lat, lng], Math.max(map.getZoom(), zoom));
     if (!marker){
       marker = L.circleMarker([lat, lng], {
@@ -2371,7 +2404,11 @@ function mapSearchLocationMover(map){
     /* permanent 가 아니면 Leaflet 이 지도 클릭(preclick)마다 말풍선을 스스로 닫는데, 점은 클릭을
        받지 않으므로(interactive:false) 한 번 닫히면 다시 열 방법이 없다. 찾은 곳 이름은 계속
        보이는 편이 쓸모 있으니 고정해 두고, 지우는 건 clear() — 화면에서는 Esc — 로만 한다. */
-    if (label) marker.bindTooltip(String(label), { pane:paneName, permanent:true, direction:"top", offset:[0,-8], opacity:.96 }).openTooltip();
+    if (label){
+      const clickable = !!(options && (options.pick || options.closable));
+      marker.bindTooltip(card(label, place, options || {}), { pane:paneName, permanent:true, direction:"top", offset:[0,-10], opacity:1,
+        className:"map-search-tip" + (clickable ? " is-clickable" : ""), interactive:clickable }).openTooltip();
+    }
   };
   // 지운 게 있을 때만 true — 부르는 쪽이 Esc 를 먹었는지 판단할 수 있게.
   move.clear = () => {
@@ -5176,6 +5213,35 @@ const MAP_TOOL_ICONS = {
   panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/>',
   search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>'
 };
+/* 주변 시설·장소 검색으로 넣은 표시의 미리보기 카드에 쓰는 갈래 아이콘(카카오 category_group_code).
+   도구 아이콘과 같은 24칸 선 그림이라 같은 마스크 규칙으로 칠한다. 갈래가 없으면 핀 모양. */
+const MAP_PLACE_ICONS = {
+  SC4: '<path d="M3 9.5 12 5l9 4.5-9 4.5z"/><path d="M7 11.5V16c1.5 1.4 3 2 5 2s3.5-.6 5-2v-4.5M21 9.5V15"/>',
+  AC5: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5M9 8h7"/>',
+  PS3: '<circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/>',
+  HP8: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/>',
+  PM9: '<path d="M10.5 20.5 3.5 13.5a5 5 0 0 1 7-7l7 7a5 5 0 0 1-7 7z"/><path d="m7 10 7 7"/>',
+  SW8: '<rect x="5.5" y="3" width="13" height="14" rx="3"/><path d="M5.5 10.5h13"/><path d="m8 21 1.5-4M16 21l-1.5-4"/>',
+  PK6: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M10 17V7h3a3 3 0 0 1 0 6h-3"/>',
+  OL7: '<path d="M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h14M5 10h10"/><path d="M15 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V9l-3-3"/>',
+  CS2: '<path d="M4 9.5 5.5 4h13L20 9.5zM5.5 9.5v11h13v-11M10 20.5v-5h4v5"/>',
+  MT1: '<circle cx="9" cy="19.5" r="1.5"/><circle cx="17" cy="19.5" r="1.5"/><path d="M3 4h2.5l2.2 11h10.6L20.5 8H6.6"/>',
+  FD6: '<path d="M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10"/><path d="M17 21V3c-2 1-3.5 3.5-3.5 7v3H17"/>',
+  CE7: '<path d="M5 9h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16M9 3.5c0 1 1 1.5 1 2.5M12.5 3.5c0 1 1 1.5 1 2.5"/>',
+  AD5: '<path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6"/><circle cx="7" cy="11" r="2"/>',
+  AG2: '<path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5M10 20v-5h4v5"/>',
+  PO3: '<path d="M3 9 12 4l9 5zM5 9v9M9.5 9v9M14.5 9v9M19 9v9M3 20.5h18"/>',
+  BK9: '<circle cx="12" cy="12" r="8.5"/><path d="m8 9 1.5 6 2.5-5 2.5 5L16 9M7.5 12h9"/>',
+  CT1: '<path d="M4 7h16v3a2 2 0 0 0 0 4v3H4v-3a2 2 0 0 0 0-4z"/><path d="M14 8v1.5M14 11.3v1.4M14 14.5V16"/>',
+  AT4: '<path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  "": '<path d="M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 0 1 13 0c0 4.8-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/>'
+};
+function mapPlaceIconUrl(code){
+  const inner = MAP_PLACE_ICONS[code] || MAP_PLACE_ICONS[""];
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
+  return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+}
 function mapToolIconUrl(name){
   const inner = MAP_TOOL_ICONS[name];
   if (!inner) return "";
@@ -6562,7 +6628,7 @@ async function mountMapEditor(doc){
   const markets = typeof MNMarketDays !== "undefined" ? MNMarketDays.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   // 주변 교통 자동 표시(지하철역은 내장 좌표, 버스 정류장은 같은 공공데이터포털 키). 버스 창·지하철 도착 창을 빌려 쓴다.
-  if (typeof MNNearbyTransit !== "undefined") MNNearbyTransit.mount({ map, stage, toolRow:toolChips, doc, t:mapT, bus:jejuBus,
+  const nearbyTransit = typeof MNNearbyTransit === "undefined" ? null : MNNearbyTransit.mount({ map, stage, toolRow:toolChips, doc, t:mapT, bus:jejuBus,
     subwayColors:MAP_SUBWAY_COLORS, say:setStatus,
     subwayArrivals:(line, name) => { if (!subwayOpenArrivals) return false; subwayOpenArrivals(line, name); return true; },
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) });
@@ -6796,16 +6862,7 @@ async function mountMapEditor(doc){
     detailBtn.hidden = !mapKakaoPlaceUrl(marker.placeUrl);
     detailBtn.addEventListener("click", () => {
       map.closePopup();
-      /* 한 번에 찾은 주변 시설만 한 벌로 넘긴다. 지도에 예전 검색 결과가 함께 있어도 batch 가
-         다르면 섞이지 않으며, 모델 순서가 곧 검색 결과 순서다. */
-      const peers = marker.source === "nearby" && marker.batch
-        ? model.markers.filter(item => item.source === "nearby" && item.batch === marker.batch
-          && mapKakaoPlaceUrl(item.placeUrl))
-        : [marker];
-      const startIndex = Math.max(0, peers.findIndex(item => item.id === marker.id));
-      openMapKakaoPlacePanel(peers.map(item => ({
-        id:item.id, name:item.label, placeUrl:item.placeUrl
-      })), startIndex);
+      openMarkerPlaceDetail(marker);
     });
 
     const roadviewBtn = document.createElement("button");
@@ -6907,11 +6964,121 @@ async function mountMapEditor(doc){
   const bindMarkerTooltip = (layer, marker) => {
     const permanent = labelsShown;
     layer.unbindTooltip();
+    if (!permanent) return;     // 마우스를 올리면 미리보기 카드가 대신 뜬다(showPlaceTip)
     layer.bindTooltip(marker.label || mapT("이름 없는 표시"), {
       permanent,
       direction: "top",
       offset: [0, -32],
       className: permanent ? "map-pin-label" : ""
+    });
+  };
+
+  /* ── 표시 미리보기 카드 ──
+     표시에 마우스를 올리면 이름 한 줄 대신 카드를 띄운다. 주변 시설·장소 검색으로 넣은 표시는
+     갈래 아이콘·기준점 거리·갈래 경로·주소·전화를, 직접 찍은 표시는 핀 아이콘·사진·메모·주소를 보인다.
+     파일에 담긴 값만 쓰므로 따로 묻지 않는다. 핀에서 벗어나도 PLACE_TIP_GRACE 동안 남겨 카드로 옮겨 가
+     누를 수 있게 하고, 누르면 카카오 상세 창(없으면 표시 편집 풍선)을 연다. 이름 보이기를 켠 동안은
+     그 이름을 잠시 접는다. */
+  const PLACE_TIP_GRACE = 300, PLACE_TIP_NOTE_LINES = 3;
+  // 주변 시설로 넣은 표시는 같은 묶음의 반경 원 한가운데가 기준점이다(원 없이 넣었으면 거리를 빼고 보인다).
+  const placeCenterOf = (marker) => {
+    if (marker.source !== "nearby" || !marker.batch) return null;
+    const ring = model.shapes.find(item => item.source === "nearby" && item.batch === marker.batch
+      && item.type === "area" && Array.isArray(item.points) && item.points.length > 2);
+    if (!ring) return null;
+    let lat = 0, lng = 0;
+    for (const point of ring.points){ lat += point[0]; lng += point[1]; }
+    return [lat / ring.points.length, lng / ring.points.length];
+  };
+  function openMarkerPlaceDetail(marker){
+    /* 한 번에 찾은 주변 시설만 한 벌로 넘긴다. 지도에 예전 검색 결과가 함께 있어도 batch 가
+       다르면 섞이지 않으며, 모델 순서가 곧 검색 결과 순서다. */
+    const peers = marker.source === "nearby" && marker.batch
+      ? model.markers.filter(item => item.source === "nearby" && item.batch === marker.batch
+        && mapKakaoPlaceUrl(item.placeUrl))
+      : [marker];
+    const startIndex = Math.max(0, peers.findIndex(item => item.id === marker.id));
+    openMapKakaoPlacePanel(peers.map(item => ({
+      id:item.id, name:item.label, placeUrl:item.placeUrl
+    })), startIndex);
+  }
+  const buildPlaceCard = (marker) => {
+    const make = (tag, cls, text) => { const node = document.createElement(tag); node.className = cls; if (text) node.textContent = text; return node; };
+    const card = make("div", "map-place-tip-card"), head = make("div", "map-place-tip-head");
+    const icon = make("span", "map-place-tip-icon");
+    icon.style.backgroundColor = mapColorHex(marker.color);
+    icon.style.setProperty("--map-icon", mapPlaceIconUrl(marker.categoryCode || ""));
+    head.append(icon, make("strong", "map-place-tip-name", marker.label || mapT("이름 없는 표시")));
+    const center = placeCenterOf(marker);
+    if (center) head.appendChild(make("span", "map-place-tip-distance", mapFormatDistance(mapDistanceMeters(center, [marker.lat, marker.lng]))));
+    card.appendChild(head);
+    const kind = MAP_KAKAO_CATEGORIES.find(item => item.code === marker.categoryCode);
+    const path = String(marker.category || "").split(">").map(part => part.trim()).filter(Boolean);
+    if (!path.length && kind) path.push(mapT(kind.label));
+    if (path.length) card.appendChild(make("div", "map-place-tip-path", path.join(" › ")));
+    const rows = make("ul", "map-place-tip-rows");
+    const road = marker.roadAddress || marker.address || marker.lotAddress;
+    if (road){
+      const row = make("li", "is-address", road);
+      if (marker.lotAddress && marker.lotAddress !== road) row.appendChild(make("small", "", marker.lotAddress));
+      rows.appendChild(row);
+    }
+    if (marker.phone) rows.appendChild(make("li", "is-phone", marker.phone));
+    /* 메모. 주변 시설은 넣을 때 갈래·주소·전화·거리를 메모에도 적어 두므로, 카드에 이미 보인 줄은 뺀다
+       (손으로 덧붙인 줄만 남는다). */
+    const shown = new Set([kind ? mapT(kind.label) : "", marker.category, path[path.length - 1], marker.address,
+      marker.roadAddress, marker.lotAddress, marker.phone].filter(Boolean).map(text => String(text).trim()));
+    const fromCenter = mapTf("중심에서 {distance}", { distance:"" }).trim();
+    const memo = String(marker.note || "").split(/\r?\n/).map(line => line.trim())
+      .filter(line => line && !shown.has(line) && !line.startsWith("☎ ") && !(fromCenter && line.startsWith(fromCenter)));
+    if (memo.length){
+      const note = make("li", "is-memo", memo.slice(0, PLACE_TIP_NOTE_LINES).join("\n"));
+      if (memo.length > PLACE_TIP_NOTE_LINES) note.textContent += " …";
+      rows.appendChild(note);
+    }
+    if (marker.photo && marker.photo.dataUrl){
+      const photo = make("img", "map-place-tip-photo");
+      photo.src = marker.photo.dataUrl; photo.alt = "";
+      card.appendChild(photo);
+    }
+    if (rows.children.length) card.appendChild(rows);
+    card.appendChild(make("p", "map-place-tip-note",
+      mapT(mapKakaoPlaceUrl(marker.placeUrl) ? "눌러서 상세 정보 보기" : "눌러서 표시 편집")));
+    return card;
+  };
+  let placeTip = null, placeTipId = "", placeTipHide = 0, placeTipDone = null;
+  const hidePlaceTip = (id) => {
+    if (id && id !== placeTipId) return;
+    clearTimeout(placeTipHide); placeTipHide = 0;
+    if (placeTip) map.removeLayer(placeTip);
+    placeTip = null; placeTipId = "";
+    const done = placeTipDone; placeTipDone = null;
+    if (done) done();
+  };
+  const leavePlaceTip = (id) => {
+    if (!id || id !== placeTipId) return;
+    clearTimeout(placeTipHide);
+    placeTipHide = setTimeout(() => hidePlaceTip(id), PLACE_TIP_GRACE);
+  };
+  const showPlaceTip = (layer, marker) => {
+    const live = liveMarker(marker) || marker;
+    if (layer.isPopupOpen()) return;
+    if (placeTipId === live.id && placeTip){ clearTimeout(placeTipHide); placeTipHide = 0; return; }   // 카드에서 핀으로 돌아왔다
+    hidePlaceTip();
+    const card = buildPlaceCard(live);
+    placeTipId = live.id;
+    if (labelsShown && layer.getTooltip()){ layer.closeTooltip(); placeTipDone = () => { if (labelsShown && layer.getTooltip() && map.hasLayer(layer)) layer.openTooltip(); }; }
+    placeTip = L.tooltip({ direction:"top", offset:[0, -36], className:"map-place-tip", opacity:1, interactive:true })
+      .setLatLng(layer.getLatLng()).setContent(card);
+    map.addLayer(placeTip);
+    L.DomEvent.disableClickPropagation(card);
+    L.DomEvent.disableScrollPropagation(card);
+    card.addEventListener("mouseenter", () => { if (placeTipId === live.id){ clearTimeout(placeTipHide); placeTipHide = 0; } });
+    card.addEventListener("mouseleave", () => leavePlaceTip(live.id));
+    card.addEventListener("click", () => {
+      hidePlaceTip();
+      if (mapKakaoPlaceUrl(live.placeUrl)) openMarkerPlaceDetail(live);
+      else layer.openPopup();
     });
   };
 
@@ -6924,6 +7091,9 @@ async function mountMapEditor(doc){
     bindMarkerTooltip(layer, marker);
     const popup = buildPopup(marker, layer);
     layer.bindPopup(popup, { minWidth: 210 });
+    layer.on("mouseover", () => showPlaceTip(layer, marker));
+    layer.on("mouseout", () => leavePlaceTip(marker.id));
+    layer.on("dragstart popupopen remove", () => hidePlaceTip(marker.id));
     /* 끄는 동안에도 선이 따라붙게 한다 — 놓는 순간에만 다시 그리면 선이 툭 튄다. 여기서는
        touch 를 부르지 않는다(끌던 한 번을 되돌리기 수십 단계로 쪼개지 않으려고). */
     layer.on("drag", () => {
@@ -8657,6 +8827,15 @@ async function mountMapEditor(doc){
       map.closePopup();
       runNearby({ lat:spot.lat, lng:spot.lng }, { atPoint:true });
     });
+    const transitBtn = document.createElement("button");
+    transitBtn.type = "button"; transitBtn.className = "map-spot-btn map-spot-transit";
+    transitBtn.textContent = "🚏 주변 교통";
+    transitBtn.title = "이 자리로 다가가 둘레의 지하철역·버스 정류장을 지도에 띄워요";
+    transitBtn.hidden = !nearbyTransit;
+    transitBtn.addEventListener("click", () => {
+      map.closePopup();
+      if (nearbyTransit) nearbyTransit.showAround([spot.lat, spot.lng]);
+    });
     const detailBtn = document.createElement("button");
     detailBtn.type = "button"; detailBtn.className = "map-spot-btn map-spot-detail";
     detailBtn.textContent = "🗺 카카오맵 상세 보기";
@@ -8671,7 +8850,7 @@ async function mountMapEditor(doc){
     roadviewBtn.textContent = "🚶 로드뷰";
     roadviewBtn.title = "이 좌표의 카카오맵 로드뷰를 새 창에서 열어요 — API 키가 필요하지 않습니다";
     roadviewBtn.addEventListener("click", () => mapOpenKakaoRoadview(spot.lat, spot.lng));
-    actions.append(pinBtn, copyBtn, nearBtn, roadviewBtn, detailBtn);
+    actions.append(pinBtn, copyBtn, nearBtn, roadviewBtn, transitBtn, detailBtn);
     box.appendChild(actions);
     mapTranslate(box);
     return box;
@@ -8932,15 +9111,16 @@ async function mountMapEditor(doc){
 
   const moveToSearchLocation = mapSearchLocationMover(map);
   const placeSearch = mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label, place) => {
-    moveToSearchLocation(lat, lng, zoom, label);
     /* 검색 응답에는 전화번호가 이미 들어 있다. 좌표를 다시 역검색하면 업체가 아니라 건물 주소만
-       잡히는 경우가 많으므로, 고른 후보의 원래 값을 바로 말풍선에 쓴다. */
-    if (place && (place.phone || place.category || place.road || place.address)){
-      L.popup({ className:"map-spot-popup", minWidth:210, autoPan:false })
-        .setLatLng([lat, lng])
-        .setContent(buildSpotPopup({ ...place, title:place.title || place.name, lat, lng }))
-        .openOn(map);
-    }
+       잡히는 경우가 많으므로, 고른 후보의 원래 값을 바로 말풍선에 쓴다. 말풍선을 닫은 뒤에도
+       찾은 곳 카드를 누르면 다시 연다. */
+    const detailed = !!(place && (place.phone || place.category || place.road || place.address));
+    const openSpot = () => L.popup({ className:"map-spot-popup", minWidth:210, autoPan:false })
+      .setLatLng([lat, lng])
+      .setContent(buildSpotPopup({ ...place, title:place.title || place.name, lat, lng }))
+      .openOn(map);
+    moveToSearchLocation(lat, lng, zoom, label, place, { pick:detailed ? openSpot : null, closable:true });
+    if (detailed) openSpot();
     // 이제 표식이 계속 남으므로, 지우는 법을 한 줄로 알려 준다.
     if (label) setStatus(mapT("찾은 곳을 빨간 점으로 표시했어요 (Esc 로 지우기)"));
   }, setStatus);
@@ -8948,7 +9128,7 @@ async function mountMapEditor(doc){
      들어온 부탁은 _mapPendingSearch 에 담겨 오므로, 검색칸이 준비된 지금 자리에서 함께 처리한다. */
   doc.mapSearchFor = (text) => placeSearch.searchFor(text);
   doc.mapShowCoordinate = (point) => {
-    moveToSearchLocation(point.lat, point.lng, 15, point.label);
+    moveToSearchLocation(point.lat, point.lng, 15, point.label, null, { closable:true });
     setStatus(mapT("고른 좌표를 빨간 점으로 표시했어요 (Esc 로 지우기)"));
   };
   if (doc._mapPendingCoordinate){
