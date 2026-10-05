@@ -20,10 +20,10 @@ const MNMarketDays = (() => {
     return [...digits].sort((a, b) => (a || 10) - (b || 10));
   }
   const isMarketDay = (digits, day) => digits.includes(day % 10);
-  // [2, 7] → "2·7일", [5, 0] → "5·10일"
+  // [2, 7] → "2·7일", [5, 0] → "5·10일". 영어는 짧게 "Days 2·7"(이름표·말풍선·목록 공용).
   const cycleLabel = (digits, english = false) => {
     const days = digits.map(d => d || 10).join("·");
-    return english ? "days ending " + digits.map(d => d || 10).join(", ") : days + "일";
+    return english ? "Days " + days : days + "일";
   };
 
   // 표준데이터 봉투는 response 껍질 없이 {header, body} 로 온다. 다른 API 처럼 껍질이 있어도 읽는다.
@@ -172,9 +172,10 @@ const MNMarketDays = (() => {
     L.DomEvent.disableClickPropagation(panel); L.DomEvent.disableScrollPropagation(panel);
     if (typeof movePanel === "function") movePanel(panel, heading);
 
-    const pane = map.createPane("mapMarketPane"); pane.style.zIndex = "615";
-    // 점이 1,400개 가까이 되므로 캔버스 한 장에 그린다.
-    const renderer = L.canvas({ pane:"mapMarketPane", padding:0.3 });
+    const pane = map.createPane("mapMarketPane"); pane.style.zIndex = "615"; pane.classList.add("map-market-pane");
+    // 점은 SVG 로 그린다. 캔버스는 지도 전체를 덮는 한 장이라 아래 층(주변 교통·표시)의 마우스를 가로챘고,
+    // 층을 꺼도 렌더러가 남아 계속 막았다. SVG 바탕은 CSS 로 마우스를 통과시키고 점(path)만 받는다.
+    const renderer = L.svg({ pane:"mapMarketPane", padding:0.3 });
     const layer = L.layerGroup();
     const capability = new AbortController();
     let destroyed = false, shown = false, markets = [], fetchedAt = 0, abort = null, generation = 0, listTimer = 0;
@@ -202,7 +203,8 @@ const MNMarketDays = (() => {
       };
       if (m.digits.length){
         const nextDay = nextMarketDay(m.digits, ymd);
-        line(word("장날", "Market days"), cycleLabel(m.digits, english()) + (m.type.includes("상설") ? word(" (상설시장 함께)", " (also open daily)") : ""));
+        // 줄 머리가 이미 'Market days' 라 영어 값은 "Days" 없이 "4·9" 만 쓴다.
+        line(word("장날", "Market days"), (english() ? m.digits.map(d => d || 10).join("·") : cycleLabel(m.digits)) + (m.type.includes("상설") ? word(" (상설시장 함께)", " (also open daily)") : ""));
         if (nextDay && nextDay !== ymd) line(word("다음 장", "Next"), dateText(nextDay));
       } else line(word("열리는 날", "Open"), word("매일(상설)", "Daily"));
       line(word("주소", "Address"), m.address);
@@ -217,10 +219,21 @@ const MNMarketDays = (() => {
       }
       return box;
     }
+    // 마우스를 올리면 뜨는 간판형 이름표: 시장 그림 · 이름 · 장날 주기(상설은 '매일').
+    function tipOf(m, on){
+      const box = el("span", "map-market-tip-body");
+      const icon = el("span", "map-market-tip-ico");
+      if (typeof mapToolIconUrl === "function"){ const url = mapToolIconUrl("market"); if (url) icon.style.setProperty("--map-icon", url); }
+      const name = el("span", "map-market-tip-name"); name.textContent = m.name;
+      const cycle = el("span", "map-market-tip-cycle");
+      cycle.textContent = m.digits.length ? cycleLabel(m.digits, english()) + word("장", "") : word("매일", "Daily");
+      box.append(icon, name, cycle);
+      return box;
+    }
     const markerOf = new Map();
     function draw(){
       layer.clearLayers(); markerOf.clear();
-      if (!shown){ map.removeLayer(layer); return; }
+      if (!shown){ map.removeLayer(layer); map.removeLayer(renderer); return; }
       const ymd = selected();
       // 상설시장을 먼저(아래에) 깔고 장 서는 곳을 위에 얹는다.
       const order = markets.filter(m => visible(m, ymd)).sort((a, b) => opensOn(a, ymd) - opensOn(b, ymd));
@@ -228,7 +241,10 @@ const MNMarketDays = (() => {
         const on = opensOn(m, ymd);
         const marker = L.circleMarker([m.lat, m.lng], { renderer, radius:on ? 7 : 4, color:"#fff", weight:on ? 2 : 1,
           fillColor:on ? ON : PERMANENT, fillOpacity:on ? .95 : .7, bubblingMouseEvents:false });
-        marker.bindTooltip(m.name, { direction:"top", offset:[0, -6] });
+        marker.bindTooltip(() => tipOf(m, on), { direction:"top", offset:[0, -10], className:"map-market-tip" + (on ? "" : " is-permanent") });
+        // 가리킨 점을 키워 어느 점의 이름표인지 바로 보이게 한다.
+        marker.on("mouseover", () => marker.setStyle({ radius:on ? 10 : 6, weight:3 }));
+        marker.on("mouseout", () => marker.setStyle({ radius:on ? 7 : 4, weight:on ? 2 : 1 }));
         marker.bindPopup(() => popupOf(m, selected()), { maxWidth:280, className:"map-market-popup-wrap" });
         marker.addTo(layer); markerOf.set(m, marker);
       }
@@ -333,7 +349,7 @@ const MNMarketDays = (() => {
       destroy(){
         destroyed = true; generation++; if (abort) abort.abort(); capability.abort(); clearTimeout(listTimer);
         window.removeEventListener("mni18nchange", onLang); map.off("moveend", renderListSoon);
-        layer.clearLayers(); map.removeLayer(layer); panel.remove(); toggle.remove(); pane.remove();
+        layer.clearLayers(); map.removeLayer(layer); map.removeLayer(renderer); panel.remove(); toggle.remove(); pane.remove();
       }
     };
     if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];

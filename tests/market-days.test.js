@@ -19,7 +19,8 @@ test("시장개설주기 글을 날짜 끝자리로 푼다", () => {
   assert.deepEqual(days.cycleDigits("매일"), []);
   assert.deepEqual(days.cycleDigits(""), []);
   assert.equal(days.cycleLabel([5, 0]), "5·10일");
-  assert.equal(days.cycleLabel([2, 7], true), "days ending 2, 7");
+  assert.equal(days.cycleLabel([2, 7], true), "Days 2·7");
+  assert.equal(days.cycleLabel([5, 0], true), "Days 5·10");
 });
 
 test("장날은 끝자리로 가리고 31일은 1·6일장에 든다", () => {
@@ -113,25 +114,28 @@ function mountHarness(fetch){
       appendChild(item){ this.children.push(item); }, replaceChildren(...items){ this.children = items; }, addEventListener(k, fn){ this.events[k] = fn; }, focus(){}, remove(){ this.removed = true; } };
     nodes.push(n); return n;
   }
+  const svgRenderer = { renderer:true }, removed = [];
   const layer = () => { const g = { items:[], onMap:false, addTo(){ this.onMap = true; return this; }, clearLayers(){ this.items = []; } }; return g; };
   const group = layer();
-  const L = { DomEvent:{ disableClickPropagation(){}, disableScrollPropagation(){} }, canvas:() => ({}), layerGroup:() => group,
-    circleMarker:(at, options) => { const m = { at, options, bindTooltip(){ return m; }, bindPopup(fn){ m.popup = fn; return m; },
+  const L = { DomEvent:{ disableClickPropagation(){}, disableScrollPropagation(){} }, svg:options => { svgRenderer.options = options; return svgRenderer; }, layerGroup:() => group,
+    circleMarker:(at, options) => { const m = { at, options, events:{}, bindTooltip(fn, o){ m.tip = fn; m.tipOptions = o; return m; }, bindPopup(fn){ m.popup = fn; return m; },
+      on(k, fn){ m.events[k] = fn; return m; }, setStyle(o){ Object.assign(m.options, o); return m; },
       addTo(g){ g.items.push(m); markers = g.items; return m; }, openPopup(){ popups++; } }; return m; } };
-  const map = { createPane:() => node("pane"), getZoom:() => 7, setView(){}, closePopup(){}, removeLayer(g){ g.onMap = false; },
+  const map = { createPane:() => node("pane"), getZoom:() => 7, setView(){}, closePopup(){}, removeLayer(g){ g.onMap = false; removed.push(g); },
     getCenter:() => ({ lat:36.5, lng:127.5, distanceTo:([lat, lng]) => Math.hypot(lat - 36.5, lng - 127.5) * 111000 }),
     getBounds:() => ({ contains:([lat, lng]) => lat > 33 && lat < 39 && lng > 124 && lng < 132 }),
     on(name, fn){ listeners.set(name, fn); }, off(name){ listeners.delete(name); } };
   const now = Date.UTC(2026, 9, 4, 1); // 2026-10-04 10:00 KST
+  const window = { addEventListener(){}, removeEventListener(){} };
   const context = { module:{ exports:{} }, URL, AbortController, setTimeout, clearTimeout, fetch, L, mapSetToolIcon(){},
     Date:class extends Date { constructor(...a){ super(...(a.length ? a : [now])); } static now(){ return now; } },
-    document:{ createElement:node, createTextNode:t => ({ t }) }, window:{ addEventListener(){}, removeEventListener(){} },
+    document:{ createElement:node, createTextNode:t => ({ t }) }, window,
     localStorage:{ getItem:k => saved.get(k) || null, setItem:(k, v) => saved.set(k, v) } };
   vm.runInNewContext(read("src/js/market-days.js"), context);
   const doc = { cleanupFns:[] }, stage = node("stage"), toolRow = node("tools");
   const controller = context.module.exports.mount({ map, stage, toolRow, doc });
   const find = cls => nodes.find(n => (n.className || "").split(" ").includes(cls));
-  return { controller, find, group, doc, listeners, saved, markers:() => markers, popups:() => popups };
+  return { svgRenderer, removed, setEnglish:on => { window.MNI18N = on ? { lang:"en" } : undefined; }, controller, find, group, doc, listeners, saved, markers:() => markers, popups:() => popups };
 }
 const vm = require("node:vm");
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -171,10 +175,31 @@ test("장날 단추: 오늘 장 서는 곳만 찍고, 날짜·상설 보기를 �
   const popup = h.markers().find(m => Math.abs(m.at[0] - 37.11809055) < 1e-6).popup();
   assert.equal(popup.children[0].textContent, "장호원전통시장");
   assert.ok(popup.children.some(row => row.children && row.children[1] && row.children[1].textContent === "4·9일 (상설시장 함께)"));
+  // 간판형 이름표: 그림 · 이름 · 장날 주기. 가리키면 점이 커지고 떠나면 돌아온다.
+  const jangho = h.markers().find(m => Math.abs(m.at[0] - 37.11809055) < 1e-6);
+  assert.equal(jangho.tipOptions.className, "map-market-tip");
+  assert.deepEqual(jangho.tip().children.map(c => c.textContent || ""), ["", "장호원전통시장", "4·9일장"]);
+  jangho.events.mouseover(); assert.equal(jangho.options.radius, 10);
+  jangho.events.mouseout(); assert.equal(jangho.options.radius, 7);
+  const daily = h.markers().find(m => m.options.fillColor === "#6b7f86");
+  assert.equal(daily.tipOptions.className, "map-market-tip is-permanent");
+  assert.equal(daily.tip().children[2].textContent, "매일");
+  // 영어 이름표는 짧게: "Days 4·9"
+  h.setEnglish(true);
+  assert.equal(jangho.tip().children[2].textContent, "Days 4·9");
+  assert.equal(daily.tip().children[2].textContent, "Daily");
+  // 말풍선 장날 줄은 머리가 'Market days' 라 값은 "4·9" 만.
+  const enPopup = jangho.popup();
+  assert.ok(enPopup.children.some(row => row.children && row.children[0] && row.children[0].textContent === "Market days"
+    && row.children[1].textContent === "4·9 (also open daily)"));
+  h.setEnglish(false);
   assert.match(h.controller.captureNote(), /장날 · 10월 4일/);
   // 켠 채로 단추를 다시 누르면 지우고 닫는다.
   toggle.events.click();
   assert.equal(h.group.onMap, false); assert.equal(h.find("map-market-panel").hidden, true); assert.equal(h.controller.captureNote(), "");
+  // 끄면 지도 전체를 덮는 렌더러 바탕도 치워 아래 층(주변 교통 등)의 마우스를 막지 않는다.
+  assert.equal(h.svgRenderer.options.pane, "mapMarketPane");
+  assert.ok(h.removed.includes(h.svgRenderer));
   // 다시 켜면 브라우저에 담아 둔 목록을 쓴다.
   toggle.events.click(); await settle(); await settle();
   assert.equal(calls, 1);
