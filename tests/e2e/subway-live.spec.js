@@ -94,7 +94,7 @@ test("켜면 열차가 그려지고, 시간이 지나면 스스로 움직인다"
   await page.goto("/");
   await page.evaluate(() => newMapScratch());
 
-  const picker = page.locator(".map-subway-picker-btn");
+  const picker = page.locator(".map-subway-picker-btn:not(.map-transit-btn)");
   await expect(picker).toHaveCount(1);
   await expect(picker).toHaveText("실시간 열차");
   await expect(page.locator(".map-subway-line")).toHaveValue("");
@@ -129,10 +129,11 @@ test("켜면 열차가 그려지고, 시간이 지나면 스스로 움직인다"
   const tip = page.locator(".map-subway-train-tip").first();
   await expect(tip).toContainText("2호선");
   await expect(tip).toContainText("성수 방면");
-  await expect(tip).toContainText("%");                 // 구간을 얼마나 갔는지
-  /* 구간을 잇는 화살표는 글자로 남지 않는다 — icons.js 가 → 를 SVG 아이콘으로 바꾼다.
-     그래서 글자가 아니라 아이콘이 있는지로 본다. */
-  await expect(tip.locator(".ui-icon")).toHaveCount(1);
+  // 두 역 이름 사이 막대로 구간을 얼마나 갔는지 보인다(시안 B). 배지는 노선 색.
+  await expect(tip.locator(".map-subway-tip-from")).toHaveText(/\S/);
+  await expect(tip.locator(".map-subway-tip-to")).toHaveText(/\S/);
+  expect(await tip.locator(".map-subway-tip-fill").evaluate((n) => n.style.width)).toMatch(/^\d+(\.\d)?%$/);
+  expect(await tip.locator(".map-subway-tip-badge").evaluate((n) => n.style.backgroundColor)).not.toBe("");
   // 급행 열차(2002)는 그 사실도 함께 적는다.
   await trains(page).nth(1).hover();
   await expect(page.locator(".map-subway-train-tip").first()).toContainText("급행");
@@ -186,7 +187,8 @@ test("가까이 가면 역 이름이 늘 붙고 멀어지면 접힌다", async (
   await page.evaluate(() => newMapScratch());
   await page.locator(".map-subway-line").selectOption("2호선");
 
-  // 새 지도는 전국이 보이는 7단계 — 이때는 이름을 붙이지 않는다(점만).
+  /* 새 지도는 전국이 보이는 7단계(지도 칸이 낮으면 노선 전체 보기로 11단계쯤) — 이때는 이름을 붙이지
+     않는다(점만). 바로 아래 좌표 이동은 그 확대 애니메이션 도중에 들어가도 버려지면 안 된다. */
   await expect(stations(page)).toHaveCount(51);
   await expect(labels(page)).toHaveCount(0);
 
@@ -281,7 +283,7 @@ test("화면 밖 노선은 자동으로 전체 보기, 노선 안에서는 현�
   await page.locator(".map-goto").press("Enter");
   await expect.poll(async () => (await mapModel(page)).center[0]).toBeCloseTo(35.1796, 3);
 
-  await page.locator(".map-subway-picker-btn").click();
+  await page.locator(".map-subway-picker-btn:not(.map-transit-btn)").click();
   await page.getByRole("menuitemradio", { name:"신분당선", exact:true }).click();
   const wholeLineVisible = () => page.evaluate(points => {
     const doc = docs.find(d => d.kind === "map");
@@ -300,7 +302,7 @@ test("화면 밖 노선은 자동으로 전체 보기, 노선 안에서는 현�
   expect(after.center).toEqual(before.center);
   expect(after.zoom).toBe(before.zoom);
 
-  await page.locator(".map-subway-picker-btn").click();
+  await page.locator(".map-subway-picker-btn:not(.map-transit-btn)").click();
   await page.getByRole("menuitem", { name:"노선 전체 보기" }).click();
   await expect.poll(wholeLineVisible).toBe(true);
 });
@@ -347,7 +349,7 @@ test("역 점을 누르면 원래 역 이름으로 도착 정보를 묻고 보�
   const box = await page.locator(".leaflet-container").first().boundingBox();
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 
-  const panel = page.locator(".map-subway-arrival-panel");
+  const panel = page.locator(".map-subway-arrival-panel:not(.map-transit-bus-panel)");
   await expect(panel).toBeVisible();
   await expect(panel.locator(".map-subway-arrival-head strong")).toHaveText("이수 도착 정보");
   expect(asked).toEqual(["총신대입구(이수)"]);

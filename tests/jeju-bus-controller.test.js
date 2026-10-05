@@ -24,7 +24,7 @@ function harness({routeStops=null,tripData=null,at=1000000}={}){
     fitBounds(){this.fitCount=(this.fitCount||0)+1;},on(name,fn){this.handlers[name]=fn;},off(name){delete this.handlers[name];}};
   const L={DomEvent:{disableClickPropagation(){},disableScrollPropagation(){}},latLngBounds:p=>p,divIcon:o=>o,
     layerGroup(){const group={items:[],addTo(){return this;},clearLayers(){this.items=[];},addLayer(x){this.items.push(x);},removeLayer(x){this.items=this.items.filter(i=>i!==x);}};groups.push(group);return group;},
-    marker(at){const element=new Element("marker");return {at,bindTooltip(tip){this.tip=tip;return this;},setLatLng(p){this.at=p;},setOpacity(v){this.opacity=v;},getElement(){return element;}};},
+    marker(at){const element=new Element("marker");return {at,bindTooltip(tip){this.tip=tip;return this;},getTooltip(){return null;},isTooltipOpen(){return false;},setLatLng(p){this.at=p;},setOpacity(v){this.opacity=v;},getElement(){return element;}};},
     circleMarker(at,options){const marker={at,options,handlers:{},bindTooltip(){return this;},on(name,fn){this.handlers[name]=fn;return this;}};circles.push(marker);return marker;},polyline:p=>({points:p})};
   const cityList=[{code:"",name:"제주도",raw:"39"},{code:"25",name:"대전광역시",raw:"25"}];
   const catalogJobs=[],catalogJobOptions=[],catalogLoads=[],cityCatalogs={};let catalogFile=null,catalogState={state:"idle",error:"",done:0,total:1999,found:0,busy:false};

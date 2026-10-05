@@ -63,6 +63,14 @@ test("경유지가 5곳을 넘으면 다중 경유지로 한 번에 잇는다", 
   expect(call.provider).toBe("kakao-waypoints");
   expect(call.via.split("|")).toHaveLength(8);              // 표시 10개 = 출발 + 경유 8 + 도착
   await expect(page.locator(".map-drive-label")).toContainText("표시 10개");
+
+  // 교통 구간 이름표(시안 C): 상태 색 알약 + 도로 이름 + 속도·거리.
+  await page.locator("path.map-drive-traffic-line").first().hover();
+  const tip = page.locator(".leaflet-tooltip.map-drive-traffic-tip");
+  await expect(tip.locator(".map-drive-traffic-state")).toHaveText("원활");
+  expect(await tip.locator(".map-drive-traffic-state").evaluate((n) => n.style.backgroundColor)).toBe("rgb(22, 163, 74)");
+  await expect(tip.locator(".map-drive-traffic-road")).toHaveText("세종대로");
+  await expect(tip.locator(".map-drive-traffic-facts")).toHaveText("30 km/h · 12.0 km");
 });
 
 test("출발 시각을 정하면 미래 길찾기로 묻고, 지난 시각은 받지 않는다", async ({ page }) => {

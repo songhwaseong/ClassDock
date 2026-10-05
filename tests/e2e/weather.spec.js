@@ -1,6 +1,9 @@
 const { test, expect } = require("@playwright/test");
 const { collapseSidebar } = require("./helpers");
 
+/* 바람·장날 창도 같은 모양을 빌려 map-weather-panel·place·status 를 함께 쓴다 — 날씨 창 안에서만 찾는다. */
+const weatherPanel = (page) => page.locator(".map-weather-panel:not(.map-wind-panel):not(.map-market-panel)");
+
 /* 기상청 날씨·천문연 특일 — 지도 '날씨' 패널과 일기장(날씨 채우기·공휴일 달력).
  * 응답 뜻풀이는 tests/weather-api.test.js 가 지킨다. 여기서는 런처 응답을 흉내 내고 화면 계약만 본다. */
 
@@ -99,22 +102,28 @@ test("지도 가운데 날씨: 지금·시간별·날짜별을 보이고 문서�
   await expect(page.locator(".map-weather-day").nth(2)).toContainText("모레");
   await expect(page.locator(".map-weather-day").nth(2)).toContainText("80%");
   expect(await page.locator(".map-weather-hour").count()).toBeGreaterThan(0);
-  await expect(page.locator(".map-weather-place")).toContainText("격자");
+  await expect(weatherPanel(page).locator(".map-weather-place")).toContainText("격자");
   await expect(page.locator(".map-weather-tag.is-here")).toHaveCount(1);
+  // 태그 이름표는 지도 공용 색 점 알약: ● 날씨 흐린 장소.
+  await page.locator(".map-weather-tag.is-here").hover();
+  const tagTip = page.locator(".leaflet-tooltip.map-point-tip");
+  await expect(tagTip.locator(".map-point-tip-name")).toHaveText("구름많음");
+  await expect(tagTip.locator(".map-point-tip-sub")).toContainText("격자");
+  await page.mouse.move(5, 5);
   // 격자로 물었다(위경도가 아니라).
   expect(asked.some(q => /^\/weather-now\?nx=\d+&ny=\d+$/.test(q))).toBe(true);
   await page.screenshot({ path:"test-results/weather-map-here.png" });
 
   await page.locator(".map-weather-cities").click();
   await expect(page.locator(".map-weather-tag")).toHaveCount(19);
-  await expect(page.locator(".map-weather-status")).toContainText("수신");
+  await expect(weatherPanel(page).locator(".map-weather-status")).toContainText("수신");
   await page.screenshot({ path:"test-results/weather-map-cities.png" });
 
   expect(await model()).toBe(before);
   // 켜진 단추를 다시 누르면 지우고 닫는다.
   await toggle.click();
   await expect(page.locator(".map-weather-tag")).toHaveCount(0);
-  await expect(page.locator(".map-weather-panel")).toBeHidden();
+  await expect(weatherPanel(page)).toBeHidden();
   expect(errors).toEqual([]);
 });
 
@@ -124,7 +133,7 @@ test("키 문제면 어느 서비스를 신청할지 알려 준다", async ({ pa
   await page.evaluate(() => newMapScratch());
   await page.locator(".map-toolvis-weather").click();
   await page.locator(".map-weather-here").click();
-  await expect(page.locator(".map-weather-status")).toContainText("기상청_단기예보 조회서비스");
+  await expect(weatherPanel(page).locator(".map-weather-status")).toContainText("기상청_단기예보 조회서비스");
 });
 
 test("일기장: 공휴일은 달력에 빨갛게, 날씨는 오늘=실황·지난 날=관측·앞날=예보로 채운다", async ({ page }) => {

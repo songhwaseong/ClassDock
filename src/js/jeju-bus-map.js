@@ -94,6 +94,11 @@ const MNJejuBusMap = (() => {
     const colorFor=type=>/급행|리무진|좌석/.test(type)?"#c0392b":/간선/.test(type)?"#176bc0":/관광/.test(type)?"#986b00":/마을/.test(type)?"#4f8a2b":"#087f8c";
     const routeColor=()=>colorFor(active?active.type:"");
     const clock=stamp=>new Date(stamp).toLocaleTimeString([], {hour12:false});
+    // 정류장 점 이름표: 지도 공용 모양(map-viewer.js mapPointTip). 없으면(따로 시험할 때) 글자만.
+    const pointTip=(marker,options)=>typeof mapPointTip==="function"
+      ? marker.bindTooltip(mapPointTip(options),{className:mapPointTipClass(options.hint)})
+      : marker.bindTooltip(el("span","",[options.sub,options.name].filter(Boolean).join(" · ")));
+    const arrivalsHint=()=>t("눌러서 도착 정보 보기");
     const setStatus=text=>{if(status.textContent!==text)status.textContent=text;};
     // 키·한도 문제는 기다려도 풀리지 않으므로 '다시 시도하는 중'이라고 하지 않고 할 일을 알려 준다.
     // 활용신청은 API 마다 따로라, 키가 거절되면 어느 API 를 신청해야 하는지 조회마다 다르게 알린다.
@@ -123,6 +128,29 @@ const MNJejuBusMap = (() => {
       const all=points.length?points:[...state.vehicles.values()].map(v=>v.at);
       if(all.length){map.fitBounds(L.latLngBounds(all),{padding:[35,35],maxZoom:14});needsFit=false;}
     }
+    // 차량 이름표(시안 A): 노선 색 머리띠(번호·유형·차량 번호), 지금 정류장, 아래에 수신 시각.
+    // '마지막 수신 위치'는 평소 상태라 시각만 적고, 대기·지연처럼 다른 상태일 때만 주황 글자로 앞에 붙인다.
+    // 매 프레임 불리므로 글자가 바뀔 때만 다시 짓고, 열려 있으면 폭이 달라졌을 수 있어 자리를 다시 잡는다.
+    function fillBusTip(marker,vehicle,view){
+      const tip=marker._busTip,color=routeColor(),normal=view.status==="마지막 수신 위치";
+      const key=[active.number,active.type,vehicle.label,vehicle.stationName,view.status,vehicle.lastSeenAt,color].join("|");
+      if(tip._key===key)return;
+      tip._key=key;
+      const head=el("span","map-bus-tip-head"),icon=el("span","map-bus-tip-ico");head.style.background=color;
+      if(typeof mapToolIconUrl==="function"){const url=mapToolIconUrl("bus");if(url)icon.style.setProperty("--map-icon",url);}
+      const number=el("span","map-bus-tip-number");number.textContent=active.number;
+      head.append(icon,number);
+      if(active.type){const type=el("span","map-bus-tip-type");type.textContent=active.type;head.appendChild(type);}
+      if(vehicle.label){const plate=el("span","map-bus-tip-plate");plate.textContent=vehicle.label;head.appendChild(plate);}
+      const parts=[head];
+      // 서울 버스는 정류장 이름이 비어 올 때가 있다 — 그때는 이 줄을 빼고 수신 시각만 둔다.
+      if(vehicle.stationName){const station=el("span","map-bus-tip-station");station.textContent=vehicle.stationName;parts.push(station);}
+      const foot=el("span","map-bus-tip-foot");
+      if(!normal){const state=el("span","map-bus-tip-warn",view.status);foot.append(state," · ");}
+      foot.append(t("마지막 수신")+" "+clock(vehicle.lastSeenAt));parts.push(foot);
+      tip.replaceChildren(...parts);
+      const tooltip=marker.getTooltip();if(tooltip && marker.isTooltipOpen())tooltip.update();
+    }
     function paint(){
       if(frame)cancelAnimationFrame(frame);frame=0;if(!on || frozen || !visible())return;
       const now=Date.now();let moving=false,shown=0;
@@ -136,15 +164,14 @@ const MNJejuBusMap = (() => {
           icon.append(image);
           marker=L.marker(view.at,{pane:"mapJejuBusPane",keyboard:true,title:active.number+" · "+vehicle.label,
             icon:L.divIcon({html:icon,className:"map-jeju-bus-marker",iconSize:[24,24],iconAnchor:[12,12]})});
-          const tip=el("div","");marker.bindTooltip(tip,{direction:"top",offset:[0,-14]});marker._busTip=tip;
+          const tip=el("span","map-bus-tip-body ui-keep-symbols");tip._key="";
+          marker.bindTooltip(tip,{direction:"top",offset:[0,-14],className:"map-bus-tip"});marker._busTip=tip;
           markers.set(id,marker);vehicles.addLayer(marker);
         }
         marker.setLatLng(view.at);marker.setOpacity(view.dim?0.45:1);
         const markerEl=marker.getElement();
         if(markerEl)markerEl.classList.toggle("bus-relocated",!reduced.matches && vehicle.relocatedAt>now-1000);
-        const content=[active.number+" · "+vehicle.label,active.type,vehicle.stationName,
-          t(view.status),t("마지막 수신")+" "+clock(vehicle.lastSeenAt)].filter(Boolean).join(" · ");
-        if(marker._busTip.textContent!==content)marker._busTip.textContent=content;
+        fillBusTip(marker,vehicle,view);
       }
       for(const [id,marker] of markers)if(!state.vehicles.has(id)){vehicles.removeLayer(marker);markers.delete(id);}
       const age=state.fetchedAt?now-state.fetchedAt:Infinity;
@@ -383,9 +410,8 @@ const MNJejuBusMap = (() => {
         });
         stopList.replaceChildren(...buttons);
         for(const stop of list){
-          const tip=el("span","");tip.textContent=stop.name+(stop.cityLabel?" · "+stop.cityLabel:"");
-          const marker=L.circleMarker(stop.at,{pane:"mapJejuBusPane",radius:6,color:"#ffffff",weight:2,fillColor:"#e67e22",fillOpacity:0.95,bubblingMouseEvents:false})
-            .bindTooltip(tip);
+          const marker=L.circleMarker(stop.at,{pane:"mapJejuBusPane",radius:6,color:"#ffffff",weight:2,fillColor:"#e67e22",fillOpacity:0.95,bubblingMouseEvents:false});
+          pointTip(marker,{color:"#e67e22",name:stop.name,sub:stop.cityLabel || "",hint:arrivalsHint()});
           marker.on("click",()=>showArrivals(stop));
           stopsLayer.addLayer(marker);
         }
@@ -455,7 +481,8 @@ const MNJejuBusMap = (() => {
       tripLayer.addTo(map);
       tripLayer.addLayer(L.polyline(tripPoints,{pane:"mapJejuBusRoutePane",color:"#df6c16",weight:5,opacity:0.85,dashArray:"6 5",interactive:false}));
       for(const [stop,title] of [[section[0],"출발"],[section[section.length-1],"도착"]]){
-        tripLayer.addLayer(L.circleMarker(stop.at,{pane:"mapJejuBusRoutePane",radius:7,color:"#df6c16",weight:3,fillOpacity:1}).bindTooltip(el("span","",t(title)+" · "+stop.name)));
+        const marker=L.circleMarker(stop.at,{pane:"mapJejuBusRoutePane",radius:7,color:"#df6c16",weight:3,fillOpacity:1});
+        pointTip(marker,{color:"#df6c16",name:stop.name,sub:t(title)});tripLayer.addLayer(marker);
       }
       tripFit.disabled=false;
       map.fitBounds(L.latLngBounds(tripPoints),{padding:[35,35],maxZoom:15});
@@ -525,8 +552,8 @@ const MNJejuBusMap = (() => {
       else if(stations.length>1)routesLayer.addLayer(L.polyline(stations.map(s=>s.at),{pane:"mapJejuBusRoutePane",color:routeColor(),weight:2,opacity:0.35,dashArray:"4 6",interactive:false}));
       // 정류장 점을 누르면 그 정류장 도착 정보를 연다.
       for(const station of stations){
-        const tip=el("span","",station.name);
-        const dot=L.circleMarker(station.at,{pane:"mapJejuBusRoutePane",radius:4,color:routeColor(),weight:1,fillOpacity:0.7,bubblingMouseEvents:false}).bindTooltip(tip);
+        const dot=L.circleMarker(station.at,{pane:"mapJejuBusRoutePane",radius:4,color:routeColor(),weight:1,fillOpacity:0.7,bubblingMouseEvents:false});
+        pointTip(dot,{color:routeColor(),name:station.name,hint:arrivalsHint()});
         dot.on("click",()=>showArrivals({...station,city:choice.city}));
         routesLayer.addLayer(dot);
       }

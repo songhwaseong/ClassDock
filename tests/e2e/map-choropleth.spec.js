@@ -78,7 +78,9 @@ test("붙여 넣은 표로 시도를 칠하고 범례·마우스 올린 지역·
 
   // 저장 형식에 담긴다
   const saved = await page.evaluate(() => JSON.parse(mapDocSerialize(docs.find(d => d.kind === "map").mapDoc)));
-  expect(saved.version).toBe(13);
+  // 색칠은 13 판부터 담긴다 — 판이 더 올라가도(14=자전거길 층) 지금 판으로 쓰면 된다.
+  expect(saved.version).toBe(await page.evaluate(() => MAP_DOC_VERSION));
+  expect(saved.version).toBeGreaterThanOrEqual(13);
   expect(saved.choropleth.values["서울특별시"]).toBe(9386034);
 
   // 되돌리면 색칠이 걷힌다

@@ -5708,7 +5708,8 @@ class ClassDockLauncher
     }
 
     /* 이 API 는 오류도 HTTP 200 으로 준다 — 본문의 code 를 봐야 한다(수출입은행 환율과 같은 함정).
-       INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선).
+       INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선)
+       · ERROR-337 하루 한도(1,000회) 초과 — 자정까지 풀리지 않으니 화면이 '다시 시도' 대신 멈추게 따로 알린다.
        정상일 때는 code 가 errorMessage 안에 있고 오류일 때는 맨 바깥에 있는데, 어느 쪽이든
        본문에 그 문자열이 한 번만 나오므로 찾아보기만 해도 가른다(작은 JSON 이라 파서를 두지 않는다). */
     static string SubwayResultCode(byte[] data)
@@ -5717,6 +5718,7 @@ class ClassDockLauncher
         if (text.Contains("\"INFO-100\"")) return "INFO-100";
         if (text.Contains("\"INFO-200\"")) return "INFO-200";
         if (text.Contains("\"INFO-000\"")) return "INFO-000";
+        if (text.Contains("\"ERROR-337\"")) return "ERROR-337";
         return "";
     }
 
@@ -5798,7 +5800,7 @@ class ClassDockLauncher
             // INFO-200 은 '지금 이 노선에 열차가 없다' 는 정상 답이라 그대로 내보낸다.
             if (code == "INFO-000" || code == "INFO-200") { error = ""; return true; }
             data = null;
-            error = code == "INFO-100" ? "subway-key-invalid" : "subway-failed";
+            error = code == "INFO-100" ? "subway-key-invalid" : code == "ERROR-337" ? "subway-quota" : "subway-failed";
             return false;
         }
         catch { data = null; return false; }

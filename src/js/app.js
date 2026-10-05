@@ -1248,6 +1248,7 @@ function wire(){
       const reason = error && error.message;
       setSubwayStatus(reason === "subway-key-save-failed"
         ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
+        : reason === "subway-quota" ? "이 키는 오늘 조회 한도(1,000회)를 다 썼습니다. 내일 다시 시험해 주세요."
         : "인증키를 확인하지 못했습니다. 서울 열린데이터광장에서 발급받은 지하철 인증키인지 확인해 주세요.", "bad");
       syncSubwayFields();
     }

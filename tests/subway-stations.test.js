@@ -150,6 +150,9 @@ test("두 런처 모두 본문 code 로 성공·실패를 가른다", () => {
     assert.match(text, /INFO-000/, `${name} 이 정상 코드를 보지 않는다`);
     assert.match(text, /INFO-100/, `${name} 이 인증키 오류 코드를 보지 않는다`);
     assert.match(text, /INFO-200/, `${name} 이 '자료 없음' 을 오류와 구분하지 않는다`);
+    // 하루 한도를 넘긴 것을 그냥 실패로 넘기면 화면이 자정까지 15초마다 '다시 시도' 하며 묻는다.
+    assert.match(text, /ERROR-337/, `${name} 이 하루 한도 초과 코드를 보지 않는다`);
+    assert.match(text, /"subway-quota"/, `${name} 이 하루 한도 초과를 따로 알리지 않는다`);
   }
 });
 

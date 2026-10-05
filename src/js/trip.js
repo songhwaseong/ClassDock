@@ -3467,9 +3467,41 @@ function mountTripEditor(doc){
     return card;
   }
 
+  /* 사진·영상 없는 장소 핀 이름표(시안 B): 사진 있는 핀 카드에서 사진만 뺀 모양 —
+     '3. 이름' + 종류, 시각·주소, 메모(두 줄까지). 같은 칸 이름(trip-map-photo-*)을 써서 둘이 한 식구로 보인다. */
+  function tripMapSpotTip(spot, markerNumber){
+    const card = document.createElement("div");
+    card.className = "trip-map-photo-card trip-map-spot-card";
+    const head = document.createElement("div");
+    head.className = "trip-map-photo-head";
+    const title = document.createElement("strong");
+    title.textContent = markerNumber + ". " + (spot.name || tripWord("spot"));
+    head.append(title);
+    if (spot.kind && tripSpotKindName(spot.kind)){
+      const kind = document.createElement("span");
+      kind.textContent = tripSpotKindName(spot.kind);
+      head.append(kind);
+    }
+    card.append(head);
+    const metaText = [spot.at || "", spot.address || ""].filter(Boolean).join(" · ");
+    if (metaText){
+      const meta = document.createElement("div");
+      meta.className = "trip-map-photo-meta";
+      meta.textContent = metaText;
+      card.append(meta);
+    }
+    if (String(spot.note || "").trim()){
+      const note = document.createElement("div");
+      note.className = "trip-map-spot-note";
+      note.textContent = String(spot.note).trim();
+      card.append(note);
+    }
+    return card;
+  }
+
   function bindTripMarkerPreview(marker, spot, markerNumber){
     if (!(spot.photos || []).some(name => assets.has(name)) && !(spot.videos || []).some(v => assets.has(v.v))){
-      marker.bindTooltip(markerNumber + ". " + (spot.name || tripWord("spot")), { direction:"top" });
+      marker.bindTooltip(() => tripMapSpotTip(spot, markerNumber), { direction:"top", className:"trip-map-spot-tip" });
       return;
     }
     let card = null;

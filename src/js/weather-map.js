@@ -86,12 +86,15 @@ const MNWeatherMap = (() => {
         const icon = L.divIcon({ className:"map-weather-tag ui-keep-symbols " + cls, html, iconSize:null, iconAnchor:[13, 12] });
         const marker = L.marker(at, { icon, pane:"mapWeatherPane", keyboard:false, bubblingMouseEvents:false });
         marker.on("add", () => { const node = marker.getElement(); if (node) node.querySelector(".map-weather-tag-text").textContent = label; });
-        if (tip) marker.bindTooltip(tip, { direction:"top", offset:[0, -14] });
+        // 이름표는 지도 공용 색 점 알약(map-viewer.js mapPointTip): ● 날씨 흐린 장소.
+        if (tip && typeof mapPointTip === "function")
+          marker.bindTooltip(mapPointTip({ color:"#0284c7", ...tip }), { direction:"top", offset:[0, -14], className:mapPointTipClass("") });
+        else if (tip) marker.bindTooltip([tip.name, tip.sub].filter(Boolean).join(" · "), { direction:"top", offset:[0, -14] });
         layer.addLayer(marker);
         return marker;
       };
-      if (mode === "here" && spot && current) tag(spot, glyph(current), deg(current.temp), [describe(current), place.textContent].filter(Boolean).join(" · "), "is-here");
-      if (mode === "cities") for (const c of cities) if (c.now) tag([c.lat, c.lng], glyph(c.now), c.label + " " + deg(c.now.temp), describe(c.now));
+      if (mode === "here" && spot && current) tag(spot, glyph(current), deg(current.temp), { name:describe(current), sub:place.textContent }, "is-here");
+      if (mode === "cities") for (const c of cities) if (c.now) tag([c.lat, c.lng], glyph(c.now), c.label + " " + deg(c.now.temp), { name:describe(c.now), sub:c.label });
     }
 
     // ── 패널 ──

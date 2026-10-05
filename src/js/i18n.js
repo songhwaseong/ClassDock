@@ -383,6 +383,7 @@
     "기준 {time}": "As of {time}",
     "지금은 이 역 도착 정보가 없어요.": "No arrival information for this station right now.",
     "지하철 인증키가 맞지 않아요 — 설정 → 지하철 실시간에서 확인해 주세요.": "The subway key was rejected — check it under Settings → Live subway.",
+    "오늘 지하철 조회 한도(1,000회)를 다 썼어요 — 내일 다시 켜 주세요.": "Today's subway lookup limit (1,000) is used up — turn it on again tomorrow.",
     // A·B 생활권 비교
     "반경 비교": "Radius comparison",
     "반경 비교 · {distance} · 등록 표시(직선)": "Radius comparison · {distance} · Registered places (straight-line)",
@@ -704,6 +705,7 @@
     "서울 열린데이터광장 연결에 성공했고 키를 저장했습니다.": "Connected to Seoul Open Data Plaza and saved the key.",
     "인증키를 확인하지 못했습니다. 서울 열린데이터광장에서 발급받은 지하철 인증키인지 확인해 주세요.":
       "The key could not be verified. Make sure it is a subway key issued by Seoul Open Data Plaza.",
+    "이 키는 오늘 조회 한도(1,000회)를 다 썼습니다. 내일 다시 시험해 주세요.": "This key has used up today's lookup limit (1,000). Test it again tomorrow.",
     "지하철 인증키를 지웠습니다.": "Removed the subway key.",
     "키가 없어도 ECB 참고환율로 바로 씁니다. 한국수출입은행 오픈 API 인증키(무료)를 넣으면 고시환율(매매기준율·송금 보낼 때·받을 때)까지 볼 수 있습니다. 하루 조회 한도는 1,000회입니다.":
       "Works right away with ECB reference rates, no key needed. Add a free Korea Eximbank Open API key to also see official rates (base, remittance sent, remittance received). The daily limit is 1,000 requests.",
@@ -3421,6 +3423,8 @@
     "표시·도형 {count}개를 {format}으로 내보냈습니다": "Exported {count} pins and shapes as {format}",
     "표시 {count}개": "{count} pins",
     "표시 {count}개 — 눌러서 펼치기": "{count} pins — press to expand",
+    "눌러서 펼치기": "Click to expand",
+    "외 {count}곳": "+{count} more",
     " · 읽지 못한 항목 {skipped}개 · 상한 초과 {truncated}개":
       " · {skipped} unreadable items · {truncated} above the limit",
     "지도 자료에서 표시·도형 {count}개를 추가했습니다": "Added {count} pins and shapes from the map data",
@@ -3485,6 +3489,7 @@
     "1–9호선": "Lines 1–9",
     "광역·경전철": "Regional & light rail",
     "{line} {no}호": "{line} train {no}",
+    "{no}호": "Train {no}",
     "급행": "Express",
     "막차": "Last train",
     "{terminal} 방면": "toward {terminal}",

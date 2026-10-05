@@ -1936,6 +1936,20 @@ const MAP_DRIVE_TRAFFIC = {
 function mapDriveTrafficInfo(state){
   return MAP_DRIVE_TRAFFIC[Number(state)] || MAP_DRIVE_TRAFFIC[0];
 }
+/* 교통 구간 이름표(시안 C): 상태 색 알약 + 도로 이름 + 흐린 글자로 속도·거리, 한 줄.
+   선 위를 훑으며 보는 이름표라(sticky) 작게 둔다. 속도는 교통 정보가 있을 때만 — 0km/h 는 '모름'이다. */
+function mapDriveTrafficTip(road, info){
+  const make = (cls, text) => { const node = document.createElement("span"); node.className = cls; if (text) node.textContent = text; return node; };
+  const box = make("map-drive-traffic-body");
+  const state = make("map-drive-traffic-state", mapT(info.label));
+  state.style.background = info.color; state.style.color = mapSubwayTextColor(info.color);
+  const facts = [];
+  if (road.trafficState && road.trafficSpeed > 0) facts.push(Math.round(road.trafficSpeed) + " km/h");
+  if (road.distance > 0) facts.push(mapFormatDistance(road.distance));
+  box.append(state, make("map-drive-traffic-road", road.name || mapT("이름 없는 도로")));
+  if (facts.length) box.appendChild(make("map-drive-traffic-facts", facts.join(" · ")));
+  return box;
+}
 function mapDriveItemPoint(item){
   if (Array.isArray(item)) return [Number(item[0]), Number(item[1])];
   return [Number(item && item.lat), Number(item && item.lng)];
@@ -2392,8 +2406,21 @@ function mapSearchLocationMover(map){
     if (pick || closable){ L.DomEvent.disableClickPropagation(box); L.DomEvent.disableScrollPropagation(box); }
     return box;
   };
+  /* 확대 애니메이션 도중의 setView 는 Leaflet 이 아무 말 없이 버린다(_tryAnimatedZoom). 노선을 고르면
+     노선 전체 보기로 확대가 흐르는데, 그 사이 좌표를 적고 Enter 하면 이동이 사라졌다 —
+     끝날 때까지 미뤘다가 옮긴다. 그사이 또 부르면 마지막 자리 하나만 남긴다. */
+  let pendingView = null;
+  const setViewSoon = (lat, lng, zoom) => {
+    if (!map._animatingZoom){ map.setView([lat, lng], Math.max(map.getZoom(), zoom)); return; }
+    if (!pendingView) map.once("zoomend", () => {
+      const view = pendingView;
+      pendingView = null;
+      setViewSoon(view.lat, view.lng, view.zoom);
+    });
+    pendingView = { lat, lng, zoom };
+  };
   const move = (lat, lng, zoom, label, place = null, options = {}) => {
-    map.setView([lat, lng], Math.max(map.getZoom(), zoom));
+    setViewSoon(lat, lng, zoom);
     if (!marker){
       marker = L.circleMarker([lat, lng], {
         pane:paneName, radius:8, color:"#fff", weight:3,
@@ -5242,6 +5269,43 @@ function mapPlaceIconUrl(code){
     'stroke-linecap="round" stroke-linejoin="round">' + inner + '</svg>';
   return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
 }
+/* 작은 점 이름표(정류장·역·구간 끝·날씨). 기본은 색 점 알약 한 줄(시안 A): ● 이름 흐린 부가 글.
+   hint(누르면 할 일)를 주면 왼쪽 색 띠 + 둘째 줄 'hint ›'(시안 C) — 눌러야 쓸모가 생기는 정류장·역 점.
+   bindTooltip 의 className 은 mapPointTipClass 로 같은 모양을 고른다. */
+function mapPointTip({ color = "#64748b", name = "", sub = "", hint = "" } = {}){
+  const make = (cls, text) => { const node = document.createElement("span"); node.className = cls; if (text) node.textContent = text; return node; };
+  const box = make("map-point-tip-body ui-keep-symbols");
+  box.style.setProperty("--point-color", color);
+  const line = make("map-point-tip-line");
+  line.append(make("map-point-tip-mark"), make("map-point-tip-name", name));
+  if (sub) line.appendChild(make("map-point-tip-sub", sub));
+  box.appendChild(line);
+  if (hint) box.appendChild(make("map-point-tip-hint", hint + " ›"));
+  return box;
+}
+const mapPointTipClass = (hint) => "map-point-tip" + (hint ? " is-action" : "");
+/* 표시 묶음 이름표(시안 B): '표시 N개' + '눌러서 펼치기 ›', 아래에 안에 든 표시 셋(색 점·이름)과 '외 N곳'.
+   이름 있는 표시를 앞에 둔다 — 이름 없는 표시만 셋 보이면 무엇이 모였는지 알 수 없다. */
+const MAP_CLUSTER_TIP_ROWS = 3;
+function mapClusterTip(markers){
+  const make = (cls, text) => { const node = document.createElement("span"); node.className = cls; if (text) node.textContent = text; return node; };
+  const box = make("map-cluster-tip-body ui-keep-symbols");
+  const head = make("map-cluster-tip-head");
+  head.append(make("map-cluster-tip-count", mapTf("표시 {count}개", { count:markers.length })),
+    make("map-cluster-tip-hint", mapT("눌러서 펼치기") + " ›"));
+  const list = make("map-cluster-tip-list");
+  const named = markers.filter(marker => String(marker.label || "").trim());
+  const shown = named.concat(markers.filter(marker => !String(marker.label || "").trim())).slice(0, MAP_CLUSTER_TIP_ROWS);
+  for (const marker of shown){
+    const row = make("map-cluster-tip-row"), dot = make("map-cluster-tip-dot");
+    dot.style.background = mapColorHex(marker.color);
+    row.append(dot, make("map-cluster-tip-name", String(marker.label || "").trim() || mapT("이름 없는 표시")));
+    list.appendChild(row);
+  }
+  if (markers.length > shown.length) list.appendChild(make("map-cluster-tip-more", mapTf("외 {count}곳", { count:markers.length - shown.length })));
+  box.append(head, list);
+  return box;
+}
 function mapToolIconUrl(name){
   const inner = MAP_TOOL_ICONS[name];
   if (!inner) return "";
@@ -5720,6 +5784,22 @@ async function mountMapEditor(doc){
     [printBtn, "print"], [taskBtn, "target"], [imageClearBtn, "trash"], [prepareBtn, "cloud"], [subwayLineTrigger, "train"],
     [toolsToggleBtn, "panel"], [searchBtn, "search"]
   ]) mapSetToolIcon(element, icon);              // 저장은 빼 둔다 — setSaveIcon 이 이미 그림을 넣어 두 번 그려진다
+  /* 도구 줄 단추는 그림만 보인다(글자는 CSS 가 font-size 0 으로 감춰 우클릭 메뉴·번역·시험이 그대로 읽는다).
+     이름은 올리면 바로 뜨는 이름표(data-label → ::after)로 보인다 — title 은 긴 설명이라 그대로 둔다.
+     글자가 바뀌면(자료 들이기↔그만두기, 언어 바꾸기, 나중에 붙는 실시간 칩) 이름표도 따라간다. */
+  const syncToolLabels = () => {
+    for (const button of toolRow.querySelectorAll(".map-tools-main>.map-btn, .map-tools-extra>.map-btn")){
+      const label = button.textContent.trim();
+      if (button.dataset.label !== label) button.dataset.label = label;
+    }
+  };
+  syncToolLabels();
+  if (typeof MutationObserver === "function"){
+    const toolLabelWatch = new MutationObserver(syncToolLabels);
+    toolLabelWatch.observe(toolRow, { subtree:true, childList:true, characterData:true });
+    if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
+    doc.cleanupFns.push(() => toolLabelWatch.disconnect());
+  }
   mapSetToolIcon(searchWrap, "pin");               // 검색칸 왼쪽 안쪽의 핀(CSS 가 칸 안에 띄운다)
   searchBtn.setAttribute("aria-label", "검색");     // 글자는 CSS 로 감추고 아이콘만 보인다
 
@@ -6275,9 +6355,9 @@ async function mountMapEditor(doc){
     const subwayLabelsWanted = () => subwayOn && map.getZoom() >= MAP_SUBWAY_LABEL_MIN_ZOOM;
     const subwayBindLabel = (dot, name) => {
       dot.unbindTooltip();
-      dot.bindTooltip(name, subwayLabelsShown
-        ? { permanent:true, direction:"top", offset:[0, -6], className:"map-subway-label" }
-        : { direction:"top", offset:[0, -6] });
+      const hint = mapT("눌러서 도착 정보 보기");
+      if (subwayLabelsShown) dot.bindTooltip(name, { permanent:true, direction:"top", offset:[0, -6], className:"map-subway-label" });
+      else dot.bindTooltip(mapPointTip({ color:subwayColor(), name, hint }), { direction:"top", offset:[0, -6], className:mapPointTipClass(hint) });
     };
     const subwaySyncLabels = () => {
       const wanted = subwayLabelsWanted();
@@ -6328,13 +6408,47 @@ async function mountMapEditor(doc){
       });
     };
 
-    const subwayTooltip = (train, place) => {
-      const parts = [mapTf("{line} {no}호", { line:train.line, no:train.no }),
-        `${place.from} → ${place.to} · ${Math.round(place.progress * 100)}%`];
-      if (train.terminal) parts.push(mapTf("{terminal} 방면", { terminal:train.terminal }));
-      if (train.express) parts.push(mapT("급행"));
-      if (train.lastTrain) parts.push(mapT("막차"));
-      return parts.join(" · ");
+    /* 열차 이름표(시안 B): 노선 색 배지·열차 번호·방면/급행/막차, 아래에 두 역 이름과 그 사이를 얼마나 갔는지 막대.
+       매 프레임 불리므로 칸은 처음 한 번만 짓고, 글자는 바뀔 때만 고친다(폭이 달라지면 열린 이름표 자리를 다시 잡는다).
+       막대 길이는 프레임마다 옮긴다 — 열차 점이 움직이는 것과 같은 박자다. */
+    const subwayTipNode = () => {
+      const make = (cls) => { const node = document.createElement("span"); node.className = cls; return node; };
+      const box = make("map-subway-tip-body ui-keep-symbols");
+      const head = make("map-subway-tip-head"), badge = make("map-subway-tip-badge"),
+        no = make("map-subway-tip-no"), meta = make("map-subway-tip-meta");
+      head.append(badge, no, meta);
+      const ends = make("map-subway-tip-ends"), from = make("map-subway-tip-from"), to = make("map-subway-tip-to");
+      ends.append(from, to);
+      const bar = make("map-subway-tip-bar"), fill = make("map-subway-tip-fill"), knob = make("map-subway-tip-knob");
+      bar.append(fill, knob);
+      box.append(head, ends, bar);
+      box._refs = { badge, no, meta, from, to, fill, knob, key:"", width:"" };
+      return box;
+    };
+    const subwayTipUpdate = (marker, train, place) => {
+      const box = marker._subwayTip, refs = box._refs;
+      const color = MAP_SUBWAY_COLORS[train.line] || subwayColor();
+      const key = [train.line, train.no, train.terminal, train.express, train.lastTrain, place.from, place.to].join("|");
+      if (key !== refs.key){
+        refs.key = key;
+        refs.badge.textContent = train.line;
+        refs.badge.style.background = color; refs.badge.style.color = mapSubwayTextColor(color);
+        box.style.setProperty("--subway-line", color);
+        refs.no.textContent = mapTf("{no}호", { no:train.no });
+        const meta = [];
+        if (train.terminal) meta.push(["", mapTf("{terminal} 방면", { terminal:train.terminal })]);
+        if (train.express) meta.push(["is-express", mapT("급행")]);
+        if (train.lastTrain) meta.push(["is-last", mapT("막차")]);
+        refs.meta.replaceChildren(...meta.flatMap(([cls, text], index) => {
+          const part = document.createElement("span"); if (cls) part.className = cls; part.textContent = text;
+          return index ? [" · ", part] : [part];
+        }));
+        refs.from.textContent = place.from; refs.to.textContent = place.to;
+        const tooltip = marker.getTooltip();
+        if (tooltip && marker.isTooltipOpen()) tooltip.update();
+      }
+      const width = (Math.max(0, Math.min(1, place.progress)) * 100).toFixed(1) + "%";
+      if (width !== refs.width){ refs.width = width; refs.fill.style.width = width; refs.knob.style.left = width; }
     };
 
     /* 매 프레임 열차를 옮긴다. 새 값은 15초에 한 번뿐이라, 그 사이를 이어 주는 것이 이 함수다. */
@@ -6364,13 +6478,14 @@ async function mountMapEditor(doc){
           marker = L.marker(at, { pane:"mapSubwayPane", keyboard:true,
             title:mapTf("{line} {no}호", { line:train.line, no:train.no }),
             icon:L.divIcon({ html:icon, className:"map-subway-train", iconSize:[24,24], iconAnchor:[12,12] }) });
-          marker.bindTooltip("", { direction:"top", offset:[0, -14], className:"map-subway-train-tip" });
+          marker._subwayTip = subwayTipNode();
+          marker.bindTooltip(marker._subwayTip, { direction:"top", offset:[0, -14], className:"map-subway-train-tip" });
           subwayLayer.addLayer(marker);
           subwayMarkers.set(key, marker);
         } else {
           marker.setLatLng(at);
         }
-        marker.setTooltipContent(subwayTooltip(train, place));
+        subwayTipUpdate(marker, train, place);
       }
       /* 상태줄은 여럿이 함께 쓰는 칸이라 프레임마다 쓰면 다른 기능의 안내를 지운다.
          숫자가 바뀔 때만 알린다. */
@@ -6394,6 +6509,13 @@ async function mountMapEditor(doc){
       if (reason === "subway-key-required"){
         subwayNote = mapT("지하철 인증키가 없어요 — 설정 → 지하철 실시간에서 넣어 주세요.");
         subwayStop();                              // 키가 없으면 더 물어도 소용없다
+        setStatus(subwayNote);
+        return;
+      }
+      if (reason === "subway-quota"){
+        // 하루 한도는 자정에야 풀린다. 15초마다 '다시 시도' 라고 하며 계속 묻지 않고 끈다.
+        subwayNote = mapT("오늘 지하철 조회 한도(1,000회)를 다 썼어요 — 내일 다시 켜 주세요.");
+        subwayStop();
         setStatus(subwayNote);
         return;
       }
@@ -6459,6 +6581,7 @@ async function mountMapEditor(doc){
     const subwayArrivalFailText = (reason) => reason === "subway-key-required"
       ? mapT("지하철 인증키가 없어요 — 설정 → 지하철 실시간에서 넣어 주세요.")
       : reason === "subway-key-invalid" ? mapT("지하철 인증키가 맞지 않아요 — 설정 → 지하철 실시간에서 확인해 주세요.")
+      : reason === "subway-quota" ? mapT("오늘 지하철 조회 한도(1,000회)를 다 썼어요 — 내일 다시 켜 주세요.")
       : mapT("도착 정보를 받지 못했어요. 잠시 후 새로고침해 주세요.");
     const subwayRenderArrivals = (groups, line) => {
       const nodes = [];
@@ -7201,7 +7324,7 @@ async function mountMapEditor(doc){
           if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(center, Math.min(15, map.getZoom() + 2));
           else map.fitBounds(bounds.pad(0.2), { maxZoom:15, animate:true });
         });
-        cluster.bindTooltip(mapTf("표시 {count}개 — 눌러서 펼치기", { count:group.length }), { direction:"top" });
+        cluster.bindTooltip(() => mapClusterTip(group.map(item => item.marker)), { direction:"top", className:"map-cluster-tip" });
         clusterLayer.addLayer(cluster);
       }
     }
@@ -7378,10 +7501,7 @@ async function mountMapEditor(doc){
         pane:"mapRoutePane", color:info.color, weight:5, opacity:0.92,
         className:"map-drive-traffic-line", smoothFactor:0, interactive:true, bubblingMouseEvents:false
       }).addTo(map);
-      traffic.bindTooltip(mapTf("{road} · {state} · {speed}km/h · {distance}", {
-        road:road.name || mapT("이름 없는 도로"), state:mapT(info.label),
-        speed:Math.round(road.trafficSpeed || 0), distance:mapFormatDistance(road.distance)
-      }), { sticky:true, className:"map-drive-traffic-tip" });
+      traffic.bindTooltip(mapDriveTrafficTip(road, info), { sticky:true, className:"map-drive-traffic-tip" });
       driveTrafficLayers.push(traffic);
     });
     lastDriveResult = result;

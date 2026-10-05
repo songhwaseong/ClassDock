@@ -339,11 +339,19 @@ test("사진으로 보기를 켜면 사진 있는 곳만 사진 표식이 되고
     doc.tripAssets.set("assets/p1.png", { bytes:new Uint8Array(await blob.arrayBuffer()) });
     doc.trip.days[0].spots.push(
       { id:"sp-a", at:"", name:"성산", address:"", note:"", kind:"sight", lat:33.458, lng:126.942, color:"", cost:null, photos:["assets/p1.png"] },
-      { id:"sp-b", at:"", name:"우도", address:"", note:"", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[] });
+      { id:"sp-b", at:"10:30", name:"우도", address:"제주시 우도면", note:"배 타고 들어가기", kind:"move", lat:33.506, lng:126.951, color:"", cost:null, photos:[] });
   });
   await page.locator(".trip-day-chip").nth(0).click();
   const stage = page.locator(".trip-map-stage");
   await expect(stage.locator(".trip-map-pin")).toHaveCount(2);
+
+  // 사진 없는 핀 이름표: 번호·이름·종류, 시각·주소, 메모(사진 있는 핀 카드에서 사진만 뺀 모양).
+  await stage.locator(".trip-map-pin").nth(1).dispatchEvent("mouseover");   // 두 핀이 겹쳐 앞 핀이 마우스를 가린다
+  const spotTip = page.locator(".leaflet-tooltip.trip-map-spot-tip");
+  await expect(spotTip.locator(".trip-map-photo-head strong")).toHaveText("2. 우도");
+  await expect(spotTip.locator(".trip-map-photo-meta")).toHaveText("10:30 · 제주시 우도면");
+  await expect(spotTip.locator(".trip-map-spot-note")).toHaveText("배 타고 들어가기");
+  await stage.locator(".trip-map-pin").nth(1).dispatchEvent("mouseout");
 
   const toggle = page.locator(".trip-map-photos-btn");
   await toggle.click();

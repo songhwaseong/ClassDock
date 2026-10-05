@@ -1102,20 +1102,30 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     border-bottom:1px solid var(--border);background:var(--panel)}
   /* 편집 도구 줄은 접을 수 있다(H) — 머리말 줄은 남아 다시 펴는 길이 된다. 두 줄이 붙어 있을
      때는 사이 선을 옅게 해 하나의 도구막대로 보이게 한다. */
-  .map-tools{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:8px 12px 9px;
+  .map-tools{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:5px;padding:6px 12px;
     border-bottom:1px solid var(--border);background:var(--panel)}
-  /* 도구 줄 두 칸 — 위는 아이콘을 얹은 타일(자주 쓰는 편집·보기), 아래는 작은 칩(내보내기·연결·실시간).
-     아이콘은 단추 글자가 아니라 --map-icon 마스크라 textContent 를 갈아 끼워도 남는다(map-viewer.js). */
-  .map-tools-main,.map-tools-extra{display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0}
-  .map-tools-main>.map-btn,.map-tile-select{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:5px;min-width:58px;height:60px;padding:7px 6px 6px;border-radius:10px;font-size:11.5px;line-height:1.1;
-    white-space:nowrap;box-shadow:0 1px 2px rgba(15,23,42,.06)}
+  /* 도구 줄은 그림만 보이는 단추를 한 흐름으로 늘어놓는다 — 이름까지 적은 타일 두 칸은 1280×720 에서
+     220px 를 먹어 지도가 256px 만 남았다. 두 칸(타일=자주 쓰는 편집·보기, 칩=내보내기·연결·실시간)은
+     display:contents 로 풀어 빈자리 없이 채우고, 사이에 가는 세로선 하나만 둔다.
+     아이콘은 단추 글자가 아니라 --map-icon 마스크라 textContent 를 갈아 끼워도 남는다(map-viewer.js).
+     글자는 font-size 0 으로 남긴다 — 우클릭 메뉴·번역·시험이 그 글자를 읽고, 이름은 data-label 이름표로 뜬다. */
+  .map-tools-main,.map-tools-extra{display:contents}
+  .map-tools-extra::before{content:"";flex:none;align-self:center;width:1px;height:22px;margin:0 3px;background:var(--border)}
+  .map-tools-main>.map-btn,.map-tools-extra>.map-btn{position:relative;display:inline-flex;align-items:center;gap:6px;
+    height:34px;padding:0 10px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 2px rgba(15,23,42,.06)}
+  /* gap 0 — font-size 0 글자도 폭 0 짜리 flex 항목이라, gap 이 남으면 그림이 왼쪽으로 3px 밀린다. */
+  .map-tools-main>.map-btn.has-map-icon,.map-tools-extra>.map-btn.has-map-icon{justify-content:center;gap:0;width:34px;padding:0;
+    font-size:0;line-height:0}
   .map-tools-main>.map-btn[hidden],.map-tools-extra>.map-btn[hidden]{display:none}
   .has-map-icon::before{content:"";flex:none;width:20px;height:20px;background:var(--map-icon-color,currentColor);
     -webkit-mask:var(--map-icon) center/contain no-repeat;mask:var(--map-icon) center/contain no-repeat}
-  .map-tools-extra>.map-btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 11px;border-radius:8px;white-space:nowrap}
-  .map-tools-extra>.map-btn::before{width:16px;height:16px}
-  .map-tools-extra>.map-select{height:32px;border-radius:8px;padding:0 8px}
+  .map-tools-extra>.map-btn::before{width:18px;height:18px}
+  .map-tools-extra>.map-select{height:34px;border-radius:8px;padding:0 8px}
+  /* 그림만 남은 단추의 이름 — 올리거나(키보드로 머물러도) 바로 위에 뜬다. title 은 긴 설명이라 그대로 둔다. */
+  .map-tools .has-map-icon[data-label]:is(:hover,:focus-visible)::after{content:attr(data-label);position:absolute;
+    bottom:calc(100% + 6px);left:50%;z-index:1300;transform:translateX(-50%);padding:3px 7px;border-radius:6px;
+    background:#1f2937;color:#fff;font-size:11.5px;font-weight:600;line-height:1.3;white-space:nowrap;pointer-events:none;
+    box-shadow:0 3px 10px rgba(15,23,42,.25)}
   /* 아래 칩은 색으로 갈래를 알린다 — 켜지면(is-on) 파란 바탕 위라 흰색으로 돌아간다. */
   .map-clear-items{--map-icon-color:#e5484d}
   .map-geo-export,.map-save-png,.map-prepare{--map-icon-color:#3b82f6}
@@ -1124,28 +1134,19 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-make-task,.map-subway-picker-btn{--map-icon-color:#ea580c}
   .map-btn.is-on{--map-icon-color:currentColor}
   .map-tools-main>.map-btn.is-on{box-shadow:0 2px 8px color-mix(in srgb,var(--accent) 35%,transparent)}
-  /* 배경지도 select 를 타일처럼 — select 가 칸 전체를 덮어 어디를 눌러도 목록이 열리고,
-     아이콘(::before)은 클릭을 흘려보낸다. */
-  .map-tile-select{position:relative;border:1px solid var(--border);background:var(--field);color:var(--ink)}
+  /* 배경지도·자전거길 select 는 고른 값이 보여야 하므로 글자를 남긴 작은 칩이다 — select 가 칸 전체를
+     덮어 어디를 눌러도 목록이 열리고, 아이콘(::before)·▾(::after)는 클릭을 흘려보낸다. */
+  .map-tile-select{position:relative;display:inline-flex;align-items:stretch;height:34px;padding:0;border:1px solid var(--border);
+    border-radius:8px;background:var(--field);color:var(--ink);box-shadow:0 1px 2px rgba(15,23,42,.06)}
   .map-tile-select:hover,.map-tile-select:focus-within{background:var(--panel-hover);border-color:var(--accent)}
-  .map-tile-select{padding:0}
-  .map-tile-select::before{position:absolute;top:10px;left:50%;transform:translateX(-50%);pointer-events:none}
-  /* select 는 흐름 안에 두어 가장 긴 선택지 폭만큼 타일이 넓어진다(절대 위치면 글자가 잘린다). */
-  .map-tile-select>.map-select{align-self:stretch;height:100%;padding:31px 9px 6px;border:0;border-radius:inherit;
-    background:transparent;color:inherit;font-size:11.5px;text-align:center;text-align-last:center;cursor:pointer;
-    -webkit-appearance:none;appearance:none}
+  .map-tile-select::before{position:absolute;top:50%;left:9px;width:18px;height:18px;transform:translateY(-50%);pointer-events:none}
+  .map-tile-select::after{content:"";position:absolute;top:50%;right:10px;width:5px;height:5px;border:solid currentColor;
+    border-width:0 1.5px 1.5px 0;transform:translateY(-70%) rotate(45deg);opacity:.6;pointer-events:none}
+  /* select 는 흐름 안에 두어 가장 긴 선택지 폭만큼 칩이 넓어진다(절대 위치면 글자가 잘린다). */
+  .map-tile-select>.map-select{align-self:stretch;height:100%;padding:0 24px 0 32px;border:0;border-radius:inherit;
+    background:transparent;color:inherit;font-size:12px;cursor:pointer;-webkit-appearance:none;appearance:none}
   .map-tile-select>.map-select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   .map-tile-select>.map-select option{color:var(--ink);background:var(--panel)}
-  /* 영어 타일만 같은 폭으로 맞춘다. 아이콘은 고정하고 라벨에는 두 줄 공간을 둔다.
-     lang 를 되돌리면 위의 한국어용 크기와 배치가 그대로 적용된다. */
-  html[lang="en"] .map-tools-main>.map-btn,
-  html[lang="en"] .map-tools-main>.map-tile-select{flex:0 0 92px;width:92px;min-width:0;height:68px}
-  html[lang="en"] .map-tools-main>.map-btn{position:relative;display:block;padding:35px 6px 6px;
-    white-space:normal;overflow-wrap:anywhere;line-height:1.2;text-align:center}
-  html[lang="en"] .map-tools-main>.map-btn::before{position:absolute;top:10px;left:50%;transform:translateX(-50%)}
-  html[lang="en"] .map-tools-main>.map-btn[hidden]{display:none}
-  html[lang="en"] .map-tools-main>.map-tile-select>.map-select{width:100%;min-width:0;padding:35px 6px 6px;
-    overflow:hidden;text-overflow:ellipsis}
   /* 머리말 줄 — 검색칸이 남는 폭을 차지하고, 핀 아이콘과 돋보기 단추를 한 칸 안에 넣는다. */
   .map-bar>.map-title{flex:0 1 200px}
   .map-bar>.map-search{flex:1 1 280px;min-width:200px;align-items:stretch;gap:0;border:1px solid var(--border);
@@ -1159,6 +1160,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-bar .map-search-submit::before{width:16px;height:16px}
   .map-bar .has-map-icon:not(.map-search){display:inline-flex;align-items:center;gap:6px}
   .map-bar .has-map-icon[hidden]{display:none}
+  .map-bar .map-search-submit.has-map-icon{gap:0}
   .map-bar .has-map-icon:not(.map-search-submit)::before{width:16px;height:16px}
   .map-bar.has-tools{border-bottom-color:color-mix(in srgb,var(--border) 45%,transparent)}
   .map-title{flex:1 1 180px;min-width:120px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);
@@ -8142,6 +8144,31 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-drive-traffic-legend{display:flex;align-items:center;flex-wrap:wrap;gap:6px 11px;margin-top:10px;padding:7px 9px;border-radius:8px;background:var(--field);font-size:12px}.map-drive-traffic-legend[hidden]{display:none}.map-drive-traffic-legend span{display:inline-flex;align-items:center;gap:4px}.map-drive-traffic-legend i{width:18px;height:5px;border-radius:999px}
 .map-drive-guides{margin-top:12px}.map-drive-guides h4{margin-bottom:7px}.map-drive-guide-list{display:grid;gap:5px;max-height:240px;overflow:auto}.map-drive-guide{border:1px solid var(--border);border-radius:8px;background:var(--field);color:var(--ink);padding:7px 9px;text-align:left;font:inherit;font-size:12px;cursor:pointer}.map-drive-guide:hover{border-color:#2563eb;background:color-mix(in srgb,#2563eb 8%,var(--field))}
 .map-drive-traffic-tip,.map-drive-guide-pin{border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font-size:12px}.map-drive-traffic-tip::before,.map-drive-guide-pin::before{display:none}
+.leaflet-tooltip.map-drive-traffic-tip{padding:3px 11px 3px 3px;border-radius:999px;white-space:nowrap}
+.map-drive-traffic-body{display:flex;align-items:center;gap:7px}
+.map-drive-traffic-state{flex:none;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+.map-drive-traffic-road{font-size:13px;font-weight:600}
+.map-drive-traffic-facts{color:var(--muted,#64748b);font-variant-numeric:tabular-nums}
+.leaflet-tooltip.map-point-tip{padding:3px 10px 3px 7px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#0f172a;box-shadow:0 2px 8px #0002;font:12px/1.3 sans-serif;white-space:nowrap}
+.map-point-tip-body{display:flex;flex-direction:column}
+.map-point-tip-line{display:flex;align-items:center;gap:6px}
+.map-point-tip-mark{flex:none;width:9px;height:9px;border-radius:50%;background:var(--point-color)}
+.map-point-tip-name{font-size:13px;font-weight:600}
+.map-point-tip-sub{color:#64748b}
+.leaflet-tooltip.map-point-tip.is-action{padding:0;border-radius:8px;overflow:hidden}
+.map-point-tip.is-action .map-point-tip-body{padding:5px 10px 5px 14px;box-shadow:inset 5px 0 var(--point-color)}
+.map-point-tip.is-action .map-point-tip-mark{display:none}
+.map-point-tip-hint{font-size:11px;color:#64748b}
+.leaflet-tooltip.map-cluster-tip{padding:7px 10px 8px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#0f172a;box-shadow:0 2px 10px #0003;font:12px/1.35 sans-serif;white-space:nowrap}
+.map-cluster-tip-body{display:flex;flex-direction:column;min-width:160px;max-width:240px}
+.map-cluster-tip-head{display:flex;align-items:baseline;gap:10px}
+.map-cluster-tip-count{font-size:13px;font-weight:600}
+.map-cluster-tip-hint{margin-left:auto;font-size:11px;color:#64748b}
+.map-cluster-tip-list{display:flex;flex-direction:column;gap:2px;margin-top:5px}
+.map-cluster-tip-row{display:flex;align-items:center;gap:6px;min-width:0}
+.map-cluster-tip-dot{flex:none;width:8px;height:8px;border-radius:50%}
+.map-cluster-tip-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.map-cluster-tip-more{padding-left:14px;font-size:11px;color:#64748b}
 .map-drive-traffic-line{stroke-linecap:round;stroke-linejoin:round}
 .map-drive-settings-note{min-height:18px;margin:9px 0 0;color:var(--muted);font-size:12px}
 .map-drive-alt-line{filter:drop-shadow(0 1px 1px #fff9)}
@@ -8843,7 +8870,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
    display:none 이면 시험의 selectOption 이 '보이지 않음'으로 멈춰 투명하게만 겹쳐 둔다. */
 .map-subway-picker{position:relative;display:inline-flex}
 .map-subway-picker>select.map-subway-line{position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none}
-.map-subway-picker-btn{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;border:1px solid var(--border);
+.map-subway-picker-btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 10px;border:1px solid var(--border);
   border-radius:8px;background:var(--field);color:var(--ink);font:inherit;font-size:12px;white-space:nowrap;cursor:pointer}
 .map-subway-picker-btn:hover,.map-subway-picker-btn[aria-expanded="true"]{background:var(--panel-hover);border-color:var(--accent)}
 .map-subway-picker-btn.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--field))}
@@ -9071,6 +9098,27 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-ship-tip-side{flex:none;max-width:110px;margin-left:auto;padding-left:6px;overflow:hidden;text-overflow:ellipsis;color:#94b8c2}
 .map-ship-tip-side:empty{display:none}
 .map-ship-tip-foot{margin-top:2px;font-size:11px;color:#94b8c2}
+.leaflet-tooltip.map-subway-train-tip{padding:8px 11px 9px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#0f172a;box-shadow:0 3px 12px #0003;font:13px/1.3 sans-serif;white-space:nowrap}
+.map-subway-tip-body{--subway-line:#64748b;display:flex;flex-direction:column;min-width:200px}
+.map-subway-tip-head{display:flex;align-items:center;gap:6px}
+.map-subway-tip-badge{flex:none;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:700}
+.map-subway-tip-no{font-weight:600}
+.map-subway-tip-meta{margin-left:auto;padding-left:10px;font-size:11px;color:#64748b}
+.map-subway-tip-meta .is-express{color:#b91c1c;font-weight:600}.map-subway-tip-meta .is-last{color:#b45309;font-weight:600}
+.map-subway-tip-ends{display:flex;justify-content:space-between;gap:16px;margin-top:8px;font-size:12px}
+.map-subway-tip-bar{position:relative;height:6px;margin:4px 6px 3px;border-radius:3px;background:#e2e8f0}
+.map-subway-tip-fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;background:var(--subway-line)}
+.map-subway-tip-knob{position:absolute;top:50%;left:0;width:12px;height:12px;box-sizing:border-box;border:2px solid var(--subway-line);border-radius:50%;background:#fff;transform:translate(-50%,-50%)}
+.leaflet-tooltip.map-bus-tip{padding:0;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#0f172a;box-shadow:0 3px 12px #0003;font:13px/1.3 sans-serif;white-space:nowrap;overflow:hidden}
+.map-bus-tip-body{display:flex;flex-direction:column;min-width:190px}
+.map-bus-tip-head{display:flex;align-items:center;gap:6px;padding:6px 10px;color:#fff}
+.map-bus-tip-ico{flex:none;width:15px;height:15px;background:currentColor;-webkit-mask:var(--map-icon) center/contain no-repeat;mask:var(--map-icon) center/contain no-repeat}
+.map-bus-tip-number{font-weight:700}
+.map-bus-tip-type{font-size:11px;opacity:.85}
+.map-bus-tip-plate{margin-left:auto;padding-left:12px;font-size:11px}
+.map-bus-tip-station{padding:7px 10px 0;font-size:13px}
+.map-bus-tip-foot{padding:4px 10px 7px;font-size:11px;color:#64748b}
+.map-bus-tip-warn{color:#c2410c;font-weight:600}
 /* 날씨(기상청) — 항공·여객선 칸과 같은 자리·모양. */
 .map-weather-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
 .map-weather-panel[hidden],.map-weather-now[hidden],.map-weather-hours[hidden],.map-weather-days[hidden]{display:none}
@@ -9604,6 +9652,9 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .trip-map-photo-head strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .trip-map-photo-head span,.trip-map-photo-meta{color:var(--muted);font-size:11px;white-space:nowrap}
 .trip-map-photo-meta{margin-top:3px;overflow:hidden;text-overflow:ellipsis}
+.leaflet-tooltip.trip-map-spot-tip{padding:0;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 2px 10px #0003;white-space:normal}
+.trip-map-spot-card{box-sizing:border-box;width:max-content;min-width:170px;max-width:250px}
+.trip-map-spot-note{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:5px;font-size:12px;overflow-wrap:anywhere}
 .trip-map-photo-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:8px}
 .trip-map-photo-gallery[data-count="1"]{grid-template-columns:1fr}
 .trip-map-photo-thumb{position:relative;display:block;width:100%;height:76px;padding:0;border:0;border-radius:7px;overflow:hidden;background:var(--panel-2);cursor:zoom-in}

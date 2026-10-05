@@ -448,7 +448,7 @@ const MNNearbyTransit = (() => {
           if (controller.signal.aborted || seq !== previewSeq || destroyed) return;
           const reason = error && error.message || "";
           // 키·한도·런처 없음은 다시 물어도 같다. 다시 켜기 전까지 미리보기에서는 묻지 않는다(누르면 창이 까닭을 알려 준다).
-          if (/^(bus-key-required|bus-key-invalid|bus-quota|subway-key-required|subway-key-invalid|transit-unavailable)$/.test(reason)) previewOff[kind] = true;
+          if (/^(bus-key-required|bus-key-invalid|bus-quota|subway-key-required|subway-key-invalid|subway-quota|transit-unavailable)$/.test(reason)) previewOff[kind] = true;
           parts.note.textContent = t("눌러서 도착 정보 보기");
           if (preview && preview.update) preview.update();
         } finally { if (previewAbort === controller) previewAbort = null; }

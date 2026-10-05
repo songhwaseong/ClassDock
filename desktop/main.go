@@ -1146,7 +1146,8 @@ func setSubwayKey(value string) {
 }
 
 /* 이 API 는 오류도 HTTP 200 으로 준다 — 본문의 code 를 봐야 한다(수출입은행 환율과 같은 함정).
-   INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선).
+   INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선)
+   · ERROR-337 하루 한도(1,000회) 초과 — 자정까지 풀리지 않으니 화면이 '다시 시도' 대신 멈추게 따로 알린다.
    정상일 때는 code 가 errorMessage 안에 있고, 오류일 때는 맨 바깥에 있다. */
 func subwayResultCode(data []byte) string {
 	var parsed struct {
@@ -1247,6 +1248,8 @@ func fetchSubway(endpoint string) ([]byte, string) {
 		return data, "" // INFO-200 은 '지금 이 노선에 열차가 없다' 는 정상 답이다
 	case "INFO-100":
 		return nil, "subway-key-invalid"
+	case "ERROR-337":
+		return nil, "subway-quota"
 	default:
 		return nil, "subway-failed"
 	}

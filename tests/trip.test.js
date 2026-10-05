@@ -433,7 +433,9 @@ test("사진이 있는 지도 표식은 미리보기로, 없는 표식은 이름
   assert.match(source, /if \(!\(spot\.photos \|\| \[\]\)\.some\(name => assets\.has\(name\)\) && !\(spot\.videos \|\| \[\]\)\.some\(v => assets\.has\(v\.v\)\)\)\{/,
     "영상만 있는 장소도 미리보기를 띄운다");
   assert.match(source, /tripOpenVideoPlayer\(videos\.map/);
-  assert.match(source, /marker\.bindTooltip\(markerNumber/);
+  // 사진·영상 없는 핀은 사진만 뺀 같은 모양 카드(번호·이름·종류, 시각·주소, 메모 두 줄).
+  assert.match(source, /marker\.bindTooltip\(\(\) => tripMapSpotTip\(spot, markerNumber\), \{ direction:"top", className:"trip-map-spot-tip" \}\)/);
+  assert.match(css, /\.trip-map-spot-note\{[^}]*-webkit-line-clamp:2/);
   assert.match(source, /marker\.on\("mouseover", openPreview\)/);
   assert.match(source, /marker\.on\("click", openPreview\)/);
   assert.match(css, /\.trip-map-photo-gallery\{[^}]*grid-template-columns:repeat\(2/);
