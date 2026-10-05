@@ -172,9 +172,9 @@ const MNMarketDays = (() => {
     L.DomEvent.disableClickPropagation(panel); L.DomEvent.disableScrollPropagation(panel);
     if (typeof movePanel === "function") movePanel(panel, heading);
 
-    const pane = map.createPane("mapMarketPane"); pane.style.zIndex = "615"; pane.classList.add("map-market-pane");
-    // 점은 SVG 로 그린다. 캔버스는 지도 전체를 덮는 한 장이라 아래 층(주변 교통·표시)의 마우스를 가로챘고,
-    // 층을 꺼도 렌더러가 남아 계속 막았다. SVG 바탕은 CSS 로 마우스를 통과시키고 점(path)만 받는다.
+    const pane = map.createPane("mapMarketPane"); pane.style.zIndex = "615";
+    // 점은 SVG 로 그린다. 캔버스는 지도 전체를 덮는 한 장이 마우스를 다 받아 아래 층(주변 교통·표시)을 가렸고,
+    // 층을 꺼도 렌더러가 남아 계속 막았다. SVG 는 빈 바탕이 마우스를 통과시키고 점(path)만 받는다.
     const renderer = L.svg({ pane:"mapMarketPane", padding:0.3 });
     const layer = L.layerGroup();
     const capability = new AbortController();

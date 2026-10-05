@@ -9121,8 +9121,6 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-market-go-meta{font-size:11px;opacity:.75;font-variant-numeric:tabular-nums}
 .map-market-more{padding:6px 8px;font-size:11px;opacity:.75}
 .map-market-foot .map-market-refresh{padding:0 6px;min-height:22px;font-size:11px}
-/* 장날 점 SVG 바탕은 지도 전체를 덮으므로 마우스를 통과시킨다(점 path 는 leaflet-interactive 로 받음) */
-.map-market-pane > svg{pointer-events:none}
 /* 장날 점 이름표(간판형): 짙은 알약 + 주황 시장 그림. 상설은 회색 그림 */
 .leaflet-tooltip.map-market-tip{padding:4px 13px 4px 4px;border:0;border-radius:999px;background:#3a2a1c;color:#fff;box-shadow:0 2px 8px #0003;font:600 13px/1.2 sans-serif}
 .leaflet-tooltip-top.map-market-tip::before{border-top-color:#3a2a1c}
