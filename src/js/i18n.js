@@ -1597,6 +1597,12 @@
     "모든 기능을 예시와 함께 설명한 문서를 따로 엽니다": "Open a document explaining every feature with examples in a separate window",
     "자세한 사용법 문서": "Detailed guide",
     "라이선스": "Licenses",
+    "개발판 (빌드 전 원본)": "development (unbuilt source)",
+    "빌드": "build",
+    "수정본": "modified",
+    "버전 정보 복사 (오류를 알릴 때 붙여 넣으세요)": "Copy version info (paste it when reporting a problem)",
+    "버전 정보를 복사했어요.": "Version info copied.",
+    "버전 정보를 복사하지 못했어요.": "Couldn't copy the version info.",
     "앱에 들어 있는 오픈소스 라이브러리·글꼴·음원의 라이선스와 저작자 표시를 봅니다":
       "View licenses and attributions for the open-source libraries, fonts, and sounds bundled in the app",
     "팝업이 막혀 라이선스 고지를 열지 못했어요. 브라우저 설정에서 이 사이트의 팝업을 허용해 주세요.":

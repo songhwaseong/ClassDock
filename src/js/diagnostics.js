@@ -367,6 +367,7 @@ const MNDiagnostics = (() => {
   function exportText(events){
     return JSON.stringify({
       format:"classdock-diagnostics", version:1, exportedAt:new Date().toISOString(),
+      app:typeof appVersionLabel === "function" ? appVersionLabel() : undefined,
       privacy:"문서 본문·코드·API 키·개인 경로 제외", events:events || panelEvents
     }, null, 2);
   }

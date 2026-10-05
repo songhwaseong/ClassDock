@@ -7,12 +7,17 @@
 #   -Jdk       jdk\                   자바 실행·채점용 JDK 21 (압축 약 200MB, 풀면 약 330MB)
 #   -Full      셋 다 / -Lite 셋 다 빼기(묻지 않음)
 # 예: pack.bat -Full
+#
+# 버전: 번호는 package.json 의 "version" 한 곳에 있다. 빌드한 앱 내용의 지문을 지난 배포 기록(release.json)과
+# 비교해 같으면 그대로 두고, 바뀌었으면 올릴지 묻는다(스위치를 줘서 묻지 않을 때는 끝자리를 자동으로 올린다).
+#   -Version 1.2.0   번호를 직접 정하기
 param(
   [switch]$Ffmpeg,
   [switch]$JavaLibs,
   [switch]$Jdk,
   [switch]$Full,
-  [switch]$Lite
+  [switch]$Lite,
+  [string]$Version
 )
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
@@ -40,7 +45,9 @@ Write-Host ""
 $ffmpegSrc = Join-Path $PSScriptRoot "ffmpeg.exe"
 $javaLibsSrc = Join-Path $PSScriptRoot "java-libs"
 if ($Full) { $Ffmpeg = $true; $JavaLibs = $true; $Jdk = $true }
-if (-not ($Full -or $Lite -or $Ffmpeg -or $JavaLibs -or $Jdk)) {
+$interactive = -not ($Full -or $Lite -or $Ffmpeg -or $JavaLibs -or $Jdk)
+if ($Version -and $Version -notmatch '^\d+\.\d+\.\d+$') { Fail "버전은 1.2.3 모양이어야 합니다: $Version" }
+if ($interactive) {
   Write-Host "인터넷 없는 PC 에서도 쓰게 하려면 아래를 함께 담으세요. (안 담아도 인터넷이 있으면 앱이 처음 쓸 때 받습니다)"
   if (Test-Path $ffmpegSrc) {
     $Ffmpeg = AskYesNo "  ffmpeg (영상 변환, 약 100MB) 담을까요?"
@@ -65,6 +72,50 @@ Write-Host "[1/5] 오프라인 HTML 빌드 (node build-offline.js)..."
 if ($LASTEXITCODE -ne 0) { Fail "오픈소스 라이선스 고지(THIRD_PARTY_NOTICES.txt) 생성 실패." }
 & node build-offline.js
 if ($LASTEXITCODE -ne 0) { Fail "HTML 빌드 실패. node 가 설치돼 있는지 확인하세요." }
+
+# 버전 정하기 — 앱 내용의 지문(빌드 날짜·커밋은 뺀 것)을 지난 배포와 비교한다
+$statusJson = & node tools/release.js status
+if ($LASTEXITCODE -ne 0) { Fail "버전 정보를 읽지 못했습니다 (package.json 의 version 확인)." }
+$status = $statusJson | ConvertFrom-Json
+$current = $status.version
+$appVersion = $current
+if ($Version) {
+  $appVersion = $Version
+  Write-Host "      버전: $appVersion (직접 지정)"
+} elseif (-not $status.last) {
+  Write-Host "      첫 배포 기록입니다. 버전: $current"
+} elseif ($status.fingerprint -eq $status.last.fingerprint) {
+  Write-Host "      지난 배포($($status.last.version), $($status.last.date))와 앱 내용이 같습니다. 버전: $current 그대로"
+} elseif ($current -ne $status.last.version) {
+  Write-Host "      앱 내용이 바뀌었고 번호는 이미 $current 로 정해 두었습니다."
+} else {
+  $patchVersion = (& node tools/release.js next patch).Trim()
+  $minorVersion = (& node tools/release.js next minor).Trim()
+  if ($interactive) {
+    Write-Host ""
+    Write-Host "  지난 배포($current, $($status.last.date)) 뒤로 앱 내용이 바뀌었습니다. 버전을 고르세요."
+    Write-Host "    [1] $patchVersion   고침 (기본)"
+    Write-Host "    [2] $minorVersion   기능 추가"
+    Write-Host "    [3] $current   그대로"
+    Write-Host "    또는 1.2.3 처럼 직접 입력"
+    $pick = (Read-Host "  번호 [1]").Trim()
+    if ($pick -eq "2") { $appVersion = $minorVersion }
+    elseif ($pick -eq "3") { $appVersion = $current }
+    elseif ($pick -match '^\d+\.\d+\.\d+$') { $appVersion = $pick }
+    else { $appVersion = $patchVersion }
+    Write-Host ""
+  } else {
+    $appVersion = $patchVersion
+    Write-Host "      앱 내용이 바뀌어 버전을 $appVersion 으로 올립니다 (직접 정하려면 -Version)."
+  }
+}
+if ($appVersion -ne $current) {
+  & node tools/release.js set-version $appVersion
+  if ($LASTEXITCODE -ne 0) { Fail "package.json 버전을 바꾸지 못했습니다." }
+  Write-Host "      package.json 버전: $current -> $appVersion. 새 번호로 HTML 을 다시 빌드합니다..."
+  & node build-offline.js
+  if ($LASTEXITCODE -ne 0) { Fail "HTML 빌드 실패." }
+}
 
 # [2/5] exe 재빌드
 Write-Host "[2/5] exe 빌드 (desktop\build.bat)..."
@@ -154,7 +205,7 @@ if ($missing.Count -gt 0) {
 }
 
 $readme = @"
-ClassDock - 테스트용 패키지
+ClassDock $appVersion - 테스트용 패키지 ($(Get-Date -Format "yyyy-MM-dd") 빌드)
 ================================
 
 ■ 실행 방법
@@ -179,17 +230,22 @@ $($extraLines -join "`r`n")
 "@
 Set-Content -Path (Join-Path $stage "먼저읽어주세요.txt") -Value $readme -Encoding UTF8
 
-# [5/5] 압축 (dist\ClassDock-테스트-YYYY-MM-DD[-전체].zip)
+# [5/5] 압축 (dist\ClassDock-버전-YYYY-MM-DD[-전체].zip)
 Write-Host "[5/5] 압축 중... (JDK·ffmpeg 를 담으면 몇 분 걸립니다)"
 if (-not (Test-Path "dist")) { New-Item -ItemType Directory -Path "dist" | Out-Null }
 $today = Get-Date -Format "yyyy-MM-dd"
 $suffix = ""
 if ($Ffmpeg -and $Jdk) { $suffix = "-전체" } elseif ($Ffmpeg -or $Jdk -or $JavaLibs) { $suffix = "-추가" }
-$zip = "dist\ClassDock-테스트-$today$suffix.zip"
+$zip = "dist\ClassDock-$appVersion-$today$suffix.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
 
 Remove-Item $stage -Recurse -Force
+
+# 배포 기록(release.json) — 다음 pack 때 앱 내용이 바뀌었는지 이 기록과 비교한다. 같은 번호·같은 내용이면 늘리지 않는다.
+$recorded = & node tools/release.js record $zip
+if ($LASTEXITCODE -ne 0) { Write-Host ">> 배포 기록(release.json)을 남기지 못했습니다. 다음 pack 때 버전을 다시 묻게 됩니다." -ForegroundColor Yellow }
+elseif ("$recorded".Trim() -eq "recorded") { Write-Host "      release.json 에 $appVersion 배포를 기록했습니다 (package.json·release.json 은 커밋해 두세요)." }
 
 $info = Get-Item $zip
 Write-Host ""

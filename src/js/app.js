@@ -2158,7 +2158,12 @@ function wire(){
   if (byId("petBuilderClose")) byId("petBuilderClose").onclick = () => { byId("petBuilderModal").hidden = true; };
   document.querySelectorAll(".tool-menu").forEach(menu => menu.querySelectorAll("button").forEach(button => button.addEventListener("click", () => { menu.open = false; })));
   document.addEventListener("click", (e) => document.querySelectorAll(".tool-menu[open]").forEach(menu => { if (!menu.contains(e.target)) menu.open = false; }));
-  byId("helpOpen").onclick = () => { byId("helpModal").hidden = false; };
+  byId("helpOpen").onclick = () => { renderHelpVersion(); byId("helpModal").hidden = false; };
+  const helpVersionCopyBtn = byId("helpVersionCopy");
+  if (helpVersionCopyBtn){
+    if (typeof setUiIcon === "function") setUiIcon(helpVersionCopyBtn, "copy", helpVersionCopyBtn.title);
+    helpVersionCopyBtn.onclick = () => copyAppVersion();
+  }
   byId("helpClose").onclick = () => { byId("helpModal").hidden = true; };
 
   // 처음 사용 안내(온보딩): 최초 1회 자동으로 열고, 도움말의 '처음 사용 안내 보기'로 다시 볼 수 있다.
@@ -2646,6 +2651,50 @@ function openThirdPartyNotices(){
   }
   if (!opened && typeof toast === "function"){
     toast("팝업이 막혀 라이선스 고지를 열지 못했어요. 브라우저 설정에서 이 사이트의 팝업을 허용해 주세요.", 4200, { type: "error" });
+  }
+}
+
+/* ===== 앱 버전 =====
+   단일 파일 빌드(build-offline.js)가 package.json 의 버전과 빌드 날짜·커밋을 #mnBuildInfo 블록으로 심는다.
+   원본 HTML 을 그대로 열면 블록이 없어 null 이고, 도움말에는 '개발판'으로 나온다. */
+let _appBuildInfo;
+function appBuildInfo(){
+  if (_appBuildInfo !== undefined) return _appBuildInfo;
+  _appBuildInfo = null;
+  const block = document.getElementById("mnBuildInfo");
+  if (block){
+    try {
+      const info = JSON.parse(block.textContent || "");
+      if (info && typeof info.version === "string") _appBuildInfo = info;
+    } catch(e){ console.warn("빌드 정보를 읽지 못했어요:", e); }
+  }
+  return _appBuildInfo;
+}
+function appVersionLabel(){
+  const _t = (s) => (typeof window.t === "function" ? window.t(s) : s);
+  const info = appBuildInfo();
+  if (!info) return "ClassDock " + _t("개발판 (빌드 전 원본)");
+  const parts = ["ClassDock " + info.version];
+  if (info.date) parts.push(info.date + " " + _t("빌드"));
+  if (info.commit) parts.push(info.commit + (info.dirty ? "+" + _t("수정본") : ""));
+  return parts.join(" · ");
+}
+function renderHelpVersion(){
+  const text = byId("helpVersionText");
+  if (text) text.textContent = appVersionLabel();
+}
+async function copyAppVersion(){
+  const text = appVersionLabel() + "\n" + navigator.userAgent;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+    else {
+      const area = document.createElement("textarea");
+      area.value = text; area.style.position = "fixed"; area.style.opacity = "0";
+      document.body.appendChild(area); area.select(); document.execCommand("copy"); area.remove();
+    }
+    if (typeof toast === "function") toast("버전 정보를 복사했어요.", 2000);
+  } catch(_){
+    if (typeof toast === "function") toast("버전 정보를 복사하지 못했어요.", 2400, { type: "error" });
   }
 }
 

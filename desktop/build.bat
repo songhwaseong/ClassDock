@@ -13,8 +13,11 @@ if errorlevel 1 (
 )
 
 echo [2/3] Building exe...
+rem Version info for the exe file properties; build-offline.js writes it from package.json.
+set "VERSION_CS="
+if exist "AssemblyInfo.generated.cs" set "VERSION_CS=AssemblyInfo.generated.cs"
 if exist "%CSC%" (
-  "%CSC%" /nologo /target:winexe /win32icon:classdock.ico /r:System.IO.Compression.dll /r:System.Security.dll /r:System.Web.Extensions.dll /out:"..\ClassDock.exe" /resource:app.html,app.html /resource:python_kernel.py,python_kernel.py /resource:db_worker.py,db_worker.py /resource:npm_package_runner.js,npm_package_runner.js /resource:ssh_shell_integration.bash,ssh_shell_integration.bash "launcher.cs" "ssh_terminal.cs" "ssh_files.cs" "world_wind.cs"
+  "%CSC%" /nologo /target:winexe /win32icon:classdock.ico /r:System.IO.Compression.dll /r:System.Security.dll /r:System.Web.Extensions.dll /out:"..\ClassDock.exe" /resource:app.html,app.html /resource:python_kernel.py,python_kernel.py /resource:db_worker.py,db_worker.py /resource:npm_package_runner.js,npm_package_runner.js /resource:ssh_shell_integration.bash,ssh_shell_integration.bash "launcher.cs" "ssh_terminal.cs" "ssh_files.cs" "world_wind.cs" %VERSION_CS%
 ) else (
   echo ^>^> C# compiler not found; building Go fallback without PowerPoint PPTX-to-PDF conversion.
   go build -ldflags "-s -w -H=windowsgui" -o "..\ClassDock.exe" .

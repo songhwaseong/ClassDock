@@ -299,6 +299,26 @@ ${esc(read("THIRD_PARTY_NOTICES.txt"))}
 </script>`
 );
 
+// 앱 버전·빌드 날짜·커밋. 도움말 창이 읽어 보여 주고, exe 파일 속성에도 같은 번호를 싣는다
+// (desktop/build.bat 이 아래 AssemblyInfo.generated.cs 를 함께 컴파일한다).
+const release = require("./tools/release.js");
+const buildInfo = release.buildInfo();
+const buildInfoPlaceholder = "<!--MN_BUILD_INFO-->";
+requireTag(html, buildInfoPlaceholder, "Build info placeholder");
+html = html.replace(buildInfoPlaceholder, () => release.buildInfoBlock(buildInfo));
+const assemblyVersion = buildInfo.version + ".0";
+const informationalVersion = buildInfo.version + (buildInfo.commit ? "+" + buildInfo.commit + (buildInfo.dirty ? ".dirty" : "") : "");
+fs.writeFileSync(path.join(root, "desktop", "AssemblyInfo.generated.cs"), [
+  "// build-offline.js 가 만드는 파일이다. 직접 고치지 말 것(버전은 package.json).",
+  "using System.Reflection;",
+  '[assembly: AssemblyTitle("ClassDock")]',
+  '[assembly: AssemblyProduct("ClassDock")]',
+  `[assembly: AssemblyVersion("${assemblyVersion}")]`,
+  `[assembly: AssemblyFileVersion("${assemblyVersion}")]`,
+  `[assembly: AssemblyInformationalVersion("${informationalVersion}")]`,
+  ""
+].join("\n"), "utf8");
+
 const out = "classdock-offline.html";
 if (/\b(?:src|href)=["']src\//.test(html)) {
   console.error("Offline output still contains local source references.");

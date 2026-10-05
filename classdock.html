@@ -970,6 +970,7 @@
 </div>
 <div class="modal" id="helpModal" hidden>
   <div class="modal-card help-card"><h3>도움말</h3>
+  <div class="help-version"><span id="helpVersionText">ClassDock</span><button class="btn help-version-copy" id="helpVersionCopy" type="button" title="버전 정보 복사 (오류를 알릴 때 붙여 넣으세요)">복사</button></div>
   <div class="help-section-title">기능 둘러보기</div>
   <ul class="help-features">
     <li data-i18n="help.f1"><b>파일 열기</b> — 끌어다 놓거나 폴더째로. PDF·Word·Excel·PowerPoint·한글·이미지·코드·ZIP을 한꺼번에 열 수 있어요.</li>
@@ -1053,6 +1054,9 @@ window.FileReaderJS = window.FileReaderJS || {
 <!-- 오픈소스 라이선스 고지 자리. 단일 파일 빌드는 THIRD_PARTY_NOTICES.txt 를 통째로 심는다
      (라이브러리가 exe 안에 인라인되므로 고지도 함께 실어야 한다). 도움말에서 열 때만 읽는다. -->
 <!--MN_NOTICES-->
+<!-- 앱 버전·빌드 정보 자리. 단일 파일 빌드는 package.json 의 버전과 빌드 날짜·커밋을 JSON 블록으로
+     심는다(tools/release.js). 원본 HTML 에서는 비어 있어 도움말에 '개발판'으로 나온다. -->
+<!--MN_BUILD_INFO-->
 <script src="src/js/lazy.js"></script>
 <script src="src/js/interaction-core.js"></script>
 <script src="src/js/context-menu.js"></script>

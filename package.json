@@ -1,5 +1,6 @@
 {
   "name": "classdock-local",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "build:spellcheck-worker": "node tools/build-korean-spell-worker.mjs",

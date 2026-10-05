@@ -88,4 +88,13 @@ for (const [id, [label, expectedCount]] of Object.entries(expectedMusicSamples))
 if (!offline.includes('data-mn-notices="THIRD_PARTY_NOTICES.txt"')) fail("offline third-party notices block is missing");
 if (!offline.includes("tonejs-instruments")) fail("offline third-party notices lack the sound sample attribution");
 
+// 도움말의 버전 표시와 오류 보고는 이 블록을 읽는다. 번호는 package.json 과 같아야 한다.
+const buildInfoBlock = /<script type="application\/json" id="mnBuildInfo">([^<]+)<\/script>/.exec(offline);
+if (!buildInfoBlock) fail("offline build info block is missing");
+let buildInfo;
+try { buildInfo = JSON.parse(buildInfoBlock[1]); }
+catch(_) { fail("offline build info is invalid JSON"); }
+const packageVersion = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+if (buildInfo.version !== packageVersion) fail(`offline build version ${buildInfo.version} does not match package.json ${packageVersion}`);
+
 console.log(`릴리스 산출물 검사 완료: vendor ${manifest.vendorScripts.length}개, 단일 HTML ${Math.round(fs.statSync(offlinePath).size / 1024)} KB`);
