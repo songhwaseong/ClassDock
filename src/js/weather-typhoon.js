@@ -9,7 +9,7 @@
 const MNTyphoonLayer = (() => {
   const SYMBOL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">'
     + '<circle cx="12" cy="12" r="3.4"/><path d="M12 8.6C12 4.2 15.2 2.6 19 3.1M12 15.4c0 4.4-3.2 6-7 5.5"/></svg>';
-  function mount({ map, host, word = (ko, en) => ko, onChange = () => {}, api = typeof MNWeatherApi !== "undefined" ? MNWeatherApi : null }){
+  function mount({ map, host, word = ko => ko, onChange = () => {}, api = typeof MNWeatherApi !== "undefined" ? MNWeatherApi : null }){
     const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
     const label = el("label", "map-wind-color-label map-typhoon-toggle"), check = el("input", "map-typhoon-check"), checkText = el("span");
     check.type = "checkbox"; label.append(check, checkText);

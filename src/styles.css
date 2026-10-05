@@ -9016,6 +9016,21 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-flight-badge.is-delayed{background:#d97706}.map-flight-badge.is-cancelled{background:#c0392b}.map-flight-badge.is-diverted{background:#7c3aed}
 .map-flight-gate{font-size:11px;opacity:.75}
 .map-flight-empty{padding:8px;font-size:12px;opacity:.85}
+/* 항공 표시 이름표(출발 게시판형): 짙은 판 + 노란 공항 코드·편수. 선 이름표는 sticky 라 꼬리가 좌우로도 붙는다 */
+.leaflet-tooltip.map-flight-tip{padding:8px 12px 9px;border:0;border-radius:8px;background:#111827;color:#f8fafc;box-shadow:0 3px 12px #0006;font:13px/1.3 sans-serif;white-space:nowrap}
+.leaflet-tooltip-top.map-flight-tip::before{border-top-color:#111827}.leaflet-tooltip-bottom.map-flight-tip::before{border-bottom-color:#111827}
+.leaflet-tooltip-left.map-flight-tip::before{border-left-color:#111827}.leaflet-tooltip-right.map-flight-tip::before{border-right-color:#111827}
+.map-flight-tip-body{display:flex;flex-direction:column;gap:4px;min-width:170px}
+.map-flight-tip-head{display:flex;align-items:center;gap:6px;font-size:11px;color:#94a3b8;letter-spacing:.3px}
+.map-flight-tip-ico{flex:none;width:15px;height:15px;background:#facc15;-webkit-mask:var(--map-icon) center/contain no-repeat;mask:var(--map-icon) center/contain no-repeat}
+.map-flight-tip-main{display:flex;align-items:baseline;gap:8px}
+.map-flight-tip-code{font:600 20px/1.1 Consolas,ui-monospace,monospace;color:#facc15;letter-spacing:2px}
+.map-flight-tip-name{font-weight:600}
+.map-flight-tip-count{margin-left:auto;padding-left:12px;font:600 19px/1.1 Consolas,ui-monospace,monospace;color:#facc15;font-variant-numeric:tabular-nums}
+.map-flight-tip-count small{margin-left:2px;font:500 11px sans-serif;color:#cbd5e1}
+.map-flight-tip-status{display:flex;gap:10px;margin-top:2px;padding-top:6px;border-top:1px solid #334155;font:600 11px/1.2 Consolas,ui-monospace,monospace}
+.map-flight-tip-status .is-normal{color:#93c5fd}.map-flight-tip-status .is-delayed{color:#fbbf24}
+.map-flight-tip-status .is-cancelled{color:#f87171}.map-flight-tip-status .is-diverted{color:#c4b5fd}
 .map-flight-status{margin:6px 0 0;font-size:12px}.map-flight-note{font-size:12px;opacity:.8}.map-flight-panel a{color:#087f8c}
 /* 여객선 시간표 — 항공 칸과 같은 자리·모양. */
 .map-ship-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
@@ -9041,6 +9056,21 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-ship-fare{font-size:11px;opacity:.75;white-space:nowrap}
 .map-ship-empty{padding:8px;font-size:12px;opacity:.85}
 .map-ship-status{margin:6px 0 0;font-size:12px}.map-ship-note{font-size:12px;opacity:.8}.map-ship-panel a{color:#087f8c}
+.leaflet-tooltip.map-ship-tip{padding:8px 11px 9px;border:0;border-radius:9px;background:#0f2a33;color:#e2f3f7;box-shadow:0 3px 12px #0006;font:13px/1.3 sans-serif;white-space:nowrap}
+.leaflet-tooltip-top.map-ship-tip::before{border-top-color:#0f2a33}.leaflet-tooltip-bottom.map-ship-tip::before{border-bottom-color:#0f2a33}
+.leaflet-tooltip-left.map-ship-tip::before{border-left-color:#0f2a33}.leaflet-tooltip-right.map-ship-tip::before{border-right-color:#0f2a33}
+.map-ship-tip-body{display:flex;flex-direction:column;min-width:200px;max-width:300px}
+.map-ship-tip-head{display:flex;align-items:center;gap:6px;padding-bottom:6px;border-bottom:1px solid #2b4a55;font-weight:600}
+.map-ship-tip-ico{flex:none;width:15px;height:15px;background:#7dd3e5;-webkit-mask:var(--map-icon) center/contain no-repeat;mask:var(--map-icon) center/contain no-repeat}
+.map-ship-tip-title{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.map-ship-tip-count{margin-left:auto;padding-left:10px;font-size:11px;font-weight:500;color:#7dd3e5}
+.map-ship-tip-rows{display:flex;flex-direction:column;margin-top:4px;font-size:12px;line-height:1.75}
+.map-ship-tip-row{display:flex;align-items:baseline;gap:8px}
+.map-ship-tip-time{flex:none;font:600 12px Consolas,ui-monospace,monospace;color:#fbbf24;font-variant-numeric:tabular-nums}
+.map-ship-tip-main{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.map-ship-tip-side{flex:none;max-width:110px;margin-left:auto;padding-left:6px;overflow:hidden;text-overflow:ellipsis;color:#94b8c2}
+.map-ship-tip-side:empty{display:none}
+.map-ship-tip-foot{margin-top:2px;font-size:11px;color:#94b8c2}
 /* 날씨(기상청) — 항공·여객선 칸과 같은 자리·모양. */
 .map-weather-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
 .map-weather-panel[hidden],.map-weather-now[hidden],.map-weather-hours[hidden],.map-weather-days[hidden]{display:none}

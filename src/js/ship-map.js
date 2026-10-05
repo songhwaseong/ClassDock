@@ -91,29 +91,74 @@ const MNShipMap = (() => {
       return api.coordsOf(data.port,middle);
     }
 
+    // 지도 이름표(미니 출발 게시판, 시안 C): 짙은 판 머리에 항구·편수, 아래에 앞으로 떠날 항해 셋, 나머지는 '+N편 더'.
+    // 오늘이면 아직 안 떠난 항해부터 보인다('지난 편 숨기기'를 꺼도). 남은 게 없으면 그날 것을 앞에서부터.
+    const TIP_ROWS=3;
+    function upcoming(items){
+      const all=api.voyages(items);
+      if (data.date!==api.ymd(new Date())) return all;
+      const now=new Date(),minutes=now.getHours()*60+now.getMinutes();
+      const left=all.filter(voyage=>voyage.dep.day!==data.date || voyage.dep.minutes>=minutes);
+      return left.length ? left : all;
+    }
+    // dest 가 있으면 그 도착지 이름표: 가운데 칸=배 이름, 오른쪽=운임. 없으면 출발 항구: 가운데=들르는 곳, 오른쪽=배 이름.
+    function tipOf(items,dest=""){
+      const box=el("span","map-ship-tip-body ui-keep-symbols");
+      const top=el("span","map-ship-tip-head"),icon=el("span","map-ship-tip-ico"),title=el("span","map-ship-tip-title");
+      if (typeof mapToolIconUrl==="function"){const url=mapToolIconUrl("ship");if(url)icon.style.setProperty("--map-icon",url);}
+      const port=api.displayName(data.port);
+      title.textContent=dest ? port+" → "+api.displayName(dest) : english() ? "Departures · "+port : port+" 출발";
+      // 편수는 항해(배·출발 시각) 수로 센다 — 아래 줄·'+N편 더'와 같은 셈이라야 어긋나지 않는다.
+      const count=el("span","map-ship-tip-count");count.textContent=trips(api.voyages(items).length);
+      top.append(icon,title,count);box.appendChild(top);
+      const list=upcoming(items),rows=el("span","map-ship-tip-rows");
+      for (const voyage of list.slice(0,TIP_ROWS)){
+        const row=el("span","map-ship-tip-row");
+        const time=el("span","map-ship-tip-time");time.textContent=voyage.dep.time;
+        const main=el("span","map-ship-tip-main"),side=el("span","map-ship-tip-side");
+        const ship=voyage.ship || t("배 이름 없음");
+        if (dest){
+          main.textContent=ship;
+          if (voyage.fares.length) side.textContent=won(Math.min(...voyage.fares));
+        } else {
+          main.textContent=voyage.stops.map(api.displayName).join(" · ");
+          side.textContent=ship;
+        }
+        row.append(time,main,side);rows.appendChild(row);
+      }
+      box.appendChild(rows);
+      const more=list.length-TIP_ROWS,hint=dest ? t(destFilter===dest ? "누르면 전체 보기" : "누르면 이 곳만 보기") : "";
+      const foot=[more>0 ? (english() ? "+"+more+" more" : "+"+more+"편 더") : "",hint].filter(Boolean).join(" · ");
+      if (foot){const footNode=el("span","map-ship-tip-foot");footNode.textContent=foot;box.appendChild(footNode);}
+      return box;
+    }
+    const TIP={className:"map-ship-tip"};
     function draw(items){
       layer.clearLayers();
       if (!data){map.removeLayer(layer);return new Set();}
       layer.addTo(map);
       const missing=new Set(),origin=originAt(data.items);
       if (!origin){missing.add(data.port);return missing;}
+      // 가리킨 점을 키우고 게시판 시각과 같은 호박색 테를 둘러 어느 항구의 이름표인지 바로 보이게 한다.
+      const dot=(at,tip,style)=>{
+        const marker=L.circleMarker(at,{pane:"mapShipPane",bubblingMouseEvents:false,...style});
+        marker.bindTooltip(tip,{...TIP,direction:"top",offset:[0,-10]});
+        marker.on("mouseover",()=>marker.setStyle({radius:style.radius+3,weight:3,color:"#fbbf24"}));
+        marker.on("mouseout",()=>marker.setStyle({radius:style.radius,weight:style.weight,color:style.color}));
+        layer.addLayer(marker);return marker;
+      };
       for (const group of api.destinations(items)){
         const at=api.coordsOf(group.name,origin);
         if (!at){missing.add(group.name);continue;}
         const faded=destFilter && destFilter!==group.name;
-        const tip=api.displayName(data.port)+" → "+api.displayName(group.name)+" · "+trips(group.count)
-          +(group.ships.size ? " · "+[...group.ships].slice(0,3).join(", ")+(group.ships.size>3 ? " …" : "") : "");
+        const tip=()=>tipOf(items.filter(item=>item.to===group.name),group.name);
         const pick=()=>setDestFilter(destFilter===group.name ? "" : group.name);
         const line=L.polyline([origin,at],{pane:"mapShipPane",color:COLOR,weight:2+Math.min(4,Math.sqrt(group.count)),dashArray:"6 6",
           opacity:faded ? 0.2 : 0.85,bubblingMouseEvents:false,className:"map-ship-route"});
-        line.bindTooltip(tip,{sticky:true});line.on("click",pick);layer.addLayer(line);
-        const dot=L.circleMarker(at,{pane:"mapShipPane",radius:5,color:COLOR,weight:2,fillColor:"#ffffff",
-          opacity:faded ? 0.3 : 1,fillOpacity:faded ? 0.3 : 1,bubblingMouseEvents:false});
-        dot.bindTooltip(tip,{direction:"top",offset:[0,-6]});dot.on("click",pick);layer.addLayer(dot);
+        line.bindTooltip(tip,{...TIP,sticky:true});line.on("click",pick);layer.addLayer(line);
+        dot(at,tip,{radius:5,color:COLOR,weight:2,fillColor:"#ffffff",opacity:faded ? 0.3 : 1,fillOpacity:faded ? 0.3 : 1}).on("click",pick);
       }
-      const home=L.circleMarker(origin,{pane:"mapShipPane",radius:8,color:"#ffffff",weight:2,fillColor:"#0f172a",fillOpacity:1,bubblingMouseEvents:false});
-      home.bindTooltip(api.displayName(data.port)+" · "+trips(items.length),{direction:"top",offset:[0,-6]});
-      layer.addLayer(home);
+      dot(origin,()=>tipOf(items),{radius:8,color:"#ffffff",weight:2,fillColor:"#0f172a",fillOpacity:1});
       return missing;
     }
     function fit(){
@@ -144,8 +189,9 @@ const MNShipMap = (() => {
       if (data && !rows.length) list.replaceChildren(el("li","map-ship-empty",data.items.length && hidePast.checked
         ? "오늘 남은 편이 없어요. '지난 편 숨기기'를 끄면 오늘 편을 모두 봅니다." : "이 날 이 항구에서 떠나는 여객선이 없어요."));
       if (data){
-        const groups=api.destinations(items);
-        const all=button("","map-ship-dest"+(destFilter ? "" : " is-on"));all.textContent=t("전체")+" "+items.length;
+        // 편수는 항해(배·출발 시각) 수로 센다 — 목록 줄 수·지도 이름표와 같은 셈. 도착지 칩은 그곳에 서는 항해 수.
+        const groups=api.destinations(items),sailings=api.voyages(items).length;
+        const all=button("","map-ship-dest"+(destFilter ? "" : " is-on"));all.textContent=t("전체")+" "+sailings;
         all.addEventListener("click",()=>setDestFilter(""));
         const chips=groups.map(group=>{
           const chip=button("","map-ship-dest"+(destFilter===group.name ? " is-on" : "")+(api.coordsOf(group.name) ? "" : " is-unplaced"));
@@ -154,9 +200,9 @@ const MNShipMap = (() => {
           return chip;
         });
         dests.replaceChildren(all,...chips);dests.hidden=!groups.length;
-        const hidden=data.items.length-items.length;
+        const hidden=api.voyages(data.items).length-sailings;
         summary.textContent=[api.displayName(data.port)+" "+t("출발")+" · "+data.label,
-          trips(items.length)+" · "+t("도착지")+" "+places(groups.length),
+          trips(sailings)+" · "+t("도착지")+" "+places(groups.length),
           hidden>0 ? t("지난 편")+" "+hidden+t("편 숨김") : "",
           missing.size ? t("위치를 모르는 곳")+" "+missing.size+t("곳은 목록에만") : ""].filter(Boolean).join(" · ");
       } else {dests.replaceChildren();dests.hidden=true;summary.textContent="";}

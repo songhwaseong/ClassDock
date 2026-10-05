@@ -92,7 +92,7 @@ test("한쪽만 실패하면 받은 쪽을, 둘 다 실패하면 서울 안쪽�
 function harness({saved=null,zoom=16,center={lat:37.5547,lng:126.9707},nearby=null,view={lat:0.0005,lng:0.0005}}={}){
   class Element{
     constructor(tag){this.tagName=tag;this.children=[];this.style={setProperty(){}};this.attrs={};this.handlers={};this.className="";this.textContent="";this.hidden=false;this.parentNode=null;
-      const self=this;this.classList={set:new Set(),add(c){this.set.add(c);},remove(c){this.set.delete(c);},toggle(c,on){if(on)this.set.add(c);else this.set.delete(c);},contains(c){return this.set.has(c);}};}
+      this.classList={set:new Set(),add(c){this.set.add(c);},remove(c){this.set.delete(c);},toggle(c,on){if(on)this.set.add(c);else this.set.delete(c);},contains(c){return this.set.has(c);}};}
     append(...items){items.forEach(item=>this.appendChild(item));}
     appendChild(item){item.parentNode=this;this.children.push(item);return item;}
     insertBefore(item,ref){item.parentNode=this;const i=this.children.indexOf(ref);this.children.splice(i<0?this.children.length:i,0,item);return item;}
@@ -253,7 +253,7 @@ test("정류장에 마우스를 머물러야 도착 미리보기를 묻고, 받�
   const asks=()=>h.requests.filter(r=>r.kind==="arrivals").length;
   // 스치고 지나가면 묻지 않는다.
   stop.handlers.mouseover();
-  const card=h.tips.at(-1).content,[head,rows,note]=card.children;
+  const card=h.tips.at(-1).content,[head]=card.children;
   assert.equal(head.children[1].textContent,"용문마을회관");
   assert.equal(head.children[2].textContent,"동");
   assert.equal(head.children[3].textContent,"7");

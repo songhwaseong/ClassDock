@@ -6,6 +6,7 @@
    캡처(칠판·PNG·인쇄)에는 선이 남고, 출처·수신 시각은 captureNote 로 그림 아래에 붙는다. */
 const MNFlightMap = (() => {
   const COLORS={normal:"#1d6fb8",delayed:"#d97706",cancelled:"#c0392b",diverted:"#7c3aed"};
+  const BOARD_WORDS={normal:"ON TIME",delayed:"DLY",cancelled:"CNL",diverted:"DIV"};   // 지도 이름표 상태 줄(게시판 약어)
   const REFRESH_MS=180000;     // 게시판은 몇 분에 한 번 바뀌는 정도다. 런처도 1분 캐시를 둔다.
   function mount({map,stage,toolRow,doc,t = value=>value,movePanel = null}){
     const api=MNFlightApi;
@@ -100,6 +101,37 @@ const MNFlightMap = (() => {
       if (!data) return "";
       return nameOf(data.airport)+" "+t(data.line==="I" ? "국제선" : "국내선")+" "+t(data.io==="I" ? "도착" : "출발");
     }
+    // 지도 이름표(출발 게시판형): 짙은 판에 노란 공항 코드·편수, 아래 줄에 정상·지연·결항·회항.
+    // head=맨 위 작은 글자 · code=공항 코드(구간이면 'GMP → CJU') · count·kinds 는 있을 때만.
+    function tipOf({head,code,name,count,kinds,state}){
+      const box=el("span","map-flight-tip-body ui-keep-symbols");
+      const top=el("span","map-flight-tip-head"),icon=el("span","map-flight-tip-ico"),headText=el("span");
+      if (typeof mapToolIconUrl==="function"){const url=mapToolIconUrl("plane");if(url)icon.style.setProperty("--map-icon",url);}
+      headText.textContent=head;top.append(icon,headText);
+      const main=el("span","map-flight-tip-main");
+      if (code){const codeNode=el("span","map-flight-tip-code");codeNode.textContent=code;main.appendChild(codeNode);}
+      const nameNode=el("span","map-flight-tip-name");nameNode.textContent=name;main.appendChild(nameNode);
+      if (count!=null){
+        const countNode=el("span","map-flight-tip-count");countNode.textContent=count;
+        const unit=el("small");unit.textContent=english() ? (count===1 ? " flight" : " flights") : "편";
+        countNode.appendChild(unit);main.appendChild(countNode);
+      }
+      box.append(top,main);
+      const parts=[];
+      if (kinds){
+        const odd=(kinds.delayed || 0)+(kinds.cancelled || 0)+(kinds.diverted || 0);
+        if (count-odd>0) parts.push(["normal",count-odd]);
+        for (const kind of ["delayed","cancelled","diverted"]) if (kinds[kind]) parts.push([kind,kinds[kind]]);
+      } else if (state && state!=="normal") parts.push([state,null]);
+      if (parts.length){
+        // 게시판 약어는 한국어 화면에서도 그대로 쓴다(시안 C). 뜻은 패널 목록의 상태 배지가 글자로 보인다.
+        const row=el("span","map-flight-tip-status");
+        for (const [kind,value] of parts){const part=el("span","is-"+kind);part.textContent=BOARD_WORDS[kind]+(value==null ? "" : " "+value);row.appendChild(part);}
+        box.appendChild(row);
+      }
+      return box;
+    }
+    const boardHead=()=>(data.io==="I" ? "ARRIVALS" : "DEPARTURES")+" · "+t(data.line==="I" ? "국제선" : "국내선");
 
     // ── 지도 ──
     function draw(){
@@ -109,7 +141,10 @@ const MNFlightMap = (() => {
       const items=shownItems(),missing=new Set();
       const dot=(at,tip,style)=>{
         const marker=L.circleMarker(at,{pane:"mapFlightPane",bubblingMouseEvents:false,...style});
-        marker.bindTooltip(tip,{direction:"top",offset:[0,-6]});
+        marker.bindTooltip(tip,{direction:"top",offset:[0,-10],className:"map-flight-tip"});
+        // 가리킨 점을 키우고 게시판 글자와 같은 노란 테를 둘러 어느 공항의 이름표인지 바로 보이게 한다.
+        marker.on("mouseover",()=>marker.setStyle({radius:style.radius+3,weight:3,color:"#facc15"}));
+        marker.on("mouseout",()=>marker.setStyle({radius:style.radius,weight:style.weight,color:style.color}));
         layer.addLayer(marker);return marker;
       };
       if (mode==="board"){
@@ -121,17 +156,18 @@ const MNFlightMap = (() => {
           const worst=api.worstKind(group.kinds),faded=destFilter && destFilter!==group.code;
           const place=nameOf(group.code,group.name,group.nameEn);
           const route=data.io==="I" ? place+" → "+nameOf(data.airport) : nameOf(data.airport)+" → "+place;
-          const tip=[route,flightsText(group.count),countText(group.kinds)].filter(Boolean).join(" · ");
+          const tip=()=>tipOf({head:boardHead(),code:data.io==="I" ? group.code+" → "+data.airport : data.airport+" → "+group.code,
+            name:route,count:group.count,kinds:group.kinds});
           const points=data.io==="I" ? api.greatCircle(other.at,base.at) : api.greatCircle(base.at,other.at);
           const line=L.polyline(points,{pane:"mapFlightPane",color:COLORS[worst],weight:2+Math.min(6,Math.sqrt(group.count)),
             opacity:faded ? 0.2 : 0.85,lineCap:"round",bubblingMouseEvents:false,className:"map-flight-route"});
-          line.bindTooltip(tip,{sticky:true});
+          line.bindTooltip(tip,{sticky:true,className:"map-flight-tip"});
           line.on("click",()=>setDestFilter(destFilter===group.code ? "" : group.code));
           layer.addLayer(line);
           dot(other.at,tip,{radius:5,color:COLORS[worst],weight:2,fillColor:"#ffffff",opacity:faded ? 0.3 : 1,fillOpacity:faded ? 0.3 : 1})
             .on("click",()=>setDestFilter(destFilter===group.code ? "" : group.code));
         }
-        dot(base.at,boardTitle()+" · "+flightsText(items.length),{radius:8,color:"#ffffff",weight:2,fillColor:"#0f172a",fillOpacity:1});
+        dot(base.at,()=>tipOf({head:boardHead(),code:data.airport,name:nameOf(data.airport),count:items.length,kinds:kindCounts(items)}),{radius:8,color:"#ffffff",weight:2,fillColor:"#0f172a",fillOpacity:1});
       } else {
         // 편명 찾기: 같은 편이 출발 공항 줄·도착 공항 줄 두 줄로 온다. 구간(출발→도착)마다 선 하나.
         const legs=new Map();
@@ -145,12 +181,14 @@ const MNFlightMap = (() => {
           const a=api.airport(leg.from),b=api.airport(leg.to);
           if (!a || !b){missing.add(!a ? (leg.from || leg.fromName) : (leg.to || leg.toName));continue;}
           const worst=api.worstKind(leg.kinds);
-          const tip=leg.flight+" · "+nameOf(leg.from,leg.fromName,leg.fromNameEn)+" → "+nameOf(leg.to,leg.toName,leg.toNameEn);
+          const fromName=nameOf(leg.from,leg.fromName,leg.fromNameEn),toName=nameOf(leg.to,leg.toName,leg.toNameEn);
+          // 편명 찾기는 같은 편이 두 줄(출발·도착 공항)로 와서 편수를 세면 두 배가 된다 — 상태만 보인다.
+          const tip=()=>tipOf({head:leg.flight,code:leg.from+" → "+leg.to,name:fromName+" → "+toName,state:worst});
           const line=L.polyline(api.greatCircle(a.at,b.at),{pane:"mapFlightPane",color:COLORS[worst],weight:4,opacity:0.9,
             lineCap:"round",bubblingMouseEvents:false,className:"map-flight-route"});
-          line.bindTooltip(tip,{sticky:true});layer.addLayer(line);
-          dot(a.at,nameOf(leg.from,leg.fromName,leg.fromNameEn)+" ("+t("출발")+")",{radius:7,color:"#ffffff",weight:2,fillColor:"#0f172a",fillOpacity:1});
-          dot(b.at,nameOf(leg.to,leg.toName,leg.toNameEn)+" ("+t("도착")+")",{radius:6,color:COLORS[worst],weight:2,fillColor:"#ffffff",fillOpacity:1});
+          line.bindTooltip(tip,{sticky:true,className:"map-flight-tip"});layer.addLayer(line);
+          dot(a.at,()=>tipOf({head:leg.flight+" · "+(english() ? "DEPARTURE" : "출발"),code:leg.from,name:fromName}),{radius:7,color:"#ffffff",weight:2,fillColor:"#0f172a",fillOpacity:1});
+          dot(b.at,()=>tipOf({head:leg.flight+" · "+(english() ? "ARRIVAL" : "도착"),code:leg.to,name:toName,state:worst}),{radius:6,color:COLORS[worst],weight:2,fillColor:"#ffffff",fillOpacity:1});
         }
       }
       return missing;

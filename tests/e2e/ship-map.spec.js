@@ -70,11 +70,24 @@ test("항구 시간표를 불러오면 도착지마다 점선, 항해마다 한 
   await expect(page.locator(".map-ship-summary")).toContainText("인천 출발");
   expect(asked[0]).toMatch(/^\?port=SEA10100&date=\d{8}$/);
   await expect(page.locator(".map-ship-item")).toHaveCount(16);
+  // 요약·'전체' 칩의 편수도 항해 수(목록 줄 수)로 센다 — 도착지 줄 수(46)가 아니다.
+  await expect(page.locator(".map-ship-summary")).toContainText("16편");
+  await expect(page.locator(".map-ship-dest", { hasText:"전체" })).toHaveText("전체 16");
   await expect(page.locator(".map-ship-item", { hasText:"대부고속페리호" }).first()).toContainText("→ 대이작도 · 소이작도 · 승봉도 · 자월도");
   const placed = await page.evaluate((rows) => [...new Set(rows.map(r => r.arrPlaceNm))].filter(n => MNShipApi.coordsOf(n)).length, incheon);
   expect(placed).toBeGreaterThan(14);
   await expect(routes(page)).toHaveCount(placed);
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+  // 출발 항구 점 이름표: 미니 출발 게시판(머리=항구·항해 수, 줄은 셋까지, 나머지는 '+N편 더').
+  await page.locator(".leaflet-mapShip-pane path").last().hover();
+  const tip = page.locator(".leaflet-tooltip.map-ship-tip");
+  await expect(tip.locator(".map-ship-tip-head")).toContainText("인천 출발");
+  await expect(tip.locator(".map-ship-tip-count")).toHaveText("16편");
+  await expect(tip.locator(".map-ship-tip-row")).toHaveCount(3);
+  await expect(tip.locator(".map-ship-tip-time").first()).toHaveText(/^\d\d:\d\d$/);
+  await expect(tip.locator(".map-ship-tip-foot")).toContainText("편 더");
+  await page.mouse.move(5, 5);
 
   // 도착지 칩: 백령도만 남긴다.
   await page.locator(".map-ship-dest", { hasText:"백령도" }).click();

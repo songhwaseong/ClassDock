@@ -220,7 +220,7 @@ const MNMarketDays = (() => {
       return box;
     }
     // 마우스를 올리면 뜨는 간판형 이름표: 시장 그림 · 이름 · 장날 주기(상설은 '매일').
-    function tipOf(m, on){
+    function tipOf(m){
       const box = el("span", "map-market-tip-body");
       const icon = el("span", "map-market-tip-ico");
       if (typeof mapToolIconUrl === "function"){ const url = mapToolIconUrl("market"); if (url) icon.style.setProperty("--map-icon", url); }
@@ -241,7 +241,7 @@ const MNMarketDays = (() => {
         const on = opensOn(m, ymd);
         const marker = L.circleMarker([m.lat, m.lng], { renderer, radius:on ? 7 : 4, color:"#fff", weight:on ? 2 : 1,
           fillColor:on ? ON : PERMANENT, fillOpacity:on ? .95 : .7, bubblingMouseEvents:false });
-        marker.bindTooltip(() => tipOf(m, on), { direction:"top", offset:[0, -10], className:"map-market-tip" + (on ? "" : " is-permanent") });
+        marker.bindTooltip(() => tipOf(m), { direction:"top", offset:[0, -10], className:"map-market-tip" + (on ? "" : " is-permanent") });
         // 가리킨 점을 키워 어느 점의 이름표인지 바로 보이게 한다.
         marker.on("mouseover", () => marker.setStyle({ radius:on ? 10 : 6, weight:3 }));
         marker.on("mouseout", () => marker.setStyle({ radius:on ? 7 : 4, weight:on ? 2 : 1 }));
