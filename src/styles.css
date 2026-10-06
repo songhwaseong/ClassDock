@@ -8949,9 +8949,22 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
 .map-transit-check-text small{color:var(--muted);font-size:11px;font-weight:400}
 .map-transit-hint{margin:4px 2px 0;padding-top:8px;border-top:1px solid var(--border);color:var(--muted);font-size:11.5px;line-height:1.45}
 .map-transit-station-marker{background:none;border:0}
-.map-transit-station{display:flex;gap:1px;box-sizing:border-box;height:14px;padding:2px;border-radius:5px;background:#fff;
-  box-shadow:0 0 0 1px #0f172a66,0 1px 3px #0005;cursor:pointer}
-.map-transit-station-line{flex:1;width:5px;border-radius:2px}
+/* 지하철역 — 노선 번호 동그라미. 아이콘 칸이 0×0 이라 역 자리를 가운데로 두고 띄운다. 환승역은 동그라미를 겹친다. */
+.map-transit-station{position:absolute;left:0;top:0;display:flex;transform:translate(-50%,-50%);
+  filter:drop-shadow(0 1px 2px #0006);cursor:pointer}
+.map-transit-station-line{display:flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:24px;height:24px;
+  padding:0 5px;border:2px solid #fff;border-radius:999px;font-size:11px;font-weight:600;line-height:1;white-space:nowrap}
+.map-transit-station-line+.map-transit-station-line{margin-left:-7px}
+/* 버스 정류장 — 둥근 사각 배지 + 꼬리. 아이콘 자리(transform)는 Leaflet 이 쓰므로 키우기는 안쪽 span 에 건다. */
+.map-transit-stop-marker{background:none;border:0}
+.map-transit-stop{display:flex;flex-direction:column;align-items:center;width:24px;transform-origin:50% 100%;
+  transition:transform .12s ease-out;filter:drop-shadow(0 1px 2px #0006);cursor:pointer}
+.map-transit-stop-marker.is-hover .map-transit-stop{transform:scale(1.18)}
+.map-transit-stop-badge{display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:24px;height:24px;
+  border:2px solid #fff;border-radius:7px;background:#e67e22;fill:#fff}
+.map-transit-stop-cut{fill:#e67e22}
+.map-transit-stop-tail{width:0;height:0;margin-top:-2px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid #e67e22}
+@media(prefers-reduced-motion:reduce){.map-transit-stop{transition:none}}
 .map-transit-bus-panel{top:60px}
 /* 마우스 올림 미리보기 카드 — 지도 위라 어두운 화면에서도 흰 카드로 둔다(Leaflet 말풍선과 같은 까닭). */
 .leaflet-tooltip.map-transit-tip{padding:0;border:1px solid #e5e2da;border-radius:10px;background:#fff;color:#1f2328;

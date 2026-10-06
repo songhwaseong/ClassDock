@@ -206,7 +206,7 @@ test("넓은 화면은 가장자리 칸까지 두 개씩 차례로 묻고, 다�
   for(let i=0;i<expected.length;i++){h.pending[i].resolve(i===expected.length-1?[edgeStop]:[]);await flush();}
   assert.equal(h.requests.length,expected.length);
   assert.match(h.hint.textContent,/버스 정류장 1곳/);
-  assert.ok(h.markers.some(m=>m.options.className==="map-transit-stop"));
+  assert.ok(h.markers.some(m=>m.options.icon?.className==="map-transit-stop-marker"));
   // 다 물은 화면은 다시 묻지 않는다.
   h.map.move({});h.runTimers();await flush();
   assert.equal(h.requests.length,expected.length);
@@ -222,7 +222,7 @@ test("정류장을 누르면 떠 있는 도착 창이 열리고, 노선을 누�
   const h=harness({saved:{bus:true},center:{lat:33.5,lng:126.53},nearby:()=>[{id:"JEB1",name:"제주시청",no:"7",at:[33.5,126.53],city:""}]});
   await flush();h.runTimers();await flush();
   assert.equal(h.bus.checked,true);
-  const stop=h.markers.find(m=>m.options.className==="map-transit-stop");
+  const stop=h.markers.find(m=>m.options.icon?.className==="map-transit-stop-marker");
   assert.ok(stop);stop.handlers.click();
   const ask=h.pending.at(-1);assert.equal(ask.kind,"arrivals");assert.equal(ask.value,"JEB1");assert.equal(ask.options.city,"");
   ask.resolve({fetchedAt:Date.now(),items:[{routeId:"R1",number:"360",type:"간선",vehicleType:"",seconds:120,stops:3}]});
@@ -252,7 +252,7 @@ test("한도·키 문제면 옮길 때마다 다시 묻지 않고, 다시 켜면
 test("정류장에 마우스를 머물러야 도착 미리보기를 묻고, 받은 것은 잠시 다시 쓰며 한도면 그만 묻는다",async()=>{
   const h=harness({saved:{bus:true},center:{lat:33.5,lng:126.53},nearby:()=>[{id:"JEB1",name:"용문마을회관[동]",no:"7",at:[33.5,126.53],city:""}]});
   await flush();h.runTimers();await flush();
-  const stop=h.markers.find(m=>m.options.className==="map-transit-stop");
+  const stop=h.markers.find(m=>m.options.icon?.className==="map-transit-stop-marker");
   const asks=()=>h.requests.filter(r=>r.kind==="arrivals").length;
   // 스치고 지나가면 묻지 않는다.
   stop.handlers.mouseover();
@@ -284,7 +284,7 @@ test("미리보기에서 한도에 걸리면 다시 켤 때까지 이름만 보�
   const h=harness({saved:{bus:true},center:{lat:33.5,lng:126.53},nearby:()=>[
     {id:"A",name:"가",no:"",at:[33.5,126.53],city:""},{id:"B",name:"나",no:"",at:[33.5001,126.53],city:""}]});
   await flush();h.runTimers();await flush();
-  const [a,b]=h.markers.filter(m=>m.options.className==="map-transit-stop");
+  const [a,b]=h.markers.filter(m=>m.options.icon?.className==="map-transit-stop-marker");
   const asks=()=>h.requests.filter(r=>r.kind==="arrivals").length;
   a.handlers.mouseover();h.runTimers();await flush();
   h.pending.at(-1).reject(new Error("bus-quota"));await flush();
@@ -292,7 +292,7 @@ test("미리보기에서 한도에 걸리면 다시 켤 때까지 이름만 보�
   a.handlers.mouseout();b.handlers.mouseover();h.runTimers();await flush();
   assert.equal(asks(),1);
   b.handlers.mouseout();h.toggle(h.bus,false);h.toggle(h.bus,true);h.runTimers();await flush();
-  const again=h.markers.filter(m=>m.options.className==="map-transit-stop").at(-1);
+  const again=h.markers.filter(m=>m.options.icon?.className==="map-transit-stop-marker").at(-1);
   again.handlers.mouseover();h.runTimers();await flush();
   assert.equal(asks(),2);
   h.controller.destroy();
@@ -301,7 +301,7 @@ test("미리보기에서 한도에 걸리면 다시 켤 때까지 이름만 보�
 test("점에서 카드로 옮겨 가면 카드가 남고, 카드를 누르면 전체 도착 창이 열린다",async()=>{
   const h=harness({saved:{bus:true},center:{lat:33.5,lng:126.53},nearby:()=>[{id:"JEB1",name:"제주시청",no:"7",at:[33.5,126.53],city:""}]});
   await flush();h.runTimers();await flush();
-  const stop=h.markers.find(m=>m.options.className==="map-transit-stop");
+  const stop=h.markers.find(m=>m.options.icon?.className==="map-transit-stop-marker");
   const asks=()=>h.requests.filter(r=>r.kind==="arrivals").length;
   stop.handlers.mouseover();
   const tip=h.tips.at(-1),card=tip.content;

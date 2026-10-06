@@ -142,19 +142,22 @@ const MNNearbyTransit = (() => {
     const stationMarkers = new Map();          // 역 → 표시
     let labelsShown = false, subwayHint = "";
     const lineColor = line => subwayColors[line] || "#64748b";
+    // 노선 색 동그라미에 노선 번호를 넣는다. 환승역은 동그라미를 겹쳐 지나는 노선을 다 보인다.
+    // 글자 폭(경의·신분당)에 따라 너비가 달라지므로, 아이콘 칸은 0으로 두고 안쪽을 가운데 맞춤으로 띄운다.
     function stationIcon(entry){
       const box = el("span", "map-transit-station");
       for (const line of entry.lines.slice(0, 4)){
-        const bar = el("span", "map-transit-station-line"); bar.style.backgroundColor = lineColor(line);
-        box.appendChild(bar);
+        const color = lineColor(line), dot = el("span", "map-transit-station-line");
+        dot.textContent = shortLine(line);
+        dot.style.backgroundColor = color; dot.style.color = inkOn(color);
+        box.appendChild(dot);
       }
-      const width = Math.min(entry.lines.length, 4) * 6 + 4;
-      return L.divIcon({ html:box, className:"map-transit-station-marker", iconSize:[width, 14], iconAnchor:[width / 2, 7] });
+      return L.divIcon({ html:box, className:"map-transit-station-marker", iconSize:[0, 0], iconAnchor:[0, 0] });
     }
     // 크게 확대하면 이름만 늘 붙인다. 마우스를 올리면 그 이름은 잠시 접고 미리보기 카드를 띄운다.
     function bindStationLabel(marker, entry){
       marker.unbindTooltip();
-      if (labelsShown) marker.bindTooltip(entry.name, { permanent:true, direction:"top", offset:[0, -8], className:"map-subway-label" });
+      if (labelsShown) marker.bindTooltip(entry.name, { permanent:true, direction:"top", offset:[0, -14], className:"map-subway-label" });
     }
     function stationMarker(entry){
       let marker = stationMarkers.get(entry);
@@ -207,15 +210,24 @@ const MNNearbyTransit = (() => {
     const busFailText = (error, fallback, kind, city) => bus && typeof bus.failureText === "function"
       ? bus.failureText(error, fallback, kind, city) : t(fallback);
     const seen = () => !document.hidden && !!stage.offsetParent;
+    // 정류장 표시 — 버스 그림을 담은 둥근 사각 배지에 꼬리를 달아, 꼬리 끝이 정류장 자리를 가리킨다.
+    const STOP_ICON_HTML = '<span class="map-transit-stop"><span class="map-transit-stop-badge">' +
+      '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">' +
+      '<path d="M4 1.5h8a2 2 0 0 1 2 2V12a1 1 0 0 1-1 1v1.25a.75.75 0 0 1-1.5 0V13h-7v1.25a.75.75 0 0 1-1.5 0V13a1 1 0 0 1-1-1V3.5a2 2 0 0 1 2-2z"/>' +
+      '<rect class="map-transit-stop-cut" x="3.5" y="3.5" width="9" height="4.5" rx=".8"/>' +
+      '<circle class="map-transit-stop-cut" cx="5.2" cy="10.6" r=".9"/><circle class="map-transit-stop-cut" cx="10.8" cy="10.6" r=".9"/>' +
+      '</svg></span><span class="map-transit-stop-tail"></span></span>';
+    const stopIcon = () => L.divIcon({ html:STOP_ICON_HTML, className:"map-transit-stop-marker", iconSize:[24, 30], iconAnchor:[12, 30] });
     function addStop(stop){
       const key = (stop.city || "") + ":" + stop.id;
       if (busStops.has(key)) return;
-      const marker = L.circleMarker(stop.at, { pane:"mapTransitPane", radius:5, color:"#ffffff", weight:2, fillColor:"#e67e22", fillOpacity:0.95,
-        bubblingMouseEvents:false, className:"map-transit-stop" });
+      const marker = L.marker(stop.at, { pane:"mapTransitPane", keyboard:true, title:stop.name, icon:stopIcon(), riseOnHover:true,
+        bubblingMouseEvents:false });
       marker.on("click", () => showArrivals(stop));
-      // 올린 점은 키워 어느 것인지 또렷하게 한다.
-      const shrink = () => { if (marker.setRadius) marker.setRadius(5); };
-      marker.on("mouseover", () => { if (marker.setRadius) marker.setRadius(7); showStopPreview(stop, { pick:() => showArrivals(stop), onHide:shrink }); });
+      // 올린 배지는 키워 어느 것인지 또렷하게 한다.
+      const grow = on => { const node = marker.getElement && marker.getElement(); if (node) node.classList.toggle("is-hover", on); };
+      const shrink = () => grow(false);
+      marker.on("mouseover", () => { grow(true); showStopPreview(stop, { pick:() => showArrivals(stop), onHide:shrink }); });
       marker.on("mouseout", () => leavePreview("bus:" + key));
       busStops.set(key, { stop, marker });
       busLayer.addLayer(marker);
@@ -458,7 +470,8 @@ const MNNearbyTransit = (() => {
     function showStopPreview(stop, options){
       const key = (stop.city || "") + ":" + stop.id, { name, side } = splitSide(stop.name);
       const parts = previewCard("bus", name, side, stop.no || "", []);
-      openPreview("bus:" + key, "bus", stop.at, -8, parts, async signal => {
+      // 꼬리 끝이 정류장 자리라 카드는 배지(30px) 위로 띄운다.
+      openPreview("bus:" + key, "bus", stop.at, -34, parts, async signal => {
         const result = await MNJejuBusApi.request("arrivals", stop.id, { signal, city:stop.city || "" });
         // 서울은 한 노선이 첫째·둘째 차로 두 줄 온다. 미리보기는 노선마다 가장 빠른 한 줄만.
         const seen = new Set(), rows = [];
@@ -473,7 +486,7 @@ const MNNearbyTransit = (() => {
     }
     function showStationPreview(entry, options){
       const parts = previewCard("subway", entry.name, "", "", entry.lines);
-      openPreview("subway:" + entry.name, "subway", entry.at, -10, parts, async signal => {
+      openPreview("subway:" + entry.name, "subway", entry.at, -16, parts, async signal => {
         if (typeof MNSubwayLive === "undefined") throw new Error("transit-unavailable");
         let response;
         try {
