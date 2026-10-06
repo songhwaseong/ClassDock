@@ -2905,7 +2905,7 @@ function openMapOfflineStatus(){
         '<button class="btn map-prepare-close" type="button">닫기</button>' +
       '</div>' +
     '</div>';
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
   mapTranslate(modal);
 
   const status = modal.querySelector(".map-prepare-status");
@@ -3617,7 +3617,7 @@ function openMapChoropleth(model, hooks){
       '</div>' +
       '<input class="map-choro-input" type="file" accept=".csv,.tsv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>' +
     '</div>';
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
   const $ = (selector) => modal.querySelector(selector);
   const levelSelect = $(".map-choro-level"), vintageSelect = $(".map-choro-vintage");
   const paste = $(".map-choro-paste"), columnSelect = $(".map-choro-column");
@@ -3942,7 +3942,7 @@ function openMapRegionStats(model, hooks){
         '<button class="btn primary map-region-chart" type="button">칠판으로 차트</button>' +
       '</div>' +
     '</div>';
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
 
   const levelSelect = modal.querySelector(".map-region-level");
   const note = modal.querySelector(".map-region-note");
@@ -4073,7 +4073,7 @@ function openMapAreaStats(shape, markers){
         '<span class="spacer"></span><button class="btn primary map-area-stats-close" type="button">닫기</button>' +
       '</div>' +
     '</div>';
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
   modal.querySelector(".map-area-stats-title").textContent = (shape.label || mapT("이름 없는 영역")) + " · " + mapT("영역 표시 분석");
   modal.querySelector(".map-area-stats-summary").textContent = mapTf("면적 {area} 안에 표시 {count}개가 있습니다.",
     { area:mapFormatArea(mapPolygonAreaSquareMeters(shape.points)), count:inside.length });
@@ -4188,7 +4188,7 @@ async function mapConvertProjectedRows(rows, headers){
           '<button class="btn map-projected-cancel" type="button">취소</button>' +
           '<button class="btn primary map-projected-apply" type="button">표시 넣기</button></div>' +
       '</div>';
-    document.body.appendChild(modal);
+    (document.fullscreenElement || document.body).appendChild(modal);
     mapTranslate(modal);
     const select = modal.querySelector(".map-projected-system");
     const swapBox = modal.querySelector(".map-projected-swap");
@@ -4270,7 +4270,7 @@ function openMapGeoExport(model){
       '</div>' +
       '<div class="modal-actions"><span class="spacer"></span><button class="btn map-geo-export-close" type="button">취소</button></div>' +
     '</div>';
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
   const base = mapSafeDownloadName(model.title || mapT("지도"));
   const close = () => { window.removeEventListener("keydown", onKey, true); modal.remove(); };
   const onKey = event => { if (event.key === "Escape"){ event.preventDefault(); event.stopImmediatePropagation(); close(); } };
@@ -4355,7 +4355,7 @@ function openMapDriveSettings(config){
         '<button class="btn primary map-drive-apply" type="button">적용·길찾기</button>' +
       '</div>' +
     '</div>';
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
   const routeText = modal.querySelector(".map-drive-settings-route");
   if (ordered.length >= 2){
     const start = ordered[0].label || mapT("이름 없는 표시");
@@ -4586,7 +4586,7 @@ function openMapNearby(center, opts = {}){
           '<button class="btn primary map-nearby-ok" type="button">찾아서 넣기</button>' +
         '</div>' +
       '</div>';
-    document.body.appendChild(modal);
+    (document.fullscreenElement || document.body).appendChild(modal);
 
     const kindGrid = modal.querySelector(".map-nearby-kind-grid");
     const kindCount = modal.querySelector(".map-nearby-kinds-count");
@@ -4774,7 +4774,7 @@ async function openMapPicker(){
         '<button class="btn primary map-picker-ok" type="button">이 화면 넣기</button>' +
       '</div>' +
     '</div>';
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
 
   const stage = modal.querySelector(".map-picker-stage");
   const basemapSelect = modal.querySelector(".map-picker-basemap");
@@ -6755,6 +6755,7 @@ async function mountMapEditor(doc){
     subwayColors:MAP_SUBWAY_COLORS, say:setStatus,
     subwayArrivals:(line, name) => { if (!subwayOpenArrivals) return false; subwayOpenArrivals(line, name); return true; },
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) });
+  if (jejuBus) jejuBus.connectNearbyTransit(nearbyTransit);
 
   /* ── 되돌리기 ──
      내용이 바뀌는 곳은 모두 touch() 를 부르므로, 되돌리기 기록도 거기 한 곳에 건다(빠뜨린 길이
@@ -9017,22 +9018,83 @@ async function mountMapEditor(doc){
   contextHead.className = "map-context-head";
   contextMenu.appendChild(contextHead);
   let contextLatLng = null;
+  let contextHost = contextMenu;
+  const contextGroups = [];
+  let contextOpenGroup = null;
+  let contextSubTimer = 0;
+  const cancelContextSubClose = () => { clearTimeout(contextSubTimer); contextSubTimer = 0; };
+  const closeContextSub = () => {
+    cancelContextSubClose();
+    for (const { heading, panel } of contextGroups){
+      panel.hidden = true;
+      heading.setAttribute("aria-expanded", "false");
+      heading.classList.remove("is-open");
+    }
+    contextOpenGroup = null;
+  };
+  const openContextSub = (group, focus = false) => {
+    cancelContextSubClose();
+    if (contextOpenGroup !== group){
+      closeContextSub();
+      contextOpenGroup = group;
+      const { heading, panel } = group;
+      (document.fullscreenElement || document.body).appendChild(panel);
+      panel.hidden = false;
+      heading.setAttribute("aria-expanded", "true");
+      heading.classList.add("is-open");
+      const scale = parseFloat(document.body.style.zoom) || 1;
+      const anchor = heading.getBoundingClientRect();
+      const width = panel.offsetWidth, height = panel.offsetHeight;
+      const viewportWidth = window.innerWidth / scale, viewportHeight = window.innerHeight / scale;
+      let left = anchor.right / scale - 4;
+      if (left + width > viewportWidth - 8) left = anchor.left / scale - width + 4;
+      panel.style.left = Math.max(8, Math.min(left, viewportWidth - width - 8)) + "px";
+      panel.style.top = Math.max(8, Math.min(anchor.top / scale, viewportHeight - height - 8)) + "px";
+    }
+    if (focus){
+      const first = [...group.panel.querySelectorAll("button, select")].find(item =>
+        !item.hidden && !item.disabled && !item.closest("[hidden]"));
+      if (first) first.focus({ preventScroll:true });
+    }
+  };
+  const contextGroup = (label) => {
+    const panel = document.createElement("div");
+    panel.className = "map-context-menu map-context-sub";
+    panel.hidden = true;
+    panel.setAttribute("role", "menu");
+    panel.setAttribute("aria-label", mapT(label));
+    const heading = document.createElement("button");
+    heading.type = "button";
+    heading.className = "map-context-parent";
+    heading.setAttribute("role", "menuitem");
+    heading.setAttribute("aria-haspopup", "menu");
+    heading.setAttribute("aria-expanded", "false");
+    heading.textContent = mapT(label);
+    const group = { heading, panel };
+    contextGroups.push(group);
+    heading.addEventListener("pointerenter", () => openContextSub(group));
+    heading.addEventListener("click", () => openContextSub(group, true));
+    panel.addEventListener("pointerenter", cancelContextSubClose);
+    contextMenu.appendChild(heading);
+    contextHost = panel;
+  };
 
   function closeContextMenu(){
     if (contextMenu.hidden) return;
     // 키보드로 항목을 고르던 중이면 포커스를 지도로 돌려준다(감춘 버튼에 갇히지 않게).
-    if (contextMenu.contains(document.activeElement)){
+    if (contextMenu.contains(document.activeElement) || contextGroups.some(group => group.panel.contains(document.activeElement))){
       const container = map.getContainer();
       if (container && typeof container.focus === "function") container.focus({ preventScroll:true });
     }
     contextMenu.hidden = true;
+    closeContextSub();
     contextLatLng = null;
     document.removeEventListener("pointerdown", onContextOutside, true);
     window.removeEventListener("keydown", onContextKey, true);
     map.off("movestart zoomstart", closeContextMenu);
   }
   function onContextOutside(e){
-    if (contextMenu.contains(e.target)) return;
+    if (contextMenu.contains(e.target) || contextGroups.some(group => !group.panel.hidden && group.panel.contains(e.target))) return;
     closeContextMenu();
   }
   /* Esc 는 표시 추가 취소·도형 삭제·검색 표식 지우기가 이미 나눠 쓰고 있다. 메뉴가 떠 있는
@@ -9040,11 +9102,33 @@ async function mountMapEditor(doc){
   function onContextKey(e){
     if (e.key === "Escape"){
       e.preventDefault(); e.stopImmediatePropagation();
+      if (contextOpenGroup){
+        const heading = contextOpenGroup.heading;
+        closeContextSub();
+        heading.focus({ preventScroll:true });
+        return;
+      }
       closeContextMenu();
       return;
     }
+    if (e.target && e.target.tagName === "SELECT") return;
+    if (e.key === "ArrowRight"){
+      const group = contextGroups.find(item => item.heading === document.activeElement);
+      if (group){ e.preventDefault(); openContextSub(group, true); }
+      return;
+    }
+    if (e.key === "ArrowLeft" && contextOpenGroup){
+      e.preventDefault();
+      const heading = contextOpenGroup.heading;
+      closeContextSub();
+      heading.focus({ preventScroll:true });
+      return;
+    }
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
-    const items = [...contextMenu.querySelectorAll("button")].filter(button => !button.hidden && !button.disabled);
+    const layer = contextOpenGroup && contextOpenGroup.panel.contains(document.activeElement)
+      ? contextOpenGroup.panel : contextMenu;
+    const items = [...layer.querySelectorAll("button, select")].filter(button =>
+      !button.hidden && !button.disabled && !button.closest("[hidden]"));
     if (!items.length) return;
     e.preventDefault();
     const at = items.indexOf(document.activeElement);
@@ -9093,6 +9177,9 @@ async function mountMapEditor(doc){
   contextNearbyBtn.classList.toggle("is-unavailable", !nearbyReady);
   const contextWeatherBtn = contextItem("🌤️ 이 자리 날씨 보기", "누른 자리의 현재 날씨와 약 7일 예보를 봅니다",
     (at) => weather.openAt(at.lat, at.lng));
+  const contextTransitBtn = contextItem("🚏 여기를 중심으로 주변 교통", "이 자리 둘레의 지하철역·버스 정류장을 보여 줍니다",
+    (at) => nearbyTransit.showAround([at.lat, at.lng]));
+  contextTransitBtn.hidden = !nearbyTransit;
 
   contextSep();
   contextItem("📋 이 자리 좌표 복사", "위도, 경도를 클립보드로 복사", async (at) => {
@@ -9138,9 +9225,26 @@ async function mountMapEditor(doc){
     // 화살표 하나뿐인 단추(↶ ↷)는 메뉴에서 읽히지 않으므로 이름을 따로 준다.
     if (label) item.textContent = label;
     item.addEventListener("click", () => { closeContextMenu(); button.click(); });
-    contextMenu.appendChild(item);
+    contextHost.appendChild(item);
     contextMirrors.push({ item, button, fixedLabel:!!label });
     return item;
+  };
+  const contextSelections = [];
+  const contextSelect = (source, label) => {
+    const row = document.createElement("label");
+    row.className = "map-context-select";
+    const text = document.createElement("span");
+    text.textContent = mapT(label);
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", mapT(label));
+    select.addEventListener("change", () => {
+      source.value = select.value;
+      source.dispatchEvent(new Event("change", { bubbles:true }));
+      closeContextMenu();
+    });
+    row.append(text, select);
+    contextHost.appendChild(row);
+    contextSelections.push({ source, select, row });
   };
   const syncContextMirrors = () => {
     for (const mirror of contextMirrors){
@@ -9149,13 +9253,24 @@ async function mountMapEditor(doc){
       mirror.item.hidden = !!mirror.button.hidden;
       mirror.item.disabled = !!mirror.button.disabled;
       // 켜 둔 도구(주소 자동 등)는 도구막대처럼 눈에 띄게 — 메뉴에서는 체크로 보인다.
-      mirror.item.classList.toggle("is-on", mirror.button.classList.contains("is-on"));
+      mirror.item.classList.toggle("is-on", mirror.button.classList.contains("is-on") || mirror.button.checked === true);
+      if (mirror.item.getAttribute("role") === "menuitemcheckbox"){
+        mirror.item.setAttribute("aria-checked", String(mirror.button.checked));
+      }
       // 아직 쓸 수 없는 도구(장소 정보 등)도 도구막대처럼 흐리게 — 눌러 보면 까닭을 알려 준다.
       mirror.item.classList.toggle("is-unavailable", mirror.button.classList.contains("is-unavailable"));
     }
+    for (const { source, select, row } of contextSelections){
+      select.replaceChildren(...[...source.options].map(option => option.cloneNode(true)));
+      select.value = source.value;
+      select.disabled = source.disabled;
+      row.hidden = source === subwayLineSelect && !subwayLinePicker.isConnected;
+    }
+    closeContextSub();
   };
 
   contextSep();
+  contextGroup("편집");
   contextMirror(lineBtn);
   contextMirror(areaBtn);
   /* 켜고 끄는 도구지만 결국 지도에 선을 긋는 일이라 거리선·면적과 한 묶음에 둔다. 켜 둔 상태는
@@ -9166,13 +9281,61 @@ async function mountMapEditor(doc){
   contextMirror(addressBtn);
   contextMirror(spotBtn);
 
-  contextSep();
   contextMirror(clearItemsBtn);
+  contextGroup("보기·배경");
+  contextSelect(basemapSelect, "배경지도");
+  contextSelect(bikeSelect, "자전거길 겹쳐 보기");
+  contextMirror(gridBtn);
+  contextMirror(labelsBtn);
+  contextMirror(listBtn);
+  contextMirror(presentBtn);
+  contextMirror(imageBtn);
+  contextMirror(imageClearBtn);
+
+  contextGroup("교통·운항");
+  contextSelect(subwayLineSelect, "실시간 열차");
+  // 도구 줄을 접어도 선택할 수 있도록 교통 체크를 메뉴 안에서 직접 연결한다.
+  for (const [index, label] of ["지하철역", "버스 정류장"].entries()){
+    const source = toolChips.querySelectorAll(".map-transit-check input")[index];
+    if (!source) continue;
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitemcheckbox");
+    item.textContent = mapT(label);
+    item.addEventListener("click", () => {
+      closeContextMenu();
+      source.checked = !source.checked;
+      source.dispatchEvent(new Event("change", { bubbles:true }));
+    });
+    contextHost.appendChild(item);
+    contextMirrors.push({ item, button:source, fixedLabel:true });
+  }
+  for (const selector of [".map-toolvis-jeju-bus", ".map-toolvis-flight", ".map-toolvis-ship"]){
+    const button = toolChips.querySelector(selector);
+    if (button) contextMirror(button);
+  }
+  contextGroup("날씨·생활");
+  for (const selector of [".map-toolvis-weather", ".map-toolvis-wind", ".map-toolvis-market"]){
+    const button = toolChips.querySelector(selector);
+    if (button) contextMirror(button);
+  }
+  contextGroup("자료·분석");
+  contextMirror(csvImportBtn);
+  contextMirror(csvTemplateBtn);
+  contextMirror(csvExportBtn);
+  contextMirror(geoExportBtn);
+  contextMirror(csvMemoBtn);
   contextMirror(regionBtn);
   contextMirror(choroBtn);
+  if (prepareBtn.isConnected) contextMirror(prepareBtn);
+  contextGroup("출력·수업");
   contextMirror(boardBtn);
   contextMirror(memoBtn);
+  contextMirror(pngBtn);
+  contextMirror(printBtn);
+  contextMirror(taskBtn);
 
+  contextHost = contextMenu;
   contextSep();
   /* 도구를 접으면 이 메뉴가 유일한 길이 된다 — 이름을 고정하지 않아 '숨기기 ↔ 보이기'가
      단추를 따라 바뀌고, 문제 풀이 화면에서는 단추가 hidden 이라 항목째 빠진다. */
@@ -9203,15 +9366,17 @@ async function mountMapEditor(doc){
     contextHead.textContent = contextLatLng.lat.toFixed(5) + ", " + contextLatLng.lng.toFixed(5);
     contextZoomBtn.disabled = map.getZoom() >= maxViewZoom();
     contextWeatherBtn.disabled = !weather || !weather.isAvailable();
+    (document.fullscreenElement || document.body).appendChild(contextMenu);
     syncContextMirrors();
     contextMenu.hidden = false;
     // 화면 밖으로 넘치지 않게 보정(탭 우클릭 메뉴와 같은 방식).
     const pad = 8;
+    const scale = parseFloat(document.body.style.zoom) || 1;
     const width = contextMenu.offsetWidth, height = contextMenu.offsetHeight;
-    const x = Number(origin.clientX) || 0, y = Number(origin.clientY) || 0;
-    contextMenu.style.left = Math.max(pad, Math.min(x, window.innerWidth - width - pad)) + "px";
-    contextMenu.style.top = Math.max(pad, Math.min(y, window.innerHeight - height - pad)) + "px";
-    const first = contextMenu.querySelector("button:not([hidden])");
+    const x = (Number(origin.clientX) || 0) / scale, y = (Number(origin.clientY) || 0) / scale;
+    contextMenu.style.left = Math.max(pad, Math.min(x, window.innerWidth / scale - width - pad)) + "px";
+    contextMenu.style.top = Math.max(pad, Math.min(y, window.innerHeight / scale - height - pad)) + "px";
+    const first = contextMenu.querySelector("button:not([hidden]):not(:disabled)");
     if (first) first.focus({ preventScroll:true });
     document.addEventListener("pointerdown", onContextOutside, true);
     window.addEventListener("keydown", onContextKey, true);
@@ -9228,6 +9393,16 @@ async function mountMapEditor(doc){
   document.body.appendChild(contextMenu);
   // 도구막대와 같이 한 번만 훑는다 — 언어를 바꾸면 i18n 이 매어 둔 문구를 알아서 다시 그린다.
   mapTranslate(contextMenu);
+  for (const group of contextGroups) mapTranslate(group.panel);
+  document.addEventListener("fullscreenchange", closeContextMenu);
+  window.addEventListener("resize", closeContextMenu);
+  contextMenu.addEventListener("scroll", closeContextSub);
+  for (const button of contextMenu.querySelectorAll("button:not(.map-context-parent)")){
+    button.addEventListener("pointerenter", () => {
+      cancelContextSubClose();
+      contextSubTimer = setTimeout(closeContextSub, 220);
+    });
+  }
 
   const moveToSearchLocation = mapSearchLocationMover(map);
   const placeSearch = mapAttachPlaceSearch(gotoInput, searchBtn, searchResults, (lat, lng, zoom, label, place) => {
@@ -9825,6 +10000,10 @@ async function mountMapEditor(doc){
     window.removeEventListener("keydown", onSearchLocationKey);
     window.removeEventListener("keydown", onHistoryKey);
     closeContextMenu();                 // 열려 있던 우클릭 메뉴의 document 리스너까지 함께 뗀다
+    document.removeEventListener("fullscreenchange", closeContextMenu);
+    window.removeEventListener("resize", closeContextMenu);
+    closeContextSub();
+    for (const group of contextGroups) group.panel.remove();
     contextMenu.remove();
     if (history) history.cancel();      // 묶는 중이던 변경을 버린다(사라진 화면을 capture 하지 않게)
     cleanupNetworkNotice();

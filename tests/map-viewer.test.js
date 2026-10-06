@@ -1024,7 +1024,7 @@ test("우클릭 메뉴의 도구 항목은 도구막대 단추를 그대로 비�
   assert.match(sync[1], /if \(!mirror\.fixedLabel\) mirror\.item\.textContent = mirror\.button\.textContent/);
   assert.match(sync[1], /mirror\.item\.hidden = !!mirror\.button\.hidden/);
   assert.match(sync[1], /mirror\.item\.disabled = !!mirror\.button\.disabled/);
-  assert.match(sync[1], /classList\.toggle\("is-on", mirror\.button\.classList\.contains\("is-on"\)\)/);
+  assert.match(sync[1], /classList\.toggle\("is-on", mirror\.button\.classList\.contains\("is-on"\) \|\| mirror\.button\.checked === true\)/);
   assert.match(source, /syncContextMirrors\(\);\n\s*contextMenu\.hidden = false;/);
   // 지우기·되돌리기·저장까지 수업 중에 쓰는 도구가 메뉴에 함께 있다.
   for (const button of ["lineBtn", "areaBtn", "routeBtn", "addressBtn", "clearItemsBtn", "regionBtn", "boardBtn", "saveBtn"])

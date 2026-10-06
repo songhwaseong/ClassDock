@@ -1217,6 +1217,13 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     padding:5px;border:1px solid var(--border);border-radius:9px;
     background:var(--panel);color:var(--ink);box-shadow:0 12px 30px rgba(0,0,0,.28)}
   .map-context-menu[hidden]{display:none}
+  .map-context-menu button.map-context-parent{display:flex;align-items:center;gap:12px;font-weight:600}
+  .map-context-parent::after{content:"▸";margin-left:auto}
+  .map-context-parent.is-open{background:var(--panel-hover);color:var(--accent)}
+  .map-context-sub{z-index:1901}
+  .map-context-select{display:flex;flex-direction:column;gap:4px;padding:7px 10px;font-size:12px}
+  .map-context-select[hidden]{display:none}
+  .map-context-select select{max-width:100%;padding:5px;border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--ink)}
   .map-context-head{margin-bottom:4px;padding:4px 10px 6px;border-bottom:1px solid var(--border);
     color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
   .map-context-menu button{display:block;width:100%;border:0;border-radius:6px;padding:7px 10px;

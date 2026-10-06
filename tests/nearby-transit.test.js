@@ -172,11 +172,11 @@ test("지하철역을 켜면 화면 둘레 역만 합쳐 찍고, 누르면 첫 �
   h.controller.destroy();
 });
 
-test("버스는 확대 16 이상에서 멈춘 뒤에만, 같은 칸은 다시 묻지 않는다",async()=>{
+test("버스를 켜면 확대 16으로 이동하고 멈춘 뒤 조회하며 같은 칸은 다시 묻지 않는다",async()=>{
   const h=harness({zoom:15});await flush();
-  h.toggle(h.bus,true);h.runTimers();await flush();
-  assert.equal(h.requests.length,0);assert.match(h.hint.textContent,/버스 정류장은 더 확대하면/);
-  h.map.move({zoom:16});
+  h.toggle(h.bus,true);
+  assert.equal(h.map.getZoom(),16);
+  assert.deepEqual(h.map.getCenter(),{lat:37.5547,lng:126.9707});
   assert.equal(h.requests.length,0,"옮기는 동안은 묻지 않는다");
   h.runTimers();await flush();
   // 서울 한가운데라 TAGO 는 건너뛰고 서울 API 에만 칸 가운데 좌표로 묻는다.
@@ -188,6 +188,9 @@ test("버스는 확대 16 이상에서 멈춘 뒤에만, 같은 칸은 다시 �
   // 같은 칸 안에서 조금 옮기면 다시 묻지 않는다.
   h.map.move({center:{lat:37.5549,lng:126.9709}});h.runTimers();await flush();
   assert.equal(h.requests.length,1);
+  h.map.move({zoom:15});h.runTimers();await flush();
+  assert.equal(h.requests.length,1);
+  assert.match(h.hint.textContent,/버스 정류장은 더 확대하면/);
   h.controller.destroy();
 });
 

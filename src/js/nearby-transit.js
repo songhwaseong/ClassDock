@@ -513,6 +513,13 @@ const MNNearbyTransit = (() => {
       const on = choice.subway || choice.bus;
       trigger.classList.toggle("is-on", on);
       trigger.setAttribute("aria-pressed", String(on));
+      if (bus && typeof bus.updateNearbyStops === "function"){
+        const bounds = map.getBounds(), sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+        const visibleStops = choice.bus && map.getZoom() >= BUS_MIN_ZOOM ? [...busStops.values()].map(item => item.stop)
+          .filter(stop => stop.at[0] >= sw.lat && stop.at[0] <= ne.lat && stop.at[1] >= sw.lng && stop.at[1] <= ne.lng) : [];
+        bus.updateNearbyStops(visibleStops, !choice.bus ? t("보고 싶은 것을 체크해 주세요.")
+          : busBlocked || busHint || (map.getZoom() < BUS_MIN_ZOOM ? t("버스 정류장은 더 확대하면 보여요.") : ""));
+      }
     }
     let lastZoomHint = "";
     function onMove(){
@@ -549,6 +556,11 @@ const MNNearbyTransit = (() => {
     busCheck.box.addEventListener("change", () => {
       choice = { ...choice, bus:busCheck.box.checked };
       if (choice.bus){ busBlocked = ""; previewOff.bus = false; }   // 다시 켜면 키·한도를 다시 확인한다
+      // 메뉴에서 켜도 정류장이 보이는 배율까지 이동한다. 전체화면에서는 도구의 확대 안내가 숨겨진다.
+      if (choice.bus && busReady && map.getZoom() < BUS_MIN_ZOOM){
+        const center = map.getCenter();
+        map.setView([center.lat, center.lng], BUS_MIN_ZOOM);
+      }
       saveChoice(choice); apply();
     });
 
@@ -569,6 +581,15 @@ const MNNearbyTransit = (() => {
     }).catch(() => {});
 
     const controller = {
+      showBusAround(at){
+        if (destroyed || !busReady || !Array.isArray(at)) return false;
+        busBlocked = ""; previewOff.bus = false;
+        choice = { ...choice, bus:true };
+        saveChoice(choice);
+        map.setView(at, Math.max(map.getZoom(), BUS_MIN_ZOOM));
+        apply();
+        return true;
+      },
       /* 장소 말풍선의 '주변 교통' — 그 자리를 가운데로 버스 정류장이 보이는 확대까지 다가가고, 쓸 수 있는
          것(지하철역 자료·EXE 버스)을 모두 켠다. 켠 상태는 체크와 같이 기억된다. */
       showAround(at){

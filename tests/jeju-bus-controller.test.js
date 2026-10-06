@@ -173,15 +173,17 @@ test("근처 정류장을 찾고 정류장을 누르면 그 도시로 도착 정
   const h=harness();await flush();
   const [tools,list,arrivalBox]=h.stopBox.children,nearby=tools.children[0];
   assert.equal(nearby.disabled,false);
+  let sharedAt=null;
+  h.controller.connectNearbyTransit({showBusAround(at){sharedAt=at;return true;}});
   nearby.click();
-  const ask=h.pending.at(-1);assert.equal(ask.request.kind,"nearby");
-  assert.equal(JSON.stringify(ask.request.value),"[33.5,126.53]");assert.equal(JSON.stringify(ask.request.options.jejuCodes),"[\"39\"]");
-  ask.task.resolve([{id:"DJB9",name:"먼 정류장",no:"",at:[33.51,126.53],city:"25"},{id:"JEB1",name:"가까운 정류장",no:"7",at:[33.5001,126.53],city:""}]);
+  assert.equal(JSON.stringify(sharedAt),"[33.5,126.53]");
+  assert.equal(h.requests.filter(r=>r.kind==="nearby").length,0);
+  h.controller.updateNearbyStops([{id:"DJB9",name:"먼 정류장",no:"",at:[33.51,126.53],city:"25"},{id:"JEB1",name:"가까운 정류장",no:"7",at:[33.5001,126.53],city:""}]);
   await flush();
   assert.equal(list.children[0].textContent.startsWith("가까운 정류장 (7)"),true);
   // 지금 도시(제주)가 아닌 정류장엔 도시 이름이 붙는다.
   assert.match(list.children[1].textContent,/먼 정류장 · 대전광역시 · \d+m/);assert.doesNotMatch(list.children[0].textContent,/제주/);
-  assert.equal(h.circles.filter(c=>c.options.fillColor).length,2);
+  assert.equal(h.circles.filter(c=>c.options.fillColor).length,0,"주변 교통의 지도 점을 중복 생성하지 않는다");
   list.children[1].click();
   const arrivals=h.pending.at(-1);assert.equal(arrivals.request.kind,"arrivals");
   assert.equal(arrivals.request.value,"DJB9");assert.equal(arrivals.request.options.city,"25");
@@ -200,7 +202,8 @@ test("근처 정류장을 찾고 정류장을 누르면 그 도시로 도착 정
 test("도착 정보 키가 거절되면 버스도착정보 활용신청을 안내한다",async()=>{
   const h=harness();await flush();
   const [tools,list,arrivalBox]=h.stopBox.children;
-  tools.children[0].click();h.pending.at(-1).task.resolve([{id:"JEB1",name:"정류장",no:"",at:[33.5,126.53],city:""}]);await flush();
+  h.controller.connectNearbyTransit({showBusAround(){return true;}});
+  tools.children[0].click();h.controller.updateNearbyStops([{id:"JEB1",name:"정류장",no:"",at:[33.5,126.53],city:""}]);await flush();
   list.children[0].click();h.pending.at(-1).task.reject(new Error("bus-key-invalid"));await flush();
   assert.match(arrivalBox.children[2].textContent,/버스도착정보/);
   h.controller.destroy();

@@ -654,7 +654,7 @@ function openTaskBuilderModal(seed){
   actions.append(previewTaskBtn, spacer, cancel, exportBtn);
   card.append(title, sub, body, actions); modal.appendChild(card);
   modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
   window.addEventListener("keydown", onKey, true);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(card);
   setTimeout(() => { try { titleInput.focus(); } catch(_){} }, 0);
@@ -791,7 +791,7 @@ function openMapTaskBuilder(model){
   actions.append(previewBtn, spacer, cancel, exportBtn);
   card.append(title, sub, body, actions); modal.appendChild(card);
   modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
-  document.body.appendChild(modal);
+  (document.fullscreenElement || document.body).appendChild(modal);
   window.addEventListener("keydown", onKey, true);
   if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(card);
   setTimeout(() => { try { titleInput.focus(); } catch(_){} }, 0);

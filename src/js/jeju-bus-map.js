@@ -28,7 +28,7 @@ const MNJejuBusMap = (() => {
     const status=el("p","map-jeju-bus-status");status.setAttribute("role","status");status.setAttribute("aria-live","polite");
     // 정류장 도착 정보. 지도 가운데 근처 정류장을 찾거나, 표시 중인 노선의 정류장 점을 눌러 연다.
     const stopBox=el("div","map-jeju-bus-stops");
-    const stopTools=el("div","map-jeju-bus-stop-tools"),nearbyButton=button("📍 지도 가운데 근처 정류장","map-jeju-bus-nearby");
+    const stopTools=el("div","map-jeju-bus-stop-tools"),nearbyButton=button("📍 근처 정류장 목록","map-jeju-bus-nearby");
     nearbyButton.disabled=true;stopTools.append(nearbyButton);
     const stopList=el("div","map-jeju-bus-stop-list");stopList.hidden=true;
     const arrivalBox=el("div","map-jeju-bus-arrivals");arrivalBox.hidden=true;
@@ -383,41 +383,29 @@ const MNJejuBusMap = (() => {
       stopsLayer.clearLayers();map.removeLayer(stopsLayer);
       stopList.replaceChildren();stopList.hidden=true;arrivalBox.hidden=true;arrivalStation=null;
     }
-    // 위에서 고른 도시와 상관없이 지도 자리로 묻는다 — 서울이면 서울 API 도 함께(MNJejuBusApi.nearbyAt).
-    async function findNearby(){
-      const center=map.getCenter();
-      stopGeneration++;if(stopAbort)stopAbort.abort();stopAbort=new AbortController();
-      const seq=stopGeneration,controller=stopAbort;
-      stopsLayer.clearLayers();arrivalBox.hidden=true;arrivalStation=null;
-      stopList.hidden=false;stopList.replaceChildren(el("p","map-jeju-bus-stop-note","근처 정류장을 찾는 중…"));
-      try{
-        const jejuCodes=cityList.filter(item=>item.code==="" && item.raw).map(item=>item.raw);
-        const found=await MNJejuBusApi.nearbyAt([center.lat,center.lng],{signal:controller.signal,jejuCodes},MNJejuBusApi.request);
-        if(destroyed || seq!==stopGeneration || controller.signal.aborted)return;
-        const here=[center.lat,center.lng];
-        // 도시 경계 근처에선 같은 정류장이 이웃 도시 코드로도 온다(2026-09-18 실측: 대전역이 대전·계룡·세종·청주로 겹침).
-        // 지금 도시가 아닌 정류장엔 도시 이름을 붙이고, 거리가 같으면 지금 도시를 앞세운다.
-        const cityLabel=stop=>stop.city===city?"":((cityList.find(item=>item.code===stop.city) || {}).name || stop.city || t("제주"));
-        const list=found.map(stop=>({...stop,distance:MNJejuBusLive.metres(here,stop.at),cityLabel:cityLabel(stop)}))
-          .sort((a,b)=>Math.round(a.distance)-Math.round(b.distance) || (a.cityLabel?1:0)-(b.cityLabel?1:0));
-        if(!list.length){stopList.replaceChildren(el("p","map-jeju-bus-stop-note","지도 가운데 근처에 정류장이 없어요. 지도를 옮겨 다시 찾아 주세요."));return;}
-        stopsLayer.addTo(map);
-        const buttons=list.slice(0,12).map(stop=>{
-          const item=button("","map-jeju-bus-stop");
-          item.textContent=stop.name+(stop.no?" ("+stop.no+")":"")+(stop.cityLabel?" · "+stop.cityLabel:"")+" · "+Math.round(stop.distance)+"m";
-          item.addEventListener("click",()=>showArrivals(stop));
-          return item;
-        });
-        stopList.replaceChildren(...buttons);
-        for(const stop of list){
-          const marker=L.circleMarker(stop.at,{pane:"mapJejuBusPane",radius:6,color:"#ffffff",weight:2,fillColor:"#e67e22",fillOpacity:0.95,bubblingMouseEvents:false});
-          pointTip(marker,{color:"#e67e22",name:stop.name,sub:stop.cityLabel || "",hint:arrivalsHint()});
-          marker.on("click",()=>showArrivals(stop));
-          stopsLayer.addLayer(marker);
-        }
-      }catch(error){
-        if(controller.signal.aborted || seq!==stopGeneration)return;
-        stopList.replaceChildren(el("p","map-jeju-bus-stop-note",failureText(error,"근처 정류장을 받지 못했어요. 잠시 후 다시 찾아 주세요.","nearby",error && error.city || "")));
+    let nearbyTransit = null;
+    function renderNearbyStops(found, message = ""){
+      if (stopList.hidden || destroyed) return;
+      const center = map.getCenter(), here = [center.lat, center.lng];
+      const cityLabel = stop => stop.city === city ? "" : ((cityList.find(item => item.code === stop.city) || {}).name || stop.city || t("제주"));
+      const sorted = found.map(stop => ({ ...stop, distance:MNJejuBusLive.metres(here, stop.at), cityLabel:cityLabel(stop) }))
+        .sort((a,b) => Math.round(a.distance) - Math.round(b.distance) || (a.cityLabel ? 1 : 0) - (b.cityLabel ? 1 : 0));
+      const buttons = sorted.slice(0,12).map(stop => {
+        const item = button("", "map-jeju-bus-stop");
+        item.textContent = stop.name + (stop.no ? " (" + stop.no + ")" : "") + (stop.cityLabel ? " · " + stop.cityLabel : "") + " · " + Math.round(stop.distance) + "m";
+        item.addEventListener("click", () => showArrivals(stop));
+        return item;
+      });
+      if (message) buttons.push(el("p", "map-jeju-bus-stop-note", message));
+      if (!buttons.length) buttons.push(el("p", "map-jeju-bus-stop-note", "지도 가운데 근처에 정류장이 없어요. 지도를 옮겨 다시 찾아 주세요."));
+      stopList.replaceChildren(...buttons);
+    }
+    function findNearby(){
+      clearStops();
+      stopList.hidden = false;
+      const center = map.getCenter();
+      if (!nearbyTransit || !nearbyTransit.showBusAround([center.lat, center.lng])){
+        renderNearbyStops([], t("버스 정류장은 ClassDock EXE에서 인터넷 연결 후 볼 수 있어요."));
       }
     }
     async function showArrivals(stop,force=false){
@@ -580,6 +568,8 @@ const MNJejuBusMap = (() => {
         .then(job=>{if(!destroyed && job.state==="running")showCatalogJob(job);}).catch(()=>{});
     }).catch(()=>{});
     const controller={
+      connectNearbyTransit(value){ nearbyTransit = value; },
+      updateNearbyStops(stops, message){ renderNearbyStops(stops, message); },
       freeze(){frozen++;stopFrame();return ()=>{frozen=Math.max(0,frozen-1);nextPoll=0;tick();};},
       // 주변 교통(nearby-transit.js)의 도착 창에서 노선을 누르면 버스 창을 열고 그 노선을 검색한다.
       pickRoute(stop,item){
