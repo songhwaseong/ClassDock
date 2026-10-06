@@ -5491,8 +5491,19 @@ function mountDiaryEditor(doc){
     schoolStrip.replaceChildren(...rows);
   }
 
-  // 학교 고르기 창
-  function renderSchoolPanel(results, status){
+  // 학교 고르기 창 — 찾은 학교는 종류(초·중·고·기타) 칩으로 걸러 보고, 지금 고른 학교는 ✓ 로 표시한다.
+  const SCHOOL_GROUPS = [["elem", "초", "Elementary"], ["mid", "중", "Middle"], ["high", "고", "High"], ["etc", "기타", "Other"]];
+  const schoolGroup = kind => /초등/.test(kind) ? "elem" : /중학/.test(kind) ? "mid" : /고등/.test(kind) ? "high" : "etc";
+  const schoolShortAddress = text => String(text || "").replace(/^\S+(?:특별시|광역시|특별자치시|특별자치도|도)\s+/, "");
+  // 이름 속 검색어를 <mark> 로 — 대소문자는 가리지 않는다.
+  function schoolMarkName(el, name, query){
+    const at = query ? name.toLowerCase().indexOf(query.toLowerCase()) : -1;
+    if (at < 0){ el.textContent = name; return; }
+    const mark = document.createElement("mark"); mark.textContent = name.slice(at, at + query.length);
+    el.append(name.slice(0, at), mark, name.slice(at + query.length));
+  }
+  // view: 다시 그릴 때 이어 갈 칩·스크롤 { group, listTop, panelTop } — 학교를 고르거나 빼도 찾은 목록은 그대로 둔다.
+  function renderSchoolPanel(results, status, query, view = {}){
     const head = document.createElement("div"); head.className = "diary-style-label"; head.textContent = schoolWord("우리 학교", "My school");
     const now = document.createElement("div"); now.className = "diary-school-current";
     now.textContent = school ? school.name + (school.kind ? " (" + school.kind + ")" : "") : diaryT("아직 고른 학교가 없어요");
@@ -5500,24 +5511,60 @@ function mountDiaryEditor(doc){
     const input = document.createElement("input");
     input.type = "search"; input.className = "diary-school-q"; input.maxLength = 40;
     input.placeholder = diaryT("학교 이름 (예: 가락초)"); input.setAttribute("aria-label", schoolWord("학교 이름", "School name"));
-    const find = diaryButton("찾기", "학교 찾기", "diary-btn");
+    if (query) input.value = query;
+    const find = diaryButton("", "학교 찾기", "diary-school-find", "search");
     find.type = "submit";
     form.append(input, find);
+    const found = results || [];
+    const chips = document.createElement("div"); chips.className = "diary-school-chips"; chips.setAttribute("role", "group");
+    chips.setAttribute("aria-label", schoolWord("학교 종류", "School type"));
     const list = document.createElement("div"); list.className = "diary-school-results";
-    for (const s of results || []){
+    let shownGroup = "all";
+    const showGroup = (group) => {
+      shownGroup = group;
+      for (const chip of chips.children) chip.setAttribute("aria-pressed", String(chip.dataset.group === group));
+      for (const row of list.children) row.hidden = group !== "all" && row.dataset.group !== group;
+    };
+    if (found.length){
+      const counts = {};
+      for (const s of found){ const g = schoolGroup(s.kind); counts[g] = (counts[g] || 0) + 1; }
+      const chip = (group, label, count) => {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "diary-school-chip"; b.dataset.group = group;
+        const name = document.createElement("span"); name.textContent = label;
+        const num = document.createElement("b"); num.textContent = String(count);
+        b.append(name, num);
+        b.addEventListener("click", () => showGroup(group));
+        return b;
+      };
+      chips.append(chip("all", schoolWord("전체", "All"), found.length),
+        ...SCHOOL_GROUPS.filter(([g]) => counts[g]).map(([g, ko, en]) => chip(g, schoolWord(ko, en), counts[g])));
+    }
+    for (const s of found){
       const b = document.createElement("button");
-      b.type = "button"; b.className = "diary-school-result";
-      const name = document.createElement("strong"); name.textContent = s.name;
-      const meta = document.createElement("small"); meta.textContent = [s.kind, s.address || s.region].filter(Boolean).join(" · ");
-      b.append(name, meta);
+      const picked = !!school && school.office === s.office && school.code === s.code;
+      b.type = "button"; b.className = "diary-school-result" + (picked ? " is-current" : ""); b.dataset.group = schoolGroup(s.kind);
+      if (picked) b.setAttribute("aria-current", "true");
+      const text = document.createElement("span"); text.className = "diary-school-result-text";
+      const name = document.createElement("strong"); schoolMarkName(name, s.name, query);
+      const meta = document.createElement("small");
+      if (s.kind){ const kind = document.createElement("span"); kind.className = "diary-school-kind"; kind.textContent = s.kind; meta.append(kind); }
+      const where = schoolShortAddress(s.address) || s.region;
+      if (where) meta.append((s.kind ? " · " : "") + where);
+      text.append(name, meta);
+      const mark = document.createElement("span"); mark.className = "diary-school-result-mark"; mark.setAttribute("aria-hidden", "true");
+      if (typeof window.uiIcon === "function") mark.innerHTML = window.uiIcon(picked ? "check" : "chevronRight");
+      b.append(text, mark);
       b.addEventListener("click", () => {
         school = { office:s.office, code:s.code, name:s.name, kind:s.kind, grade:"", cls:"" };
         neisApi.saveSchool(school);
         schoolMonths.clear(); schoolFailed.clear();
-        renderCalendar(); renderSchoolStrip(); renderSchoolPanel([], "");
+        renderCalendar(); renderSchoolStrip(); rerender();
       });
       list.append(b);
     }
+    showGroup(found.length && view.group && SCHOOL_GROUPS.some(([g]) => g === view.group && found.some(s => schoolGroup(s.kind) === g)) ? view.group : "all");
+    const rerender = () => renderSchoolPanel(found, status, query, { group:shownGroup, listTop:list.scrollTop, panelTop:schoolPanel.scrollTop });
     const note = document.createElement("div"); note.className = "diary-school-note ui-keep-symbols"; note.textContent = status || "";
     const parts = [head, now];
     if (school){
@@ -5526,7 +5573,7 @@ function mountDiaryEditor(doc){
       parts.push(card);
       renderSchoolCard(card);
     }
-    parts.push(form, list);
+    parts.push(form, chips, list);
     if (school){
       /* 시간표는 학년·반이 있어야 묻는다. 학년·반은 NEIS 학급정보의 실제 목록에서 고른다.
          목록을 받기 전·못 받았을 때(키 없는 5줄 샘플 포함)는 학년 1~3(초등 1~6)과 반 직접 입력으로 둔다. */
@@ -5596,12 +5643,14 @@ function mountDiaryEditor(doc){
       forget.addEventListener("click", () => {
         school = null; neisApi.saveSchool(null);
         schoolMonths.clear(); schoolFailed.clear();
-        renderCalendar(); renderSchoolStrip(); renderSchoolPanel([], "");
+        renderCalendar(); renderSchoolStrip(); rerender();
       });
       parts.push(row, forget);
     }
     parts.push(note);
     schoolPanel.replaceChildren(...parts);
+    if (view.listTop) list.scrollTop = view.listTop;
+    if (view.panelTop) schoolPanel.scrollTop = view.panelTop;
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const q = input.value.trim();
@@ -5611,8 +5660,7 @@ function mountDiaryEditor(doc){
         const found = await neisApi.searchSchools(q);
         const message = !found.schools.length ? diaryT("찾은 학교가 없어요. 이름 일부로 다시 찾아 보세요.")
           : found.sample && found.total > found.schools.length ? diaryT("NEIS 인증키가 없어 앞의 5곳만 보여요.") : "";
-        renderSchoolPanel(found.schools, message);
-        const again = schoolPanel.querySelector(".diary-school-q"); if (again) again.value = q;
+        renderSchoolPanel(found.schools, message, q);
       } catch(error){ note.textContent = diaryT(neisApi.failureText(error)); find.disabled = false; }
     });
   }

@@ -2550,6 +2550,23 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .cmdk-item-key{flex:0 0 auto;font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:2px 6px;background:var(--field)}
   .cmdk-item.active .cmdk-item-key{color:#eef;border-color:rgba(255,255,255,.4);background:rgba(255,255,255,.14)}
   .cmdk-empty{padding:22px 14px;text-align:center;color:var(--muted);font-size:13px}
+  /* 창 등장 효과: 이동 가능한 창은 opacity만 바꿔 열자마자 실행하는
+     clamp/리사이즈 핸들의 좌표 측정과 가운데 배치 transform을 보존한다.
+     hidden으로 닫으면 즉시 사라지고, 다시 열 때만 한 번 재생된다. */
+  .modal-card:not([hidden]),.movable-card:not([hidden]){
+    animation:ui-surface-in .18s ease-out}
+  .scratchpad:not([hidden]),.image-memo:not([hidden]),.cmdk-overlay:not([hidden]){
+    animation:ui-surface-in .16s ease-out}
+  .cmdk-overlay:not([hidden])>.cmdk{
+    animation:ui-palette-in .18s cubic-bezier(.2,.8,.2,1)}
+  @keyframes ui-surface-in{from{opacity:0}to{opacity:1}}
+  @keyframes ui-palette-in{
+    from{transform:translateY(-4px) scale(.985)}to{transform:none}}
+  @media (prefers-reduced-motion:reduce){
+    .modal-card:not([hidden]),.movable-card:not([hidden]),
+    .scratchpad:not([hidden]),.image-memo:not([hidden]),.cmdk-overlay:not([hidden]),
+    .cmdk-overlay:not([hidden])>.cmdk{animation:none}
+  }
   .modal-card h3{font-size:18px;margin-bottom:4px}
   /* pre-line: 확인 문구가 줄바꿈을 쓸 수 있게(예: 삭제 대상 목록과 경고를 줄로 나눠 보여 주기) */
   .modal-card .sub{color:var(--muted);font-size:13px;margin-bottom:14px;white-space:pre-line}
@@ -9979,13 +9996,44 @@ video.trip-recall-media{width:100%;height:100%;background:#000}
 .diary-school-card-value{flex:1;min-width:0;color:var(--ink);overflow-wrap:anywhere}
 a.diary-school-card-value{color:var(--accent)}
 .diary-school-form,.diary-school-class{display:flex;gap:6px;align-items:center}
-.diary-school-q{flex:1;min-width:0;height:32px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;padding:0 8px}
+/* 찾기 단추는 검색 칸 오른쪽 안에 돋보기로 */
+.diary-school-form{position:relative}
+.diary-school-q{flex:1;min-width:0;height:34px;border:1px solid var(--border);border-radius:9px;background:var(--field);color:var(--ink);font:inherit;padding:0 38px 0 10px}
+.diary-school-q:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+.diary-school-find{position:absolute;right:3px;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:7px;background:none;color:var(--muted);cursor:pointer}
+.diary-school-find:hover{background:var(--panel-hover);color:var(--accent)}
+.diary-school-find:disabled{opacity:.5;cursor:default}
+.diary-school-find svg{width:17px;height:17px}
 .diary-school-cls{width:60px;height:32px;border:1px solid var(--border);border-radius:7px;background:var(--field);color:var(--ink);font:inherit;padding:0 8px}
-.diary-school-results{display:flex;flex-direction:column;max-height:220px;overflow:auto}
+/* 종류 칩 — 갈래마다 제 색. 개수는 칩 안 작은 수로 */
+.diary-school-chips{display:flex;flex-wrap:wrap;gap:5px}
+.diary-school-chips:empty{display:none}
+.diary-school-chip{--school-c:var(--muted);display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:1px solid color-mix(in srgb,var(--school-c) 30%,transparent);border-radius:999px;background:color-mix(in srgb,var(--school-c) 10%,transparent);color:color-mix(in srgb,var(--school-c) 80%,var(--ink));font:inherit;font-size:12px;cursor:pointer}
+.diary-school-chip b{font-weight:600;font-size:11px;opacity:.75}
+.diary-school-chip:hover{background:color-mix(in srgb,var(--school-c) 18%,transparent)}
+.diary-school-chip[aria-pressed="true"]{background:var(--school-c);border-color:var(--school-c);color:#fff}
+.diary-school-chip[aria-pressed="true"] b{opacity:.9}
+.diary-school-chip[data-group="all"]{--school-c:var(--ink)}
+.diary-school-chip[data-group="all"][aria-pressed="true"]{color:var(--panel)}
+.diary-school-chip[data-group="elem"],.diary-school-result[data-group="elem"]{--school-c:#2f9e44}
+.diary-school-chip[data-group="mid"],.diary-school-result[data-group="mid"]{--school-c:#1c7ed6}
+.diary-school-chip[data-group="high"],.diary-school-result[data-group="high"]{--school-c:#7048e8}
+.diary-school-chip[data-group="etc"],.diary-school-result[data-group="etc"]{--school-c:#e8590c}
+.diary-school-results{display:flex;flex-direction:column;gap:2px;max-height:240px;overflow:auto}
 .diary-school-results:empty{display:none}
-.diary-school-result{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:6px 8px;border:0;border-top:1px solid var(--border);background:none;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.diary-school-result{display:flex;align-items:center;gap:8px;padding:7px 8px;border:0;border-radius:8px;background:none;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.diary-school-result[hidden]{display:none}
 .diary-school-result:hover{background:var(--panel-hover)}
+.diary-school-result-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.diary-school-result strong{overflow-wrap:anywhere}
+.diary-school-result mark{background:color-mix(in srgb,#fab005 35%,transparent);color:inherit;border-radius:3px;padding:0 1px}
 .diary-school-result small{color:var(--muted);font-size:11.5px}
+.diary-school-kind{color:color-mix(in srgb,var(--school-c) 80%,var(--ink));font-weight:600}
+.diary-school-result-mark{flex:0 0 auto;display:flex;color:var(--muted);opacity:.6}
+.diary-school-result-mark svg{width:16px;height:16px}
+.diary-school-result:hover .diary-school-result-mark{opacity:1}
+.diary-school-result.is-current{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.diary-school-result.is-current strong,.diary-school-result.is-current .diary-school-result-mark{color:var(--accent);opacity:1}
 .diary-cal-day.has-school-event .diary-cal-num{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 70%,transparent)}
 .diary-cal-day.is-school-off{color:var(--diary-sun)}
 .diary-today-badge svg{width:15px;height:15px;flex:0 0 auto}
