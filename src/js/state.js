@@ -347,6 +347,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"musicRepeat", label:"반복·엔딩 표시", cls:"music-toolvis-repeat", target:"music" },
   { id:"musicMeasureSettings", label:"마디 설정", cls:"music-toolvis-measure-settings", target:"music" },
   { id:"musicLayout", label:"마디 번호·조판", cls:"music-toolvis-layout", target:"music" },
+  { id:"musicTheme", label:"악보 색 테마", cls:"music-toolvis-theme", target:"music" },
   { id:"musicPracticeAudio", label:"연습 음원 만들기", cls:"music-toolvis-practice-audio", target:"music" },
   { id:"musicSolfege", label:"계이름 표시", cls:"music-toolvis-solfege", target:"music" },
   { id:"musicEraser", label:"지우개", cls:"music-toolvis-eraser", target:"music" },

@@ -444,6 +444,143 @@ function musicDownloadBlob(name, blob){
   }
 }
 
+/* ===== 악보 색 테마 =====
+   문서가 아니라 이 컴퓨터의 설정이다(.msheet 에 담지 않는다) — 같은 악보를 다른 곳에서 열면 원래
+   검정 악보 그대로다. 색은 .music-doc 에 CSS 변수(--ms-*)로만 얹고, 오선·음표 색은 styles.css 가
+   VexFlow 그룹 클래스(vf-stave·vf-stavebarline·music-note …)에 입힌다. 규칙이 .music-doc 아래에만
+   있으므로 그림·메모·인쇄로 떼어낸 SVG 에는 테마가 따라가지 않는다(종이에는 늘 흰 바탕·검정 음표).
+   'basic' 에 고친 색이 없으면 data-score-theme 자체를 떼어 예전 화면과 한 픽셀도 다르지 않게 둔다. */
+const MUSIC_THEME_KEY = "musicScoreTheme";
+const MUSIC_THEME_EVENT = "mn-music-theme";
+const MUSIC_THEME_FIELDS = [
+  { key:"paper",   label:"종이 바탕" },
+  { key:"line",    label:"오선 줄" },
+  { key:"bar",     label:"마디선" },
+  { key:"note",    label:"음표" },
+  { key:"lyric",   label:"가사" },
+  { key:"solfege", label:"계이름" },
+  { key:"now",     label:"지금 음" },
+  { key:"num",     label:"마디 번호" },
+  { key:"band",    label:"마디 띠" },
+  { key:"accent",  label:"도구 강조색" }
+];
+const MUSIC_THEME_FLAGS = [
+  { key:"pitch",   label:"음표·가사를 계이름 색으로" },
+  { key:"dim",     label:"재생할 때 지나간 음 흐리게" },
+  { key:"nowBand", label:"재생 중인 마디에 띠" },
+  { key:"mid",     label:"오선 가운데 줄 강조" },
+  { key:"serif",   label:"가사 명조체" }
+];
+// 계이름 색(도=빨강 … 시=분홍). 노랑은 흰 종이에서 안 보여 겨자색으로 낮췄다.
+const MUSIC_PITCH_COLORS = { C:"#E24B4A", D:"#E8780C", E:"#C99A00", F:"#4F8A17", G:"#2F7FD0", A:"#534AB7", B:"#C93F72" };
+const MUSIC_THEMES = [
+  { id:"basic", name:"기본 검정", desc:"지금까지의 검정 악보",
+    colors:{ paper:"#ffffff", line:"#000000", bar:"#000000", note:"#000000", lyric:"#111111", solfege:"#2563eb",
+      now:"#4f46e5", num:"#64748b", band:"#ffffff", accent:"" }, flags:{} },
+  { id:"lavender", name:"라벤더 노트", desc:"부드러운 보라 · 마디마다 옅은 띠",
+    colors:{ paper:"#ffffff", line:"#b9b4e6", bar:"#7f77dd", note:"#26215c", lyric:"#534ab7", solfege:"#534ab7",
+      now:"#d85a30", num:"#7f77dd", band:"#f6f5fe", accent:"#534ab7" }, flags:{} },
+  { id:"rainbow", name:"계이름 무지개", desc:"음높이마다 색 · 저학년·리코더 수업",
+    colors:{ paper:"#ffffff", line:"#b4b2a9", bar:"#5f5e5a", note:"#2c2c2a", lyric:"#444441", solfege:"#444441",
+      now:"#111111", num:"#5f5e5a", band:"#ffffff", accent:"#c2410c" }, flags:{ pitch:true } },
+  { id:"cream", name:"크림 악보지", desc:"인쇄 악보 느낌 · 세피아 오선 · 명조 가사",
+    colors:{ paper:"#fbf6ea", line:"#a8916b", bar:"#6b5636", note:"#2b2116", lyric:"#6b5636", solfege:"#8a5a2b",
+      now:"#9b2335", num:"#9b2335", band:"#fbf6ea", accent:"#9b2335" }, flags:{ serif:true } },
+  { id:"chalk", name:"칠판 무대", desc:"어두운 바탕 · 분필 오선 · 발표·전체화면",
+    colors:{ paper:"#1f3a32", line:"#9fbfb2", bar:"#dcebe4", note:"#f4f1e6", lyric:"#9fe1cb", solfege:"#fac775",
+      now:"#fac775", num:"#fac775", band:"#23413a", accent:"#0f6e56" }, flags:{}, sel:"#f0997b" },
+  { id:"practice", name:"연습 진행형", desc:"지나간 음은 흐리게 · 지금 마디에 띠",
+    colors:{ paper:"#ffffff", line:"#b4d4f4", bar:"#185fa5", note:"#042c53", lyric:"#185fa5", solfege:"#185fa5",
+      now:"#1d9e75", num:"#185fa5", band:"#ffffff", accent:"#185fa5" }, flags:{ dim:true, nowBand:true, mid:true } }
+];
+
+function musicThemePreset(id){
+  return MUSIC_THEMES.find((theme) => theme.id === id) || MUSIC_THEMES[0];
+}
+function musicHexColor(value){
+  const text = String(value || "").trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(text) ? text : "";
+}
+// 저장값: { id, colors:{고친 색만}, flags:{고친 것만} }. 프리셋을 바꾸면 고친 값은 비운다.
+function musicLoadThemeChoice(){
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(MUSIC_THEME_KEY) || "null"); } catch(_){}
+  const choice = { id:musicThemePreset(saved && saved.id).id, colors:{}, flags:{} };
+  if (saved && saved.colors && typeof saved.colors === "object"){
+    for (const field of MUSIC_THEME_FIELDS){
+      const hex = musicHexColor(saved.colors[field.key]);
+      if (hex) choice.colors[field.key] = hex;
+    }
+  }
+  if (saved && saved.flags && typeof saved.flags === "object"){
+    for (const flag of MUSIC_THEME_FLAGS){
+      if (typeof saved.flags[flag.key] === "boolean") choice.flags[flag.key] = saved.flags[flag.key];
+    }
+  }
+  return choice;
+}
+function musicSaveThemeChoice(choice){
+  try { localStorage.setItem(MUSIC_THEME_KEY, JSON.stringify(choice)); } catch(_){}
+  document.dispatchEvent(new CustomEvent(MUSIC_THEME_EVENT));
+}
+function musicResolveTheme(choice){
+  const preset = musicThemePreset(choice.id);
+  const colors = Object.assign({}, preset.colors, choice.colors);
+  const flags = Object.assign({}, preset.flags, choice.flags);
+  const plain = preset.id === "basic" && !Object.keys(choice.colors).length
+    && !MUSIC_THEME_FLAGS.some((flag) => flags[flag.key]);
+  return { id:preset.id, colors, flags, sel:preset.sel || "#c2410c", plain };
+}
+// 두 색을 섞는다(지나간 음 = 음표 색을 종이 쪽으로 흐린 색). color-mix 를 쓰면 --ms-note 가 제 자신을
+// 가리키는 순환이 되므로 값을 미리 계산해 둔다.
+function musicMixColor(from, to, amount){
+  const parse = (hex) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  const a = parse(musicHexColor(from) || "#000000");
+  const b = parse(musicHexColor(to) || "#ffffff");
+  return "#" + a.map((value, at) => Math.round(value + (b[at] - value) * amount).toString(16).padStart(2, "0")).join("");
+}
+function musicApplyTheme(root, theme){
+  const vars = ["paper", "line", "bar", "note", "lyric", "solfege", "now", "num", "band", "sel", "played", "band-now"];
+  for (const name of vars) root.style.removeProperty("--ms-" + name);
+  root.style.removeProperty("--accent");
+  for (const flag of MUSIC_THEME_FLAGS) root.removeAttribute("data-ms-" + flag.key.toLowerCase());
+  if (theme.plain){ root.removeAttribute("data-score-theme"); return; }
+  root.dataset.scoreTheme = theme.id;
+  const c = theme.colors;
+  for (const key of ["paper", "line", "bar", "note", "lyric", "solfege", "now", "num", "band"]){
+    root.style.setProperty("--ms-" + key, c[key]);
+  }
+  root.style.setProperty("--ms-sel", theme.sel);
+  root.style.setProperty("--ms-played", musicMixColor(c.note, c.paper, 0.68));
+  root.style.setProperty("--ms-band-now", musicMixColor(c.now, c.paper, 0.86));
+  if (musicHexColor(c.accent)) root.style.setProperty("--accent", c.accent);
+  for (const flag of MUSIC_THEME_FLAGS){
+    if (theme.flags[flag.key]) root.setAttribute("data-ms-" + flag.key.toLowerCase(), "");
+  }
+}
+// 테마 고르기 창의 작은 오선 그림. 프리셋 색을 그대로 보여 준다.
+function musicThemeSwatchSvg(theme){
+  const c = theme.colors;
+  const steps = ["C", "E", "G", "C"];
+  const ys = [33, 26, 19, 15];
+  let svg = `<svg viewBox="0 0 96 40" width="96" height="40" aria-hidden="true"><rect width="96" height="40" rx="5" fill="${c.paper}"/>`;
+  if (c.band !== c.paper) svg += `<rect x="50" y="2" width="44" height="36" fill="${c.band}"/>`;
+  for (let i = 0; i < 5; i++){
+    const y = 10 + i * 5;
+    const mid = theme.flags.mid && i === 2;
+    svg += `<line x1="4" x2="92" y1="${y}" y2="${y}" stroke="${mid ? c.bar : c.line}" stroke-width="${mid ? 1.3 : 0.8}"/>`;
+  }
+  svg += `<line x1="50" x2="50" y1="10" y2="30" stroke="${c.bar}" stroke-width="1.2"/>`;
+  steps.forEach((step, at) => {
+    const x = 16 + at * 22 + (at > 1 ? 4 : 0);
+    const color = at === 2 ? c.now : theme.flags.pitch ? MUSIC_PITCH_COLORS[step] : c.note;
+    if (at === 0) svg += `<line x1="${x - 6}" x2="${x + 6}" y1="35" y2="35" stroke="${c.line}" stroke-width="0.8"/>`;
+    svg += `<ellipse cx="${x}" cy="${ys[at]}" rx="3.6" ry="2.6" transform="rotate(-20 ${x} ${ys[at]})" fill="${color}"/>`
+      + `<line x1="${x + 3.2}" x2="${x + 3.2}" y1="${ys[at]}" y2="${ys[at] - 15}" stroke="${color}" stroke-width="1"/>`;
+  });
+  return svg + "</svg>";
+}
+
 function musicButton(label, title, className){
   const button = document.createElement("button");
   button.type = "button";
@@ -504,6 +641,9 @@ async function mountMusicEditor(doc){
   const notationEls = new Map();    // 음표 id → 가사·셈여림 등 SVG 글자 배열
   const selectedVisualEls = new Set(); // 지금 선택 표시가 붙은 요소만 기억해 전체 악보 순회를 피한다
   const playingVisualEls = new Set();  // 지금 재생 표시가 붙은 요소만 기억한다
+  const playedVisualEls = new Set();   // 색 테마 '지나간 음 흐리게'가 붙은 요소
+  const measureBands = new Map();      // 마디(0부터) → 색 테마 마디 띠 rect(테마가 켜진 동안만 그린다)
+  let nowBandMeasure = -2;             // 띠에 is-now 를 칠해 둔 마디
   const noteHorizontalLimits = new Map(); // 음표 id → 현재 조판에서 이웃·마디를 넘지 않는 xOffset 범위
   let lyricVerse = 1;              // 지금 가사를 넣는 절 — 배율처럼 보기 상태라 .msheet 에 담지 않는다
   let lyricEntry = null;           // 이어치기 중이면 { index } — 가사를 붙일 수 있는 음표 차례
@@ -1065,6 +1205,9 @@ async function mountMusicEditor(doc){
     openMusicContextMenu(rect.left, rect.bottom + 4, layoutContextItems());
   });
   measureSettingsBtn.addEventListener("click", editActiveMeasureSettings);
+  const themeBtn = musicButton("색 테마 ▾", "오선·음표·가사 색을 고릅니다 — 이 컴퓨터의 모든 악보에 적용돼요");
+  themeBtn.setAttribute("aria-haspopup", "dialog");
+  themeBtn.addEventListener("click", () => toggleThemePopover());
 
   const addBarBtn = musicButton("＋마디", "마지막에 빈 마디 추가");
   addBarBtn.addEventListener("click", () => addMeasure());
@@ -1107,6 +1250,7 @@ async function mountMusicEditor(doc){
   repeatStartBtn.classList.add("music-toolvis-repeat"); repeatEndBtn.classList.add("music-toolvis-repeat"); endingBtn.classList.add("music-toolvis-repeat");
   measureSettingsBtn.classList.add("music-toolvis-measure-settings");
   layoutBtn.classList.add("music-toolvis-layout");
+  themeBtn.classList.add("music-toolvis-theme");
   solfegeBtn.classList.add("music-toolvis-solfege");
   eraserBtn.classList.add("music-toolvis-eraser");
   positionBtn.classList.add("music-toolvis-position");
@@ -1601,7 +1745,7 @@ async function mountMusicEditor(doc){
   const scorePane = document.createElement("div");
   scorePane.className = "music-pane music-score-tools";
   scorePane.append(transposeBtn, grandStaffBtn, solfegeBtn, lyricBtn, chordSymbolBtn, dynamicBtn, articulationBtn,
-    fingeringBtn, pedalBtn, repeatStartBtn, repeatEndBtn, endingBtn, measureSettingsBtn, layoutBtn, exampleWrap);
+    fingeringBtn, pedalBtn, repeatStartBtn, repeatEndBtn, endingBtn, measureSettingsBtn, layoutBtn, themeBtn, exampleWrap);
 
   const extraPane = document.createElement("div");
   extraPane.className = "music-pane music-extra-tools";
@@ -1692,6 +1836,177 @@ async function mountMusicEditor(doc){
   document.addEventListener("mn-tool-visibility", syncToolTabs);
   doc.cleanupFns.push(() => document.removeEventListener("mn-tool-visibility", syncToolTabs));
   syncToolTabs();
+
+  /* ----- 악보 색 테마 -----
+     색만 바뀌면 CSS 변수라 다시 그릴 필요가 없다. 마디 띠는 테마가 켜진 동안에만 SVG 에 넣으므로
+     켜짐/꺼짐이 바뀔 때만 다시 조판한다. 다른 악보 탭에서 고른 것도 같은 이벤트로 따라온다. */
+  let themePopover = null;
+  let themeOutside = null;
+  let themeKeydown = null;
+  function applyScoreTheme(){
+    const wasThemed = root.hasAttribute("data-score-theme");
+    musicApplyTheme(root, musicResolveTheme(musicLoadThemeChoice()));
+    if (wasThemed !== root.hasAttribute("data-score-theme") && vexReady) drawScore();
+    else if (playingEvent) highlight(playingEvent, false);   // '지나간 음 흐리게'를 켜고 끈 것을 바로 반영
+    if (themePopover) renderThemePopover();
+  }
+  document.addEventListener(MUSIC_THEME_EVENT, applyScoreTheme);
+  doc.cleanupFns.push(() => {
+    document.removeEventListener(MUSIC_THEME_EVENT, applyScoreTheme);
+    closeThemePopover();
+  });
+  musicApplyTheme(root, musicResolveTheme(musicLoadThemeChoice()));
+
+  function closeThemePopover(){
+    if (themeOutside){ document.removeEventListener("pointerdown", themeOutside, true); themeOutside = null; }
+    if (themeKeydown){ document.removeEventListener("keydown", themeKeydown, true); themeKeydown = null; }
+    if (themePopover){ themePopover.remove(); themePopover = null; }
+    themeBtn.setAttribute("aria-expanded", "false");
+  }
+  function placeThemePopover(){
+    if (!themePopover) return;
+    const anchor = themeBtn.getBoundingClientRect();
+    const margin = 8;
+    const width = themePopover.offsetWidth, height = themePopover.offsetHeight;
+    let top = anchor.bottom + 4;
+    if (top + height > window.innerHeight - margin) top = Math.max(margin, anchor.top - height - 4);
+    themePopover.style.left = Math.max(margin, Math.min(window.innerWidth - width - margin, anchor.left)) + "px";
+    themePopover.style.top = Math.max(margin, top) + "px";
+  }
+  function renderThemePopover(){
+    const choice = musicLoadThemeChoice();
+    const theme = musicResolveTheme(choice);
+    const pop = themePopover;
+    pop.replaceChildren();
+    const head = document.createElement("div");
+    head.className = "music-theme-head";
+    const title = document.createElement("strong");
+    title.textContent = "악보 색 테마";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "music-theme-close";
+    close.textContent = "✕";
+    close.setAttribute("aria-label", "닫기");
+    close.addEventListener("click", closeThemePopover);
+    head.append(title, close);
+
+    const list = document.createElement("div");
+    list.className = "music-theme-presets";
+    for (const preset of MUSIC_THEMES){
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "music-theme-preset";
+      button.dataset.theme = preset.id;
+      button.setAttribute("aria-pressed", preset.id === choice.id ? "true" : "false");
+      button.classList.toggle("is-on", preset.id === choice.id);
+      const name = document.createElement("span");
+      name.className = "music-theme-name";
+      name.textContent = preset.name;
+      const desc = document.createElement("span");
+      desc.className = "music-theme-desc";
+      desc.textContent = preset.desc;
+      const swatch = document.createElement("span");
+      swatch.className = "music-theme-swatch";
+      swatch.innerHTML = musicThemeSwatchSvg(preset);
+      button.append(swatch, name, desc);
+      button.addEventListener("click", () => musicSaveThemeChoice({ id:preset.id, colors:{}, flags:{} }));
+      list.appendChild(button);
+    }
+
+    const custom = document.createElement("details");
+    custom.className = "music-theme-custom";
+    custom.open = !!(Object.keys(choice.colors).length || Object.keys(choice.flags).length || pop.dataset.customOpen);
+    custom.addEventListener("toggle", () => { if (custom.open) pop.dataset.customOpen = "1"; else delete pop.dataset.customOpen; });
+    const summary = document.createElement("summary");
+    summary.textContent = "색 직접 고르기";
+    const grid = document.createElement("div");
+    grid.className = "music-theme-fields";
+    for (const field of MUSIC_THEME_FIELDS){
+      const label = document.createElement("label");
+      label.className = "music-theme-field";
+      const text = document.createElement("span");
+      text.textContent = field.label;
+      const input = document.createElement("input");
+      input.type = "color";
+      input.dataset.themeField = field.key;
+      // 기본 테마의 도구 강조색은 앱 강조색을 그대로 쓰므로 고르개에는 지금 보이는 색을 보여 준다.
+      input.value = musicHexColor(theme.colors[field.key])
+        || musicHexColor(getComputedStyle(root).getPropertyValue("--accent")) || "#4f46e5";
+      input.classList.toggle("is-changed", !!choice.colors[field.key]);
+      // input 은 끄는 동안 계속 온다 — 화면에는 바로 칠하고, 저장(=다른 탭 알림)은 change 에서 한 번만.
+      input.addEventListener("input", () => {
+        const next = musicLoadThemeChoice();
+        next.colors[field.key] = input.value.toLowerCase();
+        musicApplyTheme(root, musicResolveTheme(next));
+      });
+      input.addEventListener("change", () => {
+        const next = musicLoadThemeChoice();
+        next.colors[field.key] = input.value.toLowerCase();
+        musicSaveThemeChoice(next);
+      });
+      label.append(text, input);
+      grid.appendChild(label);
+    }
+    const flags = document.createElement("div");
+    flags.className = "music-theme-flags";
+    for (const flag of MUSIC_THEME_FLAGS){
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.dataset.themeFlag = flag.key;
+      box.checked = !!theme.flags[flag.key];
+      box.addEventListener("change", () => {
+        const next = musicLoadThemeChoice();
+        next.flags[flag.key] = box.checked;
+        musicSaveThemeChoice(next);
+      });
+      label.append(box, document.createTextNode(" " + flag.label));
+      flags.appendChild(label);
+    }
+    const foot = document.createElement("div");
+    foot.className = "music-theme-foot";
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "music-btn";
+    reset.textContent = "이 테마 원래 색으로";
+    reset.disabled = !Object.keys(choice.colors).length && !Object.keys(choice.flags).length;
+    reset.addEventListener("click", () => musicSaveThemeChoice({ id:choice.id, colors:{}, flags:{} }));
+    const note = document.createElement("span");
+    note.className = "music-theme-note";
+    note.textContent = "그림 저장·메모·인쇄는 늘 흰 종이에 검정으로 나가요.";
+    foot.append(reset, note);
+    custom.append(summary, grid, flags, foot);
+
+    pop.append(head, list, custom);
+    if (window.MNI18N) window.MNI18N.translateTree(pop);
+    placeThemePopover();
+  }
+  function toggleThemePopover(){
+    if (themePopover){ closeThemePopover(); return; }
+    closeMusicContextMenu();
+    themePopover = document.createElement("div");
+    themePopover.className = "music-theme-pop";
+    themePopover.setAttribute("role", "dialog");
+    themePopover.setAttribute("aria-label", "악보 색 테마");
+    themePopover.setAttribute("data-i18n-ui", "");
+    document.body.appendChild(themePopover);
+    themeBtn.setAttribute("aria-expanded", "true");
+    renderThemePopover();
+    themeOutside = (event) => {
+      if (themePopover && !themePopover.contains(event.target) && !themeBtn.contains(event.target)) closeThemePopover();
+    };
+    themeKeydown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeThemePopover();
+      themeBtn.focus();
+    };
+    setTimeout(() => {
+      if (!themePopover) return;
+      document.addEventListener("pointerdown", themeOutside, true);
+      document.addEventListener("keydown", themeKeydown, true);
+    }, 0);
+  }
 
   root.append(bar, toolbox, practicePanel, lyricBar, notice, scoreWorkspace, earTest.el,
     imageReferenceInput, musicXmlInput);
@@ -2313,6 +2628,9 @@ async function mountMusicEditor(doc){
     notationEls.clear();
     selectedVisualEls.clear();
     playingVisualEls.clear();
+    playedVisualEls.clear();
+    measureBands.clear();
+    nowBandMeasure = -2;             // 띠를 새로 그렸으니 지금 마디를 다시 칠하게 한다
     noteHorizontalLimits.clear();
     staveBoxes = [];
     scoreLines = [];
@@ -2409,6 +2727,7 @@ async function mountMusicEditor(doc){
           if (el){
             el.classList.add("music-note");
             if (note.rest) el.classList.add("is-rest");
+            else if (note.step) el.dataset.step = note.step;   // 색 테마 '계이름 색'이 읽는다
             el.dataset.noteId = note.id;
             el.dataset.measure = String(index + 1);
             el.dataset.staff = staff;
@@ -2429,6 +2748,7 @@ async function mountMusicEditor(doc){
             notationPlaces.push({ note, index, staff, voice:voiceNumber, x:noteX,
               noteY:Number(ys[0]) || stave.getYForLine(2), topY:stave.getYForLine(0), bottomY });
           }
+            if (el) el.dataset.seq = String(drawnSequences[`${staff}:${voiceNumber}`].length);
             drawnSequences[`${staff}:${voiceNumber}`].push(item);
           }
         }
@@ -2470,6 +2790,21 @@ async function mountMusicEditor(doc){
         }
         trebleStave.setContext(context).draw();
         if (bassStave) bassStave.setContext(context).draw();
+        /* 색 테마의 마디 띠 — 맨 앞에 끼워 넣어 오선·음표 뒤에 깔린다. fill 은 속성으로 none 을 달아
+           둔다: 그림·인쇄로 떼어낸 SVG 에는 테마 규칙이 없어 속성이 없으면 검정 상자가 된다. */
+        if (scoreSvg && root.hasAttribute("data-score-theme")){
+          const band = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          band.classList.add("music-measure-band");
+          if (index % 2) band.classList.add("is-alt");
+          band.setAttribute("fill", "none");
+          band.setAttribute("pointer-events", "none");
+          band.setAttribute("x", String(x));
+          band.setAttribute("y", String(trebleStave.getYForLine(0) - 24));
+          band.setAttribute("width", String(staveWidth));
+          band.setAttribute("height", String(lineHeight - 12));
+          scoreSvg.insertBefore(band, scoreSvg.firstChild);
+          measureBands.set(index, band);
+        }
 
         if (bassStave){
           if (head){
@@ -2592,8 +2927,10 @@ async function mountMusicEditor(doc){
           appendNotationText(place, mark, "music-articulation", place.noteY + (place.voice === 1 ? -11 : 18));
         }
         musicNoteLyrics(note).forEach((text, verseIndex) => {
-          if (text) appendNotationText(place, text, "music-lyric",
+          if (!text) return;
+          appendNotationText(place, text, "music-lyric",
             place.bottomY + 54 + verseIndex * MUSIC_LYRIC_ROW_GAP + (place.voice === 2 ? 16 : 0));
+          if (!note.rest && note.step) scoreSvg.lastChild.dataset.step = note.step;
         });
         // 셈여림·페달은 절이 몇이든 가사 아래에 오게 문서의 절 수만큼 한꺼번에 내린다.
         const lyricDrop = Math.max(0, musicClampVerseCount(sheet.lyricVerses) - 1) * MUSIC_LYRIC_ROW_GAP;
@@ -2644,6 +2981,7 @@ async function mountMusicEditor(doc){
         }
         label.classList.add("music-solfege");
         label.dataset.noteId = place.note.id;
+        if (place.note.step) label.dataset.step = place.note.step;
         label.dataset.measure = String(place.index + 1);
         label.dataset.staff = place.staff;
         label.dataset.voice = String(place.voice);
@@ -2686,6 +3024,7 @@ async function mountMusicEditor(doc){
       paintSelection();
       if (playingEvent) highlight(playingEvent, false);
       paintPractice();          // 배율·창 크기가 바뀌어 다시 그려도 따라치기 진도 표시가 살아남는다
+      paintNowBand();           // 색 테마 마디 띠는 다시 그리면 새 요소라 지금 마디를 다시 칠한다
       syncPlaybackLineControls(true);
     } catch(error){
       console.warn("악보를 그리지 못했습니다:", error);
@@ -5038,10 +5377,38 @@ async function mountMusicEditor(doc){
     // 마디 막대는 음표마다가 아니라 마디가 바뀔 때만 다시 그린다(음표마다 그리면 긴 곡에서 무겁다).
     const measure = event && Number.isFinite(event.measure) ? event.measure - 1 : -1;
     if (measure !== timelinePlayMeasure){ timelinePlayMeasure = measure; syncTimeline(); }
+    paintNowBand();
     const el = paintNoteVisualState(playingVisualEls, event && event.id, "is-playing");
+    paintPlayedNotes(event);
     if (!event) return;
     if (!el) return;
     if (reveal) revealScoreElement(el, playbackGrandStaffBounds(event));
+  }
+
+  /* 색 테마 — 지금 소리 나는 마디의 띠와 지나간 음. 지나간 음은 같은 손·성부에서 앞 차례인 음과
+     앞 마디의 모든 음이다(도돌이로 되돌아가면 뒤 음은 다시 진해진다). 테마가 꺼져 있으면 지우기만 한다. */
+  function paintNowBand(){
+    if (nowBandMeasure === timelinePlayMeasure) return;   // 음표마다 불리므로 마디가 바뀔 때만 칠한다
+    nowBandMeasure = timelinePlayMeasure;
+    for (const [index, band] of measureBands) band.classList.toggle("is-now", index === nowBandMeasure);
+  }
+  function paintPlayedNotes(event){
+    for (const el of playedVisualEls) el.classList.remove("is-played");
+    playedVisualEls.clear();
+    if (!event || !root.hasAttribute("data-ms-dim")) return;
+    const current = noteEls.get(event.id);
+    const measure = Number(event.measure) || 0;
+    const lane = current ? current.dataset.staff + ":" + current.dataset.voice : "";
+    const seq = current ? Number(current.dataset.seq) : -1;
+    for (const [id, el] of noteEls){
+      const sameLane = el.dataset.staff + ":" + el.dataset.voice === lane;
+      if (!(Number(el.dataset.measure) < measure || (sameLane && Number(el.dataset.seq) < seq))) continue;
+      for (const item of [el, solfegeEls.get(id), ...(notationEls.get(id) || [])]){
+        if (!item) continue;
+        item.classList.add("is-played");
+        playedVisualEls.add(item);
+      }
+    }
   }
 
   function setPlaying(on, isPaused = false){

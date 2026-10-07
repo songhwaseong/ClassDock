@@ -1794,6 +1794,70 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .music-score.is-practice .music-note.mp-bad path,.music-score.is-practice .music-note.mp-bad rect,
   .music-score.is-practice .music-note.mp-bad text{fill:#dc2626;stroke:#dc2626}
   .music-score.is-practice .music-solfege.mp-bad{fill:#dc2626}
+  /* 악보 색 테마 — music-editor.js musicApplyTheme 가 .music-doc 에 --ms-* 변수와 data-score-theme 를 얹을
+     때만 먹는다. VexFlow 그룹(vf-stave 등)은 fill/stroke 속성이 없어 여기 값을 물려받는다. 덧줄만
+     stroke="#444" 를 직접 달고 나와 요소에 따로 칠한다. 상태 색(재생·선택)은 테마 규칙보다 뒤·더 구체적으로. */
+  .music-doc[data-score-theme] .music-score-workspace,.music-doc[data-score-theme] .music-score{background:var(--ms-paper)}
+  .music-doc[data-score-theme] .music-score svg{fill:var(--ms-note);stroke:var(--ms-note)}
+  .music-doc[data-score-theme] .music-score .vf-stave{stroke:var(--ms-line)}
+  .music-doc[data-score-theme][data-ms-mid] .music-score .vf-stave>path:nth-of-type(3){stroke:var(--ms-bar);stroke-width:1.6}
+  .music-doc[data-score-theme] .music-score .vf-stavebarline{fill:var(--ms-bar);stroke:var(--ms-bar)}
+  .music-doc[data-score-theme] .music-score .music-note{fill:var(--ms-note);stroke:var(--ms-note)}
+  .music-doc[data-score-theme] .music-score .music-note>path{stroke:var(--ms-line)}
+  .music-doc[data-score-theme] .music-score .music-measure-band{fill:var(--ms-paper)}
+  .music-doc[data-score-theme] .music-score .music-measure-band.is-alt{fill:var(--ms-band)}
+  .music-doc[data-score-theme][data-ms-nowband] .music-score .music-measure-band.is-now{fill:var(--ms-band-now)}
+  .music-doc[data-score-theme] .music-score :is(.music-notation,.music-measure-setting,.music-chord-symbol,.music-rehearsal){fill:var(--ms-note)}
+  .music-doc[data-score-theme] .music-score :is(.music-rehearsal-box,.music-slur){stroke:var(--ms-note)}
+  .music-doc[data-score-theme] .music-score .music-lyric{fill:var(--ms-lyric)}
+  .music-doc[data-score-theme][data-ms-serif] .music-score .music-lyric{font-family:"Nanum Myeongjo","Batang","AppleMyungjo",serif}
+  .music-doc[data-score-theme] .music-score .music-solfege{fill:var(--ms-solfege);stroke:var(--ms-paper)}
+  .music-doc[data-score-theme] .music-score :is(.music-measure-number,.music-lyric-verse){fill:var(--ms-num)}
+  .music-doc[data-ms-pitch] .music-score [data-step="C"]{--ms-pitch:#E24B4A}
+  .music-doc[data-ms-pitch] .music-score [data-step="D"]{--ms-pitch:#E8780C}
+  .music-doc[data-ms-pitch] .music-score [data-step="E"]{--ms-pitch:#C99A00}
+  .music-doc[data-ms-pitch] .music-score [data-step="F"]{--ms-pitch:#4F8A17}
+  .music-doc[data-ms-pitch] .music-score [data-step="G"]{--ms-pitch:#2F7FD0}
+  .music-doc[data-ms-pitch] .music-score [data-step="A"]{--ms-pitch:#534AB7}
+  .music-doc[data-ms-pitch] .music-score [data-step="B"]{--ms-pitch:#C93F72}
+  .music-doc[data-score-theme][data-ms-pitch] .music-score .music-note[data-step]{--ms-note:var(--ms-pitch)}
+  .music-doc[data-score-theme][data-ms-pitch] .music-score :is(.music-lyric,.music-solfege)[data-step]{fill:var(--ms-pitch)}
+  .music-doc[data-score-theme][data-ms-dim] .music-score .music-note.is-played{--ms-note:var(--ms-played)}
+  .music-doc[data-score-theme][data-ms-dim] .music-score :is(.music-notation,.music-solfege).is-played{fill:var(--ms-played)}
+  .music-doc[data-score-theme] .music-score .music-note.is-playing :is(path,rect,text){fill:var(--ms-now);stroke:var(--ms-now)}
+  .music-doc[data-score-theme] .music-score :is(.music-notation,.music-solfege,.music-chord-symbol)[data-note-id].is-playing{fill:var(--ms-now)}
+  .music-doc[data-score-theme] .music-score .music-note.is-selected :is(path,rect,text){fill:var(--ms-sel);stroke:var(--ms-sel)}
+  .music-doc[data-score-theme] .music-score :is(.music-notation,.music-solfege,.music-chord-symbol)[data-note-id].is-selected{fill:var(--ms-sel)}
+  /* 색 테마 고르기 창 */
+  .music-theme-pop{position:fixed;z-index:1960;width:min(420px,calc(calc(100vw / var(--ui-zoom, 1)) - 16px));
+    max-height:calc(calc(100vh / var(--ui-zoom, 1)) - 16px);overflow-y:auto;padding:10px 12px 12px;
+    border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--ink);
+    box-shadow:0 12px 30px rgba(0,0,0,.34);font-size:12.5px}
+  .music-theme-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+  .music-theme-head strong{font-size:13.5px}
+  .music-theme-close{border:0;background:transparent;color:var(--muted);font-size:14px;padding:2px 6px;border-radius:6px}
+  .music-theme-close:hover{background:var(--panel-hover);color:var(--ink)}
+  .music-theme-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .music-theme-preset{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto auto;column-gap:8px;
+    align-items:center;padding:6px;border:1px solid var(--border);border-radius:9px;background:var(--field);
+    color:inherit;font:inherit;text-align:left}
+  .music-theme-preset:hover{border-color:var(--accent);background:var(--panel-hover)}
+  .music-theme-preset.is-on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;
+    background:color-mix(in srgb,var(--accent) 8%,var(--field))}
+  .music-theme-swatch{grid-row:1 / span 2;display:flex;border-radius:5px;outline:1px solid var(--border)}
+  .music-theme-name{font-weight:700;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .music-theme-desc{font-size:11px;color:var(--muted);line-height:1.3}
+  .music-theme-custom{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+  .music-theme-custom summary{cursor:pointer;font-weight:700;padding:2px 0}
+  .music-theme-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 10px;margin:8px 0}
+  .music-theme-field{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 4px 3px 8px;
+    border-radius:7px;background:var(--field)}
+  .music-theme-field input{width:34px;height:22px;padding:0;border:1px solid var(--border);border-radius:5px;background:none;cursor:pointer}
+  .music-theme-field input.is-changed{outline:2px solid var(--accent);outline-offset:1px}
+  .music-theme-flags{display:flex;flex-direction:column;gap:4px;margin:4px 0 8px}
+  .music-theme-flags label{display:flex;align-items:center;gap:4px;cursor:pointer}
+  .music-theme-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .music-theme-note{font-size:11px;color:var(--muted)}
   /* 연습 중에는 머리말·도구상자를 통째로 잠근다. 교본이 바뀌면 진도가 어긋난다.
      '쉬운 입력'(도레미 버튼)과 재생 바는 살려 둔다 — 거기서 따라치기를 끄고 켠다. */
   .music-doc.is-practice .music-bar,.music-doc.is-practice .music-synth-panel,
@@ -4652,6 +4716,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-musicRepeat .music-toolvis-repeat,
   html.hide-tool-musicMeasureSettings .music-toolvis-measure-settings,
   html.hide-tool-musicLayout .music-toolvis-layout,
+  html.hide-tool-musicTheme .music-toolvis-theme,
   html.hide-tool-musicPracticeAudio .music-toolvis-practice-audio,
   html.hide-tool-musicSolfege .music-toolvis-solfege,
   html.hide-tool-musicEraser .music-toolvis-eraser,
