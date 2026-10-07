@@ -458,7 +458,9 @@ test("편집 화면과 지도 화면 사이 분할 바는 폭을 조절하고 �
   const source = read("src/js/trip.js");
   const css = read("src/styles.css");
   assert.match(source, /className = "trip-map-divider"/);
-  assert.match(source, /body\.append\(rail, main, mapDivider, mapPane\)/);
+  // 시안 B: 여정은 본문 칸이 아니라 도구막대 아래 가로 날 띠라 본문에는 종이·분할 바·지도만 남는다
+  assert.match(source, /body\.append\(main, mapDivider, mapPane\)/);
+  assert.match(source, /root\.append\(bar, rail, body, searchPop\)/);
   assert.match(source, /localStorage\.getItem\("mn\.tripMapWidth"\)/);
   assert.match(source, /localStorage\.setItem\("mn\.tripMapWidth"/);
   assert.match(source, /leafletMap\.invalidateSize\(\{ pan:false \}\)/);
@@ -467,7 +469,7 @@ test("편집 화면과 지도 화면 사이 분할 바는 폭을 조절하고 �
   assert.match(css, /\.trip-map-divider,\.trip-map-pane\{display:none\}/);
 });
 
-test("여행일지 상단 편집 도구는 공용 아이콘과 짧은 이름을 함께 보인다", () => {
+test("여행일지 상단 편집 도구는 공용 아이콘을 쓰고 짧은 이름은 감춘 칸에 남긴다", () => {
   const source = read("src/js/trip.js");
   const icons = read("src/js/icons.js");
   const css = read("src/styles.css");
@@ -481,6 +483,7 @@ test("여행일지 상단 편집 도구는 공용 아이콘과 짧은 이름을 
   for (const label of ["되돌리기", "다시하기", "사진추가", "사진정보", "스티커·글상자", "종이·배경", "인쇄", "내보내기", "저장"]){
     assert.match(source, new RegExp('toolLabel\\([^\\n]*"' + label.replace(/[/?]/g, "\\$&") + '"'));
   }
+  assert.match(css, /\.trip-bar-actions \.trip-tool-label\{display:none\}/);   // 시안 B: 그림만 보인다
   assert.match(source, /className = "trip-brand"/);
   assert.match(source, /className = "trip-map-guide"/);
   assert.match(icons, /\bmap:\s*['"]/);

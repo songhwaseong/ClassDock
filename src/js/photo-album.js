@@ -1581,6 +1581,7 @@ const PhotoAlbum = (() => {
   }
   function onHistoryKey(event){
     if (!root || !root.isConnected || root.closest("[hidden]") || drawing || event.altKey) return;
+    if (albumMode === "book"){ onBookKey(event); return; }
     if (viewing){ onViewingKey(event); return; }
     const target = event.target;
     if (target && target.closest && target.closest("textarea,select,[contenteditable=true],input:not([type=range])")) return;
@@ -2950,7 +2951,7 @@ const PhotoAlbum = (() => {
     }
     actions.appendChild(iconButton("delete", "삭제", async () => {
       if (!await confirmDialog("사진첩에서 이 항목을 삭제할까요?", "삭제", "취소")) return;
-      try { await deleteItem(item); if (musicSession && musicSession.item === item) stopMusic(); records = records.filter(row => row.id !== item.id); for (const track of musicTracks(item.music)) await dropAudioRecord(track.id); selectedId = records[0] && records[0].id; picked = new Set(); paintList(); paintStage(); paintBackgrounds(); paintAdjust(); }
+      try { await deleteItem(item); if (musicSession && musicSession.item === item) stopMusic(); records = records.filter(row => row.id !== item.id); removeFromBook(item.id); for (const track of musicTracks(item.music)) await dropAudioRecord(track.id); selectedId = records[0] && records[0].id; picked = new Set(); paintList(); paintStage(); paintBackgrounds(); paintAdjust(); }
       catch(error){ console.error(error); notice("항목을 삭제하지 못했습니다."); }
     }, "pa-ico pa-delete"));
     caption.append(name,actions); host.appendChild(caption);
@@ -2996,17 +2997,19 @@ const PhotoAlbum = (() => {
     const songs = all.filter(entry => entry.type === "audio").map(entry => entry.file), files = all.filter(entry => entry.type !== "audio");
     if (!all.length){ notice("사진·영상·음악 파일을 선택해 주세요."); return; }
     if (!files.length){ await importSongs(songs, null); return; }
-    status(files.length + "개 파일을 가져오는 중…"); let count = 0;
+    status(files.length + "개 파일을 가져오는 중…"); let count = 0; const added = [];
     for (const {file,type} of files){
       const item = { id:crypto.randomUUID(), name:file.name, type, mime:file.type, blob:file, favorite:false, background:"white", stickers:[], created:Date.now() + count };
       try { if (type === "image"){ Object.assign(item,await dimensions(file)); item.thumbnail = await imageThumbnail(file); }
         else item.thumbnail = await videoThumbnail(file);
-        await persistNew(item); records.unshift(item); if (!selectedId) selectedId = item.id; count++;
+        await persistNew(item); records.unshift(item); added.push(item); if (!selectedId) selectedId = item.id; count++;
       } catch(error){ console.error(error); notice(error && error.message === "photo-album-file-too-large"
         ? file.name + " 파일은 256MB를 넘어 가져올 수 없습니다."
         : file.name + " 파일을 가져오지 못했습니다."); }
     }
-    paintList(); paintStage(); paintBackgrounds(); paintAdjust(); status(count + "개 파일을 저장했습니다.");
+    paintList(); paintStage(); paintBackgrounds(); paintAdjust();
+    if (added.length) appendToBook(added);   // 앨범 책: 마지막 쪽에 자리가 있으면 거기, 없으면 새 쪽에
+    status(count + "개 파일을 저장했습니다." + (added.length ? " 앨범 마지막 쪽에도 넣었습니다." : ""));
     if (songs.length) await importSongs(songs, records.find(item => item.type === "image" && files.some(entry => entry.file === item.blob)));
   }
   async function importSongs(songs, fallback){
@@ -3167,16 +3170,9 @@ const PhotoAlbum = (() => {
   }
   async function exportImage(item){
     try {
-      const media = await getBlob(item);
-      const image = await createImageBitmap(media), edge = Math.round(Math.max(image.width,image.height)*.07);
-      const canvas = document.createElement("canvas"); canvas.width = image.width+edge*2; canvas.height = image.height+edge*2;
-      const ctx = canvas.getContext("2d"), bg = bgById(item.background), gradient = ctx.createLinearGradient(0,0,canvas.width,canvas.height);
-      gradient.addColorStop(0,bg[2]); gradient.addColorStop(1,bg[3]); ctx.fillStyle = gradient; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.drawImage(image,edge,edge);
-      for (const part of item.stickers){ const row = rowOf(part); if (!row || part.h) continue;
-        const sticker = new Image(); sticker.src = partSvg(row, part); await sticker.decode(); const width = image.width*part.w/100, height = width*105/120;
-        drawStickerOnCanvas(ctx, sticker, part, edge+image.width*part.x/100, edge+image.height*part.y/100, width, height);
-      }
-      image.close(); const blob = await new Promise(resolve => canvas.toBlob(resolve,"image/png")); if (!blob) throw new Error("PNG encoding failed");
+      // 앨범 쪽 그림과 같은 합성을 원본 크기로 쓴다(composeCanvas).
+      const canvas = await composeCanvas(item, Infinity);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve,"image/png")); if (!blob) throw new Error("PNG encoding failed");
       const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = item.name.replace(/\.[^.]+$/,"") + "-꾸미기.png";
       document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url),1000); notice("꾸민 사진을 PNG로 저장했습니다.");
     } catch(error){ console.error(error); notice("PNG를 만들지 못했습니다."); }
@@ -3243,13 +3239,1132 @@ const PhotoAlbum = (() => {
       });
     });
   }
+  /* ===== 앨범 책(시안 C · 1단계) =====
+     사진 한 장마다 꾸미는 지금 화면은 그대로 두고, 그 위에 "쪽" 을 얹는다. 쪽은 꾸민 사진들을 늘어놓는 판이다 —
+     사진 칸(slot)은 미디어 id 와 자리(쪽 폭에 대한 %)·기울기만 갖고, 장식·배경은 사진 쪽 기록을 그대로 쓴다.
+     쪽 정보는 사진첩 전체 기록(albumItem, type "album")의 book 에 담는다(런처가 이미 받는 꼴, 512KB 안).
+     쪽은 세로 3:4. 칸 높이 % = 폭 % × 비율(a = 높이/폭) × 0.75. 두 쪽씩 펼쳐 보고, 좁은 화면은 한 쪽씩. */
+  const BOOK_MODE_KEY = "classdock.photoAlbum.mode", BOOK_MEDIA_MIME = "application/x-classdock-album-media";
+  const BOOK_PAPERS = [["cream","크림","#fbf6ea"],["white","하양","#ffffff"],["sky","하늘","#eaf5ff"],["mint","민트","#e7f7ef"],
+    ["pink","분홍","#fdeef3"],["lavender","라벤더","#f1ecff"],["kraft","크라프트","#e6d3b3"],["night","밤","#26324a"]];
+  const BOOK_PAGE_RATIO = 0.75, BOOK_MAX_PER_PAGE = 4, BOOK_MAX_PAGES = 400, BOOK_HISTORY_LIMIT = 60;
+  // 쪽 안 칸 수별 자리(쪽 폭·높이에 대한 %). 사진은 칸 안에 비율을 지켜 가운데 맞춘다.
+  const BOOK_CELLS = {
+    1:[{ x:9, y:7, w:82, h:78 }],
+    2:[{ x:7, y:4, w:86, h:44 }, { x:7, y:52, w:86, h:44 }],
+    3:[{ x:6, y:4, w:88, h:46 }, { x:5, y:54, w:43, h:41 }, { x:52, y:54, w:43, h:41 }],
+    4:[{ x:5, y:5, w:43, h:43 }, { x:52, y:5, w:43, h:43 }, { x:5, y:52, w:43, h:43 }, { x:52, y:52, w:43, h:43 }]
+  };
+  const BOOK_TILTS = [-2, 1.5, -1, 2, -1.5, 1];
+  let albumMode = "book", bookSpread = 0, bookPage = 0, bookPick = null, bookReading = false, bookSaveTimer = 0, bookObserver = null, bookTurnTimer = 0;
+  const bookHistory = { undo:[], redo:[], base:"" };
+  const composed = new Map(), composing = new Map();   // 사진 id → { sig, url, aspect } — 쪽에 보일 '꾸민 사진' 그림(이번 실행에만)
+  const bookId = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+  const clampNum = (value, min, max, fallback) => { const n = Number(value); return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback; };
+  const bookPaper = id => BOOK_PAPERS.find(row => row[0] === id) || BOOK_PAPERS[0];
+  const mediaById = id => records.find(row => row.id === id) || null;
+  function bookPerView(){ return root && root.isConnected && typeof matchMedia === "function" && matchMedia("(max-width:900px)").matches ? 1 : 2; }
+  // 꾸민 사진 그림의 비율(높이/폭). PNG 저장처럼 사진 둘레에 7% 배경 테가 붙는다.
+  function mediaAspect(item){
+    if (!item) return 0.75;
+    if (item.type === "image" && item.width > 0 && item.height > 0){
+      const edge = Math.max(item.width, item.height) * .07;
+      return (item.height + edge*2) / (item.width + edge*2);
+    }
+    const hit = composed.get(item.id);
+    return hit && hit.aspect ? hit.aspect : 9/16;
+  }
+  function normalizeBook(raw){
+    const known = new Set(records.map(row => row.id)), pages = [];
+    for (const page of (raw && Array.isArray(raw.pages) ? raw.pages : []).slice(0, BOOK_MAX_PAGES)){
+      if (!page || typeof page !== "object") continue;
+      const slots = (Array.isArray(page.slots) ? page.slots : []).filter(slot => slot && known.has(slot.media)).map(slot => ({
+        id:String(slot.id || bookId()), media:slot.media,
+        x:clampNum(slot.x, -40, 100, 10), y:clampNum(slot.y, -40, 100, 10), w:clampNum(slot.w, 8, 100, 40), r:clampNum(slot.r, -45, 45, 0),
+        ...(Number(slot.a) > 0 ? { a:clampNum(slot.a, .1, 10, .75) } : {})
+      }));
+      const texts = (Array.isArray(page.texts) ? page.texts : []).filter(text => text && typeof text.text === "string").map(text => ({
+        id:String(text.id || bookId()), text:String(text.text).slice(0, 400),
+        x:clampNum(text.x, -20, 100, 10), y:clampNum(text.y, -20, 100, 88), s:clampNum(text.s, 3, 14, 5.5), c:/^#[0-9a-f]{6}$/i.test(String(text.c || "")) ? text.c : ""
+      }));
+      const stickers = (Array.isArray(page.stickers) ? page.stickers : []).slice(0, 120).map(cleanPagePart).filter(Boolean);
+      pages.push({ id:String(page.id || bookId()), paper:bookPaper(page.paper)[0], slots, texts, stickers });
+    }
+    return { v:1, pages };
+  }
+  const bookOf = () => { if (!albumItem.book || !Array.isArray(albumItem.book.pages)) albumItem.book = { v:1, pages:[] }; return albumItem.book; };
+  // 칸 하나를 자리(cell) 안에 비율을 지켜 가운데 맞춘다.
+  function fitSlot(media, cell, tilt){
+    const a = mediaAspect(media), w = Math.min(cell.w, cell.h / (a * BOOK_PAGE_RATIO));
+    return { id:bookId(), media:media.id, x:cell.x + (cell.w - w) / 2, y:cell.y + (cell.h - w * a * BOOK_PAGE_RATIO) / 2, w, r:tilt, a };
+  }
+  function layoutPage(page){
+    const list = page.slots.map(slot => mediaById(slot.media)).filter(Boolean).slice(0, BOOK_MAX_PER_PAGE);
+    const cells = BOOK_CELLS[list.length] || [];
+    page.slots = list.map((media, at) => ({ ...fitSlot(media, cells[at], BOOK_TILTS[at % BOOK_TILTS.length]), id:(page.slots[at] && page.slots[at].id) || bookId() }));
+  }
+  // n 장을 쪽마다 BOOK_MAX_PER_PAGE 장 이하로 고르게 나눈다(5→3·2, 6→3·3).
+  function bookChunkSizes(n){
+    if (n <= 0) return [];
+    const pages = Math.ceil(n / BOOK_MAX_PER_PAGE), base = Math.floor(n / pages), extra = n % pages;
+    return Array.from({ length:pages }, (_, at) => base + (at < extra ? 1 : 0));
+  }
+  const localDay = time => { const d = new Date(Number(time) || 0); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); };
+  // 처음 한 번: 가져온 사진을 오래된 차례로 날짜별로 묶어 쪽을 채운다. 붙어 있는 작은 날 묶음은 한 쪽(4장 이하)에 합친다.
+  function autoFillPages(items){
+    const groups = [];
+    for (const item of items.slice().sort((a, b) => (a.created || 0) - (b.created || 0))){
+      const last = groups[groups.length - 1], day = localDay(item.created);
+      if (last && last.day === day) last.items.push(item); else groups.push({ day, items:[item] });
+    }
+    const merged = [];
+    for (const group of groups){
+      const last = merged[merged.length - 1];
+      if (last && last.length + group.items.length <= BOOK_MAX_PER_PAGE) last.push(...group.items); else merged.push(group.items.slice());
+    }
+    const pages = [];
+    for (const list of merged){
+      let at = 0;
+      for (const size of bookChunkSizes(list.length)){
+        const page = { id:bookId(), paper:"cream", slots:list.slice(at, at + size).map(media => ({ id:bookId(), media:media.id })), texts:[], stickers:[] };
+        layoutPage(page); pages.push(page); at += size;
+      }
+    }
+    return pages.slice(0, BOOK_MAX_PAGES);
+  }
+  // 새로 가져온 사진은 마지막 쪽에 자리가 있으면 거기, 없으면 새 쪽에 이어 붙인다.
+  function appendToBook(items){
+    if (!items.length) return;
+    const book = bookOf(), list = items.filter(item => item && (item.type === "image" || item.type === "video")).sort((a, b) => (a.created || 0) - (b.created || 0));
+    let last = book.pages[book.pages.length - 1];
+    for (const item of list){
+      if (!last || last.slots.length >= BOOK_MAX_PER_PAGE){
+        if (book.pages.length >= BOOK_MAX_PAGES) break;
+        last = { id:bookId(), paper:last ? last.paper : "cream", slots:[], texts:[], stickers:[] }; book.pages.push(last);
+      }
+      last.slots.push({ id:bookId(), media:item.id }); layoutPage(last);
+    }
+    bookChanged();
+  }
+  function removeFromBook(mediaId){
+    const book = albumItem.book; if (!book || !Array.isArray(book.pages)) return;
+    let touched = false;
+    for (const page of book.pages){ const before = page.slots.length; page.slots = page.slots.filter(slot => slot.media !== mediaId); if (page.slots.length !== before) touched = true; }
+    if (bookPick && bookPick.kind === "slot" && !book.pages.some(page => page.slots.some(slot => slot.id === bookPick.id))) bookPick = null;
+    if (touched) bookChanged();
+  }
+  // 사진첩을 열 때: 쪽 정보가 없으면(처음) 가져온 사진으로 채워 저장한다. 있으면 지워진 사진 칸만 걸러 낸다.
+  async function ensureBook(){
+    const first = !albumItem.book || !Array.isArray(albumItem.book.pages);
+    albumItem.book = normalizeBook(albumItem.book);
+    if (first && records.length){
+      albumItem.book.pages = autoFillPages(records);
+      try { await persistMetadata(albumItem); } catch(error){ console.warn("앨범 쪽을 저장하지 못했습니다:", error); }
+    }
+    bookHistory.base = JSON.stringify(albumItem.book); bookHistory.undo = []; bookHistory.redo = [];
+  }
+  function bookChanged(options = {}){
+    const now = JSON.stringify(bookOf());
+    if (now !== bookHistory.base && !options.skipHistory){
+      bookHistory.undo.push(bookHistory.base); if (bookHistory.undo.length > BOOK_HISTORY_LIMIT) bookHistory.undo.shift();
+      bookHistory.redo = [];
+    }
+    bookHistory.base = now;
+    clearTimeout(bookSaveTimer);
+    bookSaveTimer = setTimeout(async () => {
+      bookSaveTimer = 0;
+      try { await persistMetadata(albumItem); status("앨범을 저장했습니다."); }
+      catch(error){ console.error(error); notice("앨범 쪽을 저장하지 못했습니다."); }
+    }, 350);
+    paintBook();
+  }
+  function stepBookHistory(direction){
+    const from = direction < 0 ? bookHistory.undo : bookHistory.redo, to = direction < 0 ? bookHistory.redo : bookHistory.undo;
+    if (!from.length){ status(direction < 0 ? "더 되돌릴 앨범 편집이 없습니다." : "다시 할 앨범 편집이 없습니다."); return; }
+    to.push(bookHistory.base); albumItem.book = normalizeBook(JSON.parse(from.pop())); bookPick = null;
+    bookPage = Math.min(bookPage, Math.max(0, albumItem.book.pages.length - 1));
+    bookChanged({ skipHistory:true });
+  }
+
+  // 꾸민 사진 그림 — PNG 저장과 같은 합성(배경 테 + 사진 + 장식)을 작게 만들어 쪽에 쓴다.
+  async function composeCanvas(item, maxSide){
+    const media = await getBlob(item), probe = await createImageBitmap(media);
+    const scale = Math.min(1, maxSide / Math.max(probe.width, probe.height));
+    let image = probe;
+    if (scale < 1){ image = await createImageBitmap(media, { resizeWidth:Math.max(1, Math.round(probe.width*scale)), resizeHeight:Math.max(1, Math.round(probe.height*scale)), resizeQuality:"high" }); probe.close(); }
+    const edge = Math.round(Math.max(image.width, image.height)*.07);
+    const canvas = document.createElement("canvas"); canvas.width = image.width + edge*2; canvas.height = image.height + edge*2;
+    const ctx = canvas.getContext("2d"), bg = bgById(item.background), gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, bg[2]); gradient.addColorStop(1, bg[3]); ctx.fillStyle = gradient; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(image, edge, edge);
+    for (const part of item.stickers || []){ const row = rowOf(part); if (!row || part.h) continue;
+      const sticker = new Image(); sticker.src = partSvg(row, part); await sticker.decode(); const width = image.width*part.w/100, height = width*105/120;
+      drawStickerOnCanvas(ctx, sticker, part, edge + image.width*part.x/100, edge + image.height*part.y/100, width, height);
+    }
+    image.close();
+    return canvas;
+  }
+  function composedImage(item){
+    if (!item) return Promise.resolve(null);
+    if (item.type !== "image") return Promise.resolve(item.thumbnail ? { url:item.thumbnail, aspect:0 } : null);
+    const sig = JSON.stringify([item.background || "", item.stickers || []]), hit = composed.get(item.id);
+    if (hit && hit.sig === sig) return Promise.resolve(hit);
+    const key = item.id + "|" + sig;
+    if (composing.has(key)) return composing.get(key);
+    const job = composeCanvas(item, 1100).then(canvas => new Promise(resolve => canvas.toBlob(blob => resolve({ blob, canvas }), "image/jpeg", .9)))
+      .then(({ blob, canvas }) => {
+        if (!blob) return null;
+        const old = composed.get(item.id); if (old && old.url && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url);
+        const row = { sig, url:URL.createObjectURL(blob), aspect:canvas.height / canvas.width };
+        composed.set(item.id, row); return row;
+      })
+      .catch(error => { console.warn("앨범 쪽 그림을 만들지 못했습니다:", error); return null; })
+      .finally(() => composing.delete(key));
+    composing.set(key, job);
+    return job;
+  }
+  function releaseComposed(){ for (const row of composed.values()) if (row.url && row.url.startsWith("blob:")) URL.revokeObjectURL(row.url); composed.clear(); }
+
+  /* ----- 그리기 ----- */
+  function setAlbumMode(next, options = {}){
+    if (!root || (next !== "book" && next !== "edit")) return;
+    if (next === "book" && viewing) setViewing(false);
+    if (next === "edit" && bookReading) setBookReading(false);
+    albumMode = next;
+    if (!options.silent){ try { localStorage.setItem(BOOK_MODE_KEY, albumMode); } catch { /* 이번 화면에만 */ } }
+    root.classList.toggle("pa-book-mode", albumMode === "book");
+    root.querySelectorAll(".pa-mode-tab").forEach(tab => { const on = tab.dataset.mode === albumMode; tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1; });
+    const view = root.querySelector(".pa-view"); if (view) view.textContent = albumMode === "book" ? "▣ 책 감상" : viewing ? "✎ 꾸미기 모드" : "▣ 감상 모드";
+    if (albumMode === "edit"){ paintList(); paintStage(); requestAnimationFrame(fitArtboard); }
+    paintBook();
+  }
+  function fitSpread(){
+    if (!root) return;
+    const stage = root.querySelector(".pa-book-stage"), spread = root.querySelector(".pa-spread"); if (!stage || !spread) return;
+    const per = bookPerView(), aspect = per * BOOK_PAGE_RATIO, rect = stage.getBoundingClientRect();
+    const pad = bookReading ? 12 : 18, w = Math.max(120, rect.width - pad*2), h = Math.max(120, rect.height - pad*2);
+    const width = Math.min(w, h * aspect);
+    spread.style.width = Math.round(width) + "px"; spread.style.height = Math.round(width / aspect) + "px";
+  }
+  function pageLabel(index){ return (index + 1) + "쪽"; }
+  function paintBook(){
+    if (!root) return;
+    const host = root.querySelector(".pa-book"); if (!host) return;
+    if (albumMode !== "book"){ return; }
+    const pages = bookOf().pages, per = bookPerView();
+    bookSpread = Math.max(0, Math.min(bookSpread - bookSpread % per, Math.max(0, pages.length - 1) - (Math.max(0, pages.length - 1) % per)));
+    if (bookPage < bookSpread || bookPage >= bookSpread + per) bookPage = Math.min(bookSpread, Math.max(0, pages.length - 1));
+    const where = host.querySelector(".pa-book-where");
+    if (where) where.textContent = pages.length ? (per === 2 && pages[bookSpread + 1] ? `${bookSpread + 1}–${bookSpread + 2}쪽 / ${pages.length}` : `${bookSpread + 1}쪽 / ${pages.length}`) : "빈 앨범";
+    const spread = host.querySelector(".pa-spread"); spread.replaceChildren(); spread.dataset.pages = String(per);
+    for (let at = bookSpread; at < bookSpread + per; at++) spread.appendChild(at < pages.length ? pageElement(at) : blankPage(at));
+    addTurnCorners(spread);   // 편집·감상 모두 — 귀퉁이는 사진 칸보다 위에 떠서 귀퉁이 자리의 사진보다 먼저 잡힌다
+    const page = pages[bookPage];
+    host.querySelectorAll("[data-needs-page]").forEach(el => { el.disabled = !page; });
+    const removePage = host.querySelector(".pa-book-page-remove"); if (removePage) removePage.disabled = !page;
+    const back = host.querySelector(".pa-book-page-back"), forward = host.querySelector(".pa-book-page-forward");
+    if (back) back.disabled = !page || bookPage <= 0;
+    if (forward) forward.disabled = !page || bookPage >= pages.length - 1;
+    const relayout = host.querySelector(".pa-book-relayout"); if (relayout) relayout.disabled = !page || !page.slots.length;
+    paintBookPaper(); paintBookPick(); paintBookTray(); if (trayTab === "deco") paintBookDeco(); syncTrayTab(); paintBookThumbs(); requestAnimationFrame(fitSpread);
+  }
+  function blankPage(index){
+    const el = document.createElement("div"); el.className = "pa-page is-blank";
+    const add = button("＋ 쪽 더하기", () => addPage(), "pa-book-blank-add"); el.appendChild(add); el.dataset.index = String(index);
+    // 빈 자리에 사진을 놓으면 쪽을 더하고 그 쪽에 넣는다.
+    el.addEventListener("dragover", event => {
+      if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes(BOOK_MEDIA_MIME)) return;
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; el.classList.add("is-drop");
+    });
+    el.addEventListener("dragleave", event => { if (!el.contains(event.relatedTarget)) el.classList.remove("is-drop"); });
+    el.addEventListener("drop", event => {
+      if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes(BOOK_MEDIA_MIME)) return;
+      event.preventDefault(); event.stopPropagation();
+      const media = mediaById(event.dataTransfer.getData(BOOK_MEDIA_MIME)); endTrayDrag(); if (!media) return;
+      const pages = bookOf().pages; if (pages.length >= BOOK_MAX_PAGES) return;
+      pages.push({ id:bookId(), paper:(pages[pages.length - 1] && pages[pages.length - 1].paper) || "cream", slots:[], texts:[], stickers:[] });
+      placeMedia(pages.length - 1, media, null);
+    });
+    return el;
+  }
+  function pageElement(index){
+    const page = bookOf().pages[index], el = document.createElement("div");
+    el.className = "pa-page" + (index === bookPage && !bookReading ? " is-current" : "") + (index % 2 ? " is-right" : " is-left");
+    el.dataset.index = String(index); el.style.background = bookPaper(page.paper)[2];
+    if (page.paper === "night") el.classList.add("is-dark");
+    el.setAttribute("aria-label", pageLabel(index));
+    page.slots.forEach(slot => el.appendChild(slotElement(page, slot, index)));
+    (page.stickers || []).forEach(part => { const node = stickerElement(page, part, index); if (node) el.appendChild(node); });
+    page.texts.forEach(text => el.appendChild(textElement(page, text, index)));
+    const number = document.createElement("span"); number.className = "pa-page-no"; number.textContent = String(index + 1); el.appendChild(number);
+    if (!page.slots.length && !page.texts.length && !(page.stickers || []).length && !bookReading){
+      const hint = document.createElement("p"); hint.className = "pa-page-hint"; hint.textContent = "오른쪽 사진을 끌어다 놓거나 눌러서 넣으세요"; el.appendChild(hint);
+    }
+    el.addEventListener("pointerdown", event => {
+      if (bookReading || event.target.closest(".pa-slot,.pa-btext,.pa-book-blank-add")) return;
+      bookPage = index; if (bookPick){ bookPick = null; } paintBook();
+    });
+    el.addEventListener("dragover", event => {
+      const types = event.dataTransfer ? Array.from(event.dataTransfer.types) : [];
+      if (!types.includes(BOOK_MEDIA_MIME) && !types.includes(BOOK_ART_MIME)) return;
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; el.classList.add("is-drop");
+      showDropGhost(el, index, event);
+    });
+    el.addEventListener("dragleave", event => { if (!el.contains(event.relatedTarget)){ el.classList.remove("is-drop"); clearDropGhost(); } });
+    el.addEventListener("drop", event => {
+      const types = event.dataTransfer ? Array.from(event.dataTransfer.types) : [];
+      if (!types.includes(BOOK_MEDIA_MIME) && !types.includes(BOOK_ART_MIME)) return;
+      event.preventDefault(); event.stopPropagation(); el.classList.remove("is-drop"); clearDropGhost();
+      const rect = el.getBoundingClientRect();
+      if (types.includes(BOOK_ART_MIME)){ addPagePart(index, event.dataTransfer.getData(BOOK_ART_MIME), { x:(event.clientX - rect.left) / rect.width * 100, y:(event.clientY - rect.top) / rect.height * 100 }); return; }
+      const media = mediaById(event.dataTransfer.getData(BOOK_MEDIA_MIME)); if (!media) return;
+      placeMedia(index, media, { x:(event.clientX - rect.left) / rect.width * 100, y:(event.clientY - rect.top) / rect.height * 100 });
+    });
+    return el;
+  }
+  function slotElement(page, slot, pageIndex){
+    const media = mediaById(slot.media), el = document.createElement("div");
+    const picked = bookPick && bookPick.kind === "slot" && bookPick.id === slot.id && !bookReading;
+    el.className = "pa-slot" + (picked ? " is-picked" : "") + (media && media.type === "video" ? " is-video" : "");
+    el.dataset.id = slot.id;
+    el.style.left = slot.x + "%"; el.style.top = slot.y + "%"; el.style.width = slot.w + "%";
+    el.style.aspectRatio = "1 / " + (slot.a || mediaAspect(media)); el.style.transform = "rotate(" + slot.r + "deg)";
+    const img = document.createElement("img"); img.alt = media ? media.name : ""; img.draggable = false;
+    if (media && media.thumbnail) img.src = media.thumbnail;
+    el.appendChild(img);
+    if (media && media.type === "video"){ const badge = document.createElement("span"); badge.className = "pa-slot-play"; badge.innerHTML = uiIconHtml("play", "▶"); el.appendChild(badge); }
+    composedImage(media).then(row => {
+      if (!row || !img.isConnected) return;
+      img.src = row.url;
+      if (row.aspect && (!slot.a || Math.abs(slot.a - row.aspect) > .01) && media.type !== "image"){ slot.a = row.aspect; el.style.aspectRatio = "1 / " + slot.a; }
+    });
+    if (bookReading) return el;
+    el.title = (media ? media.name + " · " : "") + "끌어서 옮기기 · 두 번 누르면 이 사진 꾸미기 · Alt+누르기는 아래 겹친 사진";
+    el.addEventListener("pointerdown", event => startSlotDrag(event, pageIndex, slot, el, "move"));
+    el.addEventListener("dblclick", event => { event.preventDefault(); if (media) openInEditor(media.id); });
+    if (picked){
+      const resize = document.createElement("span"); resize.className = "pa-slot-handle is-resize"; resize.title = "끌어서 크기 조절";
+      resize.addEventListener("pointerdown", event => startSlotDrag(event, pageIndex, slot, el, "resize"));
+      const rotate = document.createElement("span"); rotate.className = "pa-slot-handle is-rotate"; rotate.title = "끌어서 돌리기 (0° 근처에서 바르게 맞춤)";
+      rotate.addEventListener("pointerdown", event => startSlotDrag(event, pageIndex, slot, el, "rotate"));
+      // 손잡이는 사진 안쪽 모서리에 둔다 — 쪽은 넘친 부분을 잘라 내므로 바깥에 두면 가장자리 사진에서 사라진다.
+      // 사진 도구(꾸미기·앞뒤·바르게·빼기)는 잘리지 않는 위쪽 도구 줄에 뜬다(paintBookPick).
+      el.append(resize, rotate);
+    }
+    return el;
+  }
+  function textElement(page, text, pageIndex){
+    const el = document.createElement("div"), picked = bookPick && bookPick.kind === "text" && bookPick.id === text.id && !bookReading;
+    el.className = "pa-btext" + (picked ? " is-picked" : "");
+    el.dataset.id = text.id; el.style.left = text.x + "%"; el.style.top = text.y + "%"; el.style.setProperty("--size", String(text.s));
+    if (text.c) el.style.color = text.c;
+    const body = document.createElement("div"); body.className = "pa-btext-body"; body.textContent = text.text;
+    el.appendChild(body);
+    if (bookReading) return el;
+    body.contentEditable = "plaintext-only"; body.spellcheck = false; body.setAttribute("aria-label", "쪽 글");
+    body.addEventListener("focus", () => { if (!(bookPick && bookPick.id === text.id)){ bookPick = { kind:"text", page:pageIndex, id:text.id }; bookPage = pageIndex; el.classList.add("is-picked"); addTextTools(el, pageIndex, text); } });
+    body.addEventListener("blur", () => {
+      const value = body.textContent.replace(/\s+$/,"");
+      if (value === text.text) return;
+      if (!value.trim()){ const pageRow = bookOf().pages[pageIndex]; pageRow.texts = pageRow.texts.filter(row => row.id !== text.id); bookPick = null; bookChanged(); return; }
+      text.text = value.slice(0, 400); bookChanged();
+    });
+    body.addEventListener("keydown", event => { if (event.key === "Escape"){ event.preventDefault(); body.blur(); } event.stopPropagation(); });
+    if (picked) addTextTools(el, pageIndex, text);
+    return el;
+  }
+  function addTextTools(el, pageIndex, text){
+    if (el.querySelector(".pa-btext-bar")) return;
+    const grip = document.createElement("span"); grip.className = "pa-btext-grip"; grip.innerHTML = uiIconHtml("move", "⠿"); grip.title = "끌어서 옮기기";
+    grip.addEventListener("pointerdown", event => startTextDrag(event, pageIndex, text, el));
+    const bar = document.createElement("div"); bar.className = "pa-btext-bar";
+    bar.addEventListener("pointerdown", event => event.preventDefault());
+    const size = (delta, label) => button(label, () => { text.s = clampNum(text.s + delta, 3, 14, 5.5); bookChanged(); }, "pa-btext-size");
+    bar.append(size(-.7, "가−"), size(.7, "가＋"),
+      iconButton("delete", "글 지우기", () => { const pageRow = bookOf().pages[pageIndex]; pageRow.texts = pageRow.texts.filter(row => row.id !== text.id); bookPick = null; bookChanged(); }, "pa-ico"));
+    el.append(grip, bar);
+  }
+
+  /* ----- 끌기: 칸 옮기기·크기·돌리기, 글 옮기기 ----- */
+  function startSlotDrag(event, pageIndex, slot, el, kind){
+    if (event.button !== 0 || bookReading) return;
+    event.preventDefault(); event.stopPropagation();
+    if (kind === "move" && event.altKey){ pickSlotBelow(event, pageIndex); return; }
+    const pageEl = el.closest(".pa-page"), rect = pageEl.getBoundingClientRect();
+    if (!(bookPick && bookPick.id === slot.id)){ bookPick = { kind:"slot", page:pageIndex, id:slot.id }; bookPage = pageIndex; paintBook(); }
+    const live = () => root.querySelector(`.pa-slot[data-id="${CSS.escape(slot.id)}"]`) || el;
+    const start = { x:event.clientX, y:event.clientY, sx:slot.x, sy:slot.y, sw:slot.w, sr:slot.r };
+    const box = live().getBoundingClientRect(), center = { x:box.left + box.width/2, y:box.top + box.height/2 };
+    const startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x);
+    let moved = false;
+    const move = ev => {
+      const dx = (ev.clientX - start.x) / rect.width * 100, dy = (ev.clientY - start.y) / rect.height * 100;
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return;
+      moved = true;
+      const node = live();
+      if (kind === "move"){ slot.x = clampNum(start.sx + dx, -40, 100, start.sx); slot.y = clampNum(start.sy + dy, -40, 100, start.sy); node.style.left = slot.x + "%"; node.style.top = slot.y + "%"; }
+      else if (kind === "resize"){ slot.w = clampNum(start.sw + dx, 8, 100, start.sw); node.style.width = slot.w + "%"; }
+      else {
+        let angle = start.sr + (Math.atan2(ev.clientY - center.y, ev.clientX - center.x) - startAngle) * 180 / Math.PI;
+        angle = ((angle + 180) % 360 + 360) % 360 - 180; if (Math.abs(angle) < 2) angle = 0;
+        slot.r = clampNum(Math.round(angle * 10) / 10, -45, 45, start.sr); node.style.transform = "rotate(" + slot.r + "deg)";
+      }
+    };
+    const up = ev => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+      if (!moved) return;
+      // 옮기기를 옆 쪽 위에서 놓으면 그 쪽으로 넘긴다.
+      if (kind === "move"){
+        const target = document.elementFromPoint(ev.clientX, ev.clientY), other = target && target.closest && target.closest(".pa-page:not(.is-blank)");
+        const toIndex = other ? Number(other.dataset.index) : pageIndex;
+        if (other && toIndex !== pageIndex){
+          const pages = bookOf().pages, from = pages[pageIndex], to = pages[toIndex], r2 = other.getBoundingClientRect();
+          if (to.slots.length < 12){
+            from.slots = from.slots.filter(row => row.id !== slot.id);
+            const a = slot.a || mediaAspect(mediaById(slot.media));
+            slot.x = clampNum((ev.clientX - r2.left) / r2.width * 100 - slot.w / 2, -40, 100, 10);
+            slot.y = clampNum((ev.clientY - r2.top) / r2.height * 100 - slot.w * a * BOOK_PAGE_RATIO / 2, -40, 100, 10);
+            to.slots.push(slot); bookPick = { kind:"slot", page:toIndex, id:slot.id }; bookPage = toIndex;
+          }
+        }
+      }
+      bookChanged();
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+  }
+  function startTextDrag(event, pageIndex, text, el){
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    const rect = el.closest(".pa-page").getBoundingClientRect(), start = { x:event.clientX, y:event.clientY, sx:text.x, sy:text.y };
+    let moved = false;
+    const move = ev => {
+      moved = true;
+      text.x = clampNum(start.sx + (ev.clientX - start.x) / rect.width * 100, -20, 100, start.sx);
+      text.y = clampNum(start.sy + (ev.clientY - start.y) / rect.height * 100, -20, 100, start.sy);
+      el.style.left = text.x + "%"; el.style.top = text.y + "%";
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); if (moved) bookChanged(); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+  }
+
+  /* ----- 쪽·칸 다루기 ----- */
+  // 쪽에 놓일 자리 — 놓기와 끄는 동안의 점선 미리보기가 같은 식을 쓴다(쪽에 대한 %).
+  function landingSlot(page, media, at){
+    const a = mediaAspect(media), w = page.slots.length ? 40 : 70;
+    const x = at ? at.x - w/2 : 50 - w/2, y = at ? at.y - w*a*BOOK_PAGE_RATIO/2 : 50 - w*a*BOOK_PAGE_RATIO/2;
+    return { x:clampNum(x, -40, 100, 10), y:clampNum(y, -40, 100, 10), w, a, r:BOOK_TILTS[page.slots.length % BOOK_TILTS.length] };
+  }
+  function placeMedia(pageIndex, media, at){
+    const page = bookOf().pages[pageIndex]; if (!page || !media) return;
+    const spot = landingSlot(page, media, at);
+    const slot = { id:bookId(), media:media.id, x:spot.x, y:spot.y, w:spot.w, r:spot.r, a:spot.a };
+    page.slots.push(slot); bookPage = pageIndex; bookPick = { kind:"slot", page:pageIndex, id:slot.id };
+    bookChanged(); status(`${media.name} 을(를) ${pageLabel(pageIndex)}에 넣었습니다.`);
+  }
+  function addPage(){
+    const pages = bookOf().pages; if (pages.length >= BOOK_MAX_PAGES){ notice("쪽은 " + BOOK_MAX_PAGES + "쪽까지 만들 수 있습니다."); return; }
+    const at = pages.length ? bookPage + 1 : 0;
+    pages.splice(at, 0, { id:bookId(), paper:(pages[bookPage] && pages[bookPage].paper) || "cream", slots:[], texts:[], stickers:[] });
+    bookPage = at; bookSpread = at - at % bookPerView(); bookPick = null; bookChanged(); status(pageLabel(at) + "을 더했습니다.");
+  }
+  async function removePage(){
+    const pages = bookOf().pages, page = pages[bookPage]; if (!page) return;
+    if ((page.slots.length || page.texts.length) && typeof confirmDialog === "function"
+      && !await confirmDialog(pageLabel(bookPage) + "을 뺄까요? 쪽 위 사진은 사진첩에 그대로 남습니다.", "쪽 빼기", "취소")) return;
+    pages.splice(bookPage, 1); bookPage = Math.max(0, Math.min(bookPage, pages.length - 1)); bookPick = null; bookChanged(); status("쪽을 뺐습니다. Ctrl+Z 로 되돌릴 수 있습니다.");
+  }
+  function movePage(step){
+    const pages = bookOf().pages, to = bookPage + step; if (!pages[bookPage] || to < 0 || to >= pages.length) return;
+    const [page] = pages.splice(bookPage, 1); pages.splice(to, 0, page); bookPage = to; bookSpread = to - to % bookPerView(); bookChanged();
+  }
+  function relayoutPage(){
+    const page = bookOf().pages[bookPage]; if (!page || !page.slots.length) return;
+    if (page.slots.length > BOOK_MAX_PER_PAGE){ notice("자동 배치는 사진 " + BOOK_MAX_PER_PAGE + "장까지인 쪽에서 쓸 수 있습니다."); return; }
+    layoutPage(page); bookPick = null; bookChanged(); status(pageLabel(bookPage) + " 사진을 다시 배치했습니다.");
+  }
+  function addBookText(){
+    const page = bookOf().pages[bookPage]; if (!page) return;
+    const text = { id:bookId(), text:"여기에 글을 적어요", x:12, y:Math.min(88, 6 + page.texts.length * 8), s:5.5, c:"" };
+    page.texts.push(text); bookPick = { kind:"text", page:bookPage, id:text.id }; bookChanged();
+    const body = root.querySelector(`.pa-btext[data-id="${CSS.escape(text.id)}"] .pa-btext-body`);
+    if (body){ body.focus(); const range = document.createRange(); range.selectNodeContents(body); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+  }
+  /* 겹친 사진 고르기 — 누른 자리에 겹친 사진을 위에서부터 차례로(지금 고른 것 다음 것). 맨 아래 다음은 다시 맨 위. */
+  function pickSlotBelow(event, pageIndex){
+    const pageEl = event.target.closest(".pa-page");
+    const hits = document.elementsFromPoint(event.clientX, event.clientY).map(node => node.closest && node.closest(".pa-slot"))
+      .filter((node, at, list) => node && pageEl.contains(node) && list.indexOf(node) === at);
+    if (!hits.length) return;
+    const at = hits.findIndex(node => bookPick && node.dataset.id === bookPick.id);
+    pickSlot(pageIndex, hits[(at + 1) % hits.length].dataset.id);
+  }
+  function pickSlot(pageIndex, id){ bookPick = { kind:"slot", page:pageIndex, id }; bookPage = pageIndex; paintBook(); }
+  function pickedSlot(){
+    if (!bookPick || bookPick.kind !== "slot") return null;
+    const page = bookOf().pages[bookPick.page];
+    return page ? page.slots.find(row => row.id === bookPick.id) || null : null;
+  }
+  // 위쪽 도구 줄: 이 쪽 사진 목록(가려진 사진도 여기서 고른다) + 고른 사진 도구. 목록에 올리면 쪽 위 그 사진을 점선으로 짚는다.
+  function paintBookPick(){
+    const host = root.querySelector(".pa-book-pick"); if (!host) return; host.replaceChildren();
+    const page = bookOf().pages[bookPage];
+    const stickerPick = pickedSticker() && bookPick.page === bookPage ? pickedSticker() : null;
+    host.hidden = bookReading || !page || (!page.slots.length && !stickerPick);
+    if (!host.hidden && stickerPick){
+      const label = document.createElement("span"); label.className = "pa-book-pick-label"; label.textContent = "고른 장식";
+      host.append(label, stickerTools(bookPage, stickerPick)); return;
+    }
+    if (host.hidden) return;
+    const label = document.createElement("span"); label.className = "pa-book-pick-label"; label.textContent = "이 쪽 사진";
+    const chips = document.createElement("span"); chips.className = "pa-book-layers"; chips.setAttribute("role", "listbox"); chips.setAttribute("aria-label", "이 쪽 사진 (뒤 → 앞)");
+    page.slots.forEach((slot, at) => {
+      const media = mediaById(slot.media), on = bookPick && bookPick.id === slot.id;
+      const chip = button("", () => pickSlot(bookPage, slot.id), "pa-book-layer" + (on ? " active" : ""));
+      chip.setAttribute("role", "option"); chip.setAttribute("aria-selected", String(!!on));
+      chip.title = (media ? media.name : "사진") + " · " + (at + 1) + "번째 (뒤 → 앞)";
+      const img = document.createElement("img"); img.alt = ""; if (media && media.thumbnail) img.src = media.thumbnail; chip.appendChild(img);
+      const hint = state => { const node = root.querySelector(`.pa-slot[data-id="${CSS.escape(slot.id)}"]`); if (node) node.classList.toggle("is-hint", state); };
+      chip.addEventListener("pointerenter", () => hint(true)); chip.addEventListener("pointerleave", () => hint(false));
+      chip.addEventListener("focus", () => hint(true)); chip.addEventListener("blur", () => hint(false));
+      chips.appendChild(chip);
+    });
+    host.append(label, chips);
+    const slot = pickedSlot(); if (!slot || bookPick.page !== bookPage) return;
+    const media = mediaById(slot.media), at = bookPick.page;
+    const tools = document.createElement("span"); tools.className = "pa-book-pick-tools";
+    tools.append(
+      iconButton("sparkles", "이 사진 꾸미기", () => media && openInEditor(media.id), "pa-ico"),
+      iconButton("layers", "맨 앞으로", () => reorderSlot(at, slot.id), "pa-ico"),
+      iconButton("arrowDown", "맨 뒤로", () => sendSlotBack(at, slot.id), "pa-ico"),
+      iconButton("rotateLeft", "바르게 (기울기 0°)", () => { slot.r = 0; bookChanged(); }, "pa-ico"),
+      iconButton("delete", "쪽에서 빼기 (사진은 사진첩에 남음)", () => removeSlot(at, slot.id), "pa-ico")
+    );
+    host.appendChild(tools);
+  }
+  function sendSlotBack(pageIndex, id){ const page = bookOf().pages[pageIndex]; if (!page) return; const at = page.slots.findIndex(row => row.id === id); if (at <= 0) return; page.slots.unshift(page.slots.splice(at, 1)[0]); bookChanged(); }
+  function removeSlot(pageIndex, id){ const page = bookOf().pages[pageIndex]; if (!page) return; page.slots = page.slots.filter(row => row.id !== id); bookPick = null; bookChanged(); }
+  function reorderSlot(pageIndex, id){ const page = bookOf().pages[pageIndex]; if (!page) return; const at = page.slots.findIndex(row => row.id === id); if (at < 0) return; page.slots.push(page.slots.splice(at, 1)[0]); bookChanged(); }
+  function setPaper(id){ const page = bookOf().pages[bookPage]; if (!page) return; page.paper = bookPaper(id)[0]; bookChanged(); }
+  function openInEditor(id){ setAlbumMode("edit"); selectItem(id); }
+  /* ----- 쪽 넘김(3D) -----
+     새 펼침면을 먼저 그려 두고 그 위에 (1) 넘어가는 쪽 한 장(앞면 = 지금 쪽, 뒷면 = 다음 펼침의 쪽)과
+     (2) 다 넘어갈 때까지 덮여 있어야 할 반대쪽 옛 쪽을 복제해 얹는다. 쪽 한 장이 책등을 축으로 돌고,
+     다 넘어가면 얹은 것을 걷는다. 넘기는 도중 또 넘기면 지금 넘김을 바로 끝내고 다음으로 간다.
+     모서리 끌기(편집·책 감상)는 같은 장치를 손으로 돌린다 — 반 넘게 끌고 놓으면 끝까지, 덜 끌면 되돌아간다. */
+  const BOOK_TURN_SOUND_KEY = "classdock.photoAlbum.turnSound";
+  let bookTurn = null, turnAudio = null;
+  const reduceMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const turnEase = t => t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
+  const turnMs = () => bookReading ? 850 : 420;
+  function turnSoundOn(){ try { return localStorage.getItem(BOOK_TURN_SOUND_KEY) === "1"; } catch { return false; } }
+  // '사락' — 짧은 잡음을 종이 소리 대역으로 걸러 부풀었다 잦아들게.
+  function playTurnSound(){
+    if (!turnSoundOn()) return;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext; if (!Ctx) return;
+      if (!turnAudio) turnAudio = new Ctx();
+      const ctx = turnAudio, len = Math.floor(ctx.sampleRate * .34), buffer = ctx.createBuffer(1, len, ctx.sampleRate), data = buffer.getChannelData(0);
+      for (let i = 0; i < len; i++){ const t = i / len; data[i] = (Math.random()*2 - 1) * Math.pow(Math.sin(Math.PI*t), 1.6) * (.65 + .35*Math.sin(t*38)); }
+      const src = ctx.createBufferSource(); src.buffer = buffer;
+      const band = ctx.createBiquadFilter(); band.type = "bandpass"; band.frequency.value = 2300; band.Q.value = .7;
+      const gain = ctx.createGain(); gain.gain.value = .2;
+      src.connect(band).connect(gain).connect(ctx.destination); src.start();
+    } catch { /* 소리 없이 넘긴다 */ }
+  }
+  // 넘김용 복제 쪽 — 고름 표시·손잡이·끌기 미리보기는 떼고, 쪽 모서리 둥글기와 책등 그늘은 놓일 자리(side)에 맞춘다.
+  function turnFace(pageEl, side){
+    const face = pageEl ? pageEl.cloneNode(true) : document.createElement("div");
+    if (!pageEl){ face.className = "pa-page"; face.style.background = "#fbf6ea"; }
+    face.classList.remove("is-current", "is-drop");
+    face.querySelectorAll(".pa-slot-handle,.pa-drop-ghost,.pa-turn-corner").forEach(node => node.remove());
+    face.querySelectorAll(".is-picked,.is-hint").forEach(node => node.classList.remove("is-picked", "is-hint"));
+    face.classList.add("pa-turn-face"); face.removeAttribute("data-index"); face.setAttribute("aria-hidden", "true");
+    face.style.borderRadius = side === "left" ? "6px 0 0 6px" : side === "right" ? "0 6px 6px 0" : "6px";
+    face.style.boxShadow = side === "left" ? "inset -16px 0 18px -16px rgba(58,50,38,.4)" : side === "right" ? "inset 16px 0 18px -16px rgba(58,50,38,.4)" : "none";
+    const shade = document.createElement("span"); shade.className = "pa-turn-shade"; face.appendChild(shade);
+    return face;
+  }
+  function prepareTurn(step){
+    const pages = bookOf().pages, per = bookPerView(), from = bookSpread, to = from + step*per;
+    const spread = root && root.querySelector(".pa-spread");
+    if (!spread || to < 0 || to >= pages.length) return null;
+    const old = Array.from(spread.querySelectorAll(":scope > .pa-page"));
+    const oldFaces = per === 2 ? [turnFace(old[0], "left"), turnFace(old[1], "right")] : [turnFace(old[0], "single")];
+    bookSpread = to; bookPage = to; bookPick = null; paintBook();
+    const fresh = Array.from(spread.querySelectorAll(":scope > .pa-page"));
+    const layer = document.createElement("div"); layer.className = "pa-turn-layer"; layer.dataset.pages = String(per);
+    const leaf = document.createElement("div"); leaf.className = "pa-turn-leaf";
+    let front, back, cover = null, under = null;
+    if (per === 2 && step > 0){ cover = oldFaces[0]; front = oldFaces[1]; back = turnFace(fresh[0], "left"); under = fresh[1]; leaf.classList.add("is-next"); }
+    else if (per === 2){ cover = oldFaces[1]; front = oldFaces[0]; back = turnFace(fresh[1], "right"); under = fresh[0]; leaf.classList.add("is-prev"); }
+    else if (step > 0){ front = oldFaces[0]; back = turnFace(null, "single"); under = fresh[0]; leaf.classList.add("is-single"); }
+    else { front = turnFace(fresh[0], "single"); back = turnFace(null, "single"); cover = oldFaces[0]; leaf.classList.add("is-single"); }
+    if (cover){ cover.classList.add("pa-turn-cover", per === 1 ? "is-full" : step > 0 ? "is-left" : "is-right"); layer.appendChild(cover); }
+    back.classList.add("is-back"); leaf.append(front, back); layer.appendChild(leaf); spread.appendChild(layer);
+    let underShade = null;
+    if (under){ underShade = document.createElement("span"); underShade.className = "pa-turn-under"; under.appendChild(underShade); }
+    const frontShade = front.querySelector(".pa-turn-shade"), backShade = back.querySelector(".pa-turn-shade");
+    // 한 쪽씩 보기의 '앞 쪽' 은 새 쪽이 왼쪽으로 접힌 채(-180°)에서 돌아와 덮는다.
+    const angle = t => per === 2 ? (step > 0 ? -180*t : 180*t) : (step > 0 ? -180*t : -180*(1 - t));
+    const turn = { step, raf:0, commit:true, done:false };
+    turn.set = t => {
+      const fold = per === 1 && step < 0 ? 1 - t : t;
+      leaf.style.transform = "rotateY(" + angle(t) + "deg)";
+      frontShade.style.opacity = String(Math.min(.45, fold*.9));
+      backShade.style.opacity = String(Math.min(.45, (1 - fold)*.9));
+      if (underShade) underShade.style.opacity = String(Math.max(0, .35*(1 - t*1.4)));
+    };
+    turn.finish = commit => {
+      if (turn.done) return; turn.done = true; cancelAnimationFrame(turn.raf);
+      layer.remove(); if (underShade) underShade.remove(); if (bookTurn === turn) bookTurn = null;
+      if (!commit){ bookSpread = from; bookPage = from; paintBook(); }
+    };
+    turn.set(0);
+    return turn;
+  }
+  function runTurn(turn, from, to, ms, commit){
+    const start = performance.now();
+    const tick = now => {
+      if (turn.done) return;
+      const k = Math.min(1, (now - start) / Math.max(1, ms));
+      turn.set(from + (to - from) * turnEase(k));
+      if (k < 1) turn.raf = requestAnimationFrame(tick); else turn.finish(commit);
+    };
+    turn.raf = requestAnimationFrame(tick);
+  }
+  function goSpread(step){
+    if (bookTurn) bookTurn.finish(bookTurn.commit);
+    const pages = bookOf().pages, per = bookPerView(), next = bookSpread + step * per;
+    if (next < 0 || next >= pages.length) return false;
+    if (reduceMotion() || !root.querySelector(".pa-spread > .pa-page")){ bookSpread = next; bookPage = next; bookPick = null; paintBook(); return true; }
+    const turn = prepareTurn(step); if (!turn) return false;
+    bookTurn = turn; playTurnSound(); runTurn(turn, 0, 1, turnMs(), true);
+    return true;
+  }
+  // 오른쪽 아래(다음)·왼쪽 아래(앞) 모서리를 잡고 끌어 넘긴다(편집·책 감상 공통).
+  function startCornerTurn(event, step){
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    if (bookTurn) bookTurn.finish(bookTurn.commit);
+    if (reduceMotion()){ goSpread(step); return; }      // 동작 줄이기: 끌기 없이 누르면 바로 넘어간다
+    const spread = root.querySelector(".pa-spread"); if (!spread) return;
+    const rect = spread.getBoundingClientRect(), turn = prepareTurn(step); if (!turn) return;
+    bookTurn = turn; turn.commit = false; root.classList.add("pa-turning");
+    let t = 0, travel = 0;
+    const startX = event.clientX, startY = event.clientY;
+    const move = ev => {
+      travel = Math.max(travel, Math.hypot(ev.clientX - startX, ev.clientY - startY));
+      t = Math.max(0, Math.min(1, step > 0 ? (rect.right - ev.clientX) / rect.width : (ev.clientX - rect.left) / rect.width)); turn.set(t);
+    };
+    const up = ev => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+      if (root) root.classList.remove("pa-turning");
+      // 거의 움직이지 않고 뗐으면 '누르기' — 끝까지 넘긴다. 끌었으면 반을 넘겼는지로 정한다.
+      const tapped = ev && ev.type === "pointerup" && travel < 6;
+      const go = tapped || t > .45; turn.commit = go; if (go) playTurnSound();
+      runTurn(turn, t, go ? 1 : 0, tapped ? turnMs() : turnMs() * (go ? 1 - t : t) + 120, go);
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+  }
+  /* 넘김 귀퉁이(시안 C) — 쪽 아래 바깥 귀퉁이가 접힌 모양의 단추다. 누르면 넘어가고, 끌면 끄는 만큼 손으로 넘긴다.
+     키보드로도 고른다(Enter·Space). 접힌 뒷면 색은 그 쪽 바탕색을 따른다. */
+  function addTurnCorners(spread){
+    const pages = bookOf().pages, per = bookPerView();
+    const corner = (cls, step, label, pageAt) => {
+      const el = document.createElement("button"); el.type = "button"; el.className = "pa-turn-corner " + cls;
+      el.title = label + " — 누르거나 끌어서 넘기기 (" + (step > 0 ? "→" : "←") + ")"; el.setAttribute("aria-label", label);
+      const paper = pages[pageAt] ? bookPaper(pages[pageAt].paper)[2] : "#fbf6ea";
+      el.style.setProperty("--corner-paper", paper);
+      const icon = document.createElement("span"); icon.className = "pa-turn-corner-icon"; icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = uiIconHtml(step > 0 ? "arrow" : "arrowLeft", step > 0 ? "›" : "‹");
+      el.appendChild(icon);
+      el.addEventListener("pointerdown", event => startCornerTurn(event, step));
+      el.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " "){ event.preventDefault(); event.stopPropagation(); goSpread(step); } });
+      spread.appendChild(el);
+    };
+    if (bookSpread + per < pages.length) corner("is-next", 1, "다음 쪽", Math.min(pages.length - 1, bookSpread + per - 1));
+    if (bookSpread > 0) corner("is-prev", -1, "앞 쪽", bookSpread);
+  }
+  function syncTurnSoundButton(){
+    const button = root && root.querySelector(".pa-book-sound"); if (!button) return;
+    const on = turnSoundOn();
+    button.setAttribute("aria-pressed", String(on)); button.classList.toggle("is-on", on);
+    button.title = on ? "쪽 넘김 소리 끄기" : "쪽 넘길 때 종이 소리 내기"; button.setAttribute("aria-label", button.title);
+    button.innerHTML = uiIconHtml(on ? "volume" : "mute", on ? "♪" : "×");
+  }
+  function setBookReading(on){
+    if (!root || bookReading === !!on) return;
+    if (bookTurn) bookTurn.finish(bookTurn.commit);
+    bookReading = !!on; bookPick = null;
+    root.classList.toggle("pa-book-reading", bookReading);
+    if (!bookReading && viewFullscreen){ viewFullscreen = false; if (viewerFullscreenOn()) toggleViewFullscreen(); }
+    const view = root.querySelector(".pa-view"); if (view) view.textContent = "▣ 책 감상";
+    paintBook();
+    status(bookReading ? "책 감상 — ←/→·휠로 넘기거나 쪽 모서리를 끌어 넘깁니다. Esc 로 돌아가고, 두 번 누르면 전체화면." : "앨범 편집으로 돌아왔습니다.");
+  }
+  function onBookKey(event){
+    const target = event.target;
+    if (target && target.closest && target.closest("textarea,select,[contenteditable],input")) return;
+    const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
+    if (bookReading){
+      if (event.key === "Escape"){ event.preventDefault(); setBookReading(false); }
+      else if (["ArrowRight","PageDown"," "].includes(event.key)){ event.preventDefault(); goSpread(1); }
+      else if (["ArrowLeft","PageUp"].includes(event.key)){ event.preventDefault(); goSpread(-1); }
+      else if (event.key === "Home"){ event.preventDefault(); bookSpread = 0; paintBook(); }
+      else if (event.key === "End"){ event.preventDefault(); const n = bookOf().pages.length; bookSpread = Math.max(0, n - 1); paintBook(); }
+      return;
+    }
+    if (mod && key === "z"){ event.preventDefault(); stepBookHistory(event.shiftKey ? 1 : -1); return; }
+    if (mod && key === "y"){ event.preventDefault(); stepBookHistory(1); return; }
+    if (mod) return;
+    const pick = pickedSlot() || pickedSticker();
+    if (pick && (event.key === "Delete" || event.key === "Backspace")){ event.preventDefault(); if (bookPick.kind === "sticker") removeSticker(bookPick.page, pick.id); else removeSlot(bookPick.page, pick.id); return; }
+    if (pick && /^Arrow(Left|Right|Up|Down)$/.test(event.key)){
+      event.preventDefault(); const step = event.shiftKey ? 2 : .5;
+      if (event.key === "ArrowLeft") pick.x -= step; else if (event.key === "ArrowRight") pick.x += step; else if (event.key === "ArrowUp") pick.y -= step; else pick.y += step;
+      bookChanged(); return;
+    }
+    if (event.key === "Escape" && bookPick){ event.preventDefault(); bookPick = null; paintBook(); return; }
+    if (event.key === "ArrowRight" || event.key === "PageDown"){ if (goSpread(1)) event.preventDefault(); }
+    else if (event.key === "ArrowLeft" || event.key === "PageUp"){ if (goSpread(-1)) event.preventDefault(); }
+  }
+
+  /* ----- 쪽 바탕·사진 칸(트레이)·쪽 미리보기 ----- */
+  function paintBookPaper(){
+    const host = root.querySelector(".pa-book-papers"); if (!host) return; host.replaceChildren();
+    const page = bookOf().pages[bookPage];
+    BOOK_PAPERS.forEach(([id, label, color]) => {
+      const swatch = button("", () => setPaper(id), "pa-book-paper" + (page && page.paper === id ? " active" : ""));
+      swatch.style.background = color; swatch.title = label + " 쪽 바탕"; swatch.setAttribute("aria-label", label + " 쪽 바탕"); swatch.disabled = !page;
+      host.appendChild(swatch);
+    });
+  }
+  function paintBookTray(){
+    const host = root.querySelector(".pa-book-tray-list"); if (!host) return; host.replaceChildren();
+    const used = new Map();
+    bookOf().pages.forEach((page, at) => page.slots.forEach(slot => { if (!used.has(slot.media)) used.set(slot.media, at); }));
+    const count = root.querySelector(".pa-book-tray-count"); if (count) count.textContent = records.length + "개";
+    if (!records.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = "사진·영상을 가져와 시작하세요."; host.appendChild(p); return; }
+    for (const item of records){
+      const card = button("", () => { const pages = bookOf().pages; if (!pages.length) addPage(); placeMedia(Math.min(bookPage, bookOf().pages.length - 1), item, null); }, "pa-book-tray-item");
+      card.draggable = true; card.title = item.name + " · 쪽으로 끌어다 놓거나 눌러서 지금 쪽에 넣기";
+      card.addEventListener("dragstart", event => startTrayDrag(event, item, card));
+      card.addEventListener("dragend", endTrayDrag);
+      // 그림 자체는 끌리지 않게 한다 — 그림이 끌리면 브라우저가 '파일'로도 실어 보내 사진첩이 새 파일로 가져오려 든다.
+      const img = document.createElement("img"); img.alt = ""; img.loading = "lazy"; img.draggable = false; if (item.thumbnail) img.src = item.thumbnail;
+      const grip = document.createElement("span"); grip.className = "pa-book-tray-grip"; grip.setAttribute("aria-hidden", "true"); grip.innerHTML = uiIconHtml("grip", "⠿");
+      card.append(img, grip);
+      if (item.type === "video"){ const badge = document.createElement("b"); badge.className = "pa-book-tray-video"; badge.innerHTML = uiIconHtml("play", "▶"); card.appendChild(badge); }
+      if (used.has(item.id)){ const mark = document.createElement("span"); mark.className = "pa-book-tray-used"; mark.textContent = (used.get(item.id) + 1) + "쪽"; card.appendChild(mark); card.classList.add("is-used"); }
+      host.appendChild(card);
+    }
+  }
+  /* 트레이에서 끌기 — 끄는 그림은 꾸민 사진(있으면)을 큼직하게, 쪽 위에서는 놓일 자리를 점선 상자로 미리 보인다.
+     끄는 동안 dataTransfer 내용은 읽을 수 없어(dragover) 끄는 사진을 변수에 둔다. */
+  let trayDrag = null;
+  function startTrayDrag(event, item, card){
+    event.dataTransfer.setData(BOOK_MEDIA_MIME, item.id); event.dataTransfer.effectAllowed = "copy";
+    trayDrag = { item, card }; card.classList.add("is-dragging"); root.classList.add("pa-tray-dragging");
+    const hit = composed.get(item.id), src = (hit && hit.url) || item.thumbnail;
+    if (src && event.dataTransfer.setDragImage){
+      const ghost = document.createElement("div"); ghost.className = "pa-drag-card";
+      const img = document.createElement("img"); img.src = src; img.alt = "";
+      const w = 120, h = Math.round(w * Math.min(1.6, Math.max(.5, mediaAspect(item))));
+      img.style.width = w + "px"; img.style.height = h + "px";
+      const label = document.createElement("span"); label.textContent = "쪽에 놓기";
+      ghost.append(img, label); document.body.appendChild(ghost);
+      try { event.dataTransfer.setDragImage(ghost, w / 2, h / 2); } catch { /* 기본 그림 */ }
+      setTimeout(() => ghost.remove(), 0);
+    }
+  }
+  function endTrayDrag(){
+    if (trayDrag){ trayDrag.card.classList.remove("is-dragging"); trayDrag = null; }
+    if (root){ root.classList.remove("pa-tray-dragging"); root.querySelectorAll(".pa-page.is-drop").forEach(node => node.classList.remove("is-drop")); }
+    clearDropGhost();
+  }
+  function showDropGhost(pageEl, pageIndex, event){
+    const page = bookOf().pages[pageIndex]; if (!page || !trayDrag) return;
+    const rect = pageEl.getBoundingClientRect(), at = { x:(event.clientX - rect.left) / rect.width * 100, y:(event.clientY - rect.top) / rect.height * 100 };
+    // 장식: 가운데에 놓이는 상자(사진 칸처럼 왼쪽 위 기준이 아니다), 기울기 없음
+    const spot = trayDrag.deco ? (() => { const w = trayDrag.deco.value.startsWith("emoji:") ? 13 : 20, a = BOOK_ART_RATIO;
+      return { x:at.x - w/2, y:at.y - w*a*BOOK_PAGE_RATIO/2, w, a, r:0 }; })() : landingSlot(page, trayDrag.item, at);
+    let ghost = pageEl.querySelector(".pa-drop-ghost");
+    if (!ghost){
+      clearDropGhost();
+      ghost = document.createElement("div"); ghost.className = "pa-drop-ghost";
+      const label = document.createElement("span"); label.textContent = "여기에 놓기"; ghost.appendChild(label);
+      pageEl.appendChild(ghost);
+    }
+    ghost.style.left = spot.x + "%"; ghost.style.top = spot.y + "%"; ghost.style.width = spot.w + "%";
+    ghost.style.aspectRatio = "1 / " + spot.a; ghost.style.transform = "rotate(" + spot.r + "deg)";
+  }
+  function clearDropGhost(){ if (root) root.querySelectorAll(".pa-drop-ghost").forEach(node => node.remove()); }
+  function paintBookThumbs(){
+    const host = root.querySelector(".pa-book-thumbs"); if (!host) return; host.replaceChildren();
+    const pages = bookOf().pages, per = bookPerView();
+    for (let at = 0; at < pages.length; at += per){
+      const thumb = button("", () => { bookSpread = at; bookPage = at; bookPick = null; paintBook(); }, "pa-book-thumb" + (at === bookSpread ? " active" : ""));
+      thumb.title = per === 2 && pages[at + 1] ? `${at + 1}–${at + 2}쪽` : `${at + 1}쪽`;
+      for (let k = at; k < Math.min(at + per, pages.length); k++){
+        const mini = document.createElement("span"); mini.className = "pa-mini-page"; mini.style.background = bookPaper(pages[k].paper)[2];
+        for (const slot of pages[k].slots){
+          const media = mediaById(slot.media); if (!media) continue;
+          const shot = document.createElement("img"); shot.alt = ""; shot.loading = "lazy"; if (media.thumbnail) shot.src = media.thumbnail;
+          shot.style.left = slot.x + "%"; shot.style.top = slot.y + "%"; shot.style.width = slot.w + "%"; shot.style.aspectRatio = "1 / " + (slot.a || mediaAspect(media));
+          shot.style.transform = "rotate(" + slot.r + "deg)"; mini.appendChild(shot);
+        }
+        thumb.appendChild(mini);
+      }
+      const label = document.createElement("small"); label.textContent = thumb.title; thumb.appendChild(label);
+      host.appendChild(thumb);
+    }
+    const add = button("＋ 쪽", () => addPage(), "pa-book-thumb-add"); add.title = "지금 쪽 다음에 빈 쪽 더하기"; host.appendChild(add);
+    const active = host.querySelector(".pa-book-thumb.active");
+    if (active){ const left = active.offsetLeft, right = left + active.offsetWidth; if (left < host.scrollLeft) host.scrollLeft = left - 8; else if (right > host.scrollLeft + host.clientWidth) host.scrollLeft = right - host.clientWidth + 8; }
+  }
+  /* ----- 쪽 그림 저장·인쇄 -----
+     화면의 쪽(.pa-page)을 그대로 캔버스에 다시 그린다: 쪽 바탕 → 사진 칸(꾸민 사진 합성, 기울기·그림자) → 글 → 쪽 번호.
+     자리 식은 화면과 같다(칸: 쪽 폭에 대한 %·높이 = 폭 × a, 글: 크기 = 쪽 폭의 s%, 최대 폭 90%).
+     인쇄는 쪽마다 그림 한 장을 A4 한 면에 담은 인쇄 층(#paPrintLayer)을 body 에 붙여 찍고 걷는다. */
+  const BOOK_FONT = '"Nanum Pen Script","ClassDock Nanum Pen","Segoe Print",cursive';
+  const ensureBookFont = () => typeof diaryEnsureFont === "function" ? diaryEnsureFont("pen").catch(() => false) : Promise.resolve(false);
+  const loadImage = src => new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = src; });
+  // 한 줄씩 넘기기 — 글자 단위로 재며 max 를 넘으면 줄을 바꾼다(화면의 overflow-wrap:anywhere 와 같은 결과).
+  function wrapLines(ctx, text, max){
+    const lines = [];
+    for (const para of String(text).split("\n")){
+      let line = "";
+      for (const ch of Array.from(para)){
+        if (line && ctx.measureText(line + ch).width > max){ lines.push(line); line = ch.trimStart(); }
+        else line += ch;
+      }
+      lines.push(line);
+    }
+    return lines;
+  }
+  async function drawSlot(ctx, slot, PW, PH, ox){
+    const media = mediaById(slot.media); if (!media) return;
+    const a = slot.a || mediaAspect(media), w = slot.w / 100 * PW, h = w * a;
+    let source = null;
+    try {
+      if (media.type === "image") source = await composeCanvas(media, Math.min(2400, Math.max(w, h) * 1.25));
+      else if (media.thumbnail) source = await loadImage(media.thumbnail);
+    } catch(error){ console.warn("쪽 그림에 사진을 넣지 못했습니다:", error); }
+    if (!source) return;
+    const sw = source.width, sh = source.height, want = h / w;
+    // object-fit:cover — 칸 비율에 맞춰 가운데를 잘라 쓴다.
+    let cw = sw, ch = sw * want; if (ch > sh){ ch = sh; cw = sh / want; }
+    const cx = (sw - cw) / 2, cy = (sh - ch) / 2;
+    ctx.save();
+    ctx.translate(ox + slot.x / 100 * PW + w / 2, slot.y / 100 * PH + h / 2); ctx.rotate(slot.r * Math.PI / 180);
+    ctx.shadowColor = "rgba(0,0,0,.22)"; ctx.shadowBlur = PW * .012; ctx.shadowOffsetY = PW * .003;
+    ctx.fillStyle = "#fff"; ctx.fillRect(-w/2, -h/2, w, h);
+    ctx.shadowColor = "transparent";
+    ctx.drawImage(source, cx, cy, cw, ch, -w/2, -h/2, w, h);
+    if (media.type === "video"){
+      const r = Math.min(w * .11, PW * .04), bx = -w/2 + w*.06 + r, by = h/2 - h*.06 - r;
+      ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(bx - r*.32, by - r*.45); ctx.lineTo(bx + r*.5, by); ctx.lineTo(bx - r*.32, by + r*.45); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+  async function drawPage(ctx, page, index, PW, PH, ox, side){
+    const paper = bookPaper(page.paper), dark = paper[0] === "night";
+    ctx.fillStyle = paper[2]; ctx.fillRect(ox, 0, PW, PH);
+    ctx.save(); ctx.beginPath(); ctx.rect(ox, 0, PW, PH); ctx.clip();
+    for (const slot of page.slots) await drawSlot(ctx, slot, PW, PH, ox);
+    for (const part of page.stickers || []) await drawPageSticker(ctx, part, PW, PH, ox);
+    for (const text of page.texts){
+      const size = text.s / 100 * PW, lineH = size * 1.25, pad = size * .2;
+      ctx.font = size + "px " + BOOK_FONT; ctx.fillStyle = text.c || (dark ? "#f4f1e6" : "#3a3226"); ctx.textBaseline = "top";
+      wrapLines(ctx, text.text, PW * .9 - pad * 2).forEach((line, at) => ctx.fillText(line, ox + text.x / 100 * PW + pad, text.y / 100 * PH + at * lineH + (lineH - size) / 2));
+    }
+    // 책등 그늘(펼친 두 쪽에서만) — 화면의 inset 그림자와 같은 방향
+    if (side){
+      const g = side === "left" ? ctx.createLinearGradient(ox + PW, 0, ox + PW - PW*.06, 0) : ctx.createLinearGradient(ox, 0, ox + PW*.06, 0);
+      g.addColorStop(0, "rgba(58,50,38,.28)"); g.addColorStop(1, "rgba(58,50,38,0)");
+      ctx.fillStyle = g; ctx.fillRect(side === "left" ? ox + PW*.94 : ox, 0, PW*.06, PH);
+    }
+    ctx.font = (PW * .026) + "px " + BOOK_FONT; ctx.fillStyle = dark ? "rgba(255,255,255,.45)" : "rgba(58,50,38,.45)"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.fillText(String(index + 1), ox + PW / 2, PH * (1 - .016)); ctx.textAlign = "start";
+    ctx.restore();
+  }
+  // indexes 쪽들을 나란히 한 장에. width = 쪽 한 장의 폭(px).
+  async function renderPages(indexes, width){
+    await ensureBookFont(); if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    const pages = bookOf().pages, PW = Math.round(width), PH = Math.round(width / BOOK_PAGE_RATIO);
+    const canvas = document.createElement("canvas"); canvas.width = PW * indexes.length; canvas.height = PH;
+    const ctx = canvas.getContext("2d");
+    for (let at = 0; at < indexes.length; at++){
+      const side = indexes.length === 2 ? (at === 0 ? "left" : "right") : "";
+      await drawPage(ctx, pages[indexes[at]], indexes[at], PW, PH, at * PW, side);
+    }
+    return canvas;
+  }
+  const canvasBlob = (canvas, type = "image/png", quality) => new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("canvas-encode")), type, quality));
+  function downloadBlob(blob, name){
+    const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = name;
+    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  let bookExportBusy = false;
+  async function exportBookPng(which){
+    if (bookExportBusy) return;
+    const pages = bookOf().pages; if (!pages.length){ notice("저장할 쪽이 없습니다."); return; }
+    const indexes = which === "spread" ? [bookSpread, bookSpread + 1].filter(at => at < pages.length) : [Math.min(bookPage, pages.length - 1)];
+    bookExportBusy = true; status("쪽 그림을 만드는 중…");
+    try {
+      const blob = await canvasBlob(await renderPages(indexes, 1800));
+      const name = "앨범-" + (indexes.length === 2 ? (indexes[0] + 1) + "-" + (indexes[1] + 1) : String(indexes[0] + 1)) + "쪽.png";
+      downloadBlob(blob, name); notice(name + " 을(를) 저장했습니다.");
+    } catch(error){ console.error(error); notice("쪽 그림을 만들지 못했습니다."); }
+    finally { bookExportBusy = false; }
+  }
+  function clearPrintLayer(){
+    const old = document.getElementById("paPrintLayer");
+    if (old){ old.querySelectorAll("img").forEach(img => { if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src); }); old.remove(); }
+    document.body.classList.remove("pa-printing");
+  }
+  async function printBook(which){
+    if (bookExportBusy) return;
+    const pages = bookOf().pages; if (!pages.length){ notice("인쇄할 쪽이 없습니다."); return; }
+    const indexes = which === "spread" ? [bookSpread, bookSpread + 1].filter(at => at < pages.length) : pages.map((_, at) => at);
+    bookExportBusy = true; clearPrintLayer();
+    const layer = document.createElement("div"); layer.id = "paPrintLayer"; layer.setAttribute("aria-hidden", "true");
+    try {
+      for (let at = 0; at < indexes.length; at++){
+        status(`인쇄할 쪽을 그리는 중… ${at + 1}/${indexes.length}`);
+        // A4 세로 한 면에 한 쪽(약 150dpi). 쪽 비율 3:4 가 A4 보다 조금 넓어 위아래가 남는다.
+        const blob = await canvasBlob(await renderPages([indexes[at]], 1240), "image/jpeg", .92);
+        const sheet = document.createElement("div"); sheet.className = "pa-print-sheet";
+        const img = document.createElement("img"); img.alt = (indexes[at] + 1) + "쪽"; img.src = URL.createObjectURL(blob);
+        sheet.appendChild(img); layer.appendChild(sheet);
+      }
+      document.body.appendChild(layer);
+      await Promise.all(Array.from(layer.querySelectorAll("img")).map(img => img.decode().catch(() => {})));
+      document.body.classList.add("pa-printing");
+      const done = () => { window.removeEventListener("afterprint", done); clearPrintLayer(); };
+      window.addEventListener("afterprint", done);
+      status(indexes.length + "쪽을 인쇄합니다. 인쇄 창에서 'PDF로 저장'을 고르면 PDF 로도 남길 수 있어요.");
+      // 인쇄 미리보기가 떠 있는 동안(프린터를 바꾸면 다시 그린다) 층이 있어야 하므로 시간으로 걷지 않는다 — afterprint,
+      // 다음 인쇄, 사진첩 닫기에서 걷는다. 화면에서는 층이 늘 감춰져 있어 남아도 보이지 않는다.
+      window.print();
+    } catch(error){ console.error(error); clearPrintLayer(); notice("인쇄할 쪽을 만들지 못했습니다."); }
+    finally { bookExportBusy = false; }
+  }
+  function openBookSaveMenu(anchor){
+    const pages = bookOf().pages, rect = anchor.getBoundingClientRect(), hasSpread = bookPerView() === 2 && pages[bookSpread + 1];
+    const items = [
+      { label:"이 쪽 그림 저장 (PNG)", title:"지금 고른 쪽을 그림 파일로", icon:"save", action:() => exportBookPng("page") },
+      ...(hasSpread ? [{ label:"펼친 두 쪽 그림 저장 (PNG)", title:"지금 펼친 두 쪽을 한 장으로", icon:"image", action:() => exportBookPng("spread") }] : []),
+      { separator:true },
+      { label:"모든 쪽 인쇄 (" + pages.length + "쪽)", title:"쪽마다 A4 한 면 · 인쇄 창에서 PDF로 저장 가능", icon:"print", action:() => printBook("all") },
+      { label:"지금 펼친 쪽만 인쇄", title:"지금 보이는 " + (hasSpread ? "두 쪽" : "쪽"), icon:"print", action:() => printBook("spread") }
+    ];
+    if (typeof MNContextMenu === "undefined"){ exportBookPng("page"); return; }
+    anchor.classList.add("is-open");
+    MNContextMenu.open(rect.left, rect.bottom + 6, items, { base:"text-context", onClose:() => anchor.classList.remove("is-open") });
+  }
+  /* ----- 쪽 위 장식 -----
+     사진 꾸미기의 장식(안경·모자·옷·신발·이모지·내 그림)을 쪽에도 붙인다. 모양은 사진 장식과 같다
+     ({ id, art, x, y, w, r, f?, em? }) — x·y 는 장식 가운데(쪽에 대한 %), w 는 쪽 폭에 대한 %, 높이 = w × 105/120.
+     내 그림은 획을 복사하지 않고 id 로만 가리킨다(사진첩 전체 기록은 512KB 한도) — 지운 그림은 쪽에서도 안 그린다. */
+  const BOOK_ART_MIME = "application/x-classdock-album-page-art", BOOK_TRAY_KEY = "classdock.photoAlbum.trayTab";
+  const BOOK_DECO_GROUPS = ["안경", "모자", "옷", "신발", EMOJI_GROUP, CUSTOM_GROUP];
+  const BOOK_ART_RATIO = 105 / 120;
+  let trayTab = "media", decoGroup = "안경";
+  try { trayTab = localStorage.getItem(BOOK_TRAY_KEY) === "deco" ? "deco" : "media"; } catch { /* 처음엔 사진 */ }
+  function pageArtRow(part){
+    if (!part) return null;
+    if (typeof part.em === "string") return rowOf({ em:part.em });
+    return artById(part.art) || null;
+  }
+  function cleanPagePart(raw){
+    if (!raw || typeof raw !== "object") return null;
+    const part = { id:String(raw.id || bookId()), art:String(raw.art || "").slice(0, 80),
+      x:clampNum(raw.x, -20, 120, 50), y:clampNum(raw.y, -20, 120, 50), w:clampNum(raw.w, 4, 100, 18), r:clampNum(raw.r, -180, 180, 0) };
+    if (raw.f) part.f = true;
+    if (typeof raw.em === "string"){ const em = cleanEmoji(raw.em); if (!em) return null; part.em = em; part.art = "emoji"; }
+    else if (!part.art) return null;
+    return part;
+  }
+  // 고른 장식(값 "art:<id>" 또는 "emoji:<이모지>")으로 쪽 장식 하나를 만든다. at = 가운데(쪽 %).
+  function makePagePart(value, at){
+    const text = String(value || ""), center = at || { x:50, y:42 };
+    if (text.startsWith("emoji:")){ const em = cleanEmoji(text.slice(6)); if (!em) return null; rememberEmoji(em); return { id:bookId(), art:"emoji", em, x:center.x, y:center.y, w:13, r:0 }; }
+    const row = artById(text.replace(/^art:/, "")); if (!row) return null;
+    return { id:bookId(), art:row[0], x:center.x, y:center.y, w:20, r:0 };
+  }
+  function addPagePart(pageIndex, value, at){
+    const pages = bookOf().pages; if (!pages.length){ addPage(); pageIndex = bookPage; }
+    const page = bookOf().pages[pageIndex]; if (!page) return;
+    const part = makePagePart(value, at); if (!part) return;
+    page.stickers.push(part); bookPage = pageIndex; bookPick = { kind:"sticker", page:pageIndex, id:part.id };
+    bookChanged(); status("장식을 " + pageLabel(pageIndex) + "에 붙였습니다.");
+  }
+  function pickedSticker(){
+    if (!bookPick || bookPick.kind !== "sticker") return null;
+    const page = bookOf().pages[bookPick.page];
+    return page ? page.stickers.find(row => row.id === bookPick.id) || null : null;
+  }
+  function stickerElement(page, part, pageIndex){
+    const row = pageArtRow(part); if (!row) return null;
+    const el = document.createElement("div"), picked = bookPick && bookPick.kind === "sticker" && bookPick.id === part.id && !bookReading;
+    el.className = "pa-bsticker" + (picked ? " is-picked" : ""); el.dataset.id = part.id;
+    el.style.left = part.x + "%"; el.style.top = part.y + "%"; el.style.width = part.w + "%";
+    el.style.transform = "translate(-50%,-50%) rotate(" + part.r + "deg)";
+    const img = document.createElement("img"); img.alt = row[2] || "장식"; img.draggable = false; img.src = partSvg(row, part);
+    if (part.f) img.style.transform = "scaleX(-1)";
+    el.appendChild(img);
+    if (bookReading) return el;
+    el.title = (row[2] || "장식") + " · 끌어서 옮기기";
+    el.addEventListener("pointerdown", event => startStickerDrag(event, pageIndex, part, el, "move"));
+    if (picked){
+      const resize = document.createElement("span"); resize.className = "pa-slot-handle is-resize"; resize.title = "끌어서 크기 조절";
+      resize.addEventListener("pointerdown", event => startStickerDrag(event, pageIndex, part, el, "resize"));
+      const rotate = document.createElement("span"); rotate.className = "pa-slot-handle is-rotate"; rotate.title = "끌어서 돌리기 (0° 근처에서 바르게 맞춤)";
+      rotate.addEventListener("pointerdown", event => startStickerDrag(event, pageIndex, part, el, "rotate"));
+      el.append(resize, rotate);
+    }
+    return el;
+  }
+  function startStickerDrag(event, pageIndex, part, el, kind){
+    if (event.button !== 0 || bookReading) return;
+    event.preventDefault(); event.stopPropagation();
+    if (kind === "move" && event.altKey){ pickSlotBelow(event, pageIndex); return; }
+    const rect = el.closest(".pa-page").getBoundingClientRect();
+    if (!(bookPick && bookPick.id === part.id)){ bookPick = { kind:"sticker", page:pageIndex, id:part.id }; bookPage = pageIndex; paintBook(); }
+    const live = () => root.querySelector(`.pa-bsticker[data-id="${CSS.escape(part.id)}"]`) || el;
+    const start = { x:event.clientX, y:event.clientY, sx:part.x, sy:part.y, sw:part.w, sr:part.r };
+    const box = live().getBoundingClientRect(), center = { x:box.left + box.width/2, y:box.top + box.height/2 };
+    const startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x), startDist = Math.max(4, Math.hypot(event.clientX - center.x, event.clientY - center.y));
+    let moved = false;
+    const place = node => { node.style.left = part.x + "%"; node.style.top = part.y + "%"; node.style.width = part.w + "%"; node.style.transform = "translate(-50%,-50%) rotate(" + part.r + "deg)"; };
+    const move = ev => {
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return;
+      moved = true;
+      if (kind === "move"){ part.x = clampNum(start.sx + (ev.clientX - start.x) / rect.width * 100, -20, 120, start.sx); part.y = clampNum(start.sy + (ev.clientY - start.y) / rect.height * 100, -20, 120, start.sy); }
+      // 가운데가 그대로인 장식은 가운데에서 멀어진 만큼 키운다.
+      else if (kind === "resize") part.w = clampNum(start.sw * Math.hypot(ev.clientX - center.x, ev.clientY - center.y) / startDist, 4, 100, start.sw);
+      else {
+        let angle = start.sr + (Math.atan2(ev.clientY - center.y, ev.clientX - center.x) - startAngle) * 180 / Math.PI;
+        angle = ((angle + 180) % 360 + 360) % 360 - 180; if (Math.abs(angle) < 2) angle = 0;
+        part.r = Math.round(angle * 10) / 10;
+      }
+      place(live());
+    };
+    const up = ev => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+      if (!moved) return;
+      if (kind === "move"){
+        const target = document.elementFromPoint(ev.clientX, ev.clientY), other = target && target.closest && target.closest(".pa-page:not(.is-blank)");
+        const toIndex = other ? Number(other.dataset.index) : pageIndex;
+        if (other && toIndex !== pageIndex){
+          const pages = bookOf().pages, r2 = other.getBoundingClientRect();
+          pages[pageIndex].stickers = pages[pageIndex].stickers.filter(row => row.id !== part.id);
+          part.x = clampNum((ev.clientX - r2.left) / r2.width * 100, -20, 120, 50); part.y = clampNum((ev.clientY - r2.top) / r2.height * 100, -20, 120, 50);
+          pages[toIndex].stickers.push(part); bookPick = { kind:"sticker", page:toIndex, id:part.id }; bookPage = toIndex;
+        }
+      }
+      bookChanged();
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+  }
+  function stickerTools(at, part){
+    const tools = document.createElement("span"); tools.className = "pa-book-pick-tools";
+    const list = () => bookOf().pages[at].stickers;
+    tools.append(
+      iconButton("layers", "맨 앞으로", () => { const rows = list(), i = rows.indexOf(part); if (i >= 0){ rows.push(rows.splice(i, 1)[0]); bookChanged(); } }, "pa-ico"),
+      iconButton("arrowDown", "맨 뒤로", () => { const rows = list(), i = rows.indexOf(part); if (i > 0){ rows.unshift(rows.splice(i, 1)[0]); bookChanged(); } }, "pa-ico"),
+      iconButton("flipH", "좌우 뒤집기", () => { part.f = !part.f; if (!part.f) delete part.f; bookChanged(); }, "pa-ico"),
+      iconButton("rotateLeft", "바르게 (기울기 0°)", () => { part.r = 0; bookChanged(); }, "pa-ico"),
+      iconButton("copy", "복제", () => { const copy = { ...part, id:bookId(), x:part.x + 4, y:part.y + 3 }; list().push(copy); bookPick = { kind:"sticker", page:at, id:copy.id }; bookChanged(); }, "pa-ico"),
+      iconButton("delete", "장식 떼기", () => removeSticker(at, part.id), "pa-ico")
+    );
+    return tools;
+  }
+  function removeSticker(pageIndex, id){ const page = bookOf().pages[pageIndex]; if (!page) return; page.stickers = page.stickers.filter(row => row.id !== id); bookPick = null; bookChanged(); }
+  // 오른쪽 칸 '장식' 탭 — 갈래 칩 + 장식 그림. 쪽으로 끌어 놓거나 누르면 지금 쪽 가운데에 붙는다.
+  function paintBookDeco(){
+    const host = root.querySelector(".pa-book-deco"); if (!host) return; host.replaceChildren();
+    const chips = document.createElement("div"); chips.className = "pa-book-deco-groups";
+    BOOK_DECO_GROUPS.forEach(group => chips.appendChild(button(group, () => { decoGroup = group; paintBookDeco(); }, "pa-book-deco-group" + (decoGroup === group ? " active" : ""))));
+    const grid = document.createElement("div"); grid.className = "pa-book-deco-grid";
+    let entries;
+    if (decoGroup === EMOJI_GROUP) entries = [...new Set([...recentEmojis(), ...EMOJI_SETS.flatMap(set => set[2])])].map(em => ({ value:"emoji:" + em, row:rowOf({ em }), name:em }));
+    else if (decoGroup === CUSTOM_GROUP) entries = customArts.map(customRow).map(row => ({ value:"art:" + row[0], row, name:row[2] }));
+    else entries = art.filter(row => row[1] === decoGroup).map(row => ({ value:"art:" + row[0], row, name:row[2] }));
+    entries = entries.filter(entry => entry.row);
+    if (!entries.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = decoGroup === CUSTOM_GROUP ? "사진 꾸미기의 '내 그림'에서 장식을 그리면 여기에도 나옵니다." : "장식이 없습니다."; grid.appendChild(p); }
+    for (const entry of entries){
+      const card = button("", () => addPagePart(Math.min(bookPage, Math.max(0, bookOf().pages.length - 1)), entry.value, null), "pa-book-deco-item");
+      card.title = entry.name + " · 쪽으로 끌어다 놓거나 눌러서 붙이기"; card.setAttribute("aria-label", entry.name); card.draggable = true;
+      card.addEventListener("dragstart", event => startDecoDrag(event, entry, card)); card.addEventListener("dragend", endTrayDrag);
+      const img = document.createElement("img"); img.alt = ""; img.draggable = false; img.src = svg(entry.row); card.appendChild(img);
+      grid.appendChild(card);
+    }
+    host.append(chips, grid);
+  }
+  function startDecoDrag(event, entry, card){
+    event.dataTransfer.setData(BOOK_ART_MIME, entry.value); event.dataTransfer.effectAllowed = "copy";
+    trayDrag = { deco:entry, card }; card.classList.add("is-dragging"); root.classList.add("pa-tray-dragging");
+    if (event.dataTransfer.setDragImage){
+      const ghost = document.createElement("div"); ghost.className = "pa-drag-card is-deco";
+      const img = document.createElement("img"); img.src = svg(entry.row); img.alt = ""; img.style.width = "84px"; img.style.height = Math.round(84 * BOOK_ART_RATIO) + "px";
+      ghost.appendChild(img); document.body.appendChild(ghost);
+      try { event.dataTransfer.setDragImage(ghost, 42, 37); } catch { /* 기본 그림 */ }
+      setTimeout(() => ghost.remove(), 0);
+    }
+  }
+  function syncTrayTab(){
+    const tray = root.querySelector(".pa-book-tray"); if (!tray) return;
+    tray.dataset.tab = trayTab;
+    tray.querySelectorAll(".pa-book-tray-tab").forEach(tab => { const on = tab.dataset.tray === trayTab; tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1; });
+  }
+  async function drawPageSticker(ctx, part, PW, PH, ox){
+    const row = pageArtRow(part); if (!row) return;
+    let img; try { img = await loadImage(partSvg(row, part)); } catch { return; }
+    const w = part.w / 100 * PW, h = w * BOOK_ART_RATIO;
+    ctx.save(); ctx.translate(ox + part.x / 100 * PW, part.y / 100 * PH); ctx.rotate(part.r * Math.PI / 180); if (part.f) ctx.scale(-1, 1);
+    ctx.drawImage(img, -w/2, -h/2, w, h); ctx.restore();
+  }
+  function setupBook(){
+    const host = root.querySelector(".pa-book"); if (!host) return;
+    root.querySelectorAll(".pa-mode-tab").forEach(tab => { tab.onclick = () => setAlbumMode(tab.dataset.mode); });
+    host.querySelector(".pa-book-text").onclick = addBookText;
+    host.querySelector(".pa-book-relayout").onclick = relayoutPage;
+    host.querySelector(".pa-book-page-add").onclick = addPage;
+    host.querySelector(".pa-book-page-remove").onclick = removePage;
+    host.querySelector(".pa-book-page-back").onclick = () => movePage(-1);
+    host.querySelector(".pa-book-page-forward").onclick = () => movePage(1);
+    host.querySelector(".pa-book-read-exit").onclick = () => setBookReading(false);
+    host.querySelector(".pa-book-save").onclick = event => openBookSaveMenu(event.currentTarget);
+    host.querySelectorAll(".pa-book-tray-tab").forEach(tab => { tab.onclick = () => {
+      trayTab = tab.dataset.tray === "deco" ? "deco" : "media"; try { localStorage.setItem(BOOK_TRAY_KEY, trayTab); } catch { /* 이번 화면에만 */ }
+      if (trayTab === "deco") paintBookDeco(); syncTrayTab();
+    }; });
+    ensureBookFont();   // 쪽 글 손글씨(펜) — 화면·그림·인쇄가 같은 글꼴을 쓰게 처음에 읽어 둔다
+    host.querySelector(".pa-book-sound").onclick = () => {
+      const on = !turnSoundOn(); try { localStorage.setItem(BOOK_TURN_SOUND_KEY, on ? "1" : "0"); } catch { /* 이번 화면에만 */ }
+      syncTurnSoundButton(); if (on) playTurnSound();
+    };
+    syncTurnSoundButton();
+    const stage = host.querySelector(".pa-book-stage");
+    stage.addEventListener("dblclick", event => { if (bookReading){ event.preventDefault(); toggleViewFullscreen(); } });
+    stage.addEventListener("wheel", event => {
+      if (!bookReading || Math.abs(event.deltaY) < 20) return;
+      event.preventDefault(); clearTimeout(bookTurnTimer);
+      goSpread(event.deltaY > 0 ? 1 : -1);
+    }, { passive:false });
+    if (typeof ResizeObserver === "function"){ bookObserver = new ResizeObserver(() => { fitSpread(); }); bookObserver.observe(stage); }
+    let stored = "book"; try { stored = localStorage.getItem(BOOK_MODE_KEY) === "edit" ? "edit" : "book"; } catch { /* 처음엔 책 */ }
+    setAlbumMode(stored, { silent:true });
+  }
   function makeUi(host){
     closeEffectPanel(); host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
-    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div></div><aside class="pa-tools"><div class="pa-tool-tabs" role="tablist" aria-label="꾸미기 도구"><button type="button" class="pa-tool-tab" role="tab" data-tab="deco" aria-selected="false" title="사진 위에 장식을 올립니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span>꾸미기</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="bg" aria-selected="false" title="사진 둘레 배경을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="7.5" y="8.5" width="9" height="7" rx="1"/></svg><span>배경</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="music" aria-selected="false" title="배경음악과 재생 설정"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.5" r="2.4"/></svg><span>음악</span></button></div><div class="pa-deco-section pa-tab-panel" role="tabpanel" data-tab="deco" aria-label="꾸미기"><svg class="pa-sparkles is-right" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><svg class="pa-sparkles is-left" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></div><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="bg" aria-label="배경" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div></section><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="music" aria-label="음악" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-music"></div><p class="pa-music-none">사진을 고르면 배경음악을 넣을 수 있어요.</p><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></aside><div class="pa-split" data-side="left" role="separator" aria-orientation="vertical" aria-label="목록 칸 폭" title="끌어서 목록 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div><div class="pa-split" data-side="right" role="separator" aria-orientation="vertical" aria-label="꾸미기 칸 폭" title="끌어서 꾸미기 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
+    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-mode" role="tablist" aria-label="사진첩 화면"><button type="button" class="pa-mode-tab" role="tab" data-mode="book" title="꾸민 사진을 쪽마다 붙인 앨범 책"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.6 5 6.6 4.6 3.5 5v13c3.1-.4 6.1 0 8.5 1.5 2.4-1.5 5.4-1.9 8.5-1.5V5c-3.1-.4-6.1 0-8.5 1.5z"/><path d="M12 6.5v13"/></svg><span>앨범 책</span></button><button type="button" class="pa-mode-tab" role="tab" data-mode="edit" title="사진 한 장씩 장식·배경·음악으로 꾸미기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/></svg><span>사진 꾸미기</span></button></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-book"><div class="pa-book-bar"><strong class="pa-book-where"></strong><span class="pa-book-pick" hidden></span><span class="pa-book-tools"><button type="button" class="pa-book-text" data-needs-page title="지금 쪽에 손글씨 글 넣기">가 글 넣기</button><button type="button" class="pa-book-relayout" title="지금 쪽 사진을 자동으로 다시 배치합니다">자동 배치</button><span class="pa-book-papers" role="group" aria-label="쪽 바탕"></span><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-page-back" title="지금 쪽을 한 쪽 앞으로">◂ 쪽 앞으로</button><button type="button" class="pa-book-page-forward" title="지금 쪽을 한 쪽 뒤로">쪽 뒤로 ▸</button><button type="button" class="pa-book-page-add" title="지금 쪽 다음에 빈 쪽 더하기">＋ 쪽</button><button type="button" class="pa-book-page-remove" title="지금 쪽 빼기 (사진은 사진첩에 남음)">쪽 빼기</button><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-save" data-needs-page aria-haspopup="menu" title="쪽 그림 저장(PNG)·인쇄">저장·인쇄 ▾</button></span><button type="button" class="pa-book-sound" aria-pressed="false"></button><button type="button" class="pa-book-read-exit" title="앨범 편집으로 돌아갑니다 (Esc)">✎ 감상 끝</button></div><div class="pa-book-main"><div class="pa-book-stage"><div class="pa-spread"></div></div><aside class="pa-book-tray"><div class="pa-book-tray-tabs" role="tablist" aria-label="쪽에 넣을 것"><button type="button" class="pa-book-tray-tab" role="tab" data-tray="media">사진 <span class="pa-book-tray-count"></span></button><button type="button" class="pa-book-tray-tab" role="tab" data-tray="deco">장식</button></div><p class="pa-book-tray-hint">쪽으로 끌거나 눌러서 넣기</p><div class="pa-book-tray-list" role="tabpanel"></div><div class="pa-book-deco" role="tabpanel"></div></aside></div><div class="pa-book-thumbs" aria-label="쪽 미리보기"></div></div><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div></div><aside class="pa-tools"><div class="pa-tool-tabs" role="tablist" aria-label="꾸미기 도구"><button type="button" class="pa-tool-tab" role="tab" data-tab="deco" aria-selected="false" title="사진 위에 장식을 올립니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span>꾸미기</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="bg" aria-selected="false" title="사진 둘레 배경을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="7.5" y="8.5" width="9" height="7" rx="1"/></svg><span>배경</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="music" aria-selected="false" title="배경음악과 재생 설정"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.5" r="2.4"/></svg><span>음악</span></button></div><div class="pa-deco-section pa-tab-panel" role="tabpanel" data-tab="deco" aria-label="꾸미기"><svg class="pa-sparkles is-right" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><svg class="pa-sparkles is-left" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></div><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="bg" aria-label="배경" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div></section><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="music" aria-label="음악" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-music"></div><p class="pa-music-none">사진을 고르면 배경음악을 넣을 수 있어요.</p><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></aside><div class="pa-split" data-side="left" role="separator" aria-orientation="vertical" aria-label="목록 칸 폭" title="끌어서 목록 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div><div class="pa-split" data-side="right" role="separator" aria-orientation="vertical" aria-label="꾸미기 칸 폭" title="끌어서 꾸미기 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
     host.appendChild(root);
     root.querySelector(".pa-import").onclick = () => root.querySelector(".pa-input").click();
     root.querySelector(".pa-input").onchange = async event => { await importFiles(event.target.files); event.target.value = ""; };
-    root.querySelector(".pa-view").onclick = () => setViewing(!viewing);
+    root.querySelector(".pa-view").onclick = () => albumMode === "book" ? setBookReading(!bookReading) : setViewing(!viewing);
     root.querySelector(".pa-view-exit").onclick = () => setViewing(false);
     root.querySelector(".pa-fx-open").onclick = openEffectPanel;
     // 감상 모드 단추 줄의 효과 고르개: 목록 위 단추와 같은 값을 쓴다. 고르면 포커스를 풀어 ←/→ 가 다시 사진 넘기기로.
@@ -3302,6 +4417,7 @@ const PhotoAlbum = (() => {
     observer = new ResizeObserver(fitArtboard); observer.observe(root.querySelector(".pa-stage"));
     setupToolTabs(); setupPaneSplitters();
     paintFilters(); paintList(); paintBackgrounds(); paintStickers(); paintStage();
+    bookReading = false; bookPick = null; setupBook();
   }
   async function mount(host){
     try {
@@ -3346,6 +4462,7 @@ const PhotoAlbum = (() => {
         catch(error){ item.stickers = previous; console.warn("철회된 사진첩 장식 기록을 지우지 못했습니다:",error); }
       }
       records.sort((a,b) => b.created-a.created);
+      await ensureBook();
     } catch(error){
       console.error("사진첩 저장소를 열지 못했습니다:", error);
       if (host.isConnected) host.textContent = "사진첩 저장소를 열지 못했습니다. 앱을 다시 실행해 주세요.";
@@ -3356,7 +4473,12 @@ const PhotoAlbum = (() => {
     makeUi(host); applyMotionSetting();
     window.addEventListener("keydown", onHistoryKey);
   }
-  function cleanup(){ closeSaveMenu(); closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null; root = null; }
+  function cleanup(){ closeSaveMenu(); closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null;
+    // 앨범 쪽 저장이 기다리는 중이면 닫기 전에 바로 보낸다(닫은 뒤에 타이머가 돌면 root 가 없다).
+    if (bookSaveTimer){ clearTimeout(bookSaveTimer); bookSaveTimer = 0; persistMetadata(albumItem).catch(error => console.warn("앨범 쪽을 저장하지 못했습니다:", error)); }
+    clearTimeout(bookTurnTimer); clearPrintLayer(); if (bookTurn) bookTurn.finish(bookTurn.commit); if (turnAudio){ turnAudio.close().catch(() => {}); turnAudio = null; }
+    if (bookObserver) bookObserver.disconnect(); bookObserver = null; bookReading = false; bookPick = null; releaseComposed();
+    root = null; }
   return { mount, cleanup };
 })();
 
@@ -3376,8 +4498,11 @@ function openPhotoAlbum(options={}){
   const existing = docs.find(doc => doc.kind === "photo-album" && !doc.closed);
   if (existing){
     if (!options.restoreInBackground){
+      // 사진첩은 앱에 하나뿐이다 — 이미 보고 있으면 바뀌는 게 없어 '눌러도 반응이 없다'로 보이므로 알려 준다.
+      const already = typeof activeId !== "undefined" && activeId === existing.id && !existing.el.hidden;
       if (typeof workspaceHasDoc === "function" && !workspaceHasDoc(existing)) workspaceAttachExistingDoc(existing);
       setActiveDoc(existing.id);
+      if (already && typeof toast === "function") toast("사진첩은 하나라 지금 보고 있는 사진첩이에요.", 2600);
     }
     return existing;
   }

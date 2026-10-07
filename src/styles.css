@@ -7228,6 +7228,27 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .timeline-present-controls button:disabled{opacity:.32;cursor:default;box-shadow:none}
 
   .timeline-print{display:none}
+  /* 연대표 시안 B — 왼쪽 사건 목록(늘 열림) + 가로 축 + 아래 미니맵. 기호뿐이던 단추는 그림만(이름은 감춘 칸). */
+  .timeline-main{position:relative;display:flex;flex:1 1 auto;flex-direction:column;min-width:0;min-height:0}
+  .timeline-main>.timeline-viewport{flex:1 1 auto}
+  .timeline-list-panel{display:flex;flex:0 0 262px;flex-direction:column;min-width:220px;border-left:0;border-right:1px solid var(--border)}
+  .timeline-list-panel .timeline-list{flex:1;height:auto;min-height:0}
+  .timeline-minimap{position:relative;flex:none;height:36px;border-top:1px solid var(--border);background:var(--panel);cursor:pointer;touch-action:none;user-select:none}
+  .timeline-minimap[hidden]{display:none}
+  .timeline-minimap-inner{position:absolute;top:0;bottom:0;left:14px;right:14px}
+  .timeline-minimap-track{position:absolute;inset:0}
+  .timeline-minimap-track::before{content:"";position:absolute;left:0;right:0;top:50%;height:2px;margin-top:-1px;border-radius:1px;background:var(--border)}
+  .timeline-minimap-period{position:absolute;top:50%;height:6px;margin-top:-3px;border-radius:3px;opacity:.4}
+  .timeline-minimap-dot{position:absolute;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;box-shadow:0 0 0 1.5px var(--panel)}
+  .timeline-minimap-dot.is-selected{width:12px;height:12px;margin:-6px 0 0 -6px;box-shadow:0 0 0 2px var(--panel),0 0 0 3.5px var(--accent)}
+  .timeline-minimap-window{position:absolute;top:5px;bottom:5px;min-width:10px;border:1.5px solid var(--accent);border-radius:6px;background:color-mix(in srgb,var(--accent) 10%,transparent);cursor:grab}
+  .timeline-minimap.is-dragging .timeline-minimap-window{cursor:grabbing;background:color-mix(in srgb,var(--accent) 18%,transparent)}
+  .timeline-btn.timeline-ico{display:inline-flex;align-items:center;justify-content:center;width:32px;min-width:32px;padding:0}
+  .timeline-ico .ui-icon{width:16px;height:16px}
+  .timeline-btn-label{display:none}
+  @media(max-width:900px){
+    .timeline-list-panel{left:0;right:auto;border-right:1px solid var(--border);box-shadow:8px 0 24px rgba(15,23,42,.18)}
+  }
   @media(max-width:900px){
     .timeline-list-panel{position:absolute;right:0;top:0;bottom:0;width:min(310px,calc(88vw / var(--ui-zoom, 1)));z-index:7;box-shadow:-8px 0 24px rgba(15,23,42,.18)}
     .timeline-present-card,.timeline-present-card.is-text-only{width:min(760px,100%);min-height:0;
@@ -10595,6 +10616,107 @@ a.diary-school-card-value{color:var(--accent)}
   .trip-body.is-map-open .trip-map-stage{min-height:0}
 }
 
+/* ===== 여행일지 시안 B — 위 도구는 그림만, 여정은 가로 날 띠, 장소는 세로 타임라인 =====
+   위의 예전 규칙을 지우지 않고 덮는다(같은 세기면 뒤가 이긴다). 날 띠는 예전 여정 칸(.trip-rail)
+   요소를 그대로 써서 .trip-days 를 덧붙였다 — 몰입 모드·어두운 테마 규칙이 그대로 먹는다. */
+.trip-bar{min-height:0;gap:8px;padding:6px 10px}
+.trip-brand-mark{width:38px;height:38px;border-radius:11px}
+.trip-brand-mark::after{right:6px;top:5px;width:7px;height:7px}
+.trip-brand-art{width:32px;height:27px;transform:translateY(4px)}
+.trip-brand-title{font-size:16px}
+.trip-brand-sub{margin-top:3px;font-size:10px}
+.trip-title{height:36px}
+.trip-bar-actions{align-items:center;gap:3px}
+.trip-bar-actions .trip-tool-button.diary-ico,
+.trip-bar-actions .trip-tool-button.trip-sticker-btn.diary-ico,
+.trip-bar-actions .trip-tool-button.trip-style-btn.diary-ico{width:36px;height:36px;min-height:36px;padding:0;gap:0;border-radius:10px}
+.trip-bar-actions .trip-tool-button .ui-icon{width:19px;height:19px}
+.trip-bar-actions .trip-tool-label{display:none}
+.trip-bar-actions .trip-search-btn{color:#526cf4;background:color-mix(in srgb,#eef2ff 82%,var(--panel))}
+.trip-bar-actions .trip-search-btn.is-on{background:var(--accent);color:#fff}
+.trip-root>.diary-style-panel,.trip-root>.diary-art-panel{top:66px}
+/* 가로 날 띠 */
+.trip-rail.trip-days{flex:none;flex-direction:row;align-items:center;gap:8px;margin:8px 12px 0;padding:6px 8px;overflow:hidden;border-radius:14px;max-height:none}
+.trip-days .trip-rail-icon{flex:none;padding-left:2px}
+.trip-days .trip-rail-head{flex:none;font-size:13px;white-space:nowrap}
+.trip-days .trip-rail-list{flex:1;min-width:0;display:flex;flex-direction:row;gap:6px;padding:2px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+.trip-days .trip-day-chip{flex:0 0 auto;width:auto;min-width:120px;max-width:210px;min-height:46px;margin:0;padding:6px 10px;border:1px solid rgba(125,158,193,.28);background:color-mix(in srgb,var(--bg) 70%,transparent)}
+.trip-days .trip-day-chip::before,.trip-days .trip-day-chip::after{display:none}
+.trip-days .trip-day-chip.is-on{box-shadow:inset 0 -3px 0 #526cf4,0 4px 10px rgba(69,96,175,.12)}
+.trip-days .trip-day-chip.has-thumb{padding-right:46px}
+.trip-days .trip-day-chip-thumb{right:6px;width:32px;height:32px;border-radius:7px}
+.trip-days .trip-day-chip-head,.trip-days .trip-day-chip-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trip-days .trip-add-day{flex:none;width:auto;min-height:40px;margin:0;padding:0 12px;white-space:nowrap}
+.trip-days-tools{display:flex;flex:none;gap:4px}
+.trip-body{grid-template-columns:minmax(0,1fr) 8px var(--trip-map,350px);padding:10px 12px 12px}
+/* 찾기 창 — 도구막대 돋보기 아래 */
+.trip-search-pop{position:absolute;z-index:45;width:min(340px,calc(100% - 16px));max-height:min(calc(60vh / var(--ui-zoom, 1)),520px);overflow:auto;padding:10px;
+  border:1px solid var(--border);border-radius:12px;background:var(--panel);color:var(--ink);box-shadow:0 14px 34px rgba(0,0,0,.22)}
+.trip-search-pop[hidden]{display:none}
+.trip-search-pop .trip-search-box{padding:0 0 8px}
+/* 장소 세로 타임라인 — 왼쪽 핀 번호는 지도 핀과 같다 */
+.trip-spot-list{position:relative;gap:10px;padding-left:34px}
+.trip-spot-list:has(.trip-spot + .trip-spot)::before{content:"";position:absolute;left:15px;top:20px;bottom:20px;width:2px;border-radius:2px;background:color-mix(in srgb,var(--trip-blue,#2563eb) 28%,transparent)}
+.trip-spot-pin{position:absolute;left:-32px;top:9px;z-index:1;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;
+  background:var(--pin,#2563eb);color:#fff;font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums;box-shadow:0 0 0 3px var(--trip-card,var(--panel))}
+.trip-spot-pin.is-unplaced{left:-27px;top:14px;width:14px;height:14px;border:2px solid var(--pin,#2563eb);background:var(--panel)}
+.trip-spot-more{flex:0 0 auto;width:28px;min-width:28px;min-height:28px;padding:0;border:0;background:transparent;color:var(--muted)}
+.trip-spot-more:hover:not(:disabled){color:var(--accent)}
+.trip-spot.is-open{border-color:color-mix(in srgb,var(--trip-blue,#2563eb) 38%,transparent)}
+/* 접힌 줄: 시각·이름·메모·사진(+쓴 돈이 있으면 돈, 앞 곳에서 온 거리)만 */
+.trip-spot:not(.is-open) :is(.trip-spot-kind,.trip-spot-pick,.trip-spot-video-add,.trip-spot-remove,.trip-spot-addr,.trip-spot-find){display:none}
+.trip-spot:not(.is-open) .trip-spot-money:has(.trip-spot-cost:placeholder-shown) :is(.trip-spot-cost,.trip-spot-cost-unit){display:none}
+.trip-spot:not(.is-open) .trip-spot-money:has(.trip-spot-cost:placeholder-shown):not(:has(.trip-spot-leg)){display:none}
+.trip-spot:not(.is-open) input{border-color:transparent;background:transparent}
+.trip-spot:not(.is-open) input:hover,.trip-spot:not(.is-open) input:focus{border-color:var(--border);background:var(--panel)}
+.trip-spot:not(.is-open) .trip-spot-name{font-size:14px;font-weight:700}
+/* 돈·준비물 — 장소 목록 아래 나란히 */
+.trip-spots-foot{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 18px;align-items:start;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)}
+.trip-spots-foot .trip-budget,.trip-spots-foot .trip-checklist{margin-top:0;padding-top:0;border-top:0}
+/* 종이 60% | 들른 곳 40% — 들른 곳 칸은 글쓰기 칸 높이(--trip-main-h, trip.js 가 잰다)만큼만 서고 따로 구른다.
+   나란히 둘지는 창이 아니라 글쓰기 칸 폭으로 정한다(지도 칸을 끌어 넓히거나 닫아도 맞게). */
+.trip-main{container:trip-write / inline-size}
+.trip-write{display:grid;grid-template-columns:minmax(0,60fr) minmax(0,40fr);gap:14px;align-items:start}
+.trip-write>.diary-paper{width:100%;margin:0 auto}
+.trip-write>.trip-spots{position:sticky;top:0;max-width:none;margin:0;max-height:calc(var(--trip-main-h,640px) - 20px);overflow:auto;overscroll-behavior:contain}
+.trip-write>.trip-spots .trip-spot-line{flex-wrap:wrap}
+.trip-write>.trip-spots .trip-spot-name{min-width:110px}
+.trip-write>.trip-spots .trip-spot-kind{max-width:112px}
+.trip-write>.trip-spots .trip-spot-addr,.trip-write>.trip-spots .trip-spot-note{min-width:130px}
+.trip-main .trip-page-head.diary-page-head{max-width:none}
+/* 들른 곳 칸·날 띠는 휠·끌기로 굴러가되 스크롤 막대는 보이지 않게 한다(막대가 좁은 칸 폭을 먹고 화면을 어지럽힌다). */
+.trip-write>.trip-spots,.trip-days .trip-rail-list{scrollbar-width:none;-ms-overflow-style:none}
+.trip-write>.trip-spots::-webkit-scrollbar,.trip-days .trip-rail-list::-webkit-scrollbar{display:none}
+/* 글쓰기 칸(종이 쪽 세로 스크롤)도 막대를 감춘다. 대신 두 칸 모두 아래에 더 있으면 옅은 그림자를 띄운다
+   (.has-more-below 는 trip.js syncScrollHint). 그림자는 내용 위에 와야 해서 바탕 그림이 아니라 끈끈이
+   (sticky) 덧요소로 그린다 — 크롬은 끈끈이 bottom 을 칸의 안쪽 여백 안에서 재므로 여백만큼 음수로 내린다. */
+.trip-main{scrollbar-width:none;-ms-overflow-style:none}
+.trip-main::-webkit-scrollbar{display:none}
+.trip-main::after,.trip-write>.trip-spots::after{content:"";position:sticky;z-index:30;display:block;height:30px;margin-top:-30px;pointer-events:none;opacity:0;transition:opacity .2s ease;
+  background:linear-gradient(to bottom,transparent,color-mix(in srgb,#1d3468 16%,transparent))}
+.trip-main::after{bottom:-38px;margin-left:-12px;margin-right:-12px}
+.trip-write>.trip-spots::after{bottom:-10px;margin-left:-12px;margin-right:-12px;border-radius:0 0 14px 14px}
+.trip-main.has-more-below::after,.trip-write>.trip-spots.has-more-below::after{opacity:1}
+[data-theme="dark"] .trip-main::after,[data-theme="dark"] .trip-write>.trip-spots::after{background:linear-gradient(to bottom,transparent,rgba(0,0,0,.45))}
+@media (max-width:760px){.trip-main::after{bottom:-30px;margin-left:0;margin-right:0}}
+@media (prefers-reduced-motion:reduce){.trip-main::after,.trip-write>.trip-spots::after{transition:none}}
+@container trip-write (max-width:880px){
+  .trip-main .trip-page-head.diary-page-head{max-width:900px}
+  .trip-write{grid-template-columns:minmax(0,1fr)}
+  .trip-write>.trip-spots{position:static;max-width:900px;width:100%;margin:0 auto;max-height:none;overflow:visible}
+}
+@media (max-width:1350px){.trip-bar-actions .trip-tool-button.diary-ico{width:34px}}
+@media (max-width:1100px){.trip-body{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:860px){.trip-bar-actions .trip-tool-button.diary-ico{width:32px;height:34px;min-height:34px}}
+@media (max-width:760px){
+  .trip-body{grid-template-rows:minmax(0,1fr);padding:8px}
+  .trip-rail.trip-days{max-height:none;margin:6px 8px 0}
+  .trip-days .trip-rail-icon,.trip-days .trip-rail-head{display:none}
+  .trip-days .trip-rail-list{display:flex}
+  .trip-days .trip-day-chip{min-width:104px}
+  .trip-spot-list{padding-left:30px}
+}
+
 /* 사진첩: 편집 화면은 5번 구성, 어두운 감상 화면은 4번 구성을 따른다. */
 .office.photo-album-doc{padding:0;overflow:hidden;background:#f3f6fb}
 .photo-album{--pa-bg:#f4f7fc;--pa-panel:#fff;--pa-text:#19253b;--pa-muted:#718098;--pa-line:#e3e9f2;--pa-soft:#f0f4fa;--pa-accent:#3177ef;display:flex;flex-direction:column;width:100%;height:100%;min-height:0;color:var(--pa-text);background:var(--pa-bg);font-family:inherit;box-sizing:border-box}
@@ -11036,6 +11158,195 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-viewing .pa-artboard{max-width:calc(100% - 20px);max-height:calc(100% - 20px)}
 @media(max-width:900px){.pa-layout{grid-template-columns:145px minmax(0,1fr) 220px}.pa-split{display:none}.pa-list{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-sidebar{padding:10px 7px}.pa-tools{--pa-tools-pad:8px;padding-bottom:12px}.pa-sticker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-flip-row{grid-template-columns:1fr}.pa-header{padding:10px 14px}.pa-header h2{font-size:21px}.pa-header p{display:none}.pa-caption{display:block}.pa-caption-actions{justify-content:flex-start;margin-top:4px}.pa-artboard{max-height:calc(100% - 115px)}}
 @media(max-width:650px){.pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.photo-album .pa-fx-open{padding:6px 4px;gap:0;justify-content:center}.pa-fx-open svg{display:none}.pa-fx-open small{font-size:9px}.pa-fx-open b{font-size:10px}.pa-layout{grid-template-rows:minmax(0,1fr) auto}.pa-sidebar{grid-row:1/-1}.pa-tools{grid-column:2;max-height:42vh;border-left:0;border-top:1px solid var(--pa-line)}.pa-header-actions button{font-size:10px;padding:6px}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}
+/* ===== 사진첩 앨범 책(시안 C · 1단계) — photo-album.js '앨범 책' 묶음과 짝 =====
+   쪽은 세로 3:4, 두 쪽 펼침(900px 이하는 한 쪽). 칸·글 자리는 쪽에 대한 % 라 쪽 크기만 바꾸면 따라온다.
+   글 크기는 쪽 폭 기준(cqw) — 쪽이 inline-size 컨테이너다. */
+.pa-mode{display:flex;gap:2px;margin-left:auto;padding:3px;border:1px solid var(--pa-line);border-radius:10px;background:var(--pa-soft)}
+.photo-album .pa-mode-tab{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border:0;border-radius:8px;background:transparent;color:var(--pa-muted);font-size:12px;font-weight:700;white-space:nowrap}
+.photo-album .pa-mode-tab[aria-selected="true"]{background:var(--pa-panel);color:var(--pa-accent);box-shadow:0 1px 4px rgba(25,37,59,.12)}
+.pa-mode-tab svg{width:16px;height:16px}
+.pa-book{position:relative;display:none;flex:1;min-height:0;flex-direction:column;background:#ede6d6}
+.pa-book-mode .pa-book{display:flex}
+.pa-book-mode .pa-layout{display:none}
+.pa-book-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--pa-line);background:var(--pa-panel)}
+.pa-book-where{min-width:110px;font-size:13px}
+.pa-book-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}
+.photo-album .pa-book-tools>button,.photo-album .pa-book-read-exit{padding:6px 10px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-panel);color:var(--pa-text);font-size:12px;font-weight:700;white-space:nowrap}
+.photo-album .pa-book-tools>button:hover:not(:disabled){border-color:var(--pa-accent);color:var(--pa-accent)}
+.pa-book-papers{display:flex;gap:4px}
+.photo-album .pa-book-paper{width:22px;height:22px;padding:0;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px var(--pa-line)}
+.photo-album .pa-book-paper.active{box-shadow:0 0 0 2px var(--pa-accent)}
+.pa-book-sep{width:1px;height:22px;background:var(--pa-line)}
+.pa-book-read-exit{display:none}
+.pa-book-main{display:flex;flex:1;min-height:0}
+.pa-book-stage{position:relative;display:flex;flex:1;align-items:center;justify-content:center;gap:10px;min-width:0;min-height:0;padding:0 6px}
+.pa-spread{position:relative;display:flex;flex:none;border-radius:6px;box-shadow:0 10px 30px rgba(58,50,38,.25)}
+.pa-page{position:relative;flex:1;min-width:0;height:100%;overflow:hidden;container-type:inline-size;background:#fbf6ea}
+.pa-spread[data-pages="2"] .pa-page:first-child{border-radius:6px 0 0 6px;box-shadow:inset -16px 0 18px -16px rgba(58,50,38,.4)}
+.pa-spread[data-pages="2"] .pa-page:last-child{border-radius:0 6px 6px 0;box-shadow:inset 16px 0 18px -16px rgba(58,50,38,.4)}
+.pa-spread[data-pages="1"] .pa-page{border-radius:6px}
+.pa-page.is-current{outline:2px solid color-mix(in srgb,var(--pa-accent) 55%,transparent);outline-offset:-2px}
+.pa-page.is-drop{outline:3px dashed var(--pa-accent);outline-offset:-6px}
+.pa-page.is-blank{display:flex;align-items:center;justify-content:center;background:rgba(251,246,234,.5)}
+.photo-album .pa-book-blank-add{padding:10px 16px;border:1px dashed #b9a57f;border-radius:10px;background:transparent;color:#6b5636;font-weight:700}
+.pa-page-no{position:absolute;left:0;right:0;bottom:1.6%;color:rgba(58,50,38,.45);font-size:2.6cqw;text-align:center;pointer-events:none}
+.pa-page.is-dark .pa-page-no{color:rgba(255,255,255,.45)}
+.pa-page-hint{position:absolute;top:42%;left:10%;right:10%;margin:0;color:rgba(58,50,38,.5);font-size:3.4cqw;text-align:center;pointer-events:none}
+.pa-slot{position:absolute;box-sizing:border-box;transform-origin:center;cursor:grab;touch-action:none}
+.pa-slot img{display:block;width:100%;height:100%;object-fit:cover;border-radius:2px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2);user-select:none;-webkit-user-drag:none}
+.pa-slot.is-picked{z-index:3;outline:2px solid var(--pa-accent);outline-offset:3px}
+.pa-slot-play{position:absolute;left:6%;bottom:6%;display:flex;align-items:center;justify-content:center;width:22%;max-width:36px;aspect-ratio:1;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;pointer-events:none}
+.pa-slot-play svg{width:55%;height:55%}
+.pa-slot-handle{position:absolute;width:14px;height:14px;box-sizing:border-box;border:2px solid var(--pa-accent);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.pa-slot-handle.is-resize{right:5px;bottom:5px;width:16px;height:16px;cursor:nwse-resize}
+.pa-slot-handle.is-rotate{left:50%;top:5px;width:16px;height:16px;margin-left:-8px;cursor:grab}
+.pa-slot-handle.is-rotate::after{content:"";position:absolute;inset:3px;border:1.5px solid var(--pa-accent);border-top-color:transparent;border-radius:50%}
+/* 잡힐 사진 미리 보이기 — 올린 사진은 점선, 위 줄 사진 목록에 올린 사진은 굵은 점선 */
+.photo-album:not(.pa-book-reading) .pa-slot:hover:not(.is-picked){outline:2px dashed color-mix(in srgb,var(--pa-accent) 70%,transparent);outline-offset:2px}
+.pa-slot.is-hint{z-index:4;outline:3px dashed var(--pa-accent)!important;outline-offset:3px}
+.pa-book-pick{display:flex;align-items:center;gap:6px;min-width:0}
+.pa-book-pick[hidden]{display:none}
+.pa-book-pick-label{color:var(--pa-muted);font-size:11px;white-space:nowrap}
+.pa-book-layers{display:flex;gap:3px}
+.photo-album .pa-book-layer{width:30px;height:30px;padding:0;overflow:hidden;border:1px solid var(--pa-line);border-radius:6px;background:var(--pa-soft)}
+.pa-book-layer img{display:block;width:100%;height:100%;object-fit:cover}
+.photo-album .pa-book-layer:hover{border-color:var(--pa-accent)}
+.photo-album .pa-book-layer.active{border-color:var(--pa-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--pa-accent) 35%,transparent)}
+.pa-book-pick-tools{display:flex;gap:2px;margin-left:4px;padding-left:8px;border-left:1px solid var(--pa-line)}
+.photo-album .pa-book-pick-tools button{display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-panel);color:var(--pa-text)}
+.photo-album .pa-book-pick-tools button:hover{border-color:var(--pa-accent);color:var(--pa-accent)}
+.pa-book-pick-tools .ui-icon{width:16px;height:16px}
+.pa-slot-bar{position:absolute;left:50%;top:calc(100% + 12px);display:flex;gap:3px;padding:3px;border-radius:9px;background:var(--pa-panel);box-shadow:0 4px 14px rgba(0,0,0,.2);transform:translateX(-50%);cursor:default}
+.photo-album .pa-slot-bar button{display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--pa-text)}
+.photo-album .pa-slot-bar button:hover{background:var(--pa-soft);color:var(--pa-accent)}
+.pa-slot-bar .ui-icon{width:16px;height:16px}
+.pa-btext{position:absolute;z-index:2;max-width:90%;color:#3a3226;font-family:"Nanum Pen Script","ClassDock Nanum Pen","Segoe Print",cursive;font-size:calc(var(--size,5.5) * 1cqw);line-height:1.25}
+.pa-page.is-dark .pa-btext{color:#f4f1e6}
+.pa-btext-body{min-width:2em;padding:0 .2em;outline:0;white-space:pre-wrap;overflow-wrap:anywhere;cursor:text}
+.pa-btext.is-picked .pa-btext-body{border-radius:3px;background:rgba(255,255,255,.45);box-shadow:0 0 0 1px var(--pa-accent)}
+.pa-btext-grip{position:absolute;left:-24px;top:2px;display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;background:var(--pa-panel);color:var(--pa-accent);box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:grab;touch-action:none}
+.pa-btext-grip svg{width:13px;height:13px}
+.pa-btext-bar{position:absolute;left:0;top:calc(100% + 6px);display:flex;gap:3px;padding:3px;border-radius:9px;background:var(--pa-panel);box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.photo-album .pa-btext-bar button{display:flex;align-items:center;justify-content:center;min-width:30px;height:28px;padding:0 6px;border:0;border-radius:7px;background:transparent;color:var(--pa-text);font:700 12px/1 "Malgun Gothic",system-ui,sans-serif}
+.photo-album .pa-btext-bar button:hover{background:var(--pa-soft);color:var(--pa-accent)}
+.pa-btext-bar .ui-icon{width:15px;height:15px}
+.pa-book-tray{display:flex;flex-direction:column;flex:none;width:170px;min-height:0;border-left:1px solid var(--pa-line);background:var(--pa-panel)}
+.pa-book-tray-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 2px;font-size:13px}
+/* 오른쪽 칸 탭(사진·장식)과 쪽 위 장식 */
+.pa-book-tray-tabs{display:flex;gap:4px;padding:8px 10px 4px}
+.photo-album .pa-book-tray-tab{flex:1;padding:6px 4px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft);color:var(--pa-muted);font-size:12px;font-weight:700;white-space:nowrap}
+.photo-album .pa-book-tray-tab[aria-selected="true"]{border-color:var(--pa-accent);background:var(--pa-panel);color:var(--pa-accent)}
+.pa-book-tray-tab .pa-book-tray-count{color:var(--pa-muted);font-size:10.5px;font-weight:500}
+.pa-book-tray[data-tab="deco"] .pa-book-tray-list{display:none}
+.pa-book-tray:not([data-tab="deco"]) .pa-book-deco{display:none}
+.pa-book-deco{display:flex;flex:1;flex-direction:column;min-height:0}
+.pa-book-deco-groups{display:flex;flex-wrap:wrap;gap:3px;padding:2px 10px 6px}
+.photo-album .pa-book-deco-group{padding:3px 7px;border:1px solid var(--pa-line);border-radius:12px;background:var(--pa-panel);color:var(--pa-muted);font-size:11px;font-weight:700}
+.photo-album .pa-book-deco-group.active{border-color:#b8a3e9;background:#efe8ff;color:#5b3fb0}
+.pa-book-deco-grid{display:grid;flex:1;grid-template-columns:1fr 1fr 1fr;align-content:start;gap:4px;min-height:0;padding:2px 10px 12px;overflow:auto}
+.photo-album .pa-book-deco-item{aspect-ratio:120/105;padding:2px;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-soft);cursor:grab;transition:transform .12s ease}
+.photo-album .pa-book-deco-item:hover{border-color:var(--pa-accent);transform:translateY(-1px)}
+.photo-album .pa-book-deco-item.is-dragging{opacity:.35;transform:none}
+.pa-book-deco-item img{display:block;width:100%;height:100%;object-fit:contain}
+.pa-book-deco-grid .pa-list-empty{grid-column:1/-1;font-size:11px}
+.pa-bsticker{position:absolute;z-index:2;aspect-ratio:120/105;cursor:grab;touch-action:none}
+.pa-bsticker img{display:block;width:100%;height:100%;pointer-events:none;user-select:none}
+.pa-bsticker.is-picked{z-index:5;outline:2px dashed var(--pa-accent);outline-offset:2px}
+.photo-album:not(.pa-book-reading) .pa-bsticker:hover:not(.is-picked){outline:1.5px dashed color-mix(in srgb,var(--pa-accent) 60%,transparent);outline-offset:2px}
+.pa-book-reading .pa-bsticker{cursor:default}
+.pa-drag-card.is-deco{padding:2px;background:rgba(255,255,255,.85)}
+@media(max-width:900px){.pa-book-deco-grid{grid-template-columns:1fr 1fr}}
+.pa-book-tray-head span{color:var(--pa-muted);font-size:11px}
+.pa-book-tray-hint{margin:0;padding:0 12px 6px;color:var(--pa-muted);font-size:10.5px}
+.pa-book-tray-list{display:grid;flex:1;grid-template-columns:1fr 1fr;align-content:start;gap:6px;min-height:0;padding:4px 10px 12px;overflow:auto}
+.photo-album .pa-book-tray-item{position:relative;aspect-ratio:1;padding:0;overflow:hidden;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft);cursor:grab}
+.pa-book-tray-item img{display:block;width:100%;height:100%;object-fit:cover}
+.photo-album .pa-book-tray-item:hover{border-color:var(--pa-accent)}
+.pa-book-tray-item.is-used img{opacity:.55}
+/* 트레이에서 끌기 — 올리면 살짝 뜨고 손잡이가 보인다. 끄는 동안 원래 칸은 흐리고, 쪽 위에는 놓일 자리가 점선 상자로 */
+.photo-album .pa-book-tray-item{transition:transform .12s ease,box-shadow .12s ease,opacity .12s ease}
+.photo-album .pa-book-tray-item:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(25,37,59,.18)}
+.pa-book-tray-grip{position:absolute;left:3px;top:3px;display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;background:rgba(255,255,255,.9);color:var(--pa-accent);opacity:0;transition:opacity .12s ease;pointer-events:none}
+.pa-book-tray-item:hover .pa-book-tray-grip,.pa-book-tray-item:focus-visible .pa-book-tray-grip{opacity:1}
+.pa-book-tray-grip svg{width:13px;height:13px}
+.photo-album .pa-book-tray-item.is-dragging{opacity:.35;transform:none;box-shadow:none}
+.pa-drag-card{position:fixed;left:-9999px;top:0;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;border-radius:10px;background:#fff;box-shadow:0 8px 22px rgba(0,0,0,.28)}
+.pa-drag-card img{display:block;object-fit:cover;border-radius:4px}
+.pa-drag-card span{color:#3177ef;font:700 11px/1 "Malgun Gothic",system-ui,sans-serif}
+.pa-drop-ghost{position:absolute;z-index:6;display:flex;align-items:center;justify-content:center;box-sizing:border-box;border:2px dashed var(--pa-accent);border-radius:4px;background:color-mix(in srgb,var(--pa-accent) 14%,transparent);pointer-events:none}
+.pa-drop-ghost span{padding:3px 8px;border-radius:6px;background:var(--pa-accent);color:#fff;font:700 11px/1.2 "Malgun Gothic",system-ui,sans-serif;white-space:nowrap}
+.pa-tray-dragging .pa-page{outline:2px dashed color-mix(in srgb,var(--pa-accent) 45%,transparent);outline-offset:-4px}
+.pa-tray-dragging .pa-page.is-drop{outline:3px solid var(--pa-accent);outline-offset:-3px}
+.pa-book-tray-used{position:absolute;right:3px;bottom:3px;padding:0 5px;border-radius:6px;background:rgba(25,37,59,.72);color:#fff;font-size:10px;font-weight:700}
+.pa-book-tray-video{position:absolute;left:3px;bottom:3px;display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff}
+.pa-book-tray-video svg{width:10px;height:10px}
+.pa-book-thumbs{display:flex;align-items:center;gap:8px;padding:8px 14px;overflow-x:auto;border-top:1px solid var(--pa-line);background:var(--pa-panel);scrollbar-width:thin}
+.photo-album .pa-book-thumb{display:flex;flex:none;flex-wrap:wrap;gap:1px;padding:4px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft)}
+.photo-album .pa-book-thumb.active{border-color:var(--pa-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--pa-accent) 25%,transparent)}
+.pa-mini-page{position:relative;display:block;width:36px;height:48px;overflow:hidden;border-radius:2px}
+.pa-mini-page img{position:absolute;object-fit:cover;box-shadow:0 0 0 .5px rgba(0,0,0,.15)}
+.pa-book-thumb small{flex-basis:100%;margin-top:2px;color:var(--pa-muted);font-size:10px;text-align:center}
+.photo-album .pa-book-thumb-add{flex:none;width:52px;height:66px;border:1px dashed var(--pa-line);border-radius:8px;background:transparent;color:var(--pa-muted);font-weight:700}
+.pa-book-reading .pa-header,.pa-book-reading .pa-footer,.pa-book-reading .pa-book-tray,.pa-book-reading .pa-book-thumbs,.pa-book-reading .pa-book-tools{display:none}
+.pa-book-reading .pa-book{background:#2a2622}
+.pa-book-reading .pa-book-bar{position:absolute;top:10px;right:14px;z-index:5;padding:0;border:0;background:transparent;opacity:.35;transition:opacity .2s}
+.pa-book-reading .pa-book-bar:hover,.pa-book-reading .pa-book-bar:focus-within{opacity:1}
+.pa-book-reading .pa-book-where{color:#f4f1e6}
+.photo-album.pa-book-reading .pa-book-read-exit{display:inline-flex}
+.pa-book-reading .pa-slot{cursor:default}
+.pa-book-reading .pa-page.is-current{outline:0}
+/* 쪽 넘김(3D) — photo-album.js prepareTurn. 넘어가는 장(leaf)은 책등을 축으로 돈다(앞면 = 지금 쪽, 뒷면 = 다음 쪽).
+   덮개(cover)는 다 넘어갈 때까지 반대쪽에 옛 쪽을 남겨 둔다. 그늘은 넘어가는 정도만큼 짙어진다. */
+.pa-spread{perspective:2200px}
+.pa-turn-layer{position:absolute;inset:0;z-index:20;pointer-events:none}
+.pa-turn-cover{position:absolute;top:0;height:100%}
+.pa-turn-cover.is-left{left:0;width:50%}.pa-turn-cover.is-right{left:50%;width:50%}.pa-turn-cover.is-full{left:0;width:100%}
+.pa-turn-leaf{position:absolute;top:0;width:50%;height:100%;transform-style:preserve-3d;will-change:transform}
+.pa-turn-leaf.is-next{left:50%;transform-origin:left center}
+.pa-turn-leaf.is-prev{left:0;transform-origin:right center}
+.pa-turn-leaf.is-single{left:0;width:100%;transform-origin:left center}
+.pa-turn-leaf>.pa-turn-face{position:absolute;inset:0;width:100%;height:100%;-webkit-backface-visibility:hidden;backface-visibility:hidden;outline:0}
+.pa-turn-leaf>.pa-turn-face.is-back{transform:rotateY(180deg)}
+.pa-turn-cover.pa-turn-face{outline:0}
+.pa-turn-shade,.pa-turn-under{position:absolute;inset:0;z-index:30;background:#2a2016;opacity:0;pointer-events:none}
+/* 넘김 귀퉁이(시안 C) — 쪽 아래 바깥 귀퉁이가 접힌 단추. 접힌 뒷면은 쪽 바탕색(--corner-paper)을 조금 어둡게,
+   그 위에 화살표. 올리면 더 크게 접힌다. 누르면 넘기고, 끌면 손으로 넘긴다. */
+.photo-album .pa-turn-corner{position:absolute;bottom:0;z-index:15;width:58px;height:58px;padding:0;border:0;background:transparent;cursor:pointer;touch-action:none;transition:width .18s ease,height .18s ease}
+.pa-turn-corner.is-next{right:0}.pa-turn-corner.is-prev{left:0}
+.pa-turn-corner::before{content:"";position:absolute;inset:0;transition:filter .18s ease}
+.pa-turn-corner.is-next::before{border-radius:0 0 6px 0;background:linear-gradient(135deg,transparent 50%,color-mix(in srgb,var(--corner-paper,#fbf6ea) 82%,#3a3226) 50%);box-shadow:-4px -4px 8px -4px rgba(58,50,38,.25);clip-path:polygon(100% 0,100% 100%,0 100%)}
+.pa-turn-corner.is-prev::before{border-radius:0 0 0 6px;background:linear-gradient(225deg,transparent 50%,color-mix(in srgb,var(--corner-paper,#fbf6ea) 82%,#3a3226) 50%);clip-path:polygon(0 0,100% 100%,0 100%)}
+.pa-turn-corner-icon{position:absolute;bottom:7px;display:flex;color:#5b4a33;opacity:.8;transition:opacity .18s ease,color .18s ease}
+.pa-turn-corner.is-next .pa-turn-corner-icon{right:7px}.pa-turn-corner.is-prev .pa-turn-corner-icon{left:7px}
+.pa-turn-corner-icon .ui-icon{width:17px;height:17px}
+.photo-album .pa-turn-corner:hover,.photo-album .pa-turn-corner:focus-visible{width:72px;height:72px}
+.pa-turn-corner:hover .pa-turn-corner-icon,.pa-turn-corner:focus-visible .pa-turn-corner-icon{opacity:1;color:var(--pa-accent)}
+.pa-turn-corner:hover::before,.pa-turn-corner:focus-visible::before{filter:brightness(.94)}
+.photo-album .pa-turn-corner:focus-visible{outline:2px solid var(--pa-accent);outline-offset:-4px}
+.pa-book-reading .pa-turn-corner-icon{color:#3a3226}
+.pa-turning,.pa-turning *{cursor:grabbing!important;user-select:none}
+/* 트레이에서 사진·장식을 끄는 동안엔 귀퉁이가 놓기를 막지 않게 비킨다. */
+.pa-tray-dragging .pa-turn-corner{pointer-events:none}
+.photo-album .pa-book-sound{display:inline-flex;align-items:center;justify-content:center;width:32px;height:30px;padding:0;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-panel);color:var(--pa-muted)}
+.photo-album .pa-book-sound.is-on{border-color:var(--pa-accent);color:var(--pa-accent)}
+.pa-book-sound .ui-icon{width:16px;height:16px}
+.photo-album .pa-book-save.is-open{border-color:var(--pa-accent);color:var(--pa-accent)}
+/* 앨범 쪽 인쇄 층 — photo-album.js printBook. 인쇄할 때만 보이고, 쪽마다 A4 한 면. */
+#paPrintLayer{display:none}
+@media print{
+  @page{size:A4 portrait;margin:8mm}
+  body.pa-printing>*:not(#paPrintLayer){display:none!important}
+  body.pa-printing{background:#fff!important}
+  body.pa-printing #paPrintLayer{display:block!important}
+  #paPrintLayer .pa-print-sheet{display:flex;align-items:center;justify-content:center;height:calc(297mm - 16mm);break-after:page;page-break-after:always}
+  #paPrintLayer .pa-print-sheet:last-child{break-after:auto;page-break-after:auto}
+  #paPrintLayer img{display:block;max-width:100%;max-height:100%;object-fit:contain}
+}
+/* 어두운 테마: 책상은 어둡게, 쪽(종이)은 고른 바탕 그대로 둔다 — 종이색이 곧 앨범 꾸미기라서. */
+[data-theme="dark"] .pa-book{background:#1d1a16}
+[data-theme="dark"] .pa-page.is-blank{background:rgba(251,246,234,.08)}
+[data-theme="dark"] .photo-album .pa-book-blank-add{border-color:#6b5f4c;color:#d8c9ad}
+@media(max-width:900px){.pa-book-tray{width:118px}.pa-book-tray-list{grid-template-columns:1fr}.pa-mode-tab span{display:none}}
 
 /* 로또 6/45 — 다크 바이올렛, 기존 문서 테마와 독립된 도구 창 */
 .modal.lotto-modal{container:lotto-viewport / inline-size;z-index:1250;padding:20px;background:rgba(2,6,18,.82);color:#f5f5ff;color-scheme:dark}

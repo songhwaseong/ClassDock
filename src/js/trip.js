@@ -1801,6 +1801,9 @@ function mountTripEditor(doc){
   status.dataset.placeholder = tripIsEn()
     ? "Record your journey. Ctrl+Z will undo changes."
     : "여행을 기록해보세요. Ctrl+Z로 되돌릴 수 있어요.";
+  const searchBtn = diaryButton("", "날짜·장소·내용 찾기", "diary-btn trip-search-btn", "search");
+  searchBtn.setAttribute("aria-haspopup", "dialog");
+  searchBtn.setAttribute("aria-expanded", "false");
   const undoBtn = diaryButton("", "실행 취소 (Ctrl+Z)", "diary-btn trip-undo-btn", "undo");
   const redoBtn = diaryButton("", "다시 실행 (Ctrl+Shift+Z)", "diary-btn trip-redo-btn", "redo");
   const photoBtn = diaryButton("", "사진 붙이기", "diary-btn trip-photo-btn", "image");
@@ -1831,6 +1834,7 @@ function mountTripEditor(doc){
     button.classList.add("trip-tool-button");
     button.append(label);
   };
+  toolLabel(searchBtn, "찾기", "Search");
   toolLabel(undoBtn, "되돌리기", "Undo");
   toolLabel(redoBtn, "다시하기", "Redo");
   toolLabel(photoBtn, "사진추가", "Add photo");
@@ -1845,7 +1849,7 @@ function mountTripEditor(doc){
   toolLabel(saveBtn, "저장", "Save");
   const actions = document.createElement("div");
   actions.className = "trip-bar-actions";
-  actions.append(undoBtn, redoBtn, photoBtn, photoInput, exifBtn, exifInput,
+  actions.append(searchBtn, undoBtn, redoBtn, photoBtn, photoInput, exifBtn, exifInput,
     mapMobileBtn, templateBtn, focusBtn, stickerBtn, styleBtn, bgInput, backdropInput, printBtn, exportBtn, saveBtn);
   bar.append(brand, titleInput, saveStatus, status, actions);
 
@@ -1866,36 +1870,18 @@ function mountTripEditor(doc){
   /* ----- 본문: 여정 띠 + 종이 ----- */
   const body = document.createElement("div");
   body.className = "trip-body";
+  /* 시안 B: 여정은 왼쪽 세로 칸이 아니라 도구막대 아래 가로 날 띠다. 날 카드를 옆으로 늘어놓고
+     (많으면 옆으로 넘김) 끝에 ＋날·되돌아보기·요약을 둔다. 찾기는 도구막대 돋보기 창, 준비물은 장소
+     목록 아래(돈 칸 옆)로 옮겼다. 한 줄이라 예전 '여정 띠 접기'는 없앴다. */
   const rail = document.createElement("div");
-  rail.className = "trip-rail";
-  const railTitlebar = document.createElement("div");
-  railTitlebar.className = "trip-rail-titlebar";
+  rail.className = "trip-rail trip-days";
   const railIcon = document.createElement("span");
   railIcon.className = "trip-rail-icon";
   railIcon.setAttribute("aria-hidden", "true");
   if (typeof window.uiIcon === "function") railIcon.innerHTML = window.uiIcon("calendar");
   const railHead = document.createElement("div");
   railHead.className = "trip-rail-head";
-  // 여정 띠 접기 — 머리 줄만 남기고 검색·날 목록·날 추가·준비물을 감춘다. 보는 사람 편의라 이 브라우저에만 남긴다.
-  const railChevron = document.createElement("button");
-  railChevron.type = "button";
-  railChevron.className = "trip-rail-chevron";
-  let railFolded = false;
-  try { railFolded = localStorage.getItem("mn.tripRailFolded") === "1"; } catch(_){}
-  function applyRailFold(){
-    rail.classList.toggle("is-folded", railFolded);
-    railChevron.setAttribute("aria-expanded", String(!railFolded));
-    const tip = tripIsEn() ? (railFolded ? "Show day list" : "Hide day list") : (railFolded ? "날 목록 펼치기" : "날 목록 접기");
-    railChevron.title = tip;
-    railChevron.setAttribute("aria-label", tip);
-    railChevron.innerHTML = typeof window.uiIcon === "function" ? window.uiIcon(railFolded ? "chevronDown" : "chevronUp") : (railFolded ? "▾" : "▴");
-  }
-  railChevron.addEventListener("click", () => {
-    railFolded = !railFolded;
-    try { localStorage.setItem("mn.tripRailFolded", railFolded ? "1" : "0"); } catch(_){}
-    applyRailFold();
-  });
-  // 여행 요약 — 여정 띠 머리에 둔다(여정 전체를 보는 자리).
+  // 여행 요약 — 여정 띠 끝에 둔다(여정 전체를 보는 자리).
   const summaryBtn = diaryButton("", "", "diary-btn trip-summary-btn", "chart");
   const summaryTip = tripIsEn() ? "Trip summary — period, distance, spending, regions" : "여행 요약 — 기간·이동 거리·경비·다녀온 지역";
   summaryBtn.title = summaryTip;
@@ -1904,9 +1890,15 @@ function mountTripEditor(doc){
   const replayTip = tripIsEn() ? "Replay the trip — photos and places, day by day" : "여행 되돌아보기 — 날 차례로 사진·장소를 넘겨 보기";
   replayBtn.title = replayTip;
   replayBtn.setAttribute("aria-label", replayTip);
-  railTitlebar.append(railIcon, railHead, replayBtn, summaryBtn, railChevron);
   const railList = document.createElement("div");
   railList.className = "trip-rail-list";
+  // 세로 휠로도 날 띠를 옆으로 넘긴다(가로 스크롤 막대를 잡지 않아도 되게).
+  railList.addEventListener("wheel", (e) => {
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || railList.scrollWidth <= railList.clientWidth + 1) return;
+    e.preventDefault();
+    railList.scrollLeft += e.deltaY;
+  }, { passive:false });
+  // 찾기 — 도구막대 돋보기를 누르면 그 아래에 뜨는 작은 창
   const searchBox = document.createElement("div");
   searchBox.className = "trip-search-box";
   const searchInput = document.createElement("input");
@@ -1915,10 +1907,13 @@ function mountTripEditor(doc){
   const searchResults = document.createElement("div");
   searchResults.className = "trip-search-results"; searchResults.hidden = true;
   searchBox.append(searchInput);
+  const searchPop = document.createElement("div");
+  searchPop.className = "trip-search-pop"; searchPop.hidden = true;
+  searchPop.append(searchBox, searchResults);
   const addDayBtn = document.createElement("button");
   addDayBtn.type = "button";
   addDayBtn.className = "diary-btn trip-add-day";
-  // 준비물·할 일 — 여행 전체에 하나. 여정 띠 아래에 접어 둔다(펼침은 이 브라우저에만).
+  // 준비물·할 일 — 여행 전체에 하나. 장소 목록 아래(돈 칸 옆)에 접어 둔다(펼침은 이 브라우저에만).
   const checkBox = document.createElement("section");
   checkBox.className = "trip-checklist";
   const checkHead = document.createElement("button");
@@ -1927,8 +1922,10 @@ function mountTripEditor(doc){
   const checkBody = document.createElement("div");
   checkBody.className = "trip-check-body";
   checkBox.append(checkHead, checkBody);
-  rail.append(railTitlebar, searchBox, searchResults, railList, addDayBtn, checkBox);
-  applyRailFold();
+  const railTools = document.createElement("div");
+  railTools.className = "trip-days-tools";
+  railTools.append(replayBtn, summaryBtn);
+  rail.append(railIcon, railHead, railList, addDayBtn, railTools);
 
   /* 지도 칸 — 좌표가 있는 장소를 표시로 찍고 목록 차례대로 잇는다(설계 2.3).
      칸은 접을 수 있다. 접기는 보는 사람 편의라 파일이 아니라 이 브라우저에만 남긴다. */
@@ -2092,11 +2089,19 @@ function mountTripEditor(doc){
   let extraOpen = false;
   try { extraOpen = localStorage.getItem("mn.tripExtraOpen") === "1"; } catch(_){}
   budgetBox.append(budgetLine, extraHead, extraBox);
-  spotsBox.append(spotsHead, spotList, spotsEmpty, budgetBox);
+  const spotsFoot = document.createElement("div");
+  spotsFoot.className = "trip-spots-foot";
+  spotsFoot.append(budgetBox, checkBox);
+  spotsBox.append(spotsHead, spotList, spotsEmpty, spotsFoot);
 
-  main.append(pageHead, els.paper, spotsBox);
-  body.append(rail, main, mapDivider, mapPane);
-  root.append(bar, body);
+  /* 종이 60% | 들른 곳 40% (시안 B 변형) — 날 머리는 위에 길게, 그 아래 두 칸. 들른 곳 칸은 따로 굴러
+     종이를 내려도 옆에 남는다. 글쓰기 칸이 좁으면(컨테이너 쿼리) 예전처럼 종이 아래로 쌓인다. */
+  const writeCols = document.createElement("div");
+  writeCols.className = "trip-write";
+  writeCols.append(els.paper, spotsBox);
+  main.append(pageHead, writeCols);
+  body.append(main, mapDivider, mapPane);
+  root.append(bar, rail, body, searchPop);
 
   /* ----- 저장 여부·복구본 ----- */
   const setStatus = (msg) => { status.textContent = msg || ""; };
@@ -2245,6 +2250,22 @@ function mountTripEditor(doc){
   const { addStickers, addAsset, applyStyle, layout, redrawDrawing, renderStickers, setDrawMode, clearSelection,
     addArtSticker, addTextSticker, addAudioSticker, applyStickerColor, applyStickerOpacity, selectedStickers,
     stickerColorNow, stickerOpacityNow } = paperApi;
+  /* 종이 폭은 이제 지도 칸 폭·창 폭에 따라 수시로 바뀐다(옆에 들른 곳 칸이 있어서) — 폭이 바뀌면 다시 배치한다.
+     들른 곳 칸 높이는 글쓰기 칸 높이에 맞춘다(CSS 가 칸 높이를 % 로 알 수 없어 변수로 넘긴다). */
+  /* 스크롤 막대를 감춘 두 칸(글쓰기 칸·들른 곳 칸)은 아래에 더 있으면 옅은 그림자로 알린다.
+     굴릴 때·칸 크기가 바뀔 때·안의 내용이 늘거나 줄 때(종이가 길어짐, 장소 줄 추가·접기) 다시 잰다. */
+  const syncScrollHint = (el) => {
+    el.classList.toggle("has-more-below", el.scrollHeight - el.scrollTop - el.clientHeight > 2);
+  };
+  const syncScrollHints = () => { syncScrollHint(main); syncScrollHint(spotsBox); };
+  main.addEventListener("scroll", () => syncScrollHint(main), { passive:true });
+  spotsBox.addEventListener("scroll", () => syncScrollHint(spotsBox), { passive:true });
+  const writeResize = typeof ResizeObserver === "function" ? new ResizeObserver(() => {
+    main.style.setProperty("--trip-main-h", main.clientHeight + "px");
+    if (els.paper.clientWidth && els.paper.clientWidth !== paperApi.paperWidthNow()){ layout(); redrawDrawing(); }
+    syncScrollHints();
+  }) : null;
+  if (writeResize){ for (const el of [main, els.paper, writeCols, spotsBox, spotList, spotsFoot]) writeResize.observe(el); }
 
   /* ----- 꾸미기 창·스티커 창 ----- */
   // 일기장과 같은 창을 그대로 쓴다. 종이가 같으니 꾸밀 거리도 같다.
@@ -3149,7 +3170,7 @@ function mountTripEditor(doc){
   const tripMapWidthLimit = () => {
     // 좁은 화면에서는 지도와 분할 바가 감춰진다. 그때 저장 폭까지 줄이지 말고 다시 넓어질 때 복원한다.
     if (matchMedia("(max-width: 1100px)").matches) return 720;
-    return Math.max(240, Math.min(720, body.clientWidth - rail.offsetWidth - 360 - mapDivider.offsetWidth));
+    return Math.max(240, Math.min(720, body.clientWidth - 420 - mapDivider.offsetWidth));   // 날 띠는 위로 옮겨 종이 칸만 남긴다
   };
   const syncMapAfterResize = () => {
     cancelAnimationFrame(mapResizeRaf);
@@ -3274,6 +3295,7 @@ function mountTripEditor(doc){
     if (!focusMode) applyTripMapWidth(tripMapWidth);
     else { layout(); redrawDrawing(); }
     if (!templatePanel.hidden) positionTemplatePanel();
+    if (!searchPop.hidden) placeSearchPop();
   };
   window.addEventListener("resize", onTripWindowResize);
 
@@ -3823,6 +3845,13 @@ function mountTripEditor(doc){
       });
       railList.append(chip);
     }
+    // 고른 날 카드가 날 띠 밖에 있으면 옆으로 넘겨 보이게 한다(바깥 칸까지 굴리는 scrollIntoView 는 쓰지 않는다).
+    const onChip = railList.querySelector(".trip-day-chip.is-on");
+    if (onChip){
+      const left = onChip.offsetLeft, right = left + onChip.offsetWidth;   // 날 띠(.trip-rail-list)가 position:relative 라 그 안 좌표다
+      if (left < railList.scrollLeft) railList.scrollLeft = Math.max(0, left - 8);
+      else if (right > railList.scrollLeft + railList.clientWidth) railList.scrollLeft = right - railList.clientWidth + 8;
+    }
     addDayBtn.textContent = tripWord("dayAdd");
     renderTripSearchResults();
   }
@@ -3841,7 +3870,6 @@ function mountTripEditor(doc){
     const query = searchInput.value.trim();
     if (query !== lastSearchQuery){ lastSearchQuery = query; searchVisible = 100; }
     searchResults.hidden = !query;
-    railList.hidden = addDayBtn.hidden = checkBox.hidden = !!query;
     if (!query){ searchResults.replaceChildren(); return; }
     const rows = tripSearchRows(model, query);
     const en = tripIsEn();
@@ -3896,9 +3924,40 @@ function mountTripEditor(doc){
   }
   searchInput.addEventListener("input", renderTripSearchResults);
   searchInput.addEventListener("keydown", event => {
-    if (event.key !== "Escape" || !searchInput.value) return;
-    event.stopPropagation(); searchInput.value = ""; renderTripSearchResults();
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    // 글자가 있으면 먼저 지우고, 빈 칸에서 한 번 더 누르면 찾기 창을 닫는다.
+    if (searchInput.value){ searchInput.value = ""; renderTripSearchResults(); }
+    else setSearchOpen(false, true);
   });
+  /* 찾기 창 — 도구막대 돋보기 아래에 띄운다. 바깥을 누르거나 결과로 옮겨 가면 닫는다(찾던 말은 남겨 둔다). */
+  let searchOutside = null;
+  function placeSearchPop(){
+    const anchor = searchBtn.getBoundingClientRect(), base = root.getBoundingClientRect();
+    const width = searchPop.offsetWidth || 320;
+    const left = Math.max(8, Math.min(base.width - width - 8, anchor.left - base.left + anchor.width / 2 - width / 2));
+    searchPop.style.left = left + "px";
+    searchPop.style.top = (anchor.bottom - base.top + 6) + "px";
+  }
+  function setSearchOpen(open, focusButton){
+    open = !!open;
+    if (open === !searchPop.hidden) return;
+    searchPop.hidden = !open;
+    searchBtn.classList.toggle("is-on", open);
+    searchBtn.setAttribute("aria-expanded", String(open));
+    if (searchOutside){ document.removeEventListener("pointerdown", searchOutside, true); searchOutside = null; }
+    if (open){
+      placeSearchPop();
+      searchInput.focus();
+      searchInput.select();
+      searchOutside = (event) => {
+        if (!searchPop.contains(event.target) && !searchBtn.contains(event.target)) setSearchOpen(false);
+      };
+      document.addEventListener("pointerdown", searchOutside, true);
+    } else if (focusButton) searchBtn.focus({ preventScroll:true });
+  }
+  searchBtn.addEventListener("click", () => setSearchOpen(searchPop.hidden));
+  searchResults.addEventListener("click", (event) => { if (event.target.closest(".trip-search-result")) setSearchOpen(false); });
 
   /* ----- 장소 목록 ----- */
 
@@ -4571,6 +4630,22 @@ function mountTripEditor(doc){
     ]);
   }
 
+  /* 장소 타임라인(시안 B) — 줄은 평소 시각·이름·사진·메모만 보이고, 펼치면 종류·주소·위치·영상·쓴 돈까지.
+     펼침은 보는 사람 편의라 파일에 담지 않는다. 이름이 빈 새 줄은 채우라고 펼쳐 둔다. */
+  const spotOpen = new Map();
+  const isSpotOpen = (spot) => spotOpen.has(spot.id) ? spotOpen.get(spot.id) : !spot.name;
+  // 타임라인 핀 색 — 지도 핀과 같은 규칙(장소 색이 없으면 종류 색)
+  const spotPinHex = (spot) => typeof MAP_MARKER_COLORS !== "undefined"
+    ? (MAP_MARKER_COLORS.find(c => c.id === (spot.color || tripSpotKindColor(spot.kind))) || MAP_MARKER_COLORS[0]).hex : "#2563eb";
+  function syncSpotOpen(row, more, open){
+    row.classList.toggle("is-open", open);
+    more.setAttribute("aria-expanded", String(open));
+    more.title = open ? (tripIsEn() ? "Show less" : "간단히 보기")
+      : (tripIsEn() ? "More — kind, address, location, video, cost" : "자세히 — 종류·주소·위치·영상·쓴 돈");
+    more.setAttribute("aria-label", more.title);
+    if (typeof window.uiIcon === "function") more.innerHTML = window.uiIcon(open ? "chevronUp" : "chevronDown");
+  }
+
   function renderSpots(){
     const day = dayOf(current);
     spotsTitle.textContent = tripWord("spotList");
@@ -4586,10 +4661,20 @@ function mountTripEditor(doc){
     spotsDist.title = tripIsEn() ? "Straight-line distance between places in list order (real roads are longer)"
       : "목록 차례대로 이은 직선 거리(실제 길은 이보다 길어요)";
 
+    // 핀 번호는 지도와 같다 — 위치가 있는 장소만 센다(여행 전체 지도면 앞 날부터 이어서).
+    const pinNo = new Map(spotsWithCoords().map((item, at) => [item.id, at + 1]));
     for (const spot of spots){
       const row = document.createElement("div");
       row.className = "trip-spot";
       row.dataset.id = spot.id;
+      const pin = document.createElement("span");
+      pin.className = "trip-spot-pin" + (pinNo.has(spot.id) ? "" : " is-unplaced");
+      pin.style.setProperty("--pin", spotPinHex(spot));
+      pin.textContent = pinNo.has(spot.id) ? String(pinNo.get(spot.id)) : "";
+      pin.title = pinNo.has(spot.id) ? (tripIsEn() ? "Map pin " : "지도 핀 ") + pinNo.get(spot.id)
+        : (tripIsEn() ? "No place on the map yet" : "아직 지도 자리가 없어요");
+      pin.setAttribute("aria-hidden", "true");
+      row.append(pin);
 
       /* 차례 손잡이 — 끌어서 목록 안 차례를 바꾸거나 여정 띠의 다른 날 위에 놓는다.
          누르면 같은 일을 메뉴로, Alt+↑/↓ 는 한 칸씩(끌기가 어려운 사람·자판 사용자). */
@@ -4645,7 +4730,16 @@ function mountTripEditor(doc){
       const videoBtn = diaryButton("", tripIsEn()
         ? "Add a short video (up to " + tripLimitText(TRIP_VIDEO_MAX_SEC) + ")"
         : "짧은 영상 넣기 (" + tripLimitText(TRIP_VIDEO_MAX_SEC) + "까지)", "diary-btn trip-spot-video-add", "video");
-      line1.append(grip, at, icon, kindSelect, name, videoBtn, pickBtn, removeBtn);
+      const moreBtn = diaryButton("", "", "diary-btn trip-spot-more", "chevronDown");
+      // 새 줄로 펼친 것은 이름을 채운 뒤에도 펼친 채 둔다 — 시각·종류를 마저 적는 도중에 접히면 안 된다.
+      if (!spotOpen.has(spot.id) && isSpotOpen(spot)) spotOpen.set(spot.id, true);
+      syncSpotOpen(row, moreBtn, isSpotOpen(spot));
+      moreBtn.addEventListener("click", () => {
+        const open = !row.classList.contains("is-open");
+        spotOpen.set(spot.id, open);
+        syncSpotOpen(row, moreBtn, open);
+      });
+      line1.append(grip, at, icon, kindSelect, name, videoBtn, pickBtn, removeBtn, moreBtn);
       pickBtn.addEventListener("click", () => startPicking(spot.id));
       videoBtn.addEventListener("click", () => { videoTarget = spot.id; videoInput.click(); });
       // 줄 위쪽 반이면 이 줄 앞, 아래쪽 반이면 뒤에 놓는다.
@@ -4690,7 +4784,7 @@ function mountTripEditor(doc){
       });
 
       const line2 = document.createElement("div");
-      line2.className = "trip-spot-line";
+      line2.className = "trip-spot-line trip-spot-detail";
       const address = document.createElement("input");
       address.type = "text"; address.className = "trip-spot-addr"; address.maxLength = 300;
       address.value = spot.address || ""; address.placeholder = "주소";
@@ -4777,7 +4871,7 @@ function mountTripEditor(doc){
       }
 
       const line3 = document.createElement("div");
-      line3.className = "trip-spot-line";
+      line3.className = "trip-spot-line trip-spot-money";
       const cost = document.createElement("input");
       cost.type = "text"; cost.className = "trip-spot-cost"; cost.maxLength = 12; cost.inputMode = "numeric";
       cost.value = spot.cost ? String(spot.cost.amount) : "";
@@ -5629,6 +5723,8 @@ function mountTripEditor(doc){
     clearTimeout(recoveryTimer);
     cancelAnimationFrame(mapResizeRaf);
     cancelAnimationFrame(focusLayoutRaf);
+    setSearchOpen(false);
+    if (writeResize) writeResize.disconnect();
     window.removeEventListener("resize", onTripWindowResize);
     window.removeEventListener("mni18nchange", onTripLanguageChange);
     document.removeEventListener("keydown", onKey, true);
