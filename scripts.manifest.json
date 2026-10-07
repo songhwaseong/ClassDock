@@ -165,6 +165,7 @@
     "music-editor.js",
     "image-memo.js",
     "backup.js",
+    "sidebar-create-menu.js",
     "app.js",
     "command-palette.js"
   ],
@@ -357,6 +358,7 @@
         "music-editor.js",
         "image-memo.js",
         "backup.js",
+        "sidebar-create-menu.js",
         "app.js",
         "command-palette.js"
       ]
@@ -700,6 +702,7 @@
       "image-memo.js"
     ],
     "app.js": [
+      "sidebar-create-menu.js",
       "file-loaders.js",
       "notebook-cells.js",
       "whiteboard.js",
@@ -707,7 +710,8 @@
       "workspaces.js"
     ],
     "command-palette.js": [
-      "app.js"
+      "app.js",
+      "icons.js"
     ],
     "remote-terminal.js": [
       "download.js",
@@ -791,6 +795,14 @@
     ]
   },
   "moduleBoundaries": [
+    {
+      "name": "sidebar-create-menu",
+      "file": "sidebar-create-menu.js",
+      "publicApi": "MNSidebarCreateMenu",
+      "consumers": [
+        "app.js"
+      ]
+    },
     {
       "name": "document-types",
       "file": "document-types.js",

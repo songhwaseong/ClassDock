@@ -222,7 +222,8 @@ flowchart LR
 | `image-memo.js` | 캡처 이미지 여러 장 붙여넣기·드롭, EXE 자동 저장, 브라우저 임시 복구, 다시 시도·삭제·미리보기·일반 메모 보내기를 담당합니다. | `scratchpad.js`, `desktop/launcher.cs`, `tests/image-memo.test.js` |
 | `backup.js` | 미저장 작업·메모·복구 데이터와 설정을 전용 매니페스트가 든 ZIP으로 내보내고, 형식·버전·필수 구조를 검증해 IndexedDB·localStorage·작업공간으로 복원합니다. | `workspace-store.js`, 각 편집기 복구 훅, `tests/backup.test.js` |
 | `app.js` | 최종 이벤트 배선 파일입니다. 드래그 앤 드롭, 파일/폴더 열기, 설정 모달, 자동 저장 폴더, 도움말, 단축키, 헤더 메뉴, 서버 heartbeat와 앱 시작·종료 흐름을 연결합니다. | 사실상 모든 기능 파일, 특히 `state.js`, `file-loaders.js` |
-| `command-palette.js` | `Ctrl+K` 명령 팔레트의 명령 목록, 현재 문맥별 활성화 조건, 검색·키보드 선택과 실제 기능 호출을 담당합니다. | `app.js`, 각 명령 대상 파일 |
+| `command-palette.js` | `Ctrl+K` 명령 팔레트의 93개 명령과 문서별 표시 조건, 카테고리 탐색·전체 검색·선택 기능 설명 패널을 담당합니다. SVG 아이콘과 공용 창 이동·크기 조절을 사용하고 키보드·포커스·한글 조합을 처리하며 기존 실행 함수를 호출합니다. | `app.js`, `icons.js`, `i18n.js`, 각 명령 대상 파일 |
+| `sidebar-create-menu.js` | 사이드바 + 메뉴의 26개 도구를 카테고리와 전체 2열 목록으로 구성합니다. 이름·별칭·확장자 검색, 키보드 이동, 팝업 위치와 포커스를 관리하며 기존 버튼의 실행 함수를 유지합니다. | `app.js`, `i18n.js`, `tests/sidebar-create-menu.test.js` |
 
 ## 빌드·개발 도구 JS
 

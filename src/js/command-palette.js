@@ -24,6 +24,141 @@
   const hasBtn = (selector) => () => !!inDoc(selector);
   const clickBtn = (selector) => () => { const b = inDoc(selector); if (b) b.click(); };
 
+  // 표시 정보만 분리하고 기존 명령의 실행 함수·문맥 조건은 그대로 사용한다.
+  const CATEGORIES = [
+    {
+      "id": "all",
+      "label": "전체",
+      "icon": "list"
+    },
+    {
+      "id": "current",
+      "label": "현재 문서",
+      "icon": "file"
+    },
+    {
+      "id": "files",
+      "label": "파일·열기",
+      "icon": "folder"
+    },
+    {
+      "id": "create",
+      "label": "새로 만들기",
+      "icon": "file"
+    },
+    {
+      "id": "edit",
+      "label": "편집·변환",
+      "icon": "arrowBoth"
+    },
+    {
+      "id": "tools",
+      "label": "수업·도구",
+      "icon": "school"
+    },
+    {
+      "id": "view",
+      "label": "보기·설정",
+      "icon": "settings"
+    }
+  ];
+  const COMMAND_UI = {
+    openFiles: ["files","file","파일을 작업공간에 추가"],
+    openFolder: ["files","folder","폴더 안의 파일을 함께 열기"],
+    newPython: ["create","code","Python 코드 작성·실행"],
+    newJava: ["create","code","Java 코드 작성·실행"],
+    newNotebook: ["create","notebook","코드·마크다운 셀을 작성하고 실행"],
+    newSheet: ["create","table","셀·수식으로 데이터를 정리"],
+    newBoard: ["create","board","그림과 글로 자유롭게 판서"],
+    newText: ["create","text","간단한 글과 메모 작성"],
+    newMnote: ["create","puzzle","글·표·이미지를 블록으로 구성"],
+    newMusic: ["create","school","음표를 놓고 소리로 확인"],
+    newMap: ["create","map","위치·거리·영역을 지도에 표시"],
+    newTimeline: ["create","clock","사건과 기간을 시간순으로 정리"],
+    newConcept: ["create","graph","개념을 연결해 관계와 구조 정리"],
+    newDiary: ["create","calendar","날짜별 글과 사진 기록"],
+    newTrip: ["create","location","여정·지도·장소를 함께 기록"],
+    newStudy: ["create","notebook","문답·빈칸 카드를 만들고 복습"],
+    newTier: ["create","chart","항목을 등급별로 나누어 배치"],
+    newBracket: ["create","graph","토너먼트·리그 대진과 결과 관리"],
+    newPick: ["create","dice","참가자 명단으로 룰렛·추첨 진행"],
+    mapToBoard: ["current","board","현재 지도를 화이트보드로 옮겨 판서"],
+    boardInsertMap: ["current","map","화이트보드에 지도를 넣어 함께 판서"],
+    mapOfflinePrepare: ["current","folder","지도 타일의 오프라인 보관 상태 확인"],
+    openLesson: ["files","video","녹화한 수업 파일 열어 다시 보기"],
+    newTask: ["create","task","현재 자료를 과제 파일로 구성해 배포"],
+    taskBatch: ["edit","task","과제 제출 파일을 모아 확인·재채점"],
+    newExam: ["create","notebook","객관식·주관식·이미지 문항 작성"],
+    examGrade: ["edit","check","제출된 답안을 채점하고 성적 정리"],
+    examples: ["tools","code","파이썬 예제를 골라 열고 실행"],
+    javaExamples: ["tools","code","자바 예제를 골라 열고 실행"],
+    scratchpad: ["tools","text","작업 중 떠 있는 메모창 열기"],
+    scratchpadOverview: ["tools","search","메모를 목록으로 보고 제목·본문 검색"],
+    compareFiles: ["edit","arrowBoth","열린 두 파일의 내용 차이를 비교"],
+    compareSaved: ["current","arrowBoth","현재 편집 내용과 저장본의 차이 확인"],
+    replaceAcrossFiles: ["edit","arrowBoth","여러 문서의 일치하는 글을 함께 바꾸기"],
+    convertFormat: ["edit","arrowBoth","JSON·CSV·표·마크다운 등의 형식 변환"],
+    lottoPicker: ["tools","dice","로또 6/45 번호 조합 뽑기"],
+    pensionPicker: ["tools","dice","연금복권 720+ 번호 조합 뽑기"],
+    exchangeRate: ["tools","chart","고시환율을 확인하고 통화 금액 계산"],
+    imageMemo: ["tools","image","이미지를 모아 두고 메모와 함께 보기"],
+    saveFolder: ["files","folder","직전에 저장한 파일이 있는 폴더 열기"],
+    theme: ["view","sun","화면의 밝은 테마와 어두운 테마 전환"],
+    sidebar: ["view","column","파일 목록 서랍을 접거나 펼치기"],
+    language: ["view","text","앱의 표시 언어를 한국어 또는 영어로 전환"],
+    screensaver: ["view","view","설정한 대기 화면을 바로 시작"],
+    settings: ["view","settings","일반·표시·단축키 등 앱 설정 열기"],
+    help: ["view","info","주요 사용법과 단축키 안내 보기"],
+    manual: ["view","notebook","전체 기능의 자세한 사용법 문서 열기"],
+    spellcheck: ["current","check","현재 문서의 한국어 맞춤법·띄어쓰기 검사"],
+    goToLine: ["current","list","코드 편집기에서 지정한 줄로 이동"],
+    pyTrace: ["current","play","한 줄씩 실행하며 변수 변화 확인"],
+    pyAnalyze: ["current","warning","코드의 오류와 문제 점검"],
+    pyGrade: ["current","check","테스트 입력과 출력으로 자동 채점"],
+    pyPkg: ["current","puzzle","Python 실행에 필요한 라이브러리 설치"],
+    jsPkg: ["current","puzzle","JavaScript 실행에 사용할 라이브러리 선택"],
+    pyRec: ["current","video","코드 수업 과정을 리플레이로 녹화"],
+    pyRevert: ["current","undo","현재 코드를 원본 내용으로 되돌리기"],
+    pyToNotebook: ["current","notebook","현재 코드를 노트북 셀로 구성"],
+    nbRunAll: ["current","play","노트북의 모든 코드 셀을 순서대로 실행"],
+    nbRestart: ["current","redo","커널을 초기화한 뒤 전체 코드 셀 실행"],
+    nbToc: ["current","list","노트북의 제목·셀 목차로 이동"],
+    nbExportPdf: ["current","save","노트북을 PDF 파일로 내보내기"],
+    nbInk: ["current","pen","노트북 화면 위에 펜으로 필기"],
+    nbHelp: ["current","info","노트북 셀 편집·실행 단축키 안내"],
+    sheetEdit: ["current","table","표의 셀 편집·정렬·필터 모드 전환"],
+    sheetFind: ["current","search","표 안의 글과 셀 내용을 찾기"],
+    boardEducation: ["current","math","수학·과학 기호와 교육 도형 도구 열기"],
+    boardFocus: ["current","view","스포트라이트·화면 가리개로 수업에 집중"],
+    boardUngroup: ["current","puzzle","선택한 교육 도형을 구성 요소로 분리"],
+    boardRec: ["current","video","화이트보드 판서 과정을 녹화"],
+    boardClear: ["current","eraser","현재 화이트보드의 모든 내용을 지우기"],
+    closeCurrent: ["current","close","현재 탭의 파일을 닫기"],
+    deleteCurrent: ["current","delete","확인 후 현재 원본 파일을 디스크에서 삭제"],
+    reopenClosed: ["files","undo","마지막으로 닫은 파일을 다시 열기"],
+    previousFile: ["current","arrowLeft","열린 탭 중 이전 파일로 이동"],
+    nextFile: ["current","chevronRight","열린 탭 중 다음 파일로 이동"],
+    studyToggle: ["current","column","참고 문서와 작업 문서를 나란히 보기"],
+    pdfSign: ["current","pen","서명이나 도장을 PDF의 원하는 위치에 배치"],
+    pdfText: ["current","text","PDF의 필요한 위치에 글자 추가"],
+    pdfDate: ["current","calendarDay","PDF에 날짜 글자를 배치"],
+    pdfCheck: ["current","check","PDF에 확인용 체크 표시 추가"],
+    pdfPen: ["current","highlighter","펜과 형광펜으로 PDF 위에 필기"],
+    pdfCodeLink: ["current","code","현재 Python 코드 줄과 PDF 위치를 연결"],
+    pdfFind: ["current","search","PDF 문서의 글자와 내용을 찾기"],
+    pdfOutline: ["current","list","PDF 목차와 책갈피로 빠르게 이동"],
+    pdfPages: ["current","column","PDF 페이지를 미리 보고 추출·회전·정리"],
+    pdfMerge: ["current","file","여러 PDF 파일을 하나로 합치기"],
+    pdfNight: ["current","sun","PDF 색상을 반전해 야간에 보기"],
+    pdfDownload: ["current","save","편집한 PDF를 파일로 저장"],
+    pdfUndo: ["current","undo","직전 PDF 편집을 취소"],
+    pdfRedo: ["current","redo","취소한 PDF 편집을 다시 적용"],
+    runCode: ["current","play","지금 편집 중인 코드를 실행"],
+    print: ["current","file","현재 문서를 인쇄하거나 PDF로 저장"],
+    fullscreen: ["current","view","문서 영역을 전체화면으로 보기"]
+  };
+
+
   // ── 명령 목록: label(표시)·icon·kw(검색 키워드)·when(문맥)·sc(연결 단축키)·run(실행) ──
   const C = (id, icon, label, run, opts) => Object.assign({ id, icon, label, run }, opts || {});
   const COMMANDS = [
@@ -176,15 +311,16 @@
   ];
 
   // ── 검색 ─────────────────────────────
-  const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
+  const norm = (s) => String(s || "").normalize("NFKC").toLowerCase().replace(/\s+/g, "");
   const localizedLabel = (cmd) => (typeof window.t === "function" ? window.t(cmd.label) : cmd.label);
   function score(cmd, q){
     // 화면에는 영어 레이블을 보여 주므로, 검색도 원문·번역문 양쪽을 대상으로 한다.
-    const hay = norm(cmd.label + " " + localizedLabel(cmd) + " " + (cmd.kw || ""));
+    const description = COMMAND_UI[cmd.id] && COMMAND_UI[cmd.id][2] || "";
+    const hay = norm([cmd.label, localizedLabel(cmd), cmd.kw || "", description, translate(description)].join(" "));
     const i = hay.indexOf(norm(q));
     if (i >= 0) return 1000 - i;                    // 앞쪽에서 일치할수록 상위
     // "로또 뽑기"처럼 사이 낱말을 빼고 쳐도 찾도록, 띄어 쓴 낱말이 모두 들어 있으면 통째 일치보다 아래 순위로 보여 준다.
-    const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+    const words = String(q || "").normalize("NFKC").toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length < 2) return -1;
     const at = words.map(word => hay.indexOf(word));
     return at.some(pos => pos < 0) ? -1 : 500 - Math.min(...at);
@@ -196,116 +332,289 @@
   }
 
   // ── UI ─────────────────────────────
-  let overlay = null, input = null, listEl = null, emptyEl = null, items = [], activeIndex = 0, previousFocus = null;
-  const focusableInPalette = () => overlay ? [...overlay.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')]
-    .filter(el => !el.hidden && !el.disabled) : [];
+  const translate = (text) => typeof window.t === "function" ? window.t(text) : text;
+  const countText = (count) => typeof window.tf === "function" ? window.tf("{n}개 기능", { n:count }) : count + "개 기능";
+  const infoFor = (cmd) => {
+    const [category, icon, description] = COMMAND_UI[cmd.id] || ["tools", "file", cmd.label];
+    return { category, icon, description };
+  };
+  const groupFor = (cmd) => CATEGORIES.find(group => group.id === infoFor(cmd).category);
+  const currentOrder = { runCode:0, pdfSign:0, nbRunAll:0, sheetEdit:0, boardEducation:0, mapToBoard:0,
+    pyRevert:90, closeCurrent:95, boardClear:98, deleteCurrent:99 };
+  const create = (tag, className, text) => {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text != null) el.textContent = translate(text);
+    return el;
+  };
+  const icon = (name, className="cmdk-icon") => {
+    const el = create("span", className);
+    el.setAttribute("aria-hidden", "true");
+    if (typeof window.uiIcon === "function") el.innerHTML = window.uiIcon(name);
+    return el;
+  };
+  const documentName = () => {
+    const doc = curState();
+    return doc ? String(doc.name || (doc.file && doc.file.name) || ($("activeFileName") && $("activeFileName").textContent) || translate("현재 문서")) : "";
+  };
+  function scopeFor(cmd){
+    if (cmd.id === "pdfCodeLink") return "Python 코드와 PDF 문서";
+    if (cmd.id.startsWith("pdf")) return "PDF 문서";
+    if (cmd.id.startsWith("nb")) return "노트북 문서";
+    if (cmd.id.startsWith("sheet")) return "표 문서";
+    if (cmd.id.startsWith("board")) return "화이트보드";
+    if (cmd.id.startsWith("map")) return "지도";
+    if (cmd.id === "pyPkg") return "Python 문서";
+    if (cmd.id === "jsPkg") return "JavaScript 문서";
+    if (cmd.id.startsWith("py") || cmd.id === "runCode" || cmd.id === "goToLine") return "코드 편집기";
+    return cmd.when ? "현재 문서·작업공간" : "공통 기능";
+  }
+  function commandPath(cmd){
+    if (cmd.id === "pdfSign") return translate("PDF 도구") + " › " + translate("서명");
+    return translate(groupFor(cmd).label) + " › " + localizedLabel(cmd);
+  }
+
+  let overlay = null, card = null, input = null, listEl = null, emptyEl = null, resultTitle = null, resultCount = null;
+  let contextEl = null, clearButton = null, detailButton = null, detailPane = null, detailContent = null, detailRun = null;
+  let tabs = [], options = [], items = [], activeIndex = 0, previousFocus = null, category = "all", detailsOpen = false;
+  const focusableInPalette = () => overlay ? [...overlay.querySelectorAll('button,[href],input,select,textarea,[tabindex]')]
+    .filter(el => !el.disabled && el.tabIndex !== -1 && !el.closest("[hidden]")) : [];
   function trapFocus(e){
     if (e.key !== "Tab") return;
     const nodes = focusableInPalette();
     if (!nodes.length){ e.preventDefault(); return; }
     const first = nodes[0], last = nodes[nodes.length - 1];
-    if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    if (!nodes.includes(document.activeElement)){ e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
   }
+  function clampCard(){
+    requestAnimationFrame(() => {
+      if (overlay && !overlay.hidden && typeof card.__clampMovableModal === "function") card.__clampMovableModal(true);
+    });
+  }
+  function setDetails(open){
+    detailsOpen = open; detailPane.hidden = !open;
+    detailButton.setAttribute("aria-expanded", String(open)); card.classList.toggle("has-details", open);
+    // 이동 뒤 고정된 폭도 설명 패널의 폭에 맞추고 화면 안에 수납한다.
+    card.style.width = ""; card.style.maxWidth = "";
+    renderDetails(); clampCard();
+  }
+  function renderDetails(){
+    const cmd = items[activeIndex];
+    detailRun.disabled = !cmd;
+    const fragment = document.createDocumentFragment();
+    if (cmd){
+      const info = infoFor(cmd);
+      fragment.append(icon(info.icon, "cmdk-detail-icon"), create("h3", "cmdk-detail-title", localizedLabel(cmd)),
+        create("p", "cmdk-detail-description", info.description), create("small", "cmdk-detail-caption", "사용 조건"));
+      fragment.append(create("span", "cmdk-detail-scope", scopeFor(cmd)), create("small", "cmdk-detail-caption", "실행 위치"));
+      const location = create("p", "cmdk-detail-path", commandPath(cmd));
+      location.setAttribute("data-i18n-ignore", ""); fragment.append(location);
+      const shortcut = shortcutKey(cmd);
+      if (shortcut){
+        fragment.append(create("small", "cmdk-detail-caption", "단축키"));
+        const key = create("kbd", "cmdk-detail-shortcut", shortcut);
+        key.setAttribute("data-i18n-ignore", ""); fragment.append(key);
+      }
+      detailRun.setAttribute("aria-label", localizedLabel(cmd) + " · " + translate("실행"));
+    } else {
+      fragment.append(icon("info", "cmdk-detail-icon"), create("p", "cmdk-detail-description", "기능을 선택하면 설명을 볼 수 있어요"));
+      detailRun.setAttribute("aria-label", translate("선택한 기능 실행"));
+    }
+    detailContent.replaceChildren(fragment);
+  }
   function build(){
-    overlay = document.createElement("div");
-    overlay.className = "cmdk-overlay"; overlay.hidden = true;
-    overlay.innerHTML =
-      '<div class="cmdk" role="dialog" aria-modal="true" aria-label="명령 팔레트">' +
-        '<div class="cmdk-inputwrap">' +
-          '<svg class="cmdk-ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"></circle><path d="m15 15 5 5"></path></svg>' +
-          '<input class="cmdk-input" type="text" role="combobox" placeholder="기능 검색…  (예: 서명, 화이트보드, 어둡게)" autocomplete="off" spellcheck="false" aria-label="명령 검색" aria-controls="cmdkList" aria-expanded="true">' +
-          '<kbd class="cmdk-esc">Esc</kbd>' +
-        '</div>' +
-        '<div class="cmdk-list" id="cmdkList" role="listbox"></div>' +
-        '<div class="cmdk-empty" hidden>일치하는 기능이 없어요</div>' +
-      '</div>';
+    overlay = create("div", "cmdk-overlay"); overlay.hidden = true;
+    card = create("div", "cmdk movable-card"); card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true"); card.setAttribute("aria-labelledby", "cmdkTitle"); card.setAttribute("data-i18n-ui", "");
+    const header = create("div", "cmdk-head"), grip = icon("move", "cmdk-grip");
+    grip.title = translate("제목줄을 끌어 창 이동");
+    const title = create("strong", "cmdk-title", "기능 검색·실행"); title.id = "cmdkTitle";
+    detailButton = create("button", "cmdk-detail-toggle"); detailButton.type = "button";
+    detailButton.setAttribute("aria-label", translate("상세 설명"));
+    detailButton.setAttribute("aria-controls", "cmdkDetails"); detailButton.setAttribute("aria-expanded", "false");
+    detailButton.append(icon("info"), create("span", "", "상세 설명"));
+    const openingKey = create("kbd", "cmdk-opening-key", "Ctrl+K"); openingKey.setAttribute("data-shortcut-action", "commandPalette");
+    const closeButton = create("button", "cmdk-close"); closeButton.type = "button";
+    closeButton.setAttribute("aria-label", translate("닫기")); closeButton.append(icon("close"));
+    header.append(grip, title, detailButton, openingKey, closeButton);
+
+    const searchWrap = create("div", "cmdk-inputwrap");
+    input = create("input", "cmdk-input"); input.type = "search"; input.autocomplete = "off"; input.spellcheck = false;
+    input.placeholder = translate("기능 이름을 검색하세요");
+    input.setAttribute("role", "combobox"); input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-label", translate("명령 검색")); input.setAttribute("aria-controls", "cmdkList"); input.setAttribute("aria-expanded", "true");
+    clearButton = create("button", "cmdk-clear"); clearButton.type = "button";
+    clearButton.setAttribute("aria-label", translate("검색 지우기")); clearButton.append(icon("close"));
+    searchWrap.append(icon("search", "cmdk-ico"), input, clearButton);
+
+    const body = create("div", "cmdk-body"), navigation = create("div", "cmdk-categories");
+    navigation.setAttribute("role", "tablist"); navigation.setAttribute("aria-label", translate("기능 카테고리"));
+    navigation.setAttribute("aria-orientation", "vertical");
+    for (const group of CATEGORIES){
+      const tab = create("button", "cmdk-category"); tab.type = "button"; tab.id = "cmdkCategory-" + group.id;
+      tab.dataset.category = group.id; tab.setAttribute("role", "tab"); tab.setAttribute("aria-controls", "cmdkResults");
+      const count = create("span", "cmdk-category-count"); count.setAttribute("data-i18n-ignore", "");
+      tab.append(icon(group.icon), create("span", "cmdk-category-label", group.label), count);
+      tab.addEventListener("click", () => { category = group.id; input.value = ""; render(""); });
+      tab.addEventListener("keydown", (e) => {
+        if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) return;
+        e.preventDefault(); e.stopPropagation();
+        const index = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1
+          : (tabs.indexOf(tab) + (e.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
+        tabs[index].click(); tabs[index].focus();
+      });
+      tabs.push(tab); navigation.append(tab);
+    }
+    const work = create("div", "cmdk-work"), results = create("div", "cmdk-results");
+    results.id = "cmdkResults"; results.setAttribute("role", "tabpanel");
+    const summary = create("div", "cmdk-summary");
+    resultTitle = create("strong", "", "전체"); resultCount = create("span", "cmdk-count");
+    resultCount.setAttribute("data-i18n-ignore", ""); resultCount.setAttribute("role", "status"); resultCount.setAttribute("aria-live", "polite");
+    summary.append(resultTitle, resultCount);
+    contextEl = create("div", "cmdk-context"); contextEl.setAttribute("data-i18n-ignore", "");
+    listEl = create("div", "cmdk-list"); listEl.id = "cmdkList"; listEl.setAttribute("role", "listbox");
+    listEl.setAttribute("aria-label", translate("사용 가능한 기능"));
+    emptyEl = create("div", "cmdk-empty"); emptyEl.hidden = true;
+    results.append(summary, contextEl, listEl, emptyEl);
+    detailPane = create("aside", "cmdk-details"); detailPane.id = "cmdkDetails"; detailPane.hidden = true;
+    detailPane.setAttribute("aria-label", translate("기능 상세 설명"));
+    detailContent = create("div", "cmdk-detail-content");
+    detailRun = create("button", "cmdk-detail-run"); detailRun.type = "button";
+    detailRun.append(icon("play"), create("span", "", "선택한 기능 실행"), create("kbd", "", "Enter"));
+    detailPane.append(detailContent, detailRun); work.append(results, detailPane); body.append(navigation, work);
+
+    const footer = create("div", "cmdk-footer"), keys = create("span", "cmdk-keys");
+    keys.append(create("kbd", "", "↑ ↓"), create("span", "", "이동"), create("kbd", "", "Enter"), create("span", "", "실행"),
+      create("kbd", "", "Esc"), create("span", "", "닫기"));
+    footer.append(keys, create("span", "cmdk-search-scope", "사용 가능한 전체 기능 검색"));
+    card.append(header, searchWrap, body, footer); overlay.append(card);
+    // 공용 창 이동은 제목줄에서만 시작한다. 검색·목록·설명 영역의 선택은 그대로 둔다.
+    [searchWrap, body, footer].forEach(region => region.addEventListener("mousedown", (e) => e.stopPropagation()));
     document.body.appendChild(overlay);
+    if (typeof window.makeCardMovable === "function") window.makeCardMovable(card);
     if (window.MNI18N && typeof window.MNI18N.translateTree === "function") window.MNI18N.translateTree(overlay);
-    input = overlay.querySelector(".cmdk-input");
-    listEl = overlay.querySelector(".cmdk-list");
-    emptyEl = overlay.querySelector(".cmdk-empty");
-    input.addEventListener("input", () => render(input.value));
+    input.addEventListener("input", (e) => { if (!e.isComposing) render(input.value); });
+    input.addEventListener("compositionend", () => render(input.value));
     input.addEventListener("keydown", onInputKey);
-    overlay.addEventListener("keydown", trapFocus);
+    clearButton.addEventListener("click", () => { input.value = ""; render(""); input.focus(); });
+    detailButton.addEventListener("click", () => setDetails(!detailsOpen));
+    detailRun.addEventListener("click", () => run(activeIndex));
+    closeButton.addEventListener("click", () => close());
+    overlay.addEventListener("keydown", (e) => {
+      if (e.isComposing || e.keyCode === 229){ e.stopPropagation(); return; }
+      if (e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); close(); return; }
+      trapFocus(e);
+    });
     overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
   }
-  function render(query){
-    const avail = available();
-    const list = (!query || !query.trim())
-      ? avail
-      : avail.map(c => ({ c, s: score(c, query) })).filter(x => x.s >= 0).sort((a, b) => b.s - a.s).map(x => x.c);
-    items = list;
-    activeIndex = 0;
-    listEl.innerHTML = "";
-    emptyEl.hidden = list.length > 0;
-    const frag = document.createDocumentFragment();
-    list.forEach((c, idx) => {
-      const row = document.createElement("div");
-      row.className = "cmdk-item" + (idx === 0 ? " active" : "");
-      row.id = "cmdkOption" + idx;
-      row.setAttribute("role", "option");
-      row.setAttribute("aria-selected", idx === 0 ? "true" : "false");
-      const ico = document.createElement("span"); ico.className = "cmdk-item-ico"; ico.textContent = c.icon || "•";
-      const lab = document.createElement("span"); lab.className = "cmdk-item-label"; lab.textContent = localizedLabel(c);
-      row.appendChild(ico); row.appendChild(lab);
-      const key = shortcutKey(c);
-      if (key){ const kb = document.createElement("kbd"); kb.className = "cmdk-item-key"; kb.textContent = key; row.appendChild(kb); }
-      row.addEventListener("mousemove", () => setActive(idx));
-      row.addEventListener("click", () => run(idx));
-      frag.appendChild(row);
+  function render(query, preserveActive=false){
+    const previousId = preserveActive && items[activeIndex] && items[activeIndex].id;
+    const avail = available(), searching = !!String(query || "").trim();
+    // 카테고리를 고른 상태에서도 검색은 현재 사용 가능한 모든 명령을 대상으로 한다.
+    const matching = searching ? avail.map(c => ({ c, s:score(c, query) })).filter(x => x.s >= 0)
+      .sort((a,b) => b.s - a.s).map(x => x.c) : avail.filter(c => category === "all" || infoFor(c).category === category);
+    const groups = searching ? [] : CATEGORIES.slice(1).map(group => ({
+      group, commands:matching.filter(cmd => infoFor(cmd).category === group.id)
+        .sort((a,b) => group.id === "current" ? (currentOrder[a.id] ?? 50) - (currentOrder[b.id] ?? 50) : 0)
+    })).filter(entry => entry.commands.length);
+    items = searching ? matching : groups.flatMap(entry => entry.commands);
+    activeIndex = Math.max(0, items.findIndex(cmd => cmd.id === previousId)); options = [];
+    const selectedCategory = searching ? "all" : category;
+    for (const tab of tabs){
+      const id = tab.dataset.category, selected = id === selectedCategory;
+      tab.setAttribute("aria-selected", String(selected)); tab.tabIndex = selected ? 0 : -1;
+      tab.querySelector(".cmdk-category-count").textContent = String(avail.filter(cmd => id === "all" || infoFor(cmd).category === id).length);
+    }
+    $("cmdkResults").setAttribute("aria-labelledby", "cmdkCategory-" + selectedCategory);
+    resultTitle.textContent = translate(searching ? "검색 결과" : CATEGORIES.find(group => group.id === category).label);
+    resultCount.textContent = countText(items.length);
+    const name = documentName(); contextEl.hidden = !(name && !searching && (category === "current" || category === "all"));
+    contextEl.textContent = name; clearButton.hidden = !input.value;
+    emptyEl.hidden = items.length > 0; listEl.hidden = items.length === 0;
+    emptyEl.textContent = translate(!searching && category === "current" ? "문서를 열면 관련 기능을 볼 수 있어요" : "일치하는 기능이 없어요");
+    const fragment = document.createDocumentFragment();
+    const addRow = (cmd) => {
+      const idx = options.length, info = infoFor(cmd), row = create("div", "cmdk-item");
+      row.id = "cmdkOption" + idx; row.dataset.command = cmd.id; row.setAttribute("role", "option");
+      const copy = create("span", "cmdk-item-copy");
+      copy.append(create("span", "cmdk-item-label", localizedLabel(cmd)), create("small", "cmdk-item-description", info.description));
+      row.append(icon(info.icon, "cmdk-item-ico"), copy);
+      const key = shortcutKey(cmd);
+      if (key){ const kb = create("kbd", "cmdk-item-key", key); kb.setAttribute("data-i18n-ignore", ""); row.append(kb); }
+      row.addEventListener("mousemove", () => { if (activeIndex !== idx) setActive(idx, false); });
+      row.addEventListener("click", () => run(idx)); options.push(row); fragment.append(row);
+    };
+    if (searching) items.forEach(addRow);
+    else groups.forEach(({ group, commands }) => {
+      if (category === "all"){
+        const heading = create("div", "cmdk-group-title", group.label); heading.setAttribute("role", "presentation"); fragment.append(heading);
+      }
+      commands.forEach(addRow);
     });
-    listEl.appendChild(frag);
-    input.setAttribute("aria-activedescendant", items.length ? "cmdkOption0" : "");
+    listEl.replaceChildren(fragment); listEl.scrollTop = 0;
+    setActive(activeIndex, false);
   }
-  function setActive(idx){
-    if (idx < 0 || idx >= items.length) return;
+  function setActive(idx, scroll=true){
+    if (idx < 0 || idx >= items.length){
+      input.removeAttribute("aria-activedescendant"); renderDetails(); return;
+    }
     activeIndex = idx;
-    [...listEl.children].forEach((el, i) => {
-      const on = i === idx;
-      el.classList.toggle("active", on);
-      el.setAttribute("aria-selected", on ? "true" : "false");
+    options.forEach((el,i) => {
+      const selected = i === idx; el.classList.toggle("active", selected); el.setAttribute("aria-selected", String(selected));
     });
     input.setAttribute("aria-activedescendant", "cmdkOption" + idx);
-    const el = listEl.children[idx]; if (el) el.scrollIntoView({ block: "nearest" });
+    if (scroll && options[idx]) options[idx].scrollIntoView({ block:"nearest" });
+    renderDetails();
   }
   function move(delta){ if (items.length) setActive((activeIndex + delta + items.length) % items.length); }
   function onInputKey(e){
-    if (e.key === "ArrowDown"){ e.preventDefault(); move(1); }
-    else if (e.key === "ArrowUp"){ e.preventDefault(); move(-1); }
-    else if (e.key === "Enter"){ e.preventDefault(); run(activeIndex); }
-    else if (e.key === "Escape"){ e.preventDefault(); close(); }
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "ArrowDown"){ e.preventDefault(); e.stopPropagation(); move(1); }
+    else if (e.key === "ArrowUp"){ e.preventDefault(); e.stopPropagation(); move(-1); }
+    else if (e.key === "Enter"){ e.preventDefault(); e.stopPropagation(); run(activeIndex); }
   }
   function run(idx){
-    const c = items[idx]; if (!c) return;
+    const c = items[idx]; if (!c || !overlay || overlay.hidden) return;
+    if (!available().includes(c)){ render(input.value); return; }
     close(false);
-    // 파일 선택창·모달을 여는 동작은 팔레트가 닫힌 뒤 실행해야 포커스·중첩 문제가 없다.
+    // 파일 선택창·새 모달의 포커스를 유지하도록 닫은 뒤 실행한다.
     setTimeout(() => {
-      try { c.run(); }
-      catch(err){ console.error(err); if (typeof window.toast === "function") window.toast("실행하지 못했어요.", 2000, { type: "error" }); }
+      try {
+        if (c.when && !c.when()){
+          if (typeof window.toast === "function") window.toast(translate("현재 문서에서 사용할 수 없는 기능이에요."), 2000, { type:"info" });
+          return;
+        }
+        c.run();
+      } catch(err){
+        console.error(err); if (typeof window.toast === "function") window.toast(translate("실행하지 못했어요."), 2000, { type:"error" });
+      }
     }, 0);
   }
   function open(){
+    if (document.querySelector(".modal:not([hidden])")) return;
     if (!overlay) build();
     if (!overlay.hidden) return;
-    if (document.querySelector(".modal:not([hidden])")) return;   // 다른 대화상자 위에 겹쳐 열지 않음
     previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    overlay.hidden = false;
-    input.value = "";
-    render("");
-    requestAnimationFrame(() => { try { input.focus(); input.select(); } catch(_){} });
+    category = "all"; overlay.hidden = false; card.removeAttribute("style"); input.value = "";
+    render(""); setDetails(detailsOpen);
+    if (typeof window.syncShortcutHints === "function") window.syncShortcutHints(overlay);
+    requestAnimationFrame(() => { if (!overlay.hidden){ try { input.focus(); input.select(); } catch(_){} } });
   }
   function close(restoreFocus=true){
     if (!overlay || overlay.hidden) return;
     overlay.hidden = true;
     const restore = previousFocus; previousFocus = null;
-    if (restoreFocus && restore && restore.isConnected) requestAnimationFrame(() => { try { restore.focus(); } catch(_){} });
+    if (restoreFocus && restore && restore.isConnected) requestAnimationFrame(() => {
+      if (overlay.hidden){ try { restore.focus(); } catch(_){} }
+    });
   }
   window.openCommandPalette = open;
 
   // 열린 팔레트는 언어 전환 뒤에도 결과 목록·검색 순위를 즉시 새 언어 기준으로 맞춘다.
   window.addEventListener("mni18nchange", () => {
-    if (overlay && !overlay.hidden) render(input ? input.value : "");
+    if (overlay && !overlay.hidden) render(input ? input.value : "", true);
   });
 
   // ── 상시 진입점(헤더 버튼·빈 화면 힌트) 연결 ──

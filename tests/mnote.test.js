@@ -105,7 +105,8 @@ test("사이드바 아래 + 메뉴에서 새 .mnote 문서를 만들 수 있다"
   const app = fs.readFileSync(path.join(__dirname, "../src/js/app.js"), "utf8");
   assert.match(html, /id="sbNewMnote"[\s\S]*새 블록 문서\(\.mnote\)/);
   assert.match(app, /byId\("sbNewMnote"\)\.onclick[\s\S]*newMnoteScratch\(\)/);
-  assert.match(app, /const items = \[[^\]]*byId\("sbNewMnote"\)/);
+  assert.match(app, /MNSidebarCreateMenu\.init\(byId\("sbNew"\), byId\("sbNewMenu"\)\)/);
+  assert.ok(require("../src/js/sidebar-create-menu.js").items.some(item => item.id === "sbNewMnote"));
 });
 
 test("저장한 .mnote 는 자동 복원 사본에도 반영된다", () => {

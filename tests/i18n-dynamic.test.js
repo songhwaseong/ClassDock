@@ -99,6 +99,45 @@ test("known missing labels and variable messages translate without changing docu
   assert.equal(api.tf("{name} 로 내보냈어요.", { name: "내 한글 문서.pdf" }), "Exported as 내 한글 문서.pdf.");
 });
 
+test("sidebar creation categories, tool descriptions and counters translate both ways", () => {
+  const h = harness();
+  const { categories, items } = require("../src/js/sidebar-create-menu.js");
+  for (const label of [...categories.map(category => category.label), ...items.flatMap(item => [item.label, item.description])]){
+    assert.notEqual(h.api.t(label), label, label + " has an English translation");
+  }
+  assert.equal(h.api.tf("{n}개 도구", { n:26 }), "26 tools");
+  assert.equal(h.api.tf("{n}개 검색 결과", { n:1 }), "1 search result");
+  assert.equal(h.api.tf("{n}개 검색 결과", { n:0 }), "0 search results");
+  const menu = h.element("div", null); menu.setAttribute("data-i18n-ui", "");
+  const category = h.element("span", "코딩·데이터", menu);
+  const description = h.element("small", "문답·빈칸 카드를 만들고 복습", menu);
+  h.ready(); h.flush();
+  assert.equal(category.textContent, "Code & data");
+  assert.equal(description.textContent, "Create and review question and cloze cards");
+  h.api.setLang("ko"); h.flush();
+  assert.equal(category.textContent, "코딩·데이터");
+  assert.equal(description.textContent, "문답·빈칸 카드를 만들고 복습");
+});
+
+test("command palette categories, all descriptions and feature counts translate", () => {
+  const h = harness();
+  const paletteSource = fs.readFileSync(path.join(__dirname, "../src/js/command-palette.js"), "utf8");
+  const metadata = vm.runInNewContext("(" + paletteSource.match(/const COMMAND_UI = (\{[\s\S]*?\n  \});/)[1] + ")");
+  for (const values of Object.values(metadata)) assert.notEqual(h.api.t(values[2]), values[2], values[2]);
+  for (const label of ["파일·열기", "편집·변환", "수업·도구", "보기·설정", "사용 조건", "상세 설명", "기능 상세 설명", "선택한 기능 실행"]){
+    assert.notEqual(h.api.t(label), label, label);
+  }
+  assert.equal(h.api.tf("{n}개 기능", { n:1 }), "1 feature");
+  assert.equal(h.api.tf("{n}개 기능", { n:93 }), "93 features");
+  const pane = h.element("aside", null); pane.setAttribute("data-i18n-ui", "");
+  const details = h.element("button", "상세 설명", pane);
+  const description = h.element("p", "서명이나 도장을 PDF의 원하는 위치에 배치", pane);
+  h.ready(); h.flush(); assert.equal(details.textContent, "Details");
+  assert.equal(description.textContent, "Place a signature or stamp anywhere on the PDF");
+  h.api.setLang("ko"); h.flush(); assert.equal(details.textContent, "상세 설명");
+  assert.equal(description.textContent, "서명이나 도장을 PDF의 원하는 위치에 배치");
+});
+
 test("late menus, nested labels and reused tooltips survive EN/KO/EN switching", () => {
   const h = harness(); h.ready();
   const button = h.element("button", "편집 도구");

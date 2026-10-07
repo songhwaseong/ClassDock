@@ -417,7 +417,8 @@ test("새 자바 파일은 사이드바 + 메뉴·시작 화면·폴더 우클�
   assert.match(html, /id="sbNewJava"[^>]*role="menuitem"/);
   assert.match(html, /<span>새 자바 코드\(\.java\)<\/span>/);
   assert.match(appSource, /byId\("sbNewJava"\)\.onclick = \(\) => \{ if \(typeof newJavaScratch === "function"\) newJavaScratch\(\); \}/);
-  assert.match(appSource, /byId\("sbNewJs"\), byId\("sbNewJava"\)/);
+  assert.match(appSource, /MNSidebarCreateMenu\.init\(byId\("sbNew"\), byId\("sbNewMenu"\)\)/);
+  assert.ok(require("../src/js/sidebar-create-menu.js").items.some(item => item.id === "sbNewJava"));
 
   // 시작 화면 '다른 문서 만들기' + 폴더 우클릭
   assert.match(html, /id="dzNewJava"[^>]*role="menuitem"/);

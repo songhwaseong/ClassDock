@@ -609,43 +609,7 @@ function wire(){
     clear.addEventListener("click", () => { setOpen(false); clearRememberedWorkspace(); });
   })();
   (() => {                                   // 사이드바 '새로 만들기'(+) 드롭다운
-    const btn = byId("sbNew"), menu = byId("sbNewMenu");
-    if (!btn || !menu) return;
-    const home = menu.parentNode;
-    const items = [byId("sbNewPy"), byId("sbNewJs"), byId("sbNewJava"), byId("sbNewNotebook"), byId("sbNewSheet"), byId("sbNewBoard"), byId("sbNewText"), byId("sbNewMnote"), byId("sbNewMap"), byId("sbOpenLesson"), byId("sbTaskBatch")].filter(Boolean);
-    const placeMenu = () => {
-      const rect = btn.getBoundingClientRect();
-      document.body.appendChild(menu);               // 좁은 사이드바의 overflow:hidden에 잘리지 않게 화면 레이어로 이동
-      menu.classList.add("sb-menu-viewport");
-      menu.hidden = false;
-      const pad = 8, gap = 7;
-      const width = menu.offsetWidth, height = menu.offsetHeight;
-      const left = Math.max(pad, Math.min(rect.left, window.innerWidth - width - pad));
-      let top = rect.top - height - gap;
-      if (top < pad) top = Math.min(window.innerHeight - height - pad, rect.bottom + gap);
-      menu.style.left = left + "px";
-      menu.style.top = Math.max(pad, top) + "px";
-      menu.style.right = "auto";
-      menu.style.bottom = "auto";
-    };
-    const setOpen = (open) => {
-      btn.setAttribute("aria-expanded", String(open));
-      if (open){
-        placeMenu();
-        if (items[0]) items[0].focus();
-      } else {
-        menu.hidden = true;
-        menu.classList.remove("sb-menu-viewport");
-        menu.removeAttribute("style");
-        home.appendChild(menu);
-      }
-    };
-    btn.addEventListener("click", (e) => { e.stopPropagation(); setOpen(menu.hidden); });
-    menu.addEventListener("click", (e) => e.stopPropagation());
-    items.forEach(it => it.addEventListener("click", () => setOpen(false)));
-    document.addEventListener("click", () => setOpen(false));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.hidden){ setOpen(false); btn.focus(); } });
-    window.addEventListener("resize", () => { if (!menu.hidden) placeMenu(); });
+    MNSidebarCreateMenu.init(byId("sbNew"), byId("sbNewMenu"));
   })();
   let shortcutDraft = normalizeShortcutMap(appSettings.shortcuts);
   let shortcutCaptureAction = "";

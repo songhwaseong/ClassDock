@@ -762,7 +762,7 @@ test("새 자바스크립트 파일은 사이드바 + 메뉴와 폴더 우클릭
   assert.match(html, /id="sbNewJs"[^>]*role="menuitem"/);
   assert.match(html, /<span>새 자바스크립트 코드<\/span>/);
   assert.match(appSource, /byId\("sbNewJs"\)\.onclick = \(\) => \{ if \(typeof newJsScratch === "function"\) newJsScratch\(\); \}/);
-  assert.match(appSource, /byId\("sbNewPy"\), byId\("sbNewJs"\)/);
+  assert.match(appSource, /MNSidebarCreateMenu\.init\(byId\("sbNew"\), byId\("sbNewMenu"\)\)/);
 
   // 폴더 우클릭 메뉴
   assert.match(documentsSource, /add\("\+Js  새 자바스크립트 코드"[\s\S]{0,140}newJsScratchInFolder\(node\.newPythonContext\)/);
