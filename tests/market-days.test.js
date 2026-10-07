@@ -87,6 +87,27 @@ test("일산시장의 매일 자료에 3·8일장을 보완하고 상설·좌표
   assert.deepEqual(days.supplement([other])[0], other);
 });
 
+test("API 위치가 빈 진해 경화시장 등은 내장 좌표로 지도에 찍는다", () => {
+  // 2026-10-08 실제 응답의 경화시장 줄(위도·경도 빈 값).
+  const gyeonghwa = days.market({ mrktNm:"경화시장", mrktType:"상설장+3일장", rdnmadr:"경상남도 창원시 진해구 경화로 38번길",
+    mrktEstblCycle:"3일+8일", latitude:"", longitude:"" });
+  assert.equal(gyeonghwa.lat, null);
+  const list = days.supplement([gyeonghwa]);
+  const [m] = list.filter(m => m.name === "경화시장(진해5일장)"); // 흔히 부르는 이름도 함께
+  assert.ok(Math.abs(m.lat - 35.1567608) < 1e-6 && Math.abs(m.lng - 128.6904062) < 1e-6);
+  assert.ok(days.isMarketDay(m.digits, 8));
+  assert.equal(gyeonghwa.lat, null); // 원본은 그대로
+  assert.equal(gyeonghwa.name, "경화시장");
+  assert.deepEqual(days.supplement(list), list); // 캐시에 담긴 목록에 다시 써도 같다
+  // 이름이 같아도 다른 고장이면, 또 API에 좌표가 있으면 손대지 않는다.
+  const elsewhere = { ...gyeonghwa, address:"서울특별시 동대문구" };
+  assert.equal(days.supplement([elsewhere]).find(m => m.name === "경화시장").lat, null);
+  const located = days.market({ mrktNm:"경화시장", rdnmadr:"경상남도 창원시 진해구", latitude:"35.2", longitude:"128.7" });
+  assert.equal(days.supplement([located]).find(m => m.name === "경화시장(진해5일장)").lat, 35.2);
+  // 실제 응답의 안덕시장(위치 빈 줄)도 채워진다.
+  assert.ok(Math.abs(days.supplement(days.parse([sample])).find(m => m.name === "안덕시장").lat - 36.2882415) < 1e-6);
+});
+
 test("시장개설주기 글을 날짜 끝자리로 푼다", () => {
   assert.deepEqual(days.cycleDigits("4일+9일"), [4, 9]);
   assert.deepEqual(days.cycleDigits("5일+10일"), [5, 0]);
@@ -279,10 +300,10 @@ test("장날 단추: 오늘 장 서는 곳만 찍고, 날짜·상설 보기를 �
   assert.equal(h.find("map-market-date").value, "2026-10-04");
   // 브라우저 날짜 칸 대신 요일까지 쓴 글자 단추를 보인다.
   assert.equal(h.find("map-market-date-btn").textContent, "10월 4일(일)");
-  // 10월 4일: 장호원·말바우·보완한 하성. 안덕은 위치가 없어 빠진다.
-  assert.deepEqual(h.markers().map(m => m.options.fillColor), ["#e8590c", "#e8590c", "#e8590c"]);
-  assert.match(h.find("map-market-summary").textContent, /10월 4일\(일\) · 장 서는 곳 전국 4곳, 지금 화면 3곳 · 위치 없는 1곳/);
-  assert.equal(h.find("map-market-list").children.length, 3);
+  // 10월 4일: 장호원·말바우·보완한 하성, 그리고 API 위치가 비어 내장 좌표로 채운 안덕.
+  assert.deepEqual(h.markers().map(m => m.options.fillColor), ["#e8590c", "#e8590c", "#e8590c", "#e8590c"]);
+  assert.match(h.find("map-market-summary").textContent, /^10월 4일\(일\) · 장 서는 곳 전국 4곳, 지금 화면 4곳$/);
+  assert.equal(h.find("map-market-list").children.length, 4);
   assert.ok(h.saved.has(days.CACHE_KEY));
   // 다음 날(5일): 통복(5·10)·삽교(2·5)
   h.find("map-market-next").events.click();
