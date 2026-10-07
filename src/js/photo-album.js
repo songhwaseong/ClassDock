@@ -349,6 +349,8 @@ const PhotoAlbum = (() => {
   });
 
   const button = (label, action, className="") => { const el = document.createElement("button"); el.type = "button"; el.textContent = label; el.className = className; if (action) el.onclick = action; return el; };
+  const uiIconHtml = (name, fallback) => typeof window.uiIcon === "function" ? window.uiIcon(name) : fallback;
+  const iconButton = (icon, label, action, className="") => { const el = button("", action, className); el.innerHTML = uiIconHtml(icon, label); el.title = label; el.setAttribute("aria-label", label); return el; };
   const status = message => { const el = root && root.querySelector(".pa-status"); if (el) el.textContent = message; };
   const notice = message => { status(message); if (typeof toast === "function") toast(message, 3000); };
   function db(){
@@ -925,7 +927,7 @@ const PhotoAlbum = (() => {
     const pick = button(label, () => input.click(), "pa-music-button"); pick.title = title;
     return [pick, input];
   }
-  // 배경음악 칸(민트 패널 오른쪽): 머리(▶·곡 추가) + 재생목록. 아래 '재생 설정' 줄(.pa-music-play)에 순서·페이드·넘길 때 겹침·전체 볼륨,
+  // 배경음악 칸(오른쪽 칸 음악 탭): 머리(▶·곡 추가) + 재생목록. 아래 '재생 설정' 줄(.pa-music-play)에 순서·페이드·넘길 때 겹침·전체 볼륨,
   // 나머지(곡 사이 겹침·구간·곡별 페이드·속도·반복·덕킹)는 '세부 설정' 칸(.pa-music-more)에 둔다. 세부 설정 칸은 틀에 있어 다시 그려도 열림 상태가 남는다.
   let musicMoreOpen = false, musicScope = "photo";
   const durationText = seconds => { const whole = Math.round(seconds); return String(Math.floor(whole/60)).padStart(2, "0") + ":" + String(whole % 60).padStart(2, "0"); };
@@ -1317,7 +1319,7 @@ const PhotoAlbum = (() => {
     });
     updateStickerElements(); saveSoon(item);
   }
-  function refreshPicked(){ updateStickerElements(); paintAdjust(); }
+  function refreshPicked(){ if (picked.size) showToolTab("deco"); updateStickerElements(); paintAdjust(); }
   // 감상 모드: ←/→ 로 지금 목록(필터) 차례대로 넘기고 끝에서는 반대쪽 끝으로 되돌아간다. Esc 는 꾸미기 모드로.
   // 영상 컨트롤에 포커스가 있어도 되감기·빨리감기 대신 사진 넘기기로 쓴다.
   function onViewingKey(event){
@@ -2292,7 +2294,7 @@ const PhotoAlbum = (() => {
       return copy;
     });
     if (!copies.length) return;
-    item.stickers.push(...copies); picked = new Set(copies.map(part => part.id)); save(item); paintStage(); paintAdjust();
+    item.stickers.push(...copies); picked = new Set(copies.map(part => part.id)); save(item); showToolTab("deco"); paintStage(); paintAdjust();
   }
   function removeParts(item){
     if (!pickedParts(item).length) return;
@@ -2323,7 +2325,7 @@ const PhotoAlbum = (() => {
     });
     if (!copies.length) return false;
     item.stickers.push(...copies); picked = new Set(copies.map(part => part.id));
-    save(item); paintStage(); paintAdjust(); status(`장식 ${copies.length}개를 붙여 넣었습니다.`);
+    save(item); showToolTab("deco"); paintStage(); paintAdjust(); status(`장식 ${copies.length}개를 붙여 넣었습니다.`);
     return true;
   }
   // 정렬: 묶음은 한 덩어리로 본다. 덩어리가 하나면 사진에, 여럿이면 고른 것 전체의 둘레에 맞춘다.
@@ -2564,7 +2566,7 @@ const PhotoAlbum = (() => {
     const part = { id:crypto.randomUUID(), art:row[0], x:position ? position.x : 50, y:position ? position.y : row[3], w:row[5], r:0 };
     if (extra) Object.assign(part, extra);
     else if (row[1] === CUSTOM_GROUP){ const record = customArts.find(other => other.id === row[0]); if (!record) return; part.cs = { n:record.name, s:record.strokes }; }
-    item.stickers.push(part); picked = new Set([part.id]); save(item); paintStage(); paintAdjust();
+    item.stickers.push(part); picked = new Set([part.id]); save(item); showToolTab("deco"); paintStage(); paintAdjust();
   }
   function dropPosition(clientX, clientY, rect){
     if (!rect || rect.width <= 0 || rect.height <= 0 || clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
@@ -2612,6 +2614,7 @@ const PhotoAlbum = (() => {
     });
     const parts = pickedParts(item), first = parts[0];
     root.querySelectorAll(".pa-adjust input[data-key]").forEach(input => { if (first && document.activeElement !== input) input.value = partValue(first,input.dataset.key); });
+    syncSaveButton(item);
     const room = orderRoom(item);
     root.querySelectorAll("[data-order]").forEach(el => { el.disabled = !parts.length || !room[/^(front|forward)$/.test(el.dataset.order) ? "forward" : "backward"]; });
     const firstFade = first ? partFade(first) : null;
@@ -2935,17 +2938,21 @@ const PhotoAlbum = (() => {
     const caption = document.createElement("div"); caption.className = "pa-caption";
     const name = document.createElement("strong"); name.textContent = item.name;
     const actions = document.createElement("div"); actions.className = "pa-caption-actions";
-    actions.appendChild(button(item.favorite ? "♥ 즐겨찾기" : "♡ 즐겨찾기", () => { item.favorite = !item.favorite; save(item); paintList(); paintStage(); }));
+    // 캡션 줄 단추는 그림만 두고 이름은 title·aria-label 로 전한다.
+    const fav = iconButton("heart", item.favorite ? "즐겨찾기 해제" : "즐겨찾기", () => { item.favorite = !item.favorite; save(item); paintList(); paintStage(); }, "pa-ico pa-fav" + (item.favorite ? " on" : ""));
+    fav.setAttribute("aria-pressed", item.favorite ? "true" : "false"); actions.appendChild(fav);
     if (item.type === "image"){
-      actions.appendChild(button("↓ PNG 저장", () => exportImage(item), "primary"));
-      const gif = button("↓ GIF 저장", () => exportGif(item), ""); gif.title = "움직이는 장식을 움직이는 그림(GIF)으로 저장합니다"; actions.appendChild(gif);
-      const mp4 = button("↓ MP4 저장", () => exportMp4(item), ""); mp4.title = "움직이는 장식을 영상(MP4)으로 저장합니다. GIF 보다 색이 곱고 부드럽습니다"; actions.appendChild(mp4);
+      closeSaveMenu();
+      // 저장 단추는 하나. 움직이는 장식이 없으면 바로 PNG, 있으면 PNG·GIF·MP4 를 고르는 메뉴를 연다.
+      const saveBtn = iconButton("save", "저장", event => { if (hasMotion(item)) toggleSaveMenu(item, event.currentTarget); else exportImage(item); }, "primary pa-ico pa-save");
+      saveBtn.insertAdjacentHTML("beforeend", '<span class="pa-save-caret" aria-hidden="true">' + uiIconHtml("chevronDown", "▾") + '</span>');
+      actions.appendChild(saveBtn); syncSaveButton(item);
     }
-    actions.appendChild(button("삭제", async () => {
+    actions.appendChild(iconButton("delete", "삭제", async () => {
       if (!await confirmDialog("사진첩에서 이 항목을 삭제할까요?", "삭제", "취소")) return;
       try { await deleteItem(item); if (musicSession && musicSession.item === item) stopMusic(); records = records.filter(row => row.id !== item.id); for (const track of musicTracks(item.music)) await dropAudioRecord(track.id); selectedId = records[0] && records[0].id; picked = new Set(); paintList(); paintStage(); paintBackgrounds(); paintAdjust(); }
       catch(error){ console.error(error); notice("항목을 삭제하지 못했습니다."); }
-    }, "pa-delete"));
+    }, "pa-ico pa-delete"));
     caption.append(name,actions); host.appendChild(caption);
   }
   async function dimensions(blob){ const image = await createImageBitmap(blob); const size = { width:image.width, height:image.height }; image.close(); return size; }
@@ -3037,6 +3044,48 @@ const PhotoAlbum = (() => {
     } finally { image.close(); }
   }
   const hasMotion = item => (item.stickers || []).some(part => !part.h && partAnimation(part) && rowOf(part));
+  // 움직임이 생기거나 없어지면 ▾ 와 풀이만 바꾼다(장식을 고칠 때마다 updateStickerElements 가 부른다).
+  function syncSaveButton(item){
+    const btn = root && root.querySelector(".pa-save"); if (!btn) return;
+    const motion = hasMotion(item);
+    btn.classList.toggle("has-menu", motion);
+    btn.title = motion ? "사진(PNG)·움직이는 그림(GIF)·영상(MP4) 중에서 골라 저장합니다" : "꾸민 사진을 PNG로 저장합니다";
+    btn.setAttribute("aria-label", btn.title);
+    if (motion) btn.setAttribute("aria-haspopup", "menu"); else { btn.removeAttribute("aria-haspopup"); closeSaveMenu(); }
+  }
+  let saveMenu = null;
+  function closeSaveMenu(){
+    if (!saveMenu) return;
+    saveMenu.cleanup(); saveMenu.el.remove(); saveMenu.btn.setAttribute("aria-expanded", "false"); saveMenu = null;
+  }
+  function toggleSaveMenu(item, btn){
+    if (saveMenu){ const same = saveMenu.btn === btn; closeSaveMenu(); if (same) return; }
+    const menu = document.createElement("div"); menu.className = "pa-save-menu"; menu.setAttribute("role", "menu");
+    [
+      ["사진(PNG)", "지금 보이는 한 장면", () => exportImage(item)],
+      ["움직이는 그림(GIF)", "어디서나 열리는 짧은 움직임", () => exportGif(item)],
+      ["영상(MP4)", "GIF 보다 색이 곱고 부드럽습니다", () => exportMp4(item)]
+    ].forEach(([label, hint, run]) => {
+      const row = document.createElement("button"); row.type = "button"; row.setAttribute("role", "menuitem");
+      const strong = document.createElement("strong"); strong.textContent = label;
+      const small = document.createElement("small"); small.textContent = hint;
+      row.append(strong, small); row.onclick = () => { closeSaveMenu(); run(); };
+      menu.appendChild(row);
+    });
+    root.appendChild(menu);
+    // 단추가 바닥 줄에 있으므로 보통 위로 연다. 위 자리가 모자랄 때만 아래로.
+    const rect = btn.getBoundingClientRect(), height = menu.offsetHeight, width = menu.offsetWidth;
+    const top = rect.top - height - 6 >= 8 ? rect.top - height - 6 : rect.bottom + 6;
+    menu.style.top = Math.round(top) + "px";
+    menu.style.left = Math.round(Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width))) + "px";
+    const onDown = event => { if (!menu.contains(event.target) && !btn.contains(event.target)) closeSaveMenu(); };
+    const onKey = event => { if (event.key === "Escape"){ event.preventDefault(); event.stopPropagation(); closeSaveMenu(); btn.focus(); } };
+    document.addEventListener("pointerdown", onDown, true); window.addEventListener("keydown", onKey, true);
+    window.addEventListener("resize", closeSaveMenu);
+    saveMenu = { el:menu, btn, cleanup(){ document.removeEventListener("pointerdown", onDown, true); window.removeEventListener("keydown", onKey, true); window.removeEventListener("resize", closeSaveMenu); } };
+    btn.setAttribute("aria-expanded", "true");
+    const first = menu.querySelector("button"); if (first) first.focus();
+  }
   function download(bytes, type, name){
     const url = URL.createObjectURL(new Blob([bytes], { type })), link = document.createElement("a");
     link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -3132,9 +3181,71 @@ const PhotoAlbum = (() => {
       document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url),1000); notice("꾸민 사진을 PNG로 저장했습니다.");
     } catch(error){ console.error(error); notice("PNG를 만들지 못했습니다."); }
   }
+  // 오른쪽 칸 탭(꾸미기·배경·음악). 고른 탭은 이 브라우저에만 기억한다. 사진 위 장식을 고르면 꾸미기 탭으로 넘어간다(조절 칸이 거기 있다).
+  const TOOL_TAB_KEY = "classdock.photoAlbum.toolTab", TOOL_TABS = ["deco","bg","music"];
+  function storedToolTab(){ try { const saved = localStorage.getItem(TOOL_TAB_KEY); return TOOL_TABS.includes(saved) ? saved : "deco"; } catch { return "deco"; } }
+  function showToolTab(id){
+    if (!root || !TOOL_TABS.includes(id)) return;
+    root.querySelectorAll(".pa-tool-tab").forEach(tab => { const on = tab.dataset.tab === id; tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1; });
+    root.querySelectorAll(".pa-tab-panel").forEach(panel => { panel.hidden = panel.dataset.tab !== id; });
+    const tools = root.querySelector(".pa-tools"); if (tools) tools.dataset.tab = id;   // 고른 탭 쪽 카드 모서리를 펴서 탭과 잇는다
+    try { localStorage.setItem(TOOL_TAB_KEY, id); } catch { /* 이번 화면에만 적용 */ }
+  }
+  function setupToolTabs(){
+    const tabs = Array.from(root.querySelectorAll(".pa-tool-tab"));
+    tabs.forEach((tab, index) => {
+      tab.onclick = () => showToolTab(tab.dataset.tab);
+      tab.onkeydown = event => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0; if (!step) return;
+        event.preventDefault(); const next = tabs[(index + step + tabs.length) % tabs.length]; showToolTab(next.dataset.tab); next.focus();
+      };
+    });
+    showToolTab(storedToolTab());
+  }
+  // 양쪽 칸 폭 조절 막대. 폭은 이 브라우저에 기억하고, 좁은 화면(900px 이하)에서는 CSS 의 고정 폭을 따른다.
+  // 가운데 무대는 CENTER_MIN 보다 좁아지지 않게 막는다. 무대 크기가 바뀌면 ResizeObserver 가 사진을 다시 맞춘다.
+  const PANES_KEY = "classdock.photoAlbum.paneWidths", PANE_LIMITS = { left:[140,340,190], right:[250,440,280] }, CENTER_MIN = 360;
+  const narrowLayout = () => matchMedia("(max-width:900px)").matches;
+  function storedPaneWidths(){
+    let saved = {}; try { saved = JSON.parse(localStorage.getItem(PANES_KEY) || "{}") || {}; } catch { /* 처음 폭 */ }
+    const widths = {};
+    Object.entries(PANE_LIMITS).forEach(([side, [min, max, initial]]) => { const value = Number(saved[side]); widths[side] = Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : initial; });
+    return widths;
+  }
+  function setupPaneSplitters(){
+    const layout = root.querySelector(".pa-layout"), widths = storedPaneWidths();
+    const apply = (side, width) => { widths[side] = Math.round(width); layout.style.setProperty(side === "left" ? "--pa-left-w" : "--pa-right-w", widths[side] + "px"); };
+    const save = () => { try { localStorage.setItem(PANES_KEY, JSON.stringify(widths)); } catch { /* 이번 화면에만 적용 */ } };
+    apply("left", widths.left); apply("right", widths.right);
+    root.querySelectorAll(".pa-split").forEach(handle => {
+      const side = handle.dataset.side, [min, max, initial] = PANE_LIMITS[side], dir = side === "left" ? 1 : -1;
+      const pane = root.querySelector(side === "left" ? ".pa-sidebar" : ".pa-tools"), other = root.querySelector(side === "left" ? ".pa-tools" : ".pa-sidebar");
+      handle.setAttribute("aria-valuemin", String(min)); handle.setAttribute("aria-valuemax", String(max)); handle.setAttribute("aria-valuenow", String(widths[side]));
+      const set = width => {
+        const room = layout.getBoundingClientRect().width - other.getBoundingClientRect().width - CENTER_MIN;
+        apply(side, Math.max(min, Math.min(max, room, width))); handle.setAttribute("aria-valuenow", String(widths[side]));
+      };
+      handle.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || narrowLayout()) return;
+        event.preventDefault(); handle.setPointerCapture(event.pointerId); handle.classList.add("dragging"); root.classList.add("pa-resizing");
+        const startX = event.clientX, startWidth = pane.getBoundingClientRect().width;
+        const move = ev => set(startWidth + dir*(ev.clientX - startX));
+        const up = () => {
+          handle.classList.remove("dragging"); root.classList.remove("pa-resizing");
+          handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); handle.removeEventListener("pointercancel", up); save();
+        };
+        handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("pointercancel", up);
+      });
+      handle.addEventListener("dblclick", () => { if (narrowLayout()) return; set(initial); save(); });
+      handle.addEventListener("keydown", event => {
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0; if (!step || narrowLayout()) return;
+        event.preventDefault(); set(pane.getBoundingClientRect().width + dir*step*(event.shiftKey ? 48 : 16)); save();
+      });
+    });
+  }
   function makeUi(host){
     closeEffectPanel(); host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
-    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div><section class="pa-bg-section"><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div><div class="pa-music"></div><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></div><aside class="pa-tools"><div class="pa-tools-title"><strong>꾸미기</strong><small>사진 위에 올려 보세요</small></div><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></aside></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
+    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div></div><aside class="pa-tools"><div class="pa-tool-tabs" role="tablist" aria-label="꾸미기 도구"><button type="button" class="pa-tool-tab" role="tab" data-tab="deco" aria-selected="false" title="사진 위에 장식을 올립니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span>꾸미기</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="bg" aria-selected="false" title="사진 둘레 배경을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="7.5" y="8.5" width="9" height="7" rx="1"/></svg><span>배경</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="music" aria-selected="false" title="배경음악과 재생 설정"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.5" r="2.4"/></svg><span>음악</span></button></div><div class="pa-deco-section pa-tab-panel" role="tabpanel" data-tab="deco" aria-label="꾸미기"><svg class="pa-sparkles is-right" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><svg class="pa-sparkles is-left" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></div><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="bg" aria-label="배경" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div></section><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="music" aria-label="음악" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-music"></div><p class="pa-music-none">사진을 고르면 배경음악을 넣을 수 있어요.</p><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></aside><div class="pa-split" data-side="left" role="separator" aria-orientation="vertical" aria-label="목록 칸 폭" title="끌어서 목록 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div><div class="pa-split" data-side="right" role="separator" aria-orientation="vertical" aria-label="꾸미기 칸 폭" title="끌어서 꾸미기 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
     host.appendChild(root);
     root.querySelector(".pa-import").onclick = () => root.querySelector(".pa-input").click();
     root.querySelector(".pa-input").onchange = async event => { await importFiles(event.target.files); event.target.value = ""; };
@@ -3189,6 +3300,7 @@ const PhotoAlbum = (() => {
       if (surface) surface.classList.remove("pa-drop-target");
     };
     observer = new ResizeObserver(fitArtboard); observer.observe(root.querySelector(".pa-stage"));
+    setupToolTabs(); setupPaneSplitters();
     paintFilters(); paintList(); paintBackgrounds(); paintStickers(); paintStage();
   }
   async function mount(host){
@@ -3244,7 +3356,7 @@ const PhotoAlbum = (() => {
     makeUi(host); applyMotionSetting();
     window.addEventListener("keydown", onHistoryKey);
   }
-  function cleanup(){ closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null; root = null; }
+  function cleanup(){ closeSaveMenu(); closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null; root = null; }
   return { mount, cleanup };
 })();
 
