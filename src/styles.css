@@ -3165,16 +3165,121 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .single-tab-take{font:inherit;font-size:14px;font-weight:600;border:0;border-radius:9px;background:var(--accent);color:#fff;
     padding:10px 20px;cursor:pointer}
   .single-tab-take:hover{filter:brightness(1.08)}
-  /* 텍스트/코드 편집 토글 바 */
-  .text-view-bar{display:flex;align-items:center;gap:10px;max-width:1080px;margin:0 auto 10px}
-  .text-view-name{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    margin-right:auto}   /* 파일명이 남는 공간을 차지 → 버튼들은 오른쪽에 나란히 모인다 */
+  /* ===== 텍스트/코드 화면 틀 — [도구 막대] [진단 띠] [본문 | 정보 서랍] [상태 줄] =====
+     폭은 틀(.text-shell) 한 곳이 정한다. 막대·진단 띠·줄 이동·찾기 바·본문은 그 안에서 꽉 차게 —
+     따로 max-width 를 두면 서랍이 열렸을 때 막대만 좁아져 어긋난다. */
+  .text-shell{max-width:1080px;margin:0 auto}
+  .text-shell.has-drawer{max-width:1352px}
+  .text-shell .code-host,.text-shell .html-host{max-width:none;margin:0}
+  .text-shell .text-edit-diagbar{max-width:none;margin:0 0 8px}
+  .text-shell .code-goto-flow,.text-shell .ro-find{max-width:none;margin:0 0 8px}
+  /* 상태 줄(약 26px)만큼 본문을 줄여 화면 밖으로 밀리지 않게 */
+  .text-shell .code-host{max-height:calc(calc(100vh / var(--ui-zoom, 1)) - 182px)}
+  .text-shell .code-host-edit{height:calc(calc(100vh / var(--ui-zoom, 1)) - 268px)}
+  .text-shell .html-host{height:calc(calc(100vh / var(--ui-zoom, 1)) - 164px)}
+
+  /* 도구 막대 — 보기·편집·미리보기가 같은 모양. 편집일 땐 .run-bar 도 붙어 있어 특이도를 올려 둔다. */
+  .text-shell .text-bar{position:relative;z-index:32;display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;
+    max-width:none;margin:0 0 8px;padding:5px 6px 5px 12px;background:var(--panel);border:1px solid var(--border);
+    border-radius:10px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  .text-view-name{flex:1 1 120px;min-width:0;font-size:13px;font-weight:600;color:var(--ink);overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
   .text-edit-btn{font:inherit;font-size:12.5px;border:1px solid var(--accent);background:transparent;color:var(--accent);
     border-radius:8px;padding:5px 12px;cursor:pointer;flex:0 0 auto}
   .text-edit-btn:hover{background:var(--accent);color:#fff}
-  /* 편집 도구막대. 뒤에 나오는 .run-bar 가 margin:0 0 10px 로 같은 특이도에서 이겨 왼쪽에 붙어 버렸다
-     (편집기·진단 띠는 가운데 1080px 이라 400px 어긋난 채였다). 두 클래스를 겹쳐 특이도를 올려 못박는다. */
-  .run-bar.text-edit-bar{max-width:1080px;margin:0 auto 10px;justify-content:flex-end}
+  /* 화면 고르기(보기·편집 / 미리보기·소스·편집) */
+  .text-mode-seg{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--panel-2);flex:0 0 auto}
+  .text-shell .text-mode-btn{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 11px;border:0;border-radius:7px;
+    background:transparent;color:var(--muted);font:inherit;font-size:12.5px;cursor:pointer;box-shadow:none}
+  .text-shell .text-mode-btn:hover{background:transparent;color:var(--ink)}
+  .text-shell .text-mode-btn.is-on{background:var(--field);color:var(--ink);font-weight:700;box-shadow:0 1px 2px rgba(15,23,42,.12);cursor:default}
+  .text-mode-btn .ui-icon{width:14px;height:14px}
+  /* 아이콘 단추 — 이름은 감춘 글자 칸(.text-bar-label)·aria-label·title 로 전한다 */
+  .text-bar-tools{display:flex;align-items:center;flex-wrap:wrap;gap:2px;margin-left:auto}
+  .text-bar-extras{display:contents}
+  .text-bar-label{display:none}
+  .text-bar-sep{width:1px;height:18px;margin:0 5px;background:var(--border);flex:0 0 auto}
+  .text-shell .text-bar .text-tool{position:relative;display:inline-flex;align-items:center;justify-content:center;width:32px;height:30px;
+    min-width:0;padding:0;border:0;border-radius:7px;background:transparent;color:var(--ink);font:inherit;line-height:1;cursor:pointer}
+  .text-shell .text-bar .text-tool:hover{background:var(--panel-hover);color:var(--ink)}
+  .text-shell .text-bar .text-tool[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
+  .text-shell .text-bar .text-tool:disabled{opacity:.38;cursor:default;background:transparent}
+  .text-shell .text-bar .text-tool .ui-icon{width:17px;height:17px;vertical-align:0}
+  .text-shell .text-bar .run-fontpick-wrap{margin-left:2px}
+  .text-shell .text-bar .run-fontpick{height:30px;max-width:170px;padding:0 6px 0 28px;border:1px solid var(--border);border-radius:7px;
+    background:var(--field);color:var(--ink);font:inherit;font-size:12.5px;font-weight:500}
+  .text-shell .text-bar .run-fontpick:disabled{opacity:.45;cursor:default}
+  /* 저장 — 그림만, 늘 같은 자리. 저장할 게 없는 보기 화면에선 흐리게 */
+  .text-shell .text-bar .text-save.save-ico{width:34px;height:30px;min-width:0;padding:0;border:0;border-radius:7px;
+    background:var(--accent);color:#fff;cursor:pointer}
+  .text-shell .text-bar .text-save.save-ico:hover{background:var(--accent-d);color:#fff}
+  .text-shell .text-bar .text-save.save-ico:disabled{background:var(--panel-2);color:var(--muted);cursor:default}
+  .text-view-save .run-save-label{display:none}
+  .text-shell .text-bar .text-save .ui-icon{width:17px;height:17px}
+  /* 줄 정리 메뉴 — 단추는 아이콘, 아래로 펼쳐지는 목록 */
+  .text-tidy-menu{position:relative;flex:0 0 auto}
+  .text-tidy-menu>summary{list-style:none;display:inline-block}
+  .text-tidy-menu>summary::-webkit-details-marker{display:none}
+  .text-tidy-menu>summary::after{content:"";position:absolute;right:3px;bottom:6px;border:3px solid transparent;border-top-color:currentColor}
+  .text-shell .text-bar .text-tidy-menu[open]>summary{background:var(--accent);color:#fff}
+  .text-tidy-pop{position:absolute;z-index:90;top:calc(100% + 6px);right:0;min-width:190px;padding:6px;
+    display:grid;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 12px 30px rgba(15,23,42,.26)}
+  .text-tidy-note{margin:2px 8px 6px;font-size:11px;line-height:1.4;color:var(--muted);white-space:nowrap}
+  .text-tidy-pop button{font:inherit;font-size:13px;text-align:left;white-space:nowrap;border:0;border-radius:7px;
+    background:transparent;color:var(--ink);padding:7px 10px;cursor:pointer}
+  .text-tidy-pop button:hover{background:var(--panel-hover)}
+  .text-tidy-sep{height:1px;margin:4px 6px;background:var(--border)}
+
+  /* 본문 | 정보 서랍 */
+  .text-body{display:flex;align-items:stretch;gap:12px}
+  .text-main{flex:1 1 auto;min-width:0}
+  .text-drawer{flex:0 0 260px;min-width:0}
+  .text-drawer[hidden]{display:none}
+  .text-drawer-in{position:sticky;top:0;max-height:calc(calc(100vh / var(--ui-zoom, 1)) - 182px);overflow:auto;
+    background:var(--panel);border:1px solid var(--border);border-radius:10px;box-shadow:0 4px 18px rgba(15,23,42,.08)}
+  .text-shell.is-edit .text-drawer-in{max-height:calc(calc(100vh / var(--ui-zoom, 1)) - 268px)}
+  .text-drawer-tabs{position:sticky;top:0;z-index:1;display:flex;background:var(--panel);border-bottom:1px solid var(--border)}
+  .text-drawer-tab{flex:1;padding:9px 0 7px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);
+    font:inherit;font-size:12.5px;cursor:pointer}
+  .text-drawer-tab:hover{color:var(--ink)}
+  .text-drawer-tab[aria-selected="true"]{color:var(--accent);font-weight:700;border-bottom-color:var(--accent)}
+  .text-drawer-pane{padding:12px;font-size:12.5px;color:var(--ink)}
+  .text-drawer-cap{margin:0 0 6px;font-size:11px;font-weight:700;color:var(--muted)}
+  .text-stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+  .text-stat{padding:7px 10px;border-radius:8px;background:var(--panel-2)}
+  .text-stat b{display:block;font-size:17px;line-height:1.25;font-variant-numeric:tabular-nums}
+  .text-stat small{font-size:11px;color:var(--muted)}
+  .text-kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--border);color:var(--muted)}
+  .text-kv b{color:var(--ink);font-weight:600;text-align:right;overflow-wrap:anywhere}
+  .text-kv.is-dirty b{color:var(--warn)}
+  .text-drawer-empty{margin:2px;color:var(--muted);line-height:1.6}
+  .text-outline{display:grid;gap:1px}
+  .text-outline-item{display:block;width:100%;padding:5px 8px;border:0;border-radius:6px;background:transparent;color:var(--ink);
+    font:inherit;font-size:12.5px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+  .text-outline-item:hover{background:var(--panel-hover)}
+  .text-outline-item.lv1{font-weight:700}
+  .text-outline-item.lv2{padding-left:18px}
+  .text-outline-item.lv3{padding-left:28px;color:var(--muted)}
+  .text-outline-item.lv4{padding-left:38px;color:var(--muted)}
+  .text-outline-item.is-on{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}
+  @keyframes text-outline-flash{from{background:rgba(250,204,21,.45)}to{background:transparent}}
+  .text-outline-flash{animation:text-outline-flash 1.6s ease-out;border-radius:4px}
+
+  /* 상태 줄 — 왼쪽 분량, 오른쪽 커서 자리·저장 상태·인코딩·줄 끝 */
+  .text-status{display:flex;align-items:center;gap:12px;min-height:20px;margin-top:6px;padding:0 4px;font-size:12px;color:var(--muted)}
+  .text-edit-stats{white-space:nowrap;font-variant-numeric:tabular-nums;cursor:default}
+  .text-status-right{display:flex;align-items:center;gap:12px;min-width:0;margin-left:auto;overflow:hidden;white-space:nowrap;
+    font-variant-numeric:tabular-nums}
+  .text-status-right>[hidden]{display:none}
+  .text-status-state:empty{display:none}
+  .text-status-state.is-dirty{color:var(--warn);font-weight:600}
+  .text-edit-encnote{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  @media(max-width:900px){
+    .text-drawer,.text-drawer-btn,.text-bar-sep:has(+ .text-drawer-btn){display:none!important}
+    .text-shell.has-drawer{max-width:1080px}
+  }
+  @media(max-width:600px){ .text-edit-stats{display:none} }
   /* 대용량(편집 잠금) 파일용 읽기 전용 찾기 바 */
   .ro-find{display:flex;align-items:center;gap:8px;max-width:1080px;margin:0 auto 10px}
   .ro-find[hidden]{display:none}
@@ -3185,14 +3290,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   /* 대용량 찾기: 점프한 줄에서 실제 일치한 단어를 감싸는 강조 상자 */
   .ro-find-hit{position:absolute;z-index:3;pointer-events:none;background:rgba(250,204,21,.42);
     border-radius:2px;box-shadow:0 0 0 1px rgba(202,138,4,.7);mix-blend-mode:normal}
-  /* 보기 모드 바와 같은 배치: 왼쪽엔 상태 문구, 버튼들은 오른쪽에 나란히 */
-  .text-edit-bar .run-status{order:-1;margin-right:8px}
-  /* 글꼴 고르기 — 겉 칸에 겹친 글자 아이콘 자리만큼 왼쪽을 비운다(아이콘 바가 아니라 .run-bar-icons 규칙이 안 먹는다) */
-  .text-edit-bar .run-fontpick{padding-left:28px}
-  /* 문서 정보(줄·낱말·글자 수와 커서 자리): 상태 문구 옆에 붙는 읽을거리라 버튼처럼 보이지 않게.
-     왼쪽 묶음의 끝이라 남은 공간을 여기서 먹어 버튼들을 오른쪽으로 민다. */
-  .text-edit-stats{order:-1;margin-right:auto;font-size:12px;color:var(--muted);white-space:nowrap;
-    font-variant-numeric:tabular-nums;cursor:default}
   /* JSON·XML·YAML 구조 진단 띠: 도구막대가 아니라 편집기 바로 위에, 편집기와 같은 폭으로.
      통과(초록)·경고(노랑)·오류(빨강)를 이 띠 하나가 맡는다 — 도구막대에는 길이가 변하는 것을 두지 않는다. */
   .text-edit-diagbar{display:flex;align-items:center;gap:10px;max-width:1080px;margin:0 auto 8px;
@@ -3216,21 +3313,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   [data-theme="dark"] .text-edit-diagbar[data-level="error"]{border-color:rgba(248,113,113,.4);border-left-color:#f87171;
     background:rgba(248,113,113,.12);color:#fca5a5}
   [data-theme="dark"] .text-edit-diagbar-go:hover{background:#f87171;color:#111827;border-color:#f87171}
-  /* 줄 정리 메뉴 — 버튼 생김새는 .text-edit-btn 그대로, 아래로 펼쳐지는 목록만 새로 */
-  .text-tidy-menu{position:relative;flex:0 0 auto}
-  .text-tidy-menu>summary{list-style:none;display:inline-block}
-  .text-tidy-menu>summary::-webkit-details-marker{display:none}
-  .text-tidy-menu>summary::after{content:" ▾";font-size:9px}
-  .text-tidy-menu[open]>summary{background:var(--accent);color:#fff}
-  .text-tidy-pop{position:absolute;z-index:90;top:calc(100% + 6px);right:0;min-width:190px;padding:6px;
-    display:grid;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:10px;
-    box-shadow:0 12px 30px rgba(15,23,42,.26)}
-  .text-tidy-note{margin:2px 8px 6px;font-size:11px;line-height:1.4;color:var(--muted);white-space:nowrap}
-  .text-tidy-pop button{font:inherit;font-size:13px;text-align:left;white-space:nowrap;border:0;border-radius:7px;
-    background:transparent;color:var(--ink);padding:7px 10px;cursor:pointer}
-  .text-tidy-pop button:hover{background:var(--panel-hover)}
-  .text-tidy-sep{height:1px;margin:4px 6px;background:var(--border)}
-  @media(max-width:600px){ .text-edit-stats{display:none} }
   /* ===== 오프라인 한국어 맞춤법 검사 ===== */
   .spellcheck-trigger{font:inherit;font-size:12px;line-height:1.15;border:1px solid #0f766e;border-radius:7px;
     background:transparent;color:#0f766e;padding:5px 10px;cursor:pointer;white-space:nowrap}
@@ -3304,8 +3386,6 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
     .google-search-head{cursor:default}
   }
   /* 비 UTF-8 원본 저장 안내: 오른쪽 버튼들 뒤에 은은하게 */
-  .text-edit-encnote{font-size:12px;color:var(--muted);white-space:nowrap;padding-left:6px;
-    border-left:1px solid var(--border, #e2e8f0)}
   .wb-wrap{display:flex;flex-direction:column;height:100%;background:var(--viewer)}
   .wb-wrap.tb-pos-bottom{flex-direction:column-reverse}
   .wb-wrap.tb-pos-left{flex-direction:row}

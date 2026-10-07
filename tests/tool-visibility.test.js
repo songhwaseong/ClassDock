@@ -138,7 +138,8 @@ test("각 도구 id 마다 CSS 숨김 규칙과 설정 UI 배선이 있다", () 
   assert.match(codeViewerSource, /className = "run-dedupe"/);
   assert.match(codeViewerSource, /buttonClass:runnable \? "run-spellcheck" : ""/);
   assert.match(notebookSource, /className = "nbv-dedupe"/);
-  assert.match(codeViewerSource, /viewBtn\.className = "run-revert"/);
+  // 텍스트 편집 화면의 '보기' 칸은 파이썬 '원본으로'(run-py-revert) 숨김 설정에 걸리지 않는 그냥 run-revert 다.
+  assert.match(codeViewerSource, /addSeg\("view", "view", "보기", [^\n]*mode === "edit" \? "run-revert" : ""\)/);
   assert.match(cssSource, /hide-tool-pyRevert\s+\.run-py-revert/);
   assert.doesNotMatch(cssSource, /hide-tool-pyRevert\s+\.run-revert[\s,\{]/);
   assert.match(cssSource, /hide-tool-nbExport\s+\.nbv-export-group/);

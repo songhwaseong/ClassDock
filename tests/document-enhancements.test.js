@@ -89,7 +89,9 @@ test("Office 검색은 압축 해제 크기를 제한하고 대용량 XML split�
 
 test("대용량 Markdown 소스 보기에도 미리보기 복귀 도구막대가 남는다", () => {
   const source = read("code-viewer.js");
-  assert.match(source, /if \(canEdit \|\| jsonPretty \|\| isHtml \|\| isMd\)/);
+  // 보기 화면은 문서 종류와 상관없이 늘 같은 틀(막대)을 달고, 마크다운·HTML 은 미리보기 칸을 함께 둔다.
+  assert.match(source, /const frame = mountTextFrame\("view", \{/);
+  assert.match(source, /if \(isHtml \|\| isMd\)\{\s*addSeg\("preview", "view", "미리보기"/);
 });
 
 test("스프레드시트 전체 바꾸기는 재계산과 다시 그리기를 각각 한 번만 수행한다", () => {

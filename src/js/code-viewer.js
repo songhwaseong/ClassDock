@@ -963,9 +963,9 @@ const LINE_TIDY_ITEMS = [
 
 function buildLineTidyMenu(getEditor){
   const menu = document.createElement("details"); menu.className = "text-tidy-menu";
-  const summary = document.createElement("summary"); summary.className = "text-edit-btn";
-  summary.textContent = "줄 정리";
+  const summary = document.createElement("summary"); summary.className = "text-edit-btn text-tool";
   summary.title = "정렬·중복 삭제·번호 매기기 — 고른 줄이 있으면 그 부분만, 없으면 파일 전체에 적용해요";
+  setTextBarIcon(summary, "lineTidy", "줄 정리");
   const pop = document.createElement("div"); pop.className = "text-tidy-pop"; pop.setAttribute("role", "menu");
   const note = document.createElement("p"); note.className = "text-tidy-note";
   note.textContent = "고른 줄이 있으면 그 부분만, 없으면 파일 전체";
@@ -1020,11 +1020,10 @@ function countTextStats(s){
   return { lines, chars:s.length, nonSpace, words };
 }
 
-function attachTextStats(editor, bar, before){
+// 편집 화면: 타이핑·커서 이동이 멎을 때마다 숫자를 다시 세어 onRender 로 넘긴다(상태 줄·정보 서랍이 함께 쓴다).
+function attachTextStats(editor, onRender){
   const ta = editor && editor.ta;
   if (!ta) return null;
-  const el = document.createElement("span"); el.className = "text-edit-stats";
-  const n = (v) => v.toLocaleString();
   let timer = 0;
   const render = () => {
     timer = 0;
@@ -1036,21 +1035,94 @@ function attachTextStats(editor, bar, before){
     const caret = ta.selectionDirection === "backward" ? start : end;
     let line = 1, lineStart = 0;
     for (let i = 0; i < caret; i++) if (value.charCodeAt(i) === 10){ line++; lineStart = i + 1; }
-    const column = caret - lineStart + 1;
-    el.textContent = (selected ? "선택 " : "")
-      + n(stats.lines) + "줄 · " + n(stats.words) + "낱말 · " + n(stats.chars) + "자"
-      + "   " + line + ":" + column;
-    el.title = "공백 뺀 글자 " + n(stats.nonSpace) + "자"
-      + (selected ? " (고른 부분 기준)" : "")
-      + " · 커서는 " + n(line) + "번째 줄 " + n(column) + "칸";
+    onRender({ stats, selected, line, column: caret - lineStart + 1, text: value });
   };
   const schedule = () => { if (!timer) timer = setTimeout(render, 200); };
   // selectionchange 는 document 에만 오므로 쓰지 않는다 — 편집기를 닫아도 남아 새는 리스너가 되기 때문.
   // 커서가 움직이는 경로(타이핑·키 이동·클릭·드래그 끝)를 textarea 위에서 직접 받으면 요소와 함께 사라진다.
   for (const type of ["input", "keyup", "mouseup", "focus", "select"]) ta.addEventListener(type, schedule);
   render();
-  bar.insertBefore(el, before || null);
-  return el;
+  return { refresh: render };
+}
+
+/* 텍스트 화면 도구 막대 단추는 [그림 + 감춘 글자 칸] 모양이다(파이썬 실행 바의 setBarIcon 과 같은 뜻).
+   글자 칸은 CSS 로 감춰 그림만 보이고, 이름은 aria-label·title 로 전한다 — 시험·번역은 글자 칸을 찾는다. */
+function setTextBarIcon(btn, icon, label){
+  if (typeof window.setUiIcon === "function") window.setUiIcon(btn, icon); else btn.textContent = "";
+  const slot = document.createElement("span"); slot.className = "text-bar-label"; slot.textContent = label;
+  btn.appendChild(slot);
+  btn.setAttribute("aria-label", label);
+  if (!btn.title) btn.title = label;
+  return btn;
+}
+function setTextBarLabel(btn, label){
+  const slot = btn.querySelector(".text-bar-label");
+  if (slot) slot.textContent = label;
+  btn.setAttribute("aria-label", label);
+}
+
+/* ===== 정보 서랍의 개요 =====
+   마크다운 제목(# …)과 밑줄 제목(=== / --- 로 밑줄 친 줄)을 차례대로 모은다. 코드 울타리(``` · ~~~) 안은
+   제목이 아니다. 일반 텍스트 메모도 밑줄 제목을 흔히 써서 같은 규칙으로 읽는다. */
+function textOutline(text, limit){
+  const max = limit || 500;
+  const lines = String(text || "").split("\n");
+  const out = [];
+  let fence = "";
+  for (let i = 0; i < lines.length && out.length < max; i++){
+    const raw = lines[i];
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(raw);
+    if (f){
+      if (!fence) fence = f[1][0];
+      else if (f[1][0] === fence) fence = "";
+      continue;
+    }
+    if (fence) continue;
+    const atx = /^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(raw);
+    if (atx){ out.push({ level: atx[1].length, text: atx[2].trim(), line: i + 1 }); continue; }
+    const next = lines[i + 1];
+    // 목록·인용 줄과, 그 자체가 밑줄(=== · ---)인 줄은 제목 글이 될 수 없다.
+    if (next != null && raw.trim() && !/^ {0,3}([-*+]|\d+[.)])[ \t]/.test(raw) && !/^ {0,3}>/.test(raw)
+        && !/^ {0,3}(=+|-+)[ \t]*$/.test(raw)){
+      const under = /^ {0,3}(=+|-+)[ \t]*$/.exec(next);
+      if (under && under[1].length >= 2){
+        out.push({ level: under[1][0] === "=" ? 1 : 2, text: raw.trim(), line: i + 1 });
+        i++;
+      }
+    }
+  }
+  return out;
+}
+// UTF-8 로 저장할 때의 바이트 수 — 큰 파일에서도 버퍼를 새로 만들지 않고 센다.
+// crlf 면 줄바꿈마다 \r 한 바이트를 더한다(저장할 때 원본 줄 끝을 되살리므로).
+function utf8ByteLength(s, crlf){
+  let n = 0;
+  for (let i = 0; i < s.length; i++){
+    const c = s.charCodeAt(i);
+    if (c === 10 && crlf) n += 2;
+    else if (c < 0x80) n += 1;
+    else if (c < 0x800) n += 2;
+    else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length){ n += 4; i++; }
+    else n += 3;
+  }
+  return n;
+}
+function formatByteSize(n){
+  if (n < 1024) return n.toLocaleString() + " B";
+  if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1048576).toFixed(1) + " MB";
+}
+
+// 정보 서랍 — 열림과 고른 탭은 모든 텍스트 문서가 함께 쓴다(줄바꿈 설정과 같은 방식).
+let _textDrawerOn = (() => { try { return localStorage.getItem("mn.textDrawer") !== "0"; } catch(_){ return true; } })();
+let _textDrawerTab = (() => { try { return localStorage.getItem("mn.textDrawerTab") === "outline" ? "outline" : "info"; } catch(_){ return "info"; } })();
+function setTextDrawerOn(on){
+  _textDrawerOn = !!on;
+  try { localStorage.setItem("mn.textDrawer", _textDrawerOn ? "1" : "0"); } catch(_){}
+}
+function setTextDrawerTab(tab){
+  _textDrawerTab = tab === "outline" ? "outline" : "info";
+  try { localStorage.setItem("mn.textDrawerTab", _textDrawerTab); } catch(_){}
 }
 
 // 줄바꿈(자동 개행) 보기 — 편집·읽기 화면이 같은 설정을 쓴다.
@@ -1061,10 +1133,11 @@ function setTextWrapEnabled(on){
   try { localStorage.setItem("mn.textWrap", _textWrapOn ? "1" : "0"); } catch(_){}
 }
 function buildWrapButton(onToggle){
-  const btn = document.createElement("button"); btn.type = "button"; btn.className = "text-edit-btn";
+  const btn = document.createElement("button"); btn.type = "button"; btn.className = "text-edit-btn text-tool";
+  setTextBarIcon(btn, "wrapText", "줄바꿈");
   const sync = () => {
     const on = textWrapEnabled();
-    btn.textContent = on ? "줄바꿈 끔" : "줄바꿈";
+    setTextBarLabel(btn, on ? "줄바꿈 끔" : "줄바꿈");
     btn.setAttribute("aria-pressed", on ? "true" : "false");
     btn.title = on
       ? "긴 줄을 화면 폭에서 끊어 보는 중 — 끄면 원래대로 가로로 이어져요"
@@ -1102,11 +1175,12 @@ async function renderCode(file, host, ext, profile, runCtx){
     if (!ext || ["txt","text","log","srt","vtt","smi","rst","adoc","asciidoc","org","textile","wiki","mediawiki"].includes(ext)) return "plain";
     return "code";
   };
-  const attachSpellcheck = (editor, buttonHost, label) => {
+  const attachSpellcheck = (editor, buttonHost, label, before) => {
     if (!editor || !editor.ta || typeof MNKoreanSpellcheck === "undefined") return null;
     return MNKoreanSpellcheck.attach({
       textarea:editor.ta,
       buttonHost,
+      before,
       mode:spellModeForExt(),
       fileExt:ext,
       buttonClass:runnable ? "run-spellcheck" : "",
@@ -1209,6 +1283,237 @@ async function renderCode(file, host, ext, profile, runCtx){
       if (ownerDoc && typeof activeId !== "undefined" && ownerDoc.id === activeId
           && typeof updateDocumentStatus === "function") updateDocumentStatus(ownerDoc);
     };
+    /* ===== 텍스트 화면 틀 =====
+       보기·편집·미리보기가 같은 틀을 쓴다: [도구 막대] [진단 띠] [본문 | 정보 서랍] [상태 줄].
+       예전엔 보기↔편집마다 막대가 통째로 바뀌어 단추가 튀었다. 이제 단추 자리는 그대로 두고,
+       편집에서만 되는 단추(줄 정리·맞춤법·저장)는 보기에서 누르면 편집으로 넘어가 그 일을 이어서 한다. */
+    const sourceEncoding = ownerDoc && ownerDoc.textEncoding;
+    const EOL_NAMES = { CRLF:"CRLF (Windows)", LF:"LF (Linux·Mac)", CR:"CR (옛 Mac)" };
+    const mountTextFrame = (mode, opts = {}) => {
+      const shell = document.createElement("div"); shell.className = "text-shell is-" + mode;
+      const bar = document.createElement("div");
+      bar.className = mode === "edit" ? "run-bar text-edit-bar text-bar" : "text-view-bar text-bar";
+      const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = (ownerDoc && ownerDoc.name) || saveName;
+      bar.appendChild(name);
+      const go = Object.assign({ preview: () => showPreview(), view: () => showView(), edit: () => showEdit() }, opts.go || {});
+      // 편집 화면으로 넘어간 뒤 그 화면의 단추로 하던 일을 잇는다(showEdit 은 한 번에 그린다).
+      const editThen = (after) => { go.edit(); if (viewMode === "edit" && after) after(); };
+
+      // 화면 고르기 — 미리보기가 있는 문서(HTML·마크다운)는 미리보기·소스·편집 세 칸, 나머지는 보기·편집 두 칸.
+      const seg = document.createElement("div"); seg.className = "text-mode-seg";
+      seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "화면");
+      const addSeg = (key, icon, label, title, extraClass) => {
+        const b = document.createElement("button"); b.type = "button";
+        b.className = "text-edit-btn text-mode-btn" + (extraClass ? " " + extraClass : "");
+        if (typeof window.setUiIcon === "function") window.setUiIcon(b, icon);
+        const text = document.createElement("span"); text.className = "text-mode-label"; text.textContent = label;
+        b.appendChild(text);                     // 이 칸은 글자도 보인다 — 지금 어느 화면인지 바로 읽히게
+        b.title = title;
+        const on = key === mode;
+        b.classList.toggle("is-on", on); b.setAttribute("aria-pressed", on ? "true" : "false");
+        b.addEventListener("click", () => { if (key !== mode) go[key](); });
+        seg.appendChild(b);
+        return b;
+      };
+      if (isHtml || isMd){
+        addSeg("preview", "view", "미리보기", isMd ? "마크다운을 문서 모양으로 렌더링해 보기" : "HTML을 실제 페이지로 렌더링해 보기");
+        addSeg("view", "code", "소스", isMd ? "마크다운 원문(소스) 보기" : "HTML 원문(소스) 보기", mode === "edit" ? "run-revert" : "");
+      } else {
+        addSeg("view", "view", "보기", "읽기 전용으로 보기 — 실수로 고칠 걱정 없이 읽어요", mode === "edit" ? "run-revert" : "");
+      }
+      if (canEdit) addSeg("edit", "pen", "편집", "이 파일을 편집하고 저장 — 본문을 더블클릭하거나 클릭 후 바로 입력해도 켜져요");
+      if (seg.children.length > 1) bar.appendChild(seg);
+
+      const tool = (cls, icon, label, title, onClick) => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "text-edit-btn text-tool" + (cls ? " " + cls : "");
+        if (title) b.title = title;
+        setTextBarIcon(b, icon, label);
+        if (onClick) b.addEventListener("click", onClick);
+        return b;
+      };
+      const sep = () => { const el = document.createElement("span"); el.className = "text-bar-sep"; el.setAttribute("aria-hidden", "true"); return el; };
+      const tools = document.createElement("div"); tools.className = "text-bar-tools";
+      tools.appendChild(tool("text-find-btn", "search", "찾기", "문서 안에서 찾기 (Ctrl+F)", () => { if (typeof openDocFind === "function") openDocFind(); }));
+      const extras = document.createElement("span"); extras.className = "text-bar-extras";   // 화면마다 덧붙는 단추(JSON 정렬·트리·변환)
+      tools.appendChild(extras);
+      if (canEdit){
+        if (mode === "edit" && opts.editor) tools.appendChild(buildLineTidyMenu(() => opts.editor));
+        else tools.appendChild(tool("text-tidy-proxy", "lineTidy", "줄 정리", "정렬·중복 삭제·번호 매기기 — 편집 화면으로 넘어가 메뉴를 열어요",
+          () => editThen(() => { const menu = host.querySelector(".text-bar .text-tidy-menu"); if (menu) menu.open = true; })));
+      }
+      // 줄바꿈은 편집·읽기 화면이 같은 설정을 쓴다. 미리보기·트리에는 줄 개념이 없어 잠근다.
+      const wrapBtn = buildWrapButton((on) => { if (opts.onWrap) opts.onWrap(on); });
+      if (opts.noLines) wrapBtn.disabled = true;
+      tools.appendChild(wrapBtn);
+      tools.appendChild(sep());
+      const fontDown = tool("text-font-btn", "textSmaller", "글자 작게", "글자 작게 (Ctrl+−)", () => bumpCodeFont(-1, ownerDoc || host));
+      const fontUp = tool("text-font-btn", "textLarger", "글자 크게", "글자 크게 (Ctrl++)", () => bumpCodeFont(1, ownerDoc || host));
+      const fontPick = buildCodeFontPicker("이 파일 글꼴 (고정폭 · 가변폭 · 손글씨)", ownerDoc || host);
+      if (opts.noLines){
+        fontDown.disabled = fontUp.disabled = true;
+        const select = fontPick.querySelector("select"); if (select) select.disabled = true;
+      }
+      tools.append(fontDown, fontUp, fontPick);
+      let saveBtn = null;
+      if (canEdit){
+        tools.appendChild(sep());
+        if (mode !== "edit") tools.appendChild(tool("text-spell-proxy", "spellcheck", "맞춤법", "오프라인 한국어 맞춤법 검사 — 편집 화면으로 넘어가 검사해요",
+          () => editThen(() => { const b = host.querySelector(".text-bar .spellcheck-trigger"); if (b) b.click(); })));
+        saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.textContent = "저장";
+        if (mode === "edit"){
+          saveBtn.className = "run-save text-save";
+          saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "파일 저장";
+        } else {
+          // 보기 화면엔 .run-save 를 두지 않는다 — 상단 배지가 그 단추로 '저장할 수 있는 화면'을 가린다.
+          // 편집하다 보기로 돌아온 저장 안 된 내용만 이 단추로 저장한다(편집 화면의 저장을 그대로 탄다).
+          saveBtn.className = "text-save text-view-save";
+          saveBtn.title = "저장 — 편집한 내용을 파일에 써요";
+          saveBtn.disabled = !(ownerDoc && ownerDoc.hasUnsavedEdits);
+          saveBtn.addEventListener("click", () => editThen(() => { const b = host.querySelector(".text-bar .run-save"); if (b) b.click(); }));
+        }
+        if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
+        tools.appendChild(saveBtn);
+      }
+      let syncDrawer = () => {};
+      const drawerBtn = opts.noDrawer ? null : tool("text-drawer-btn", "panelRight", "정보 서랍", "문서 정보·개요 서랍 열기/닫기", () => {
+        setTextDrawerOn(!_textDrawerOn); syncDrawer();
+      });
+      if (drawerBtn){ tools.appendChild(sep()); tools.appendChild(drawerBtn); }
+      bar.appendChild(tools);
+
+      const body = document.createElement("div"); body.className = "text-body";
+      const main = document.createElement("div"); main.className = "text-main";
+      body.appendChild(main);
+      const status = document.createElement("div"); status.className = "text-status";
+      shell.append(bar, body, status);
+      host.appendChild(shell);
+
+      // ── 상태 줄: 왼쪽은 분량, 오른쪽은 커서 자리·저장 상태·인코딩·줄 끝
+      const n = (v) => v.toLocaleString();
+      const statsEl = document.createElement("span"); statsEl.className = "text-edit-stats";
+      const right = document.createElement("span"); right.className = "text-status-right";
+      const caretEl = document.createElement("span"); caretEl.className = "text-status-caret"; caretEl.hidden = true;
+      const stateEl = opts.stateEl || document.createElement("span");
+      stateEl.classList.add("text-status-state");
+      if (!opts.stateEl){
+        if (!canEdit) stateEl.textContent = "읽기 전용";
+        else if (ownerDoc && ownerDoc.hasUnsavedEdits) stateEl.textContent = "저장 안 됨";
+      }
+      const eolName = { crlf:"CRLF", cr:"CR", lf:"LF" }[(ownerDoc && ownerDoc.textEol) || "lf"] || "LF";
+      const encEl = document.createElement("span"); encEl.className = "text-status-enc";
+      const encLabel = sourceEncoding && !sourceEncoding.empty ? (sourceEncoding.shortLabel || sourceEncoding.label) : "UTF-8";
+      encEl.textContent = encLabel + (sourceEncoding && sourceEncoding.bom ? " BOM" : "");
+      encEl.title = "인코딩: " + ((sourceEncoding && sourceEncoding.label) || "UTF-8");
+      const eolEl = document.createElement("span"); eolEl.className = "text-status-eol"; eolEl.textContent = eolName;
+      eolEl.title = "줄 끝: " + EOL_NAMES[eolName] + " — 저장해도 그대로 둬요";
+      right.append(caretEl, stateEl);
+      for (const note of opts.notes || []) right.appendChild(note);
+      right.append(encEl, eolEl);
+      status.append(statsEl, right);
+
+      // ── 정보 서랍: 정보(분량·커서·인코딩·크기) / 개요(제목 목록)
+      let drawer = null, renderDrawer = () => {}, last = null, focusLineFn = opts.focusLine || null;
+      syncDrawer = () => {
+        const on = !!drawer && _textDrawerOn;
+        shell.classList.toggle("has-drawer", on);
+        if (drawer) drawer.hidden = !on;
+        if (drawerBtn) drawerBtn.setAttribute("aria-pressed", on ? "true" : "false");
+        if (on) renderDrawer();
+      };
+      if (!opts.noDrawer){
+        drawer = document.createElement("aside"); drawer.className = "text-drawer"; drawer.setAttribute("aria-label", "문서 정보");
+        const inner = document.createElement("div"); inner.className = "text-drawer-in";
+        const tabs = document.createElement("div"); tabs.className = "text-drawer-tabs"; tabs.setAttribute("role", "tablist");
+        const tabBtn = (key, label) => {
+          const b = document.createElement("button"); b.type = "button"; b.className = "text-drawer-tab"; b.textContent = label;
+          b.setAttribute("role", "tab"); b.dataset.tab = key;
+          b.addEventListener("click", () => { setTextDrawerTab(key); renderDrawer(); });
+          tabs.appendChild(b); return b;
+        };
+        const tabInfo = tabBtn("info", "정보"), tabOutline = tabBtn("outline", "개요");
+        const pane = document.createElement("div"); pane.className = "text-drawer-pane"; pane.setAttribute("role", "tabpanel");
+        inner.append(tabs, pane); drawer.appendChild(inner); body.appendChild(drawer);
+        // 개요는 글 문서(마크다운·일반 텍스트)만 — 코드 파일의 # 은 주석이지 제목이 아니다.
+        const hasOutline = isMd || spellModeForExt() === "plain";
+        // 큰 파일(1MB+)을 편집하는 동안엔 타이핑이 멎을 때마다 통째로 다시 쪼개지 않는다 — 1.5초에 한 번만.
+        let outlineText = null, outlineItems = null, outlineAt = 0;
+        const outlineOf = (text) => {
+          if (text === outlineText) return outlineItems;
+          if (outlineItems && text.length > 1048576 && Date.now() - outlineAt < 1500) return outlineItems;
+          outlineText = text; outlineItems = textOutline(text); outlineAt = Date.now();
+          return outlineItems;
+        };
+        const kv = (label, value, cls) => {
+          const row = document.createElement("div"); row.className = "text-kv" + (cls ? " " + cls : "");
+          const k = document.createElement("span"); k.textContent = label;
+          const v = document.createElement("b"); v.textContent = value;
+          row.append(k, v); return row;
+        };
+        renderDrawer = () => {
+          if (!_textDrawerOn || !last) return;
+          const tab = _textDrawerTab;
+          tabInfo.setAttribute("aria-selected", tab === "info" ? "true" : "false");
+          tabOutline.setAttribute("aria-selected", tab === "outline" ? "true" : "false");
+          pane.innerHTML = "";
+          if (tab === "info"){
+            const st = last.stats;
+            const cap = document.createElement("p"); cap.className = "text-drawer-cap";
+            cap.textContent = last.selected ? "고른 부분" : "문서 전체";
+            const grid = document.createElement("div"); grid.className = "text-stat-grid";
+            for (const [value, label] of [[st.lines, "줄"], [st.words, "낱말"], [st.chars, "글자"], [st.nonSpace, "공백 뺀 글자"]]){
+              const cell = document.createElement("div"); cell.className = "text-stat";
+              const b = document.createElement("b"); b.textContent = n(value);
+              const small = document.createElement("small"); small.textContent = label;
+              cell.append(b, small); grid.appendChild(cell);
+            }
+            pane.append(cap, grid);
+            if (last.line) pane.appendChild(kv("커서", n(last.line) + "줄 " + n(last.column) + "칸"));
+            pane.appendChild(kv("인코딩", encEl.textContent));
+            pane.appendChild(kv("줄 끝", EOL_NAMES[eolName]));
+            // 저장할 때의 크기 — 저장은 UTF-8 로 하고, 줄 끝·BOM 은 원본대로 되살린다.
+            const bytes = utf8ByteLength(last.text || "", eolName === "CRLF") + (sourceEncoding && sourceEncoding.bom ? 3 : 0);
+            pane.appendChild(kv("크기", formatByteSize(bytes)));
+            const state = stateEl.textContent || (canEdit ? "저장됨" : "읽기 전용");
+            pane.appendChild(kv("상태", state, state === "저장 안 됨" ? "is-dirty" : ""));
+            return;
+          }
+          const items = hasOutline ? outlineOf(last.text || "") : null;
+          if (!items || !items.length){
+            const empty = document.createElement("p"); empty.className = "text-drawer-empty";
+            empty.textContent = items ? "제목이 없어요 — # 제목이나 밑줄(===, ---)을 친 줄이 여기에 모여요." : "이 파일 종류에는 개요가 없어요.";
+            pane.appendChild(empty); return;
+          }
+          const list = document.createElement("div"); list.className = "text-outline";
+          let current = -1;
+          if (last.line) items.forEach((it, i) => { if (it.line <= last.line) current = i; });
+          items.forEach((it, i) => {
+            const b = document.createElement("button"); b.type = "button";
+            b.className = "text-outline-item lv" + Math.min(it.level, 4) + (i === current ? " is-on" : "");
+            b.textContent = it.text; b.title = it.line + "번째 줄";
+            b.addEventListener("click", () => { if (focusLineFn) focusLineFn(it.line, i); });
+            list.appendChild(b);
+          });
+          pane.appendChild(list);
+        };
+      }
+      const update = (info) => {
+        last = info;
+        const st = info.stats;
+        statsEl.textContent = (info.selected ? "선택 " : "") + n(st.lines) + "줄 · " + n(st.words) + "낱말 · " + n(st.chars) + "자";
+        statsEl.title = "공백 뺀 글자 " + n(st.nonSpace) + "자" + (info.selected ? " (고른 부분 기준)" : "");
+        caretEl.hidden = !info.line;
+        if (info.line){
+          caretEl.textContent = info.line + ":" + info.column;
+          caretEl.title = "커서는 " + n(info.line) + "번째 줄 " + n(info.column) + "칸";
+        }
+        stateEl.classList.toggle("is-dirty", stateEl.textContent === "저장 안 됨");
+        if (drawer && _textDrawerOn) renderDrawer();
+      };
+      syncDrawer();
+      return { shell, bar, extras, main, status, saveBtn, update,
+        setFocusLine: (fn) => { focusLineFn = fn; } };
+    };
+
     const showView = () => {
       teardownActive(); host.innerHTML = ""; if (ownerDoc) ownerDoc.codeEditor = null;
       refreshSaveBadge();
@@ -1218,82 +1523,61 @@ async function renderCode(file, host, ext, profile, runCtx){
       const openEditFromView = () => { if (enterEditAtView) enterEditAtView(); else showEdit(); };
       // 내용 검색 등에서 줄 이동이 예약돼 있으면 줄번호가 있는 코드 보기로 받는다.
       if (treeMode && ownerDoc && ownerDoc.pendingFocusLine) treeMode = false;
-      if (canEdit || jsonPretty || isHtml || isMd){
-        const bar = document.createElement("div"); bar.className = "text-view-bar";
-        const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = (ownerDoc && ownerDoc.name) || saveName;
-        bar.appendChild(name);
-        if (isHtml || isMd){
-          const previewBtn = document.createElement("button"); previewBtn.type = "button"; previewBtn.className = "text-edit-btn";
-          previewBtn.textContent = "미리보기";
-          previewBtn.title = isMd ? "마크다운을 문서 모양으로 렌더링해 보기" : "HTML을 실제 페이지로 렌더링해 보기";
-          previewBtn.addEventListener("click", () => showPreview());
-          bar.appendChild(previewBtn);
-        }
-        if (jsonPretty && !treeMode){
-          const prettyBtn = document.createElement("button"); prettyBtn.type = "button"; prettyBtn.className = "text-edit-btn";
-          prettyBtn.textContent = prettyText != null ? "원본대로" : "pretty";
-          prettyBtn.title = prettyText != null ? "저장된 원본 그대로 보기"
-            : "JSON을 들여쓰기로 정렬해 보기 (화면 표시만 바뀌고 파일은 그대로예요)";
-          prettyBtn.addEventListener("click", () => {
+      const frame = mountTextFrame("view", {
+        go: { edit: openEditFromView },          // 더블클릭과 같은 자리(보던 화면)에서 편집이 열린다
+        noLines: treeMode,                       // 트리 보기엔 줄 개념이 없다
+        onWrap: () => showView()                 // 읽기 화면에서도 같은 줄바꿈 설정을 쓴다 — 긴 줄을 읽으려고 편집을 켤 필요가 없게
+      });
+      const bar = frame.extras;
+      const extraBtn = (icon, label, title, onClick, pressed) => {
+        const b = document.createElement("button"); b.type = "button"; b.className = "text-edit-btn text-tool"; b.title = title;
+        setTextBarIcon(b, icon, label);
+        if (pressed != null) b.setAttribute("aria-pressed", pressed ? "true" : "false");
+        b.addEventListener("click", onClick);
+        return b;
+      };
+      if (jsonPretty && !treeMode){
+        bar.appendChild(extraBtn("indent", prettyText != null ? "원본대로" : "pretty",
+          prettyText != null ? "저장된 원본 그대로 보기" : "JSON을 들여쓰기로 정렬해 보기 (화면 표시만 바뀌고 파일은 그대로예요)", () => {
             if (prettyText != null){ prettyText = null; showView(); return; }
             const result = prettyPrintJsonText(currentText);
             if (!result.ok){ toast("JSON을 정렬하지 못했어요: " + result.error, 4000); return; }
             prettyText = result.text; showView();
-          });
-          bar.appendChild(prettyBtn);
-        }
-        if (jsonPretty){
-          const treeBtn = document.createElement("button"); treeBtn.type = "button"; treeBtn.className = "text-edit-btn";
-          treeBtn.textContent = treeMode ? "코드 보기" : "트리 보기";
-          treeBtn.title = treeMode ? "줄번호가 있는 코드 보기로 돌아가기"
-            : "접고 펼치는 트리로 JSON 구조 살펴보기 (화면 표시만 바뀌고 파일은 그대로예요)";
-          treeBtn.addEventListener("click", () => {
+          }, prettyText != null));
+      }
+      if (jsonPretty){
+        bar.appendChild(extraBtn("sitemap", treeMode ? "코드 보기" : "트리 보기",
+          treeMode ? "줄번호가 있는 코드 보기로 돌아가기" : "접고 펼치는 트리로 JSON 구조 살펴보기 (화면 표시만 바뀌고 파일은 그대로예요)", () => {
             if (treeMode){ treeMode = false; showView(); return; }
             if (treeDataFor !== currentText){
               try { treeData = JSON.parse(currentText); treeDataFor = currentText; }
               catch(e){ toast("JSON을 트리로 보지 못했어요: " + ((e && e.message) || e), 4000); return; }
             }
             treeMode = true; showView();
-          });
-          bar.appendChild(treeBtn);
-          if (treeMode){
-            const expandBtn = document.createElement("button"); expandBtn.type = "button"; expandBtn.className = "text-edit-btn";
-            expandBtn.textContent = "모두 펼치기";
-            expandBtn.title = "트리 전체를 펼쳐 보기 (구조가 아주 크면 일부까지만 펼쳐요)";
-            expandBtn.addEventListener("click", () => {
-              if (!treeEl || !treeEl.jtExpandAll) return;
-              if (!treeEl.jtExpandAll()) toast("구조가 커서 10,000개까지만 펼쳤어요. 필요한 가지를 눌러 이어서 보세요.", 3500);
-            });
-            const collapseBtn = document.createElement("button"); collapseBtn.type = "button"; collapseBtn.className = "text-edit-btn";
-            collapseBtn.textContent = "모두 접기";
-            collapseBtn.title = "처음처럼 최상위만 남기고 모두 접기";
-            collapseBtn.addEventListener("click", () => { if (treeEl && treeEl.jtCollapseAll) treeEl.jtCollapseAll(); });
-            bar.append(expandBtn, collapseBtn);
-          }
+          }, treeMode));
+        if (treeMode){
+          bar.appendChild(extraBtn("chevronDown", "모두 펼치기", "트리 전체를 펼쳐 보기 (구조가 아주 크면 일부까지만 펼쳐요)", () => {
+            if (!treeEl || !treeEl.jtExpandAll) return;
+            if (!treeEl.jtExpandAll()) toast("구조가 커서 10,000개까지만 펼쳤어요. 필요한 가지를 눌러 이어서 보세요.", 3500);
+          }));
+          bar.appendChild(extraBtn("chevronUp", "모두 접기", "처음처럼 최상위만 남기고 모두 접기", () => {
+            if (treeEl && treeEl.jtCollapseAll) treeEl.jtCollapseAll();
+          }));
         }
-        // 데이터 형식 파일에는 형식 변환 창을 여는 길을 붙인다(원본은 건드리지 않고 복사본만 만든다).
-        if (CONVERTIBLE_EXTS.has(ext) && typeof window.openDataConvert === "function"){
-          const convertBtn = document.createElement("button"); convertBtn.type = "button"; convertBtn.className = "text-edit-btn";
-          convertBtn.textContent = "🔄 변환";
-          convertBtn.title = "JSON·CSV·표·XML·마크다운 사이로 바꿔 보기 — 결과는 복사본으로만 나가요";
-          convertBtn.addEventListener("click", () => {
-            window.openDataConvert({ text:currentText, name:(ownerDoc && ownerDoc.name) || saveName, doc:ownerDoc });
-          });
-          bar.appendChild(convertBtn);
-        }
-        // 읽기 화면에서도 같은 줄바꿈 설정을 쓴다 — 긴 줄을 읽으려고 편집을 켤 필요가 없게. 트리 보기엔 줄 개념이 없어 뺀다.
-        if (!treeMode) bar.appendChild(buildWrapButton(() => showView()));
-        if (canEdit){
-          const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "text-edit-btn"; editBtn.textContent = "✎ 편집";
-          editBtn.title = "이 파일을 편집하고 저장 — 본문을 더블클릭하거나 클릭 후 바로 입력해도 켜져요";
-          editBtn.addEventListener("click", openEditFromView);   // 더블클릭과 같은 자리(보던 화면)에서 열린다
-          bar.appendChild(editBtn);
-        }
-        host.appendChild(bar);
       }
+      // 데이터 형식 파일에는 형식 변환 창을 여는 길을 붙인다(원본은 건드리지 않고 복사본만 만든다).
+      if (CONVERTIBLE_EXTS.has(ext) && typeof window.openDataConvert === "function"){
+        bar.appendChild(extraBtn("convert", "변환", "JSON·CSV·표·XML·마크다운 사이로 바꿔 보기 — 결과는 복사본으로만 나가요", () => {
+          window.openDataConvert({ text:currentText, name:(ownerDoc && ownerDoc.name) || saveName, doc:ownerDoc });
+        }));
+      }
+      // 보기 화면의 분량은 화면에 보이는 글 기준(pretty 면 정렬본) — 커서가 없으니 자리는 비운다.
+      const shownText = treeMode ? currentText : (prettyText != null ? prettyText : currentText);
+      frame.update({ stats: countTextStats(shownText), selected:false, line:0, column:0, text: shownText });
+      frame.setFocusLine((line) => { if (ownerDoc && ownerDoc.codeViewer && ownerDoc.codeViewer.focusLine) ownerDoc.codeViewer.focusLine(line); });
       if (treeMode){
         treeEl = buildJsonTreeView(treeData);
-        host.appendChild(treeEl);
+        frame.main.appendChild(treeEl);
         if (ownerDoc){
           // 트리에는 줄 개념이 없으므로, 줄 이동 요청이 오면 코드 보기로 전환한 뒤 넘긴다.
           ownerDoc.codeViewer = { focusLine: (line, opts) => { treeMode = false; showView();
@@ -1355,7 +1639,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       const jump = document.createElement("div"); jump.className = "readonly-jump-line"; jump.hidden = true; jump.setAttribute("aria-hidden", "true");
       const jumpWord = document.createElement("div"); jumpWord.className = "readonly-jump-word"; jumpWord.hidden = true; jumpWord.setAttribute("aria-hidden", "true");
       wrap.append(jump, jumpWord);
-      host.appendChild(wrap);
+      frame.main.appendChild(wrap);
       // 청크(가상 렌더) 모드에서 대상 줄의 실제 top 을 실측한다. 추정 줄높이(LINE_H)와 청크별 pre 패딩 때문에
       // 줄이 내려갈수록 누적 오차가 생겨 노란 바가 실제 줄과 어긋나던 문제를 없앤다. 비청크 모드는 null 반환(아래 추정식이 이미 정확).
       let focusForcedChunk = null;
@@ -1636,7 +1920,7 @@ async function renderCode(file, host, ext, profile, runCtx){
       // 줄 번호로 이동(Ctrl+G) — 보기 화면에도 편집기와 같은 창을 단다. 편집 모드로 넘어가지 않고 그 자리에서
       // 옮기므로, 편집이 잠긴 대용량 파일에서도 그대로 쓸 수 있다.
       const viewGoto = mountGotoLineBar({
-        mount: host, prepend: true, flow: true,
+        mount: frame.shell, prepend: true, flow: true,
         totalLines: () => lineN,
         snapshot: () => wrap.scrollTop,
         restore: (top) => { clearTimeout(viewJumpTimer); jump.hidden = true; jumpWord.hidden = true; wrap.scrollTop = top; },
@@ -1654,7 +1938,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         const roNext = document.createElement("button"); roNext.type = "button"; roNext.className = "text-edit-btn"; roNext.textContent = "↓"; roNext.title = "다음 (Enter)";
         const roClose = document.createElement("button"); roClose.type = "button"; roClose.className = "text-edit-btn"; roClose.textContent = "✕"; roClose.title = "닫기 (Esc)";
         roFind.append(roInput, roCount, roPrev, roNext, roClose);
-        host.insertBefore(roFind, host.firstChild);
+        frame.shell.insertBefore(roFind, frame.shell.firstChild);
         let roMatches = [], roIdx = -1, roHay = null;
         const roHit = document.createElement("div"); roHit.className = "ro-find-hit"; roHit.hidden = true; wrap.appendChild(roHit);
         const roCompute = () => {
@@ -1790,29 +2074,14 @@ async function renderCode(file, host, ext, profile, runCtx){
                                : buildCodeEditor(currentText, prof, editorOpts);
       activeEditor = editor;
       if (ownerDoc) ownerDoc.codeEditor = editor;
-      const bar = document.createElement("div"); bar.className = "run-bar text-edit-bar";
-      const saveBtn = document.createElement("button"); saveBtn.type = "button"; saveBtn.className = "run-save"; saveBtn.textContent = "저장";
-      saveBtn.dataset.shortcutAction = "saveCurrent"; saveBtn.dataset.shortcutTitle = "파일 저장";
-      if (typeof window.setSaveIcon === "function") window.setSaveIcon(saveBtn);
-      const viewBtn = document.createElement("button"); viewBtn.type = "button"; viewBtn.className = "run-revert"; viewBtn.textContent = "보기로"; viewBtn.disabled = false;
-      const fontDown = document.createElement("button"); fontDown.type = "button"; fontDown.className = "run-font"; fontDown.textContent = "A−"; fontDown.title = "글자 작게 (Ctrl+−)";
-      const fontUp = document.createElement("button"); fontUp.type = "button"; fontUp.className = "run-font"; fontUp.textContent = "A+"; fontUp.title = "글자 크게 (Ctrl++)";
-      const tidyMenu = buildLineTidyMenu(() => editor);
-      // 줄바꿈은 편집·읽기 화면이 같은 설정을 쓴다 — 편집기에 바로 걸고, 보기로 돌아가도 그대로 이어진다.
-      const wrapBtn = buildWrapButton((on) => { if (editor.setWrap) editor.setWrap(on); editor.ta.focus(); });
-      if (editor.setWrap) editor.setWrap(textWrapEnabled());
-      fontDown.addEventListener("click", () => bumpCodeFont(-1, ownerDoc || host)); fontUp.addEventListener("click", () => bumpCodeFont(1, ownerDoc || host));
       const status = document.createElement("span"); status.className = "run-status";
-      const fontPick = buildCodeFontPicker("이 파일 글꼴 (고정폭 · 가변폭 · 손글씨)", ownerDoc || host);
-      bar.append(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, fontPick, status);
-      attachTextStats(editor, bar, null);      // 상태 문구 다음 — 왼쪽 묶음(저장 상태·문서 정보)의 끝
-      attachSpellcheck(editor, bar, saveName);
+      const notes = [];
       // 대용량 가벼운 편집 모드 안내 — 왜 강조·완성이 없는지 사용자에게 알린다(저장은 정상).
       if (lightEdit){
         const liteNote = document.createElement("span"); liteNote.className = "text-edit-encnote";
         liteNote.textContent = "가벼운 편집 (대용량 · 강조·자동완성 없음)";
         liteNote.title = "1MB가 넘거나 아주 긴 줄이 있는 파일이라, 편집이 멈추지 않도록 구문 강조와 코드 지능을 끈 채로 열었어요. 저장은 그대로 됩니다.";
-        bar.appendChild(liteNote);
+        notes.push(liteNote);
       }
       // 원본이 UTF-8 이 아니면 저장 시 UTF-8 로 바뀜을 알린다(개행·BOM 은 원본 유지).
       const enc0 = ownerDoc && ownerDoc.textEncoding;
@@ -1820,8 +2089,23 @@ async function renderCode(file, host, ext, profile, runCtx){
         const encNote = document.createElement("span"); encNote.className = "text-edit-encnote";
         encNote.textContent = "원본 " + (enc0.shortLabel || enc0.label) + " → 저장 시 UTF-8";
         encNote.title = "이 파일은 " + enc0.label + " 인코딩이에요. 저장하면 UTF-8 로 바뀝니다(개행 문자는 원본 유지).";
-        bar.appendChild(encNote);
+        notes.push(encNote);
       }
+      const frame = mountTextFrame("edit", {
+        editor, stateEl: status, notes,
+        go: {
+          view: () => { currentText = editor.getValue(); captureEditAnchor(); showView(); },   // 편집하던 줄이 같은 높이에 남는다
+          preview: () => { currentText = editor.getValue(); showPreview(); }
+        },
+        // 줄바꿈은 편집·읽기 화면이 같은 설정을 쓴다 — 편집기에 바로 걸고, 보기로 돌아가도 그대로 이어진다.
+        onWrap: (on) => { if (editor.setWrap) editor.setWrap(on); editor.ta.focus(); },
+        focusLine: (line) => { if (typeof editor.focusLine === "function") editor.focusLine(line); }
+      });
+      const bar = frame.bar, saveBtn = frame.saveBtn;
+      if (editor.setWrap) editor.setWrap(textWrapEnabled());
+      const textStats = attachTextStats(editor, frame.update);   // 상태 줄·정보 서랍의 분량과 커서 자리
+      const spell = attachSpellcheck(editor, saveBtn.parentNode, saveName, saveBtn);
+      if (spell && spell.button){ spell.button.classList.add("text-tool"); setTextBarIcon(spell.button, "spellcheck", "맞춤법"); }
       /* 구조 진단 띠(JSON·XML·YAML) — 도구막대가 아니라 편집기 바로 위, 편집기와 같은 폭으로 놓는다.
          도구막대에 두면 문구 길이에 따라 버튼이 다음 줄로 접히고(.run-bar 는 flex-wrap 이라 축소보다
          줄바꿈이 먼저다), 도구막대에 짧은 배지를 따로 두면 이 띠와 같은 말을 두 번 하게 된다.
@@ -1837,7 +2121,7 @@ async function renderCode(file, host, ext, profile, runCtx){
         editor.focusLine(diagLine);
       });
       diagBar.append(diagText, diagGo);
-      host.appendChild(bar); host.appendChild(diagBar); host.appendChild(editor.host);
+      frame.shell.insertBefore(diagBar, frame.main.parentNode); frame.main.appendChild(editor.host);
       if (typeof syncShortcutHints === "function") syncShortcutHints(bar);
       registerEditorFont(editor.host, ownerDoc || host);
       let diagTimer = 0;
@@ -1881,6 +2165,7 @@ async function renderCode(file, host, ext, profile, runCtx){
             currentText = latest;
             status.textContent = dirty ? "저장 안 됨" : "저장됨";
             markDocumentDirty(ownerDoc, dirty);
+            if (textStats) textStats.refresh();
             persistTextDraft();
             setTextAutosaveState("");
             ownerDoc._textAutosaveFailureNotified = false;
@@ -1957,6 +2242,7 @@ async function renderCode(file, host, ext, profile, runCtx){
             currentText = latest;
             status.textContent = dirty ? "저장 안 됨" : "저장됨";
             markDocumentDirty(ownerDoc, dirty);
+            if (textStats) textStats.refresh();
             ownerDoc._textAutosaveFailureNotified = false;
             persistTextDraft();
             if (dirty) scheduleTextAutosave();
@@ -1964,7 +2250,6 @@ async function renderCode(file, host, ext, profile, runCtx){
         }
         finally { saveBtn.disabled = false; }
       });
-      viewBtn.addEventListener("click", () => { currentText = editor.getValue(); if (!isMd) captureEditAnchor(); (isMd ? showPreview : showView)(); });   // 마크다운은 편집 → 미리보기로 복귀
       requestAnimationFrame(() => editor.ta.focus());
       refreshSaveBadge();
     };
@@ -1977,26 +2262,23 @@ async function renderCode(file, host, ext, profile, runCtx){
       refreshSaveBadge();
       viewMode = "preview"; openReadonlyFind = null; openReadonlyGoto = null;
       if (ownerDoc){ ownerDoc.codeViewer = null; ownerDoc.codeEditor = null; }
-      const bar = document.createElement("div"); bar.className = "text-view-bar";
-      const name = document.createElement("span"); name.className = "text-view-name"; name.textContent = (ownerDoc && ownerDoc.name) || saveName;
-      const srcBtn = document.createElement("button"); srcBtn.type = "button"; srcBtn.className = "text-edit-btn";
-      srcBtn.textContent = "소스코드"; srcBtn.title = isMd ? "마크다운 원문(소스) 보기" : "HTML 원문(소스) 보기";
-      srcBtn.addEventListener("click", () => showView());
-      bar.append(name, srcBtn);
-      if (isMd && canEdit){
-        const editBtn = document.createElement("button"); editBtn.type = "button"; editBtn.className = "text-edit-btn"; editBtn.textContent = "✎ 편집";
-        editBtn.title = "이 파일을 편집하고 저장";
-        editBtn.addEventListener("click", showEdit);
-        bar.appendChild(editBtn);
-      }
-      host.appendChild(bar);
+      // 미리보기에는 줄 개념이 없어 줄바꿈·글자 크기는 잠그고, 개요는 렌더된 제목으로 옮겨 간다(HTML 은 서랍 없음).
+      const frame = mountTextFrame("preview", { noLines: true, noDrawer: !isMd });
+      frame.update({ stats: countTextStats(currentText), selected:false, line:0, column:0, text: currentText });
       if (isMd){
         const wrap = document.createElement("article");
         wrap.className = "md-host";
         wrap.innerHTML = markdownToHtml(currentText, { allowHtml: true });
-        host.appendChild(wrap);
+        frame.main.appendChild(wrap);
+        frame.setFocusLine((line, index) => {
+          const heads = wrap.querySelectorAll("h1,h2,h3,h4,h5,h6");
+          const target = heads[index];
+          if (!target) return;
+          target.scrollIntoView({ block: "start", behavior: "smooth" });
+          target.classList.remove("text-outline-flash"); void target.offsetWidth; target.classList.add("text-outline-flash");
+        });
       } else {
-        renderHtmlFile(file, host, effectiveRunCtx);
+        renderHtmlFile(file, frame.main, effectiveRunCtx);
       }
     };
     // 사이드바 본문 검색 결과 클릭 → 미리보기 화면에서 일치 글자로 스크롤+하이라이트

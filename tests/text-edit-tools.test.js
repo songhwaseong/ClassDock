@@ -56,8 +56,9 @@ test("줄 정리 메뉴는 도구막대에 접혀 들어가고 모든 항목이 
   assert.ok(items.length >= 10);
 
   // 도구막대에는 버튼 하나(줄 정리)로만 나오고, 예전 '중복 줄 삭제' 단독 버튼은 그 안으로 들어갔다.
-  assert.match(viewer, /const tidyMenu = buildLineTidyMenu\(\(\) => editor\);/);
-  assert.match(viewer, /bar\.append\(saveBtn, viewBtn, tidyMenu, wrapBtn, fontDown, fontUp, fontPick, status\);/);
+  // 막대는 보기·편집이 같은 틀(mountTextFrame)에서 만든다 — 편집 화면은 편집기를 넘겨 진짜 메뉴를 단다.
+  assert.match(viewer, /if \(mode === "edit" && opts\.editor\) tools\.appendChild\(buildLineTidyMenu\(\(\) => opts\.editor\)\);/);
+  assert.match(viewer, /const frame = mountTextFrame\("edit", \{\s*editor, stateEl: status, notes,/);
   assert.ok(!/dedupeBtn/.test(viewer.slice(viewer.indexOf("const showEdit"), viewer.indexOf("const showPreview"))),
     "편집 도구막대에 중복 줄 삭제 단독 버튼이 남아 있으면 안 된다");
 
@@ -96,7 +97,9 @@ test("줄바꿈은 줄 높이로 자리를 잡는 겹침 층을 내리고 편집
   assert.match(viewer, /localStorage\.getItem\("mn\.textWrap"\) === "1"/);
   assert.match(viewer, /if \(editor\.setWrap\) editor\.setWrap\(textWrapEnabled\(\)\);/);
   assert.match(viewer, /const longLine = \/\[\^\\n\]\{2000\}\/\.test\(viewText\) \|\| textWrapEnabled\(\);/);
-  assert.match(viewer, /if \(!treeMode\) bar\.appendChild\(buildWrapButton\(\(\) => showView\(\)\)\);/);
+  assert.match(viewer, /const wrapBtn = buildWrapButton\(\(on\) => \{ if \(opts\.onWrap\) opts\.onWrap\(on\); \}\);/);
+  // 읽기 화면은 다시 그려 접고, 트리 보기엔 줄 개념이 없어 잠근다.
+  assert.match(viewer, /noLines: treeMode,[^\n]*\n\s*onWrap: \(\) => showView\(\)/);
 });
 
 test("문서 정보는 document 리스너를 남기지 않는다", () => {
@@ -105,6 +108,29 @@ test("문서 정보는 document 리스너를 남기지 않는다", () => {
   // selectionchange 는 document 에만 오므로, 쓰면 편집기를 닫아도 남아 샌다. textarea 위 이벤트로 대신한다.
   assert.ok(!/document\.addEventListener/.test(block));
   assert.match(block, /for \(const type of \["input", "keyup", "mouseup", "focus", "select"\]\) ta\.addEventListener/);
-  // 편집 도구막대 왼쪽 묶음(저장 상태 다음)에 붙는다 — 구조 진단은 도구막대를 떠나 편집기 위 띠로 갔다.
-  assert.match(viewer, /attachTextStats\(editor, bar, null\);/);
+  // 숫자는 아래 상태 줄과 정보 서랍이 함께 쓴다 — 구조 진단은 도구막대를 떠나 편집기 위 띠로 갔다.
+  assert.match(viewer, /const textStats = attachTextStats\(editor, frame\.update\);/);
+});
+
+test("정보 서랍 개요는 # 제목과 밑줄 제목을 모으고 코드 울타리 안은 건너뛴다", () => {
+  const start = viewer.indexOf("function textOutline");
+  const end = viewer.indexOf("function formatByteSize", start);
+  const sandbox = {};
+  vm.runInNewContext(viewer.slice(start, end) + "; this.textOutline = textOutline; this.utf8ByteLength = utf8ByteLength;", sandbox);
+  const text = [
+    "수업 준비", "====",               // 1: 밑줄 제목(1단계)
+    "- 월: 복습", "---",              // 목록 줄은 제목이 아니다(--- 는 구분선)
+    "## 준비물 ##",                    // 5: # 제목, 닫는 # 은 뺀다
+    "```", "# 주석이지 제목 아님", "```",
+    "상담", "--",                      // 9: 밑줄 제목(2단계)
+    "#해시태그"                        // # 뒤에 띄어쓰기가 없으면 제목이 아니다
+  ].join("\n");
+  const items = JSON.parse(JSON.stringify(sandbox.textOutline(text)));
+  assert.deepEqual(items, [
+    { level:1, text:"수업 준비", line:1 },
+    { level:2, text:"준비물", line:5 },
+    { level:2, text:"상담", line:9 }
+  ]);
+  // 저장 크기는 UTF-8 바이트로 센다(한글 3바이트·이모지 4바이트).
+  assert.equal(sandbox.utf8ByteLength("a가😀"), 1 + 3 + 4);
 });

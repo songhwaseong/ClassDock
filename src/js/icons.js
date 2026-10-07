@@ -137,6 +137,11 @@
     ,cards: '<rect x="7" y="3.5" width="13" height="15" rx="2"/><path d="M4 7v11a2.5 2.5 0 0 0 2.5 2.5H15"/>'
     ,presentation: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/><path d="m10.5 7.5 4 2.5-4 2.5z"/>'
     ,grip: '<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>'
+    // 텍스트 화면 도구 막대 — 줄바꿈 보기·줄 정리 메뉴·오른쪽 정보 서랍·형식 변환
+    ,wrapText: '<path d="M4 6h16M4 12h13a3 3 0 0 1 0 6h-4"/><path d="m15 16-2 2 2 2M4 18h5"/>'
+    ,lineTidy: '<path d="M4 6h16M4 12h10M4 18h13"/><path d="m18 14 2 2-2 2"/>'
+    ,panelRight: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>'
+    ,convert: '<path d="M4 9h13l-3-3M20 15H7l3 3"/>'
   };
   window.uiIcon = function(name){
     const content = paths[name] || paths.code;

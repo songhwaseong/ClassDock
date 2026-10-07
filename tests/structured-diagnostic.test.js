@@ -152,7 +152,7 @@ test("JSON·YAML 오류에도 줄 번호와 한국어 풀이가 함께 붙는다
 });
 
 test("진단 띠는 도구막대와 편집기 사이에 놓이고, 도구막대에는 진단 배지를 두지 않는다", () => {
-  assert.match(viewer, /host\.appendChild\(bar\); host\.appendChild\(diagBar\); host\.appendChild\(editor\.host\)/);
+  assert.match(viewer, /frame\.shell\.insertBefore\(diagBar, frame\.main\.parentNode\); frame\.main\.appendChild\(editor\.host\);/);
   // 도구막대에 길이가 변하는 진단 문구를 다시 들이면 버튼 줄이 또 접힌다.
   assert.doesNotMatch(viewer, /text-edit-diag"/);
   assert.doesNotMatch(styles, /\.text-edit-diag\{/);
@@ -164,14 +164,16 @@ test("진단 띠는 도구막대와 편집기 사이에 놓이고, 도구막대�
 });
 
 test("편집 도구막대는 편집기·진단 띠와 같은 폭으로 가운데 맞춘다", () => {
-  // .run-bar 가 뒤에서 margin 을 덮어 도구막대만 왼쪽에 붙던 어긋남 — 특이도를 올려 막아 둔다.
-  assert.match(styles, /\.run-bar\.text-edit-bar\{[^}]*margin:0 auto 10px/);
-  const barWidth = styles.match(/\.run-bar\.text-edit-bar\{[^}]*max-width:(\d+)px/);
+  // 폭은 틀(.text-shell) 한 곳이 정하고, 막대·진단 띠·편집기는 그 안을 꽉 채운다.
+  // 저마다 max-width 를 두면 .run-bar 가 margin 을 덮거나 서랍이 열릴 때 막대만 어긋난다.
+  const shellWidth = styles.match(/\.text-shell\{[^}]*max-width:(\d+)px/);
   const hostWidth = styles.match(/\.code-host\{[^}]*max-width:(\d+)px/);
-  const barMatch = styles.match(/\.text-edit-diagbar\{[^}]*max-width:(\d+)px/);
-  assert.ok(barWidth && hostWidth && barMatch, "폭 규칙을 찾지 못했습니다");
-  assert.equal(barWidth[1], hostWidth[1]);
-  assert.equal(barMatch[1], hostWidth[1]);
+  assert.ok(shellWidth && hostWidth, "폭 규칙을 찾지 못했습니다");
+  assert.equal(shellWidth[1], hostWidth[1]);
+  assert.match(styles, /\.text-shell\{[^}]*margin:0 auto/);
+  assert.match(styles, /\.text-shell \.text-bar\{[^}]*max-width:none;margin:0 0 8px/);
+  assert.match(styles, /\.text-shell \.text-edit-diagbar\{max-width:none/);
+  assert.match(styles, /\.text-shell \.code-host,\.text-shell \.html-host\{max-width:none;margin:0\}/);
   // 파이썬·자바·JS 편집기는 줄맞춤 방식이 다르다 — 도구막대·경로·편집기를 .run-wrap 한 겹이 함께 가운데로
   // 모으므로 .run-bar 의 margin 이 무엇이든 어긋나지 않는다. 그 래퍼가 사라지면 같은 버그가 그쪽에도 생긴다.
   assert.match(styles, /\.run-wrap\{[^}]*margin:0 auto/);
