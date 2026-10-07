@@ -51,6 +51,13 @@ function studyFilterCards(cards, filter, now){
   if (filter === "new") return list.filter(card => card.result === "new");
   return [...list];
 }
+/* 오늘 복습 동그라미 — 오늘 끝낸 장수와 아직 남은 복습. '몰라요'로 답한 카드는 오늘 다시 보게 되므로
+   (due = 오늘) 끝낸 것이 아니라 남은 것으로 센다. 학습한 적 없는 새 카드도 남은 복습이다(필터 'due' 와 같은 규칙). */
+function studyTodayProgress(cards, now){
+  const today = studyToday(now), list = cards || [];
+  const done = list.filter(card => card.lastReviewed === today && card.due && card.due > today).length, left = studyFilterCards(list, "due", now).length;
+  return { done, left, total:done + left, ratio:done + left ? done / (done + left) : 0 };
+}
 function studyShuffle(items, random=Math.random){ const list = [...items]; for (let i = list.length - 1; i > 0; i--){ const j = Math.floor(random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; } return list; }
 function studyCsvEscape(value){ const text = String(value == null ? "" : value); return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text; }
 function studyCardsToCsv(cards){ return ["질문,정답,설명,태그,유형", ...(cards || []).map(card => [card.front, card.back, card.note, card.tags, card.type === "cloze" ? "빈칸" : "문답"].map(studyCsvEscape).join(","))].join("\r\n"); }
@@ -126,15 +133,31 @@ function mountStudyEditor(doc){
   const bar = document.createElement("div"); bar.className = "study-bar"; const titleInput = document.createElement("input"); titleInput.className = "study-title"; titleInput.value = model.title; titleInput.maxLength = 160; titleInput.placeholder = "암기장 제목";
   const addBtn = studyButton("카드", "새 암기 카드 추가", "study-btn study-primary", "plus"), undoBtn = studyButton("", "실행 취소", "study-btn", "undo"), redoBtn = studyButton("", "다시 실행", "study-btn", "redo");
   const search = document.createElement("input"); search.type = "search"; search.className = "study-search"; search.placeholder = "질문·정답·태그 검색";
-  const filter = document.createElement("select"); filter.className = "study-filter"; [["all","전체"],["due","오늘 복습"],["wrong","틀린 카드"],["hard","헷갈린 카드"],["new","새 카드"]].forEach(([value, label]) => { const option = document.createElement("option"); option.value = value; option.textContent = label; filter.appendChild(option); });
+  // 거르기는 고르개 대신 위쪽 숫자 타일이다(시안 A) — 누르면 목록과 학습 시작이 함께 그 카드만 다룬다.
+  const STUDY_TILES = [["all","전체"],["due","오늘 복습"],["wrong","틀린 카드"],["hard","헷갈린 카드"],["new","새 카드"]];
+  let filterValue = "all";
   let shuffleOn = false;                                   // 순서 섞기 — ⋯ 메뉴의 켬/끔 항목이다(도구막대 자리를 아끼려고 접었다)
-  const learnBtn = studyButton("학습 시작", "고른 카드로 암기 학습 시작", "study-btn study-primary", "play");
+  const learnBtn = studyButton("학습 시작", "고른 카드로 암기 학습 시작", "study-btn study-primary study-start", "play", "study-start-label");
+  const learnCount = document.createElement("span"); learnCount.className = "study-start-count"; learnBtn.append(learnCount);
   const saveBtn = studyButton("저장", "암기 카드 저장 (Ctrl+S)", "study-btn study-primary run-save", "save", "run-save-label");
   saveBtn.classList.add("study-ico", "save-ico");          // 그림만 — 글자 칸은 documents.js 가 갈아 끼우므로 남겨 두고 CSS 로 감춘다
   // CSV 들이기·내보내기는 자주 쓰지 않는데 글자가 길어 도구막대를 한 줄 더 밀어낸다 — ⋯ 로 접는다.
   const moreBtn = studyButton("", "더 보기 — CSV 들이기·내보내기·순서 섞기", "study-btn", "more");
-  bar.append(titleInput, addBtn, undoBtn, redoBtn, search, filter, learnBtn, saveBtn, moreBtn);
-  const summary = document.createElement("div"); summary.className = "study-summary"; const list = document.createElement("div"); list.className = "study-list";
+  const barSpacer = document.createElement("span"); barSpacer.className = "study-bar-spacer";
+  bar.append(titleInput, addBtn, undoBtn, redoBtn, barSpacer, search, saveBtn, moreBtn);
+  /* 위쪽 판(시안 A + E 의 동그라미): 오늘 복습 진행 동그라미 · 거르기 숫자 타일 · 큰 학습 시작 단추 */
+  const summary = document.createElement("div"); summary.className = "study-summary";
+  const ring = document.createElement("div"); ring.className = "study-ring"; ring.setAttribute("role", "img");
+  ring.innerHTML = '<svg viewBox="0 0 100 100" aria-hidden="true"><circle class="study-ring-track" cx="50" cy="50" r="42"/><circle class="study-ring-fill" cx="50" cy="50" r="42" pathLength="100" transform="rotate(-90 50 50)"/></svg><div class="study-ring-text"><strong></strong><small></small></div>';
+  const tiles = document.createElement("div"); tiles.className = "study-tiles";
+  const tileButtons = STUDY_TILES.map(([value, label]) => {
+    const tile = document.createElement("button"); tile.type = "button"; tile.className = "study-tile is-" + value; tile.dataset.filter = value;
+    const name = document.createElement("span"); name.className = "study-tile-name"; name.textContent = label;
+    const count = document.createElement("strong"); count.className = "study-tile-count";
+    tile.append(name, count); tile.onclick = () => { filterValue = value; render(); }; tiles.appendChild(tile); return tile;
+  });
+  summary.append(ring, tiles, learnBtn);
+  const list = document.createElement("div"); list.className = "study-list";
   const csvInput = document.createElement("input"); csvInput.type = "file"; csvInput.accept = ".csv,text/csv"; csvInput.hidden = true; root.append(bar, summary, list, csvInput);
   let selectedId = "", history = null, recoveryTimer = 0;
   const snapshot = () => JSON.stringify(model);
@@ -145,19 +168,39 @@ function mountStudyEditor(doc){
   const replaceModel = value => { const restored = studyDocParse(value); model.title = restored.title; model.cards = restored.cards; titleInput.value = model.title; if (selectedId && !model.cards.some(card => card.id === selectedId)) selectedId = ""; render(); touch(); };
   history = MNEditHistory.create({ capture:snapshot, isEqual:(a, b) => a === b, apply:replaceModel, onChange:() => { undoBtn.disabled = !history.canUndo(); redoBtn.disabled = !history.canRedo(); }, limit:STUDY_HISTORY_LIMIT }); history.reset(); doc._studyHistory = history;
 
+  // 지금 목록에 보이는 카드 = 고른 타일 + 찾는 말. 학습 시작도 이 카드들로 한다.
+  function visibleCards(){
+    const query = search.value.trim().toLowerCase();
+    return studyFilterCards(model.cards, filterValue).filter(card => !query || [card.front, card.back, card.note, card.tags].join(" ").toLowerCase().includes(query));
+  }
+  function renderSummary(visible){
+    const progress = studyTodayProgress(model.cards), percent = Math.round(progress.ratio * 100);
+    ring.querySelector(".study-ring-fill").style.strokeDasharray = `${percent} 100`;
+    ring.classList.toggle("is-done", progress.total > 0 && !progress.left);
+    const center = ring.querySelector("strong");
+    if (!progress.left && progress.total && typeof window.uiIcon === "function") center.innerHTML = window.uiIcon("check"); else center.textContent = String(progress.left);
+    ring.querySelector("small").textContent = progress.left ? "남은 복습" : progress.total ? "오늘 끝" : "카드 없음";
+    ring.title = `오늘 복습 ${progress.done} / ${progress.total}`; ring.setAttribute("aria-label", ring.title);
+    tileButtons.forEach(tile => { tile.querySelector(".study-tile-count").textContent = String(studyFilterCards(model.cards, tile.dataset.filter).length); tile.setAttribute("aria-pressed", String(tile.dataset.filter === filterValue)); });
+    learnCount.textContent = String(visible.length); learnBtn.disabled = !visible.length;
+  }
+
   function render(){
-    const query = search.value.trim().toLowerCase(), visible = model.cards.filter(card => !query || [card.front, card.back, card.note, card.tags].join(" ").toLowerCase().includes(query));
-    const counts = { again:model.cards.filter(card => card.result === "again").length, hard:model.cards.filter(card => card.result === "hard").length, due:studyFilterCards(model.cards, "due").length };
-    summary.innerHTML = `<strong>${model.cards.length}장</strong><span>오늘 복습 ${counts.due}</span><span>틀림 ${counts.again}</span><span>헷갈림 ${counts.hard}</span>`; list.innerHTML = "";
+    const query = search.value.trim().toLowerCase(), visible = visibleCards();
+    renderSummary(visible); list.innerHTML = "";
     visible.forEach((card, index) => {
-      const item = document.createElement("article"); item.className = "study-list-card" + (selectedId === card.id ? " is-selected" : ""); item.dataset.cardId = card.id;
+      const item = document.createElement("article"); item.className = "study-list-card is-" + card.result + (selectedId === card.id ? " is-selected" : ""); item.dataset.cardId = card.id;
       const stateLabel = card.result === "again" ? "틀림" : card.result === "hard" ? "헷갈림" : card.result === "good" ? "알아요" : "새 카드";
       item.innerHTML = `<div class="study-list-num">${index + 1}</div><div class="study-list-content"><div><span class="study-type">${card.type === "cloze" ? "빈칸" : "문답"}</span><span class="study-state is-${card.result}">${stateLabel}</span>${card.tags ? `<span class="study-tags"></span>` : ""}</div><h3></h3><p></p><small>${card.due ? "다음 복습 " + card.due : "아직 학습하지 않음"}</small></div><button type="button" class="study-card-edit" title="카드 수정" aria-label="카드 수정">${typeof window.uiIcon === "function" ? window.uiIcon("pen") : "수정"}</button>`;
       item.querySelector("h3").textContent = card.type === "cloze" ? studyClozeParts(card).question : card.front; item.querySelector("p").textContent = card.back || (card.type === "cloze" ? studyClozeParts(card).answer : "정답 없음"); if (card.tags) item.querySelector(".study-tags").textContent = card.tags;
       item.title = "클릭하면 이 카드부터 학습 화면으로 봅니다";
       item.onclick = event => { selectedId = card.id; if (event.target.closest(".study-card-edit")) openCardDialog(card.id); else startSession(visible.slice(index)); }; list.appendChild(item);
     });
-    if (!visible.length){ const empty = studyButton(query ? "검색 결과가 없습니다" : "＋ 첫 암기 카드를 만드세요", "카드 추가", "study-empty"); if (!query) empty.onclick = () => openCardDialog(); list.appendChild(empty); }
+    if (!visible.length){
+      const filtered = !query && model.cards.length && filterValue !== "all";
+      const empty = studyButton(query ? "검색 결과가 없습니다" : filtered ? "이 조건에 맞는 카드가 없습니다" : "＋ 첫 암기 카드를 만드세요", filtered ? "전체 카드 보기" : "카드 추가", "study-empty");
+      if (filtered) empty.onclick = () => { filterValue = "all"; render(); }; else if (!query) empty.onclick = () => openCardDialog(); list.appendChild(empty);
+    }
   }
   doc.studySelectCard = id => { const card = model.cards.find(item => item.id === id); if (!card) return false; selectedId = id; search.value = ""; render(); const el = list.querySelector(`[data-card-id="${CSS.escape(id)}"]`); if (el) el.scrollIntoView({ behavior:"smooth", block:"center" }); return true; };
 
@@ -191,7 +234,7 @@ function mountStudyEditor(doc){
   }
 
   function startSession(preset){
-    let deck = Array.isArray(preset) ? preset.slice() : studyFilterCards(model.cards, filter.value); if (!preset && shuffleOn) deck = studyShuffle(deck); if (!deck.length){ if (typeof toast === "function") toast("고른 조건에 학습할 카드가 없어요.", 2600); return; }
+    let deck = Array.isArray(preset) ? preset.slice() : visibleCards(); if (!preset && shuffleOn) deck = studyShuffle(deck); if (!deck.length){ if (typeof toast === "function") toast("고른 조건에 학습할 카드가 없어요.", 2600); return; }
     let index = 0, revealed = false, rated = 0; const overlay = document.createElement("div"); overlay.className = "study-session";
     overlay.innerHTML = '<div class="study-session-top"><span class="study-session-count"></span><div class="study-session-progress"><i></i></div><button type="button" class="study-session-close">끝내기</button></div><article class="study-session-card"><small></small><div class="study-session-image"></div><h2></h2><div class="study-session-answer" hidden><strong>정답</strong><p></p><aside></aside></div><button type="button" class="study-reveal">정답 보기</button><div class="study-ratings" hidden><button type="button" data-rate="again">몰라요</button><button type="button" data-rate="hard">헷갈려요</button><button type="button" data-rate="good">알아요</button></div></article><div class="study-session-done" hidden><h2>복습 완료</h2><p></p><button type="button">목록으로 돌아가기</button></div>';
     root.appendChild(overlay); const close = () => { window.removeEventListener("keydown", keys); overlay.remove(); render(); };
@@ -205,7 +248,7 @@ function mountStudyEditor(doc){
     const keys = event => { if (event.key === "Escape") close(); else if ((event.key === " " || event.key === "Enter") && !revealed){ event.preventDefault(); reveal(); } else if (revealed && ["1","2","3"].includes(event.key)){ event.preventDefault(); rate({ "1":"again", "2":"hard", "3":"good" }[event.key]); } };
     overlay.querySelector(".study-session-close").onclick = close; overlay.querySelector(".study-reveal").onclick = reveal; overlay.querySelectorAll("[data-rate]").forEach(button => button.onclick = () => rate(button.dataset.rate)); overlay.querySelector(".study-session-done button").onclick = close; window.addEventListener("keydown", keys); show();
   }
-  addBtn.onclick = () => openCardDialog(); undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.oninput = render; filter.onchange = render; learnBtn.onclick = () => startSession();
+  addBtn.onclick = () => openCardDialog(); undoBtn.onclick = () => history.undo(); redoBtn.onclick = () => history.redo(); search.oninput = render; learnBtn.onclick = () => startSession();
   titleInput.oninput = () => {
     model.title = titleInput.value;
     history.commitSoon(500);
@@ -260,7 +303,7 @@ function mountStudyEditor(doc){
 }
 
 if (typeof module !== "undefined" && module.exports){
-  module.exports = { STUDY_DOC_TYPE, STUDY_DOC_VERSION, studyNormalizeCard, studyDocEmpty, studyDocParse, studyDocSerialize,
+  module.exports = { STUDY_DOC_TYPE, STUDY_DOC_VERSION, studyTodayProgress, studyNormalizeCard, studyDocEmpty, studyDocParse, studyDocSerialize,
     studyClozeParts, studyToday, studyAddDays, studyRateCard, studyFilterCards, studyShuffle, studyCardsToCsv, studyCardsFromCsv, studyTemplateRows,
     studySearchText, studyDefaultTitle, studyScratchFileName };
 }

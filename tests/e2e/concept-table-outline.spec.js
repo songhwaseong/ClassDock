@@ -17,7 +17,7 @@ async function openConcept(page){
 }
 
 const openDialog = async page => {
-  await page.locator(".concept-bar button", { hasText: "표·개요" }).click();
+  await page.locator(".concept-rail button", { hasText: "표·개요" }).click();
   await expect(page.locator(".concept-io-form")).toBeVisible();
 };
 

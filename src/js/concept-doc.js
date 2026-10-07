@@ -664,6 +664,15 @@ async function conceptRowsFromFile(file){
 function conceptSafeName(value){ return String(value || "개념 관계도").replace(/[\\/:*?"<>|]+/g, "_").trim() || "개념 관계도"; }
 function conceptDownload(name, blob){ MNDownload.saveBlob(blob, name); }
 
+/* 그림만 보이는 도구 단추 — 글자는 .concept-tool-label 칸에 남겨 감춘다(시험·화면 읽기가 이름으로 찾는다).
+   이름은 aria-label 로, 설명은 원래 title 그대로 둔다. */
+function conceptIconButton(button, icon, label){
+  if (typeof window.uiIcon !== "function") return button;
+  button.innerHTML = window.uiIcon(icon);
+  const slot = document.createElement("span"); slot.className = "concept-tool-label"; slot.textContent = label; button.append(slot);
+  button.classList.add("concept-ico"); button.setAttribute("aria-label", label); if (!button.title) button.title = label;
+  return button;
+}
 function conceptButton(label, title, className){ const button = document.createElement("button"); button.type = "button"; button.className = className || "concept-btn"; button.textContent = label; if (title) button.title = title; return button; }
 function conceptModal(titleText, body){
   const modal = document.createElement("div"); modal.className = "concept-modal"; const card = document.createElement("div"); card.className = "concept-modal-card movable-card"; card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
@@ -690,13 +699,28 @@ function mountConceptEditor(doc){
   const edgeWeightBtn = conceptButton("강도 설정", "선택한 관계선의 강도를 한꺼번에 변경", "concept-edge-picked-weight");
   edgeWeightBtn.onclick = () => openEdgeWeightDialog();
   edgePicked.append(edgePickedCount, edgeWeightBtn, edgePickedClear);
-  // 알림은 도구막대 맨 끝에 둔다(나타났다 사라져도 다른 버튼이 밀리지 않는다).
-  bar.append(titleInput, addNodeBtn, addEdgeBtn, autoBtn, undoBtn, redoBtn, search, zoomTools, orderBtn, animationSelect, tableBtn, presentBtn, buildPresentBtn, printBtn, saveBtn, edgePicked);
+  /* 도구 배치(시안 C): 위 줄은 제목·찾기·되돌리기·인쇄·저장만, 만들기·정리·발표 도구는 왼쪽 세로 레일에
+     그림으로 세운다. 확대 단추는 관계도 오른쪽 아래에 띄운다 — 화면 안(viewport)이 아니라 그 곁에 두어야
+     단추를 눌러도 화면 끌기가 시작되지 않는다. 효과 고르기는 레일 칸 위에 투명한 select 를 덮어 고른다. */
+  [[addNodeBtn, "cardPlus", "개념 추가"], [addEdgeBtn, "relation", "관계 추가"], [autoBtn, "sitemap", "자동 정렬"], [tableBtn, "table", "표·개요"],
+    [orderBtn, "listNumbers", "발표 순서"], [presentBtn, "cards", "큰 카드"], [buildPresentBtn, "presentation", "전개 발표"],
+    [undoBtn, "undo", "실행 취소"], [redoBtn, "redo", "다시 실행"], [printBtn, "print", "인쇄"]].forEach(([button, icon, label]) => conceptIconButton(button, icon, label));
+  const animationTool = document.createElement("label"); animationTool.className = "concept-btn concept-ico concept-rail-select"; animationTool.title = "전개 발표 애니메이션";
+  if (typeof window.uiIcon === "function") animationTool.innerHTML = window.uiIcon("sparkles"); animationTool.appendChild(animationSelect);
+  const railGap = () => { const gap = document.createElement("span"); gap.className = "concept-rail-gap"; gap.setAttribute("aria-hidden", "true"); return gap; };
+  const rail = document.createElement("div"); rail.className = "concept-rail"; rail.setAttribute("role", "toolbar"); rail.setAttribute("aria-orientation", "vertical"); rail.setAttribute("aria-label", "관계도 도구");
+  const makeGap = railGap(), presentGap = railGap();
+  rail.append(addNodeBtn, addEdgeBtn, autoBtn, makeGap, tableBtn, orderBtn, animationTool, presentGap, presentBtn, buildPresentBtn);
+  const barSpacer = document.createElement("span"); barSpacer.className = "concept-bar-spacer";
+  // 알림은 찾기 칸 앞에 둔다(나타났다 사라져도 오른쪽 단추 자리는 그대로다).
+  bar.append(titleInput, barSpacer, edgePicked, search, undoBtn, redoBtn, printBtn, saveBtn);
   const viewport = document.createElement("div"); viewport.className = "concept-viewport"; viewport.tabIndex = 0;
   const stage = document.createElement("div"); stage.className = "concept-stage"; stage.style.width = CONCEPT_CANVAS_WIDTH + "px"; stage.style.height = CONCEPT_CANVAS_HEIGHT + "px";
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("concept-lines"); svg.setAttribute("viewBox", `0 0 ${CONCEPT_CANVAS_WIDTH} ${CONCEPT_CANVAS_HEIGHT}`);
   svg.innerHTML = '<defs><marker id="conceptArrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z"></path></marker></defs>';
-  const cards = document.createElement("div"); cards.className = "concept-cards"; stage.append(svg, cards); viewport.appendChild(stage); root.append(bar, viewport);
+  const cards = document.createElement("div"); cards.className = "concept-cards"; stage.append(svg, cards); viewport.appendChild(stage);
+  const canvasWrap = document.createElement("div"); canvasWrap.className = "concept-canvas"; canvasWrap.append(viewport, zoomTools);
+  const main = document.createElement("div"); main.className = "concept-main"; main.append(rail, canvasWrap); root.append(bar, main);
   let selectedId = "", hoverEdgeId = "", lastPick = "", history = null, recoveryTimer = 0, drag = null, previewTimer = 0, suppressCardClick = false, closeNodePreview = null, closeBuildPresentation = null, zoom = 1, panX = 0, panY = 0, panReady = false, glideTimer = 0;
 
   const selectedEdgeIds = new Set();   // Ctrl(⌘)+클릭으로 관계선을 여러 개 골라 둘 수 있다(고르기까지만 하고 한꺼번에 지우지는 않는다)

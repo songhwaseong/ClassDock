@@ -128,6 +128,14 @@
     ,unplug: '<path d="m3 21 3.4-3.4M21 3l-3.4 3.4"/><path d="m6.2 11.8 6 6-1.8 1.8a3.5 3.5 0 0 1-5 0l-1-1a3.5 3.5 0 0 1 0-5z"/><path d="m17.8 12.2-6-6 1.8-1.8a3.5 3.5 0 0 1 5 0l1 1a3.5 3.5 0 0 1 0 5z"/><path d="m7.7 13.3 2-2M10.7 16.3l2-2"/>'
     ,spellcheck: '<path d="m3 17 4.5-11 4.5 11M4.7 13h5.6"/><path d="m13.5 15 2.8 2.8L21 12"/>'
     ,pin: '<path d="M9 3.5h6l-1 5 3.5 3.5h-11L10 8.5z"/><path d="M12 12v8.5"/>'
+    // 개념 관계도 왼쪽 도구 레일 — 카드 더하기·두 카드 잇기·나무 정렬·번호 목록·반짝임·겹친 카드·발표 화면
+    ,cardPlus: '<rect x="3" y="4" width="14" height="10" rx="2"/><path d="M18.5 14v7M15 17.5h7"/>'
+    ,relation: '<rect x="2.5" y="4" width="7" height="6" rx="1.5"/><rect x="14.5" y="14" width="7" height="6" rx="1.5"/><path d="M6 10v3.5a3 3 0 0 0 3 3h5.5"/><path d="m12 14 2.5 2.5L12 19"/>'
+    ,sitemap: '<rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/>'
+    ,listNumbers: '<path d="M11 6h9M11 12h9M11 18h9"/><path d="M4 4.5 5.5 4v5"/><path d="M4 14.5c.5-1 2.5-1.2 2.5.3 0 1-2.5 2-2.5 3.2h2.6"/>'
+    ,sparkles: '<path d="M10 3.5 11.6 8 16 9.5l-4.4 1.6L10 15.5 8.4 11 4 9.5 8.4 8z"/><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8z"/>'
+    ,cards: '<rect x="7" y="3.5" width="13" height="15" rx="2"/><path d="M4 7v11a2.5 2.5 0 0 0 2.5 2.5H15"/>'
+    ,presentation: '<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M12 16v4M8 20h8"/><path d="m10.5 7.5 4 2.5-4 2.5z"/>'
     ,grip: '<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>'
   };
   window.uiIcon = function(name){
