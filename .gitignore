@@ -19,6 +19,9 @@ package-lock.json
 test-results/
 playwright-report/
 
+# UI 시안 이미지·프롬프트와 로컬 테스트 로그
+/output/
+
 # 로컬 백업 스크립트 (커밋 안 된 변경분 zip 만들기)
 backup-uncommitted.ps1
 backup-uncommitted.bat
