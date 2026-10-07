@@ -32,7 +32,8 @@ test("빈 곳 우클릭 → 특수문자로 누른 자리에 기호 글자를 �
   const picker = page.locator(".wb-symbol-picker");
 
   await page.mouse.click(stage.x + 300, stage.y + 220, { button:"right" });
-  await menu.locator(".wb-context-board button", { hasText:"특수문자" }).click();
+  await menu.locator(".wb-context-parent", { hasText:"삽입" }).click();
+  await menu.locator(".wb-context-insert button", { hasText:"특수문자" }).click();
   await expect(menu).toBeHidden();
   await expect(picker).toBeVisible();
 
@@ -49,7 +50,8 @@ test("빈 곳 우클릭 → 특수문자로 누른 자리에 기호 글자를 �
   expect(Math.abs(items[0].x - 300)).toBeLessThan(40);                // 누른 자리 근처
 
   await page.mouse.click(stage.x + 500, stage.y + 300, { button:"right" });
-  await menu.locator(".wb-context-board button", { hasText:"특수문자" }).click();
+  await menu.locator(".wb-context-parent", { hasText:"삽입" }).click();
+  await menu.locator(".wb-context-insert button", { hasText:"특수문자" }).click();
   await expect(picker.locator(".wb-symbol-tab.active")).toHaveText("화살표");   // 마지막으로 본 갈래를 기억
   await picker.locator(".wb-symbol-tab", { hasText:"최근" }).click();
   await expect(picker.locator(".wb-symbol-cell")).toHaveText(["→"]);

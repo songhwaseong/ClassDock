@@ -52,14 +52,15 @@ test("선택 항목 메뉴는 네 방향 레이어 이동을 제공하고 경계
 });
 
 test("빈 공간 메뉴는 삽입·배경·배율·집중 도구·전체 지우기를 기존 실행 경로로 연다", () => {
-  assert.match(source, /const contextBoardSection=makeContextSection\("보드 작업"/);
+  assert.match(source, /const contextInsertGroup=contextGroup\("삽입"/);
+  assert.match(source, /const contextViewGroup=contextGroup\("보기"/);
   assert.match(source, /contextAction\("이미지"[\s\S]{0,100}openImageFilePicker/);
   assert.match(source, /contextAction\("수학·과학"[\s\S]{0,120}toggleEducationPanel\(true\)/);
   assert.match(source, /contextAction\("배경"[\s\S]{0,100}toggleBackgroundPanel\(true\)/);
   assert.match(source, /contextAction\("100%"[\s\S]{0,100}resetView/);
   assert.match(source, /contextAction\("집중 도구"[\s\S]{0,120}toggleFocusPanel\(true\)/);
   assert.match(source, /contextAction\("전체 지우기"[\s\S]{0,140}confirmClearAll/);
-  assert.match(source, /contextBoardSection\.hidden=!!selected/);
+  assert.match(source, /showBoardContext\(!selected\)/);
 });
 
 test("이미지 선택창은 전용 picker와 명시적 이미지 형식을 우선하고 기존 click으로 대체한다", () => {

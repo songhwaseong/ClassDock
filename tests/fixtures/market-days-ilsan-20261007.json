@@ -1,0 +1,33 @@
+{
+  "body": {
+    "items": {
+      "item": [
+        {
+          "mrktNm": "일산시장",
+          "mrktType": "상설장",
+          "rdnmadr": "경기도 고양시 일산서구 일청로 12번길 9",
+          "lnmadr": "경기도 고양시 일산서구 일산동 617-20",
+          "mrktEstblCycle": "매일",
+          "latitude": "37.68562383",
+          "longitude": "126.7708323",
+          "storNumber": "88",
+          "trtmntPrdlst": "농산물+축산물+수산물+가공식품+의류+가정용품+음식점",
+          "useGcct": "",
+          "homepageUrl": "",
+          "pblicToiletYn": "Y",
+          "prkplceYn": "Y",
+          "estblYear": "1908",
+          "phoneNumber": "031-975-2232",
+          "referenceDate": "2025-11-10",
+          "insttCode": "B553077",
+          "insttNm": "소상공인시장진흥공단"
+        }
+      ]
+    },
+    "totalCount": 1
+  },
+  "header": {
+    "resultMsg": "NORMAL SERVICE.",
+    "resultCode": "00"
+  }
+}

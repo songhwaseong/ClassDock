@@ -154,6 +154,8 @@ for (const [label, repeat, mode] of [["일반 편집기", 1, "edit"], ["가벼�
     if (mode === "light") await page.locator("#content .text-edit-btn", { hasText: "편집" }).first().click();
     else if (mode === "edit") await page.locator("#content .code-host").first().dblclick();
     if (mode !== "view") await expect(ta(page)).toBeVisible();
+    // Ctrl+G 는 보기 화면이 붙으며 등록된다 — 파일 이름만 바뀐 때 누르면 가끔 아무 일도 없다.
+    else await expect(page.locator(".code-host-readonly")).toBeVisible();
     if (mode === "light") await expect(page.locator(".code-host-light")).toHaveCount(1);
     await page.keyboard.press("Control+g");
     await page.locator(".code-goto-input:visible").fill(String(target));

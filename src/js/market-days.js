@@ -4,6 +4,7 @@
    "2일+7일"·"5일+10일"·"2일+4일+7일+9일" 처럼 날짜 끝자리를 + 로 이은 꼴뿐이었다(10일 = 끝자리 0).
    그래서 장날은 '날짜 끝자리'로 가린다 — 2·7일장은 2·7·12·17·22·27일. 31일은 끝자리 1이라 1·6일장에 넣는다
    (시장마다 다르게 할 수 있어 안내 글에 적는다). 위도·경도가 빈 곳(16곳)은 지도에 못 찍고 개수만 알린다.
+   표준데이터에 없는 김포의 네 5일장과 일산시장의 빠진 장날은 지자체 공식 안내로 보완한다.
    목록은 갱신이 한 해 단위라 브라우저에 이레 동안 담아 두고 다시 쓴다. .map 문서에는 아무것도 쓰지 않는다. */
 const MNMarketDays = (() => {
   const CACHE_KEY = "mn.marketDays.v1";
@@ -53,6 +54,49 @@ const MNMarketDays = (() => {
   function parse(bodies){
     const list = [];
     for (const body of bodies) for (const row of rows(body).items) { const m = market(row); if (m.name) list.push(m); }
+    return list;
+  }
+  // 2026-10-07 전체 1,393줄에 김포의 네 5일장이 없다. 공식 안내의 길찾기
+  // 좌표를 사용하며 인근 상설시장(통진·양곡)과는 별도 시장으로 둔다.
+  const GIMPO_SOURCE = "https://www.gimpo.go.kr/culture/selectTourCntntsWebView.do?key=6874&tourNo=428";
+  const ILSAN_SOURCE = "https://www.goyang.go.kr/agr/agr04/agr04_3.jsp";
+  const EXTRA_MARKETS = [
+    { name:"김포5일장(북변시장)", cycle:"2일+7일", address:"경기도 김포시 북변동 274 (북변공영주차장)",
+      lat:37.628578, lng:126.7114383, sourceUrl:GIMPO_SOURCE,
+      aliases:["김포5일장", "김포오일장", "김포5일장(북변)", "김포5일장(북변시장)", "북변시장", "북변5일장", "북변오일장"] },
+    { name:"양곡5일장", cycle:"1일+6일", address:"경기도 김포시 양촌읍 양곡리 421-4",
+      lat:37.6558786, lng:126.623666, sourceUrl:"https://www.gimpo.go.kr/culture/selectTourCntntsWebView.do?key=6874&tourNo=776",
+      aliases:["양곡5일장", "양곡오일장"] },
+    { name:"마송5일장", cycle:"3일+8일", address:"경기도 김포시 통진읍 서암리 748-4 (통진공영주차장)",
+      lat:37.6938725, lng:126.6010875, sourceUrl:"https://www.gimpo.go.kr/culture/selectTourCntntsWebView.do?key=6874&tourNo=777",
+      aliases:["마송5일장", "마송오일장", "통진5일장"] },
+    { name:"하성5일장", cycle:"4일+9일", address:"경기도 김포시 하성면 마곡리 635-9",
+      lat:37.7191439, lng:126.6318435, sourceUrl:"https://www.gimpo.go.kr/culture/selectTourCntntsWebView.do?key=6874&tourNo=778",
+      aliases:["하성5일장", "하성오일장"] }
+  ];
+  function supplement(markets){
+    let list = markets.map(m => {
+      // 일산시장은 상설과 3·8일장을 함께 운영하나 API에는 '매일'만 있다.
+      if (!["일산시장", "일산전통시장"].includes(text(m.name).replace(/\s/g, "")) || !text(m.address).includes("고양")) return m;
+      return { ...m, type:"상설장+5일장", cycle:"3일+8일", digits:[3, 8], daily:true,
+        sourceUrl:ILSAN_SOURCE, sourceName:"고양시 일산5일장 안내", sourceNameEn:"Goyang City Ilsan Market" };
+    });
+    for (const extra of EXTRA_MARKETS){
+      const official = {
+        ...market({ mrktNm:extra.name, mrktType:"5일장", mrktEstblCycle:extra.cycle,
+          lnmadr:extra.address, latitude:extra.lat, longitude:extra.lng, phoneNumber:"031-980-5265" }),
+        sourceUrl:extra.sourceUrl, sourceName:"김포시 문화관광", sourceNameEn:"Gimpo City Tourism"
+      };
+      const matches = m => extra.aliases.includes(text(m.name).replace(/\s/g, ""))
+        && (text(m.address).includes("김포") || (m.lat != null && m.lng != null
+          && Math.abs(m.lat - official.lat) < .003 && Math.abs(m.lng - official.lng) < .003));
+      const existing = list.find(matches);
+      // API가 나중에 같은 장터를 제공해도 한 점만 남기고 품목·점포 수 등은 유지한다.
+      list = [...list.filter(m => !matches(m)), { ...official, ...existing,
+        name:official.name, type:official.type, cycle:official.cycle, digits:official.digits,
+        address:official.address, lat:official.lat, lng:official.lng, phone:official.phone,
+        sourceUrl:official.sourceUrl, sourceName:official.sourceName, sourceNameEn:official.sourceNameEn }];
+    }
     return list;
   }
   // 홈페이지 칸에는 "www.…"처럼 http 가 빠진 값도 있다. http(s) 로만 연다.
@@ -109,8 +153,8 @@ const MNMarketDays = (() => {
   }
   async function load({ signal, refresh = false } = {}){
     const saved = refresh ? null : readCache();
-    if (saved) return saved;
-    const markets = await loadAll({ signal });
+    if (saved) return { ...saved, markets:supplement(saved.markets) };
+    const markets = supplement(await loadAll({ signal }));
     const fetchedAt = Date.now();
     writeCache(markets, fetchedAt);
     return { fetchedAt, markets };
@@ -166,7 +210,11 @@ const MNMarketDays = (() => {
     const source = el("a", "", "출처: 전국전통시장표준데이터(공공데이터포털)");
     source.href = "https://www.data.go.kr/data/15012894/standard.do"; source.target = "_blank"; source.rel = "noopener noreferrer";
     const refresh = button("새로 받기", "map-market-refresh");
-    foot.append(source, document.createTextNode(" · "), refresh);
+    const extraSource = el("a", "", "보완: 김포시 문화관광");
+    extraSource.href = GIMPO_SOURCE; extraSource.target = "_blank"; extraSource.rel = "noopener noreferrer";
+    const ilsanSource = el("a", "", "고양시 일산5일장 안내");
+    ilsanSource.href = ILSAN_SOURCE; ilsanSource.target = "_blank"; ilsanSource.rel = "noopener noreferrer";
+    foot.append(source, document.createTextNode(" · "), extraSource, document.createTextNode(" · "), ilsanSource, document.createTextNode(" · "), refresh);
     panel.append(heading, tools, options, summary, list, status, note, foot);
     stage.appendChild(panel);
     L.DomEvent.disableClickPropagation(panel); L.DomEvent.disableScrollPropagation(panel);
@@ -188,7 +236,7 @@ const MNMarketDays = (() => {
       : Number(ymd.slice(5, 7)) + "월 " + dayOf(ymd) + "일(" + WEEK[weekday(ymd)] + ")";
     const selected = () => /^\d{4}-\d{2}-\d{2}$/.test(date.value) ? date.value : koreaToday();
     const opensOn = (m, ymd) => m.digits.length > 0 && isMarketDay(m.digits, dayOf(ymd));
-    const visible = (m, ymd) => m.lat != null && (opensOn(m, ymd) || (permanent.checked && !m.digits.length));
+    const visible = (m, ymd) => m.lat != null && (opensOn(m, ymd) || (permanent.checked && (!m.digits.length || m.daily)));
 
     function popupOf(m, ymd){
       const box = el("div", "map-market-popup");
@@ -216,6 +264,10 @@ const MNMarketDays = (() => {
       if (url){
         const link = el("a", "map-market-popup-link"); link.textContent = word("홈페이지", "Website");
         link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer"; box.append(link);
+      }
+      if (m.sourceUrl){
+        const link = el("a", "map-market-popup-link"); link.textContent = word("출처: " + m.sourceName, "Source: " + m.sourceNameEn);
+        link.href = m.sourceUrl; link.target = "_blank"; link.rel = "noopener noreferrer"; box.append(link);
       }
       return box;
     }
@@ -344,7 +396,7 @@ const MNMarketDays = (() => {
       isAvailable(){ return !toggle.disabled; },
       captureNote(){
         if (!shown) return "";
-        return [t("장날"), dateText(selected()), word("전국전통시장표준데이터", "Korea traditional market data")].join(" · ");
+        return [t("장날"), dateText(selected()), word("전국전통시장표준데이터 · 김포시 문화관광 · 고양시", "Korea traditional market data · Gimpo City Tourism · Goyang City")].join(" · ");
       },
       destroy(){
         destroyed = true; generation++; if (abort) abort.abort(); capability.abort(); clearTimeout(listTimer);
@@ -357,6 +409,6 @@ const MNMarketDays = (() => {
     return controller;
   }
 
-  return { mount, cycleDigits, isMarketDay, cycleLabel, rows, market, parse, siteUrl, koreaToday, addDays, nextMarketDay, loadAll, load, failureText, CACHE_KEY };
+  return { mount, cycleDigits, isMarketDay, cycleLabel, rows, market, parse, supplement, siteUrl, koreaToday, addDays, nextMarketDay, loadAll, load, failureText, CACHE_KEY };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = MNMarketDays;

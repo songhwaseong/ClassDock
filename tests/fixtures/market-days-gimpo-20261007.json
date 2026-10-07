@@ -1,0 +1,73 @@
+{
+  "header": {
+    "resultMsg": "NORMAL SERVICE.",
+    "resultCode": "00"
+  },
+  "body": {
+    "totalCount": 3,
+    "items": {
+      "item": [
+        {
+          "mrktNm": "통진시장",
+          "mrktType": "상설장",
+          "rdnmadr": "경기도 김포시 통진읍 서암로84번길 29",
+          "lnmadr": "경기도 김포시 통진읍 서암리 721-8",
+          "mrktEstblCycle": "매일",
+          "latitude": "37.69129373",
+          "longitude": "126.5997032",
+          "storNumber": "118",
+          "trtmntPrdlst": "농산물+축산물+가공식품+의류+신발+가정용품+음식점",
+          "useGcct": "",
+          "homepageUrl": "",
+          "pblicToiletYn": "N",
+          "prkplceYn": "N",
+          "estblYear": "2012",
+          "phoneNumber": "031-990-0520",
+          "referenceDate": "2025-11-10",
+          "insttCode": "B553077",
+          "insttNm": "소상공인시장진흥공단"
+        },
+        {
+          "mrktNm": "양곡시장",
+          "mrktType": "상설장",
+          "rdnmadr": "경기도 김포시 양촌읍 양곡1로 42-2",
+          "lnmadr": "경기도 김포시 양촌읍 양곡리 415-6",
+          "mrktEstblCycle": "매일",
+          "latitude": "37.65446014",
+          "longitude": "126.6238008",
+          "storNumber": "69",
+          "trtmntPrdlst": "농산물+축산물+수산물+가공식품+의류+신발+가정용품+음식점",
+          "useGcct": "",
+          "homepageUrl": "",
+          "pblicToiletYn": "Y",
+          "prkplceYn": "N",
+          "estblYear": "2013",
+          "phoneNumber": "031-984-5906",
+          "referenceDate": "2025-11-10",
+          "insttCode": "B553077",
+          "insttNm": "소상공인시장진흥공단"
+        },
+        {
+          "mrktNm": "양곡오라니장터시장",
+          "mrktType": "상설장",
+          "rdnmadr": "경기도 김포시 양촌읍 양곡1로56번길 13",
+          "lnmadr": "경기도 김포시 양촌읍 양곡리 423",
+          "mrktEstblCycle": "매일",
+          "latitude": "37.65616267",
+          "longitude": "126.6237015",
+          "storNumber": "70",
+          "trtmntPrdlst": "농산물+축산물+가공식품+의류+신발+가정용품+음식점",
+          "useGcct": "",
+          "homepageUrl": "",
+          "pblicToiletYn": "Y",
+          "prkplceYn": "Y",
+          "estblYear": "2016",
+          "phoneNumber": "031-984-5906",
+          "referenceDate": "2025-11-10",
+          "insttCode": "B553077",
+          "insttNm": "소상공인시장진흥공단"
+        }
+      ]
+    }
+  }
+}

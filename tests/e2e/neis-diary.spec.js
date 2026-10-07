@@ -130,7 +130,7 @@ test("학교를 고르면 달력에 학사일정, 날짜 줄에 급식·시간�
   await page.locator(".diary-text").fill("오늘은 체육 시간이 즐거웠다.");
   await strip.locator(".diary-school-insert").click();
   await expect(page.locator(".diary-text")).toHaveValue("오늘은 체육 시간이 즐거웠다.\n중식: 발아현미밥, 우렁된장찌개, 배추김치");
-  await expect(page.locator(".diary-status")).toContainText("저장 안 됨");
+  await expect(page.locator(".journal-save-status")).toContainText("저장 안 됨");
   // 고른 학교는 이 브라우저에 남는다(일기장 파일에는 없다).
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem("mn.neisSchool")))).toMatchObject({ code:"7010057", grade:"1", cls:"3" });
   const model = await page.evaluate(() => JSON.stringify(docs.find(d => d.kind === "diary").diary));

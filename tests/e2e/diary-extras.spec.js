@@ -142,6 +142,9 @@ test("소리 파일을 녹음 스티커로 붙이고, 재생 단추로 듣고, �
   await expect(sticker).toHaveClass(/is-playing/);
   await expect(sticker).not.toHaveClass(/is-playing/, { timeout:5000 });   // 0.6초 소리라 곧 끝난다
 
+  // 스티커 창은 붙인 뒤에도 열려 있고 종이 가운데의 새 스티커를 덮는다 — Esc 로 닫고 우클릭한다.
+  await art.locator(".diary-audio-record").press("Escape");
+  await expect(art).toBeHidden();
   await sticker.click({ button:"right" });
   await page.locator(".text-context-menu").getByText("이름표 붙이기…").click();
   await page.locator("#textInput").fill("생일 노래");
@@ -183,7 +186,7 @@ test("기념일을 넣으면 달력 아래에 D-n 으로 뜨고, 그 날 달력 
   await expect(page.locator(".diary-anniv-badge")).toContainText("엄마 생신");
   await expect(page.locator(".diary-anniv-badge")).toContainText("번째");
   await expect(page.locator(`.diary-cal-day[data-date="${soon}"]`)).toHaveClass(/has-anniv/);
-  await expect(page.locator(".diary-status")).toContainText("저장 안 됨");
+  await expect(page.locator(".journal-save-status")).toContainText("저장 안 됨");
   // 되돌리기 한 번이면 기념일이 빠진다
   await page.locator(".diary-undo-btn").click();
   await expect(page.locator(".diary-anniv-row")).toHaveCount(0);

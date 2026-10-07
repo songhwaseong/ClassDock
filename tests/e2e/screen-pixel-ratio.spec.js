@@ -67,8 +67,10 @@ for (const uiScale of [1, 1.25]){
     await expect(menu).toBeVisible();
     const m = await menu.boundingBox();
     expect(Math.abs(m.x - at.x)).toBeLessThan(3);
-    // 메뉴가 길어 세로는 화면 안으로 올려 붙인다 — 위 여백(6px, UI 크기만큼 커 보임) 자리에 딱 붙어야 한다.
-    expect(Math.abs(m.y - 6 * uiScale)).toBeLessThan(2);
+    // 세로도 커서 자리 — 아래로 넘치면 넘친 만큼만 올려 화면 안 여백(6px, UI 크기만큼 커 보임)에 맞춘다.
+    const margin = 6 * uiScale, viewH = page.viewportSize().height;
+    const expectedY = Math.max(margin, Math.min(at.y, viewH - m.height - margin));
+    expect(Math.abs(m.y - expectedY)).toBeLessThan(3);
     expect(errors).toEqual([]);
   });
 }

@@ -175,6 +175,8 @@
     "설정 → 연결의 '공공데이터포털'에 인증키를 넣어 주세요.": "Enter your data.go.kr key in Settings → Connections.",
     // 지도 장날(전국전통시장표준데이터) — market-days.js
     "장날": "Market days",
+    "보완: 김포시 문화관광": "Supplement: Gimpo City Tourism",
+    "고양시 일산5일장 안내": "Goyang City Ilsan Market",
     "하루 전": "Previous day",
     "하루 뒤": "Next day",
     "상설시장도 보기": "Also show daily markets",

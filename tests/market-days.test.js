@@ -10,6 +10,82 @@ const read = file => fs.readFileSync(path.join(__dirname, "..", file), "utf8");
 // 2026-10-04 실제 응답에서 갈래마다 한 줄씩 뽑은 것(전체 1,393곳 · 두 쪽째 뒤는 03).
 const sample = JSON.parse(read("tests/fixtures/market-days-20261004.json"));
 const nodata = JSON.parse(read("tests/fixtures/market-days-nodata-20261004.json"));
+const gimpo = JSON.parse(read("tests/fixtures/market-days-gimpo-20261007.json"));
+const ilsan = JSON.parse(read("tests/fixtures/market-days-ilsan-20261007.json"));
+
+test("표준데이터에 없는 김포5일장(북변시장)을 공식 안내로 보완한다", () => {
+  const api = days.parse([gimpo]);
+  assert.equal(api.length, 3);
+  assert.ok(api.every(m => !m.digits.length));
+  const list = days.supplement(api);
+  const bukbyeon = list.find(m => m.name === "김포5일장(북변시장)");
+  assert.equal(list.length, 7);
+  assert.deepEqual(bukbyeon.digits, [2, 7]);
+  assert.ok(days.isMarketDay(bukbyeon.digits, 7));
+  assert.ok(!days.isMarketDay(bukbyeon.digits, 8));
+  assert.equal(bukbyeon.lat, 37.628578);
+  assert.equal(bukbyeon.lng, 126.7114383);
+  assert.match(bukbyeon.address, /김포시 북변동 274/);
+  assert.match(bukbyeon.sourceUrl, /gimpo\.go\.kr/);
+  assert.equal(api.length, 3); // 원본과 인근 상설시장은 바꾸지 않는다.
+  assert.deepEqual(days.supplement(list), list);
+});
+
+test("API에 북변시장 별칭이 들어오면 중복 없이 공식 장날과 위치를 적용한다", () => {
+  const aliases = ["김포 5일장", "북변시장", "북변5일장", "김포5일장(북변)"];
+  for (const name of aliases){
+    const original = days.market({ mrktNm:name, lnmadr:"경기도 김포시 북변동 274", mrktEstblCycle:"매일", storNumber:"30", prkplceYn:"Y" });
+    const list = days.supplement([original]);
+    assert.equal(list.length, 4);
+    const bukbyeon = list.find(m => m.name === "김포5일장(북변시장)");
+    assert.deepEqual(bukbyeon.digits, [2, 7]);
+    assert.equal(bukbyeon.stores, 30);
+    assert.equal(bukbyeon.parking, true);
+    assert.equal(original.lat, null);
+  }
+  const other = days.market({ mrktNm:"북변시장", lnmadr:"다른 지역", latitude:"35.1", longitude:"128.1" });
+  assert.equal(days.supplement([other]).length, 5);
+});
+
+test("양곡·마송·하성5일장을 인근 상설시장과 구분하고 각 장날에만 연다", () => {
+  const api = days.parse([gimpo]);
+  const list = days.supplement(api);
+  for (const [name, digits, at, tour] of [
+    ["양곡5일장", [1, 6], [37.6558786, 126.623666], 776],
+    ["마송5일장", [3, 8], [37.6938725, 126.6010875], 777],
+    ["하성5일장", [4, 9], [37.7191439, 126.6318435], 778]
+  ]){
+    const m = list.find(m => m.name === name);
+    assert.deepEqual(m.digits, digits);
+    assert.deepEqual([m.lat, m.lng], at);
+    assert.ok(m.sourceUrl.endsWith("tourNo=" + tour));
+    assert.ok(days.isMarketDay(m.digits, digits[1]));
+    assert.ok(!days.isMarketDay(m.digits, 7));
+    const alias = { ...m, name:name.replace("5일", "오일"), stores:10 };
+    const merged = days.supplement([...api, alias, m]);
+    assert.equal(merged.filter(m => m.name === name).length, 1);
+    assert.equal(merged.find(m => m.name === name).stores, 10);
+  }
+  assert.deepEqual(list.filter(m => !m.digits.length), api);
+  assert.deepEqual(days.supplement(list), list);
+});
+
+test("일산시장의 매일 자료에 3·8일장을 보완하고 상설·좌표·점포 정보를 보존한다", () => {
+  const api = days.parse([ilsan]);
+  assert.equal(api[0].cycle, "매일");
+  const list = days.supplement(api);
+  const m = list.find(m => m.name === "일산시장");
+  assert.deepEqual(m.digits, [3, 8]);
+  assert.equal(m.type, "상설장+5일장");
+  assert.equal(m.lat, api[0].lat);
+  assert.equal(m.lng, api[0].lng);
+  assert.equal(m.stores, api[0].stores);
+  assert.match(m.sourceUrl, /goyang\.go\.kr/);
+  assert.equal(api[0].cycle, "매일");
+  assert.deepEqual(days.supplement(list), list);
+  const other = { ...api[0], address:"다른 지역" };
+  assert.deepEqual(days.supplement([other])[0], other);
+});
 
 test("시장개설주기 글을 날짜 끝자리로 푼다", () => {
   assert.deepEqual(days.cycleDigits("4일+9일"), [4, 9]);
@@ -105,7 +181,7 @@ test("런처·지도·도구 목록에 장날 층이 이어져 있다", () => {
 });
 
 // 가짜 DOM·지도로 단추 → 받기 → 점 찍기 → 날짜 바꾸기 → 지우기 → 치우기를 따라간다. 브라우저·화면 캡처는 쓰지 않는다.
-function mountHarness(fetch){
+function mountHarness(fetch, now = Date.UTC(2026, 9, 4, 1)){
   const nodes = [], listeners = new Map(), saved = new Map();
   let markers = [], popups = 0;
   function node(tag){
@@ -125,7 +201,6 @@ function mountHarness(fetch){
     getCenter:() => ({ lat:36.5, lng:127.5, distanceTo:([lat, lng]) => Math.hypot(lat - 36.5, lng - 127.5) * 111000 }),
     getBounds:() => ({ contains:([lat, lng]) => lat > 33 && lat < 39 && lng > 124 && lng < 132 }),
     on(name, fn){ listeners.set(name, fn); }, off(name){ listeners.delete(name); } };
-  const now = Date.UTC(2026, 9, 4, 1); // 2026-10-04 10:00 KST
   const window = { addEventListener(){}, removeEventListener(){} };
   const context = { module:{ exports:{} }, URL, AbortController, setTimeout, clearTimeout, fetch, L, mapSetToolIcon(){},
     Date:class extends Date { constructor(...a){ super(...(a.length ? a : [now])); } static now(){ return now; } },
@@ -139,6 +214,56 @@ function mountHarness(fetch){
 }
 const vm = require("node:vm");
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test("10월 7일 새 조회와 기존 이레 캐시 모두 북변시장 점과 출처를 표시한다", async () => {
+  for (const cached of [false, true]){
+    let calls = 0;
+    const now = Date.UTC(2026, 9, 6, 15, 30); // 10월 7일 00:30 KST
+    const h = mountHarness(async url => {
+      if (url === "/can-proxy-weather") return { ok:true, text:async () => "yes" };
+      calls++; return { ok:true, json:async () => gimpo };
+    }, now);
+    if (cached) h.saved.set(days.CACHE_KEY, JSON.stringify({ fetchedAt:now - 86400000, markets:days.parse([gimpo]) }));
+    await settle();
+    h.find("map-toolvis-market").events.click(); await settle(); await settle();
+    assert.equal(calls, cached ? 0 : 1);
+    assert.equal(h.find("map-market-date").value, "2026-10-07");
+    assert.equal(h.markers().length, 1);
+    assert.deepEqual(Array.from(h.markers()[0].at), [37.628578, 126.7114383]);
+    assert.match(h.find("map-market-summary").textContent, /장 서는 곳 전국 1곳, 지금 화면 1곳/);
+    const popup = h.markers()[0].popup();
+    assert.equal(popup.children[0].textContent, "김포5일장(북변시장)");
+    assert.ok(popup.children.some(n => n.textContent === "출처: 김포시 문화관광" && n.href.includes("tourNo=428")));
+    assert.match(h.controller.captureNote(), /김포시 문화관광/);
+    h.find("map-market-next").events.click();
+    assert.equal(h.group.items.length, 1); // 8일에는 북변 대신 마송5일장이 선다.
+    assert.equal(h.group.items[0].popup().children[0].textContent, "마송5일장");
+    h.controller.destroy();
+  }
+});
+
+test("일산 장날 보완은 새 조회·캐시의 점과 출처에 적용되고 상설 보기에도 남는다", async () => {
+  for (const cached of [false, true]){
+    const now = Date.UTC(2026, 9, 8, 1);
+    const h = mountHarness(async url => url === "/can-proxy-weather"
+      ? { ok:true, text:async () => "yes" } : { ok:true, json:async () => ilsan }, now);
+    if (cached) h.saved.set(days.CACHE_KEY, JSON.stringify({ fetchedAt:now - 86400000, markets:days.parse([ilsan]) }));
+    await settle();
+    h.find("map-toolvis-market").events.click(); await settle(); await settle();
+    const marker = h.group.items.find(m => m.popup().children[0].textContent === "일산시장");
+    assert.ok(marker);
+    assert.equal(marker.options.fillColor, "#e8590c");
+    assert.ok(marker.popup().children.some(n => n.textContent === "출처: 고양시 일산5일장 안내" && n.href.includes("goyang.go.kr")));
+    h.find("map-market-next").events.click(); // 9일: 일산 장날이 아니다.
+    assert.ok(!h.group.items.some(m => m.popup().children[0].textContent === "일산시장"));
+    h.find("map-market-permanent").checked = true;
+    h.find("map-market-permanent").events.change();
+    const daily = h.group.items.find(m => m.popup().children[0].textContent === "일산시장");
+    assert.ok(daily);
+    assert.equal(daily.options.fillColor, "#6b7f86");
+    h.controller.destroy();
+  }
+});
 
 test("장날 단추: 오늘 장 서는 곳만 찍고, 날짜·상설 보기를 따라 다시 그리며, 지우고 치운다", async () => {
   let calls = 0;
@@ -154,10 +279,10 @@ test("장날 단추: 오늘 장 서는 곳만 찍고, 날짜·상설 보기를 �
   assert.equal(h.find("map-market-date").value, "2026-10-04");
   // 브라우저 날짜 칸 대신 요일까지 쓴 글자 단추를 보인다.
   assert.equal(h.find("map-market-date-btn").textContent, "10월 4일(일)");
-  // 10월 4일 = 끝자리 4: 장호원(4·9)·말바우(2·4·7·9). 안덕(4·9)은 위치가 없어 빠진다.
-  assert.deepEqual(h.markers().map(m => m.options.fillColor), ["#e8590c", "#e8590c"]);
-  assert.match(h.find("map-market-summary").textContent, /10월 4일\(일\) · 장 서는 곳 전국 3곳, 지금 화면 2곳 · 위치 없는 1곳/);
-  assert.equal(h.find("map-market-list").children.length, 2);
+  // 10월 4일: 장호원·말바우·보완한 하성. 안덕은 위치가 없어 빠진다.
+  assert.deepEqual(h.markers().map(m => m.options.fillColor), ["#e8590c", "#e8590c", "#e8590c"]);
+  assert.match(h.find("map-market-summary").textContent, /10월 4일\(일\) · 장 서는 곳 전국 4곳, 지금 화면 3곳 · 위치 없는 1곳/);
+  assert.equal(h.find("map-market-list").children.length, 3);
   assert.ok(h.saved.has(days.CACHE_KEY));
   // 다음 날(5일): 통복(5·10)·삽교(2·5)
   h.find("map-market-next").events.click();

@@ -181,7 +181,7 @@ test.describe("CSS 자동완성", () => {
       name: "index.html", mimeType: "text/html",
       buffer: Buffer.from('<div class="hero-banner"><p id="lead">x</p></div>', "utf8")
     });
-    await page.locator(".tab", { hasText: "style.css" }).first().click();
+    await page.locator('#docTabs .tab[title^="style.css "]').first().click();   // 탭 글자는 확장자를 뺀 이름
     await expect(page.locator("textarea.code-input")).toBeVisible();
     await page.locator("textarea.code-input").click();
     await page.evaluate(() => {

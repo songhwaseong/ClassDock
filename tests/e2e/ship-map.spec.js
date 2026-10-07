@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { collapseSidebar } = require("./helpers");
+const { collapseSidebar, stableBox } = require("./helpers");
 const incheon = require("../fixtures/ship-schedule-incheon.json");
 const ports = require("../fixtures/ship-ports-sample.json");
 
@@ -80,7 +80,11 @@ test("항구 시간표를 불러오면 도착지마다 점선, 항해마다 한 
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
   // 출발 항구 점 이름표: 미니 출발 게시판(머리=항구·항해 수, 줄은 셋까지, 나머지는 '+N편 더').
-  await page.locator(".leaflet-mapShip-pane path").last().hover();
+  // 불러온 뒤 지도가 항로에 맞춰 움직이는 동안 점에 올리면, 항구에서 뻗은 점선이 먼저 걸려
+  // 그 도착지 이름표(sticky)가 함께 뜬다 — 점이 제자리를 잡은 뒤에 올린다.
+  const originDot = page.locator(".leaflet-mapShip-pane path").last();
+  await stableBox(originDot);
+  await originDot.hover();
   const tip = page.locator(".leaflet-tooltip.map-ship-tip");
   await expect(tip.locator(".map-ship-tip-head")).toContainText("인천 출발");
   await expect(tip.locator(".map-ship-tip-count")).toHaveText("16편");

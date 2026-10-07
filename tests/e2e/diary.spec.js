@@ -17,6 +17,9 @@ async function boot(page){
   await expect(page.locator(".diary-paper")).toBeVisible();
 }
 
+// 새 일기장은 이름이 없어 저장 상태 칸이 처음부터 '저장 안 됨'이다 — 편집이 일어났는지는 문서의 표식으로 본다.
+const diaryEdited = (page) => page.evaluate(() => { const d = docs.find(x => x.kind === "diary"); return d ? !!d.hasUnsavedEdits : null; });
+
 const todayKey = () => {
   const d = new Date();
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
@@ -244,7 +247,8 @@ test("꾸미기: 배경 효과는 사진 없이 종이를 칠하고, 색·진하
   // 색을 바꾸면 종이도 칩 견본도 다시 그린다(칩은 지금 고른 색으로 보여야 한다)
   const chipBefore = await panel.locator('.diary-paper-chip[data-paper="linear"] .diary-paper-sample')
     .evaluate(el => getComputedStyle(el).backgroundImage);
-  await panel.locator(".diary-paper-color").evaluate(el => { el.value = "#ff0000"; el.dispatchEvent(new Event("change", { bubbles:true })); });
+  // 조명 색 칸도 같은 모양 클래스를 쓴다 — 배경 효과 색만 집는다.
+  await panel.locator(".diary-paper-color:not(.diary-light-color)").evaluate(el => { el.value = "#ff0000"; el.dispatchEvent(new Event("change", { bubbles:true })); });
   await expect.poll(() => art.evaluate(el => getComputedStyle(el).backgroundImage)).not.toBe(meshed);
   await expect.poll(() => panel.locator('.diary-paper-chip[data-paper="linear"] .diary-paper-sample')
     .evaluate(el => getComputedStyle(el).backgroundImage)).not.toBe(chipBefore);
@@ -1221,7 +1225,7 @@ test("접기: 양옆 칸을 따로 접으면 종이가 제 폭을 찾고, 접은
   expect(await paperWidth()).toBeGreaterThan(narrowed);
 
   // 접은 상태는 보는 사람 편의라 localStorage 에만 — 파일이 더러워지지 않는다
-  await expect(page.locator(".diary-status")).not.toContainText("저장 안 됨");
+  expect(await diaryEdited(page)).toBe(false);
   expect(await page.evaluate(() => localStorage.getItem("mn.diaryPanels"))).toBe('{"side":true,"rail":true,"head":false}');
 
   // 새로 연 일기장도 접힌 채로 시작한다(앞 탭도 DOM 에 남으므로 새로 붙은 쪽만 본다)
@@ -1395,7 +1399,9 @@ test("원고지 칸 수: 원고지·그림일기일 때만 고를 수 있고, 10
   expect(pos[10][1]).toBe(pos[0][1]);
   const cell = pos[0][2];
   expect(Math.round(rb.width)).toBe(cell * 10 + 1);                 // 줄 폭 = 10칸
-  expect(cell).toBeGreaterThan(60);                                 // 폭 780 기준 칸이 커졌다(자동은 34)
+  // 칸 수를 고르면 칸이 종이 폭을 나눠 자동(줄 간격 34)보다 훨씬 커진다 — 종이 폭은 옆 칸을 접었는지에 따라 달라 숫자로 박지 않는다.
+  const autoCell = await page.evaluate(() => DIARY_GAPS.normal);
+  expect(cell).toBeGreaterThan(autoCell * 1.5);
 
   // 저장했다 열어도 남는다
   const saved = await page.evaluate(async () => {
@@ -1643,5 +1649,5 @@ test("돌아보기의 기록 지도를 기분으로 칠하고, 범례를 누르�
   await expect(heat.locator(".diary-review-day[data-mood]")).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem("mn.diaryHeatMode"))).toBe("entry");
   // 보기를 바꾸는 것은 편집이 아니다
-  await expect(page.locator(".diary-status")).not.toContainText("저장 안 됨");
+  expect(await diaryEdited(page)).toBe(false);
 });

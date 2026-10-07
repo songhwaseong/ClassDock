@@ -3894,6 +3894,42 @@ function renderWhiteboard(doc, host){
     const button=mkBtn(label,title,cls,(e)=>{e.preventDefault();closeFocusContextMenu();fn();});
     button.setAttribute("role","menuitem"); return button;
   };
+  // 빈 곳 메뉴는 판서 중 바로 쓰는 것(도구·색·굵기·되돌리기·붙여넣기)만 펼쳐 두고 나머지는 ▸ 묶음에 접는다(지도 우클릭 메뉴와 같은 방식).
+  // 묶음 패널은 메뉴의 자식이라 바깥 클릭 닫기·키보드 처리가 그대로 통하고, position:fixed 라 메뉴의 세로 스크롤에 잘리지 않는다.
+  const contextGroups=[]; let contextOpenGroup=null, contextSubTimer=0;
+  const cancelContextSubClose=()=>{clearTimeout(contextSubTimer);contextSubTimer=0;};
+  const closeContextSub=()=>{
+    cancelContextSubClose();
+    for(const {heading,panel} of contextGroups){panel.hidden=true;heading.classList.remove("is-open");heading.setAttribute("aria-expanded","false");}
+    contextOpenGroup=null;
+  };
+  const openContextSub=(group,focusFirst=false)=>{
+    cancelContextSubClose();
+    if(contextOpenGroup!==group){
+      closeContextSub(); contextOpenGroup=group;
+      const {heading,panel}=group;
+      panel.hidden=false; heading.classList.add("is-open"); heading.setAttribute("aria-expanded","true");
+      // 메뉴 오른쪽 옆에 붙이고, 화면을 넘치면 왼쪽 옆으로 넘긴다(메뉴 본체와 같은 화면 좌표).
+      const anchor=heading.getBoundingClientRect(),menuRect=focusContextMenu.getBoundingClientRect(),width=panel.offsetWidth,height=panel.offsetHeight,margin=6;
+      let left=menuRect.right-2; if(left+width>window.innerWidth-margin)left=menuRect.left-width+2;
+      panel.style.left=Math.max(margin,Math.min(left,window.innerWidth-width-margin))+"px";
+      panel.style.top=Math.max(margin,Math.min(anchor.top-5,window.innerHeight-height-margin))+"px";
+    }
+    if(focusFirst){
+      const first=[...group.panel.querySelectorAll("button:not(:disabled)")].find(button=>!button.hidden&&!button.closest("[hidden]"));
+      if(first)first.focus({preventScroll:true});
+    }
+  };
+  const contextGroup=(label,cls)=>{
+    const panel=document.createElement("div"); panel.className="wb-context-sub "+cls; panel.hidden=true;
+    panel.setAttribute("role","menu"); panel.setAttribute("aria-label",label);
+    const group={panel,heading:null};
+    group.heading=mkBtn(label,label,"wb-context-parent",(e)=>{e.preventDefault();openContextSub(group,true);});
+    group.heading.setAttribute("role","menuitem"); group.heading.setAttribute("aria-haspopup","menu"); group.heading.setAttribute("aria-expanded","false");
+    group.heading.addEventListener("pointerenter",()=>openContextSub(group));
+    panel.addEventListener("pointerenter",cancelContextSubClose);
+    contextGroups.push(group); return group;
+  };
 
   const focusContextSection=makeContextSection("집중 도구","wb-context-focus");
   const focusContextActions=document.createElement("div"); focusContextActions.className="wb-context-actions wb-focus-context-actions";
@@ -3989,79 +4025,14 @@ function renderWhiteboard(doc, host){
     contextShowPrevBtn.disabled=stepView.shown<=0; contextShowNextBtn.disabled=stepView.shown>=total;
   };
 
-  const contextBoardSection=makeContextSection("보드 작업","wb-context-board");
-  const contextBoardActions=document.createElement("div"); contextBoardActions.className="wb-context-actions";
-  const contextPasteBoardBtn=contextAction("붙여넣기","복사한 항목을 이 위치에 붙여넣기","",()=>pasteInternalClipboardAt(contextMenuBoardPoint));
-  const contextImageBtn=contextAction("이미지","이미지 파일을 이 보드에 넣기","",openImageFilePicker);
-  const contextEducationBtn=contextAction("수학·과학","수학·과학 도구상자 열기","",()=>toggleEducationPanel(true));
-  const contextSymbolBtn=contextAction("특수문자","특수문자를 이 위치에 넣기 (글 입력 중에는 글상자 안에서 우클릭)","",()=>openSymbolPicker({kind:"board",point:contextMenuBoardPoint},contextMenuClient.x,contextMenuClient.y));
-  const contextGraphBtn=contextAction("그래프","함수 그래프 만들기 — 식을 치면 곡선을 계산해 넣습니다","",()=>{eduCategory="graph";toggleEducationPanel(true);});
-  const contextChartBtn=contextAction("차트","자료 차트 만들기 — 표 숫자로 막대·꺾은선·원그래프를 넣습니다","",()=>{eduCategory="chart";toggleEducationPanel(true);});
-  const contextChemBtn=contextAction("주기율표","주기율표와 반응식 균형 맞추기 열기","",()=>{eduCategory="chemistry";toggleEducationPanel(true);});
-  const contextBackgroundBtn=contextAction("배경","보드 배경(색·무늬) 바꾸기","",()=>toggleBackgroundPanel(true));
-  contextZoomOutBtn=contextAction("축소","화이트보드 화면 축소","",()=>setViewScale(view.scale/1.25));
-  contextZoomResetBtn=contextAction("100%","화이트보드 배율 100%로 초기화","",resetView);
-  contextZoomInBtn=contextAction("확대","화이트보드 화면 확대","",()=>setViewScale(view.scale*1.25));
-  const contextFocusBtn=contextAction("집중 도구","스포트라이트·화면 가리개 설정 열기","",()=>toggleFocusPanel(true));
-  const contextClearBtn=contextAction("전체 지우기","보드 내용 전체 지우기","wb-context-danger wb-context-clear",confirmClearAll);
-  contextBoardActions.append(contextPasteBoardBtn,contextImageBtn,contextSymbolBtn,contextEducationBtn,contextGraphBtn,contextChartBtn,contextChemBtn,contextBackgroundBtn,contextZoomOutBtn,contextZoomResetBtn,contextZoomInBtn,contextFocusBtn,contextClearBtn);
-  contextBoardSection.appendChild(contextBoardActions);
-
-  // 교구는 판서 내용이 아니라 손에 든 도구라 보드 작업과 같은 자리(선택 없을 때)에 둔다.
-  const contextGearSection=makeContextSection("교구·정리","wb-context-gear-section");
-  const contextGearActions=document.createElement("div"); contextGearActions.className="wb-context-actions wb-context-gear-actions";
-  const contextRulerBtn=contextAction("자","자 꺼내기 — 대고 그으면 곧게 그려집니다 (왼쪽 손잡이로 길이 조절)","",()=>setGear("ruler"));
-  const contextProtractorBtn=contextAction("각도기","각도기 꺼내기 — 가운데에서 그으면 1°씩 맞춰집니다 (왼쪽 손잡이로 크기 조절)","",()=>setGear("protractor"));
-  const contextCompassBtn=contextAction("컴퍼스","컴퍼스 꺼내기 — 연필 손잡이를 돌리면 호·원이 그려집니다 (중간 손잡이로 반지름 조절)","",()=>setGear("compass"));
-  const contextSnapBtn=contextAction("15° 맞추기","직선·화살표를 15°씩 맞춰 긋기","",()=>{gear.snap=!gear.snap;saveGearPrefs();syncGearButtons();});
-  const contextTidyBtn=contextAction("손그림 정리","대충 그린 도형을 반듯하게 바꾸기","",()=>{
-    gear.tidy=!gear.tidy;saveGearPrefs();syncGearButtons();
-    if(typeof toast==="function")toast(gear.tidy?"손그림 정리를 켰어요.":"손그림 정리를 껐어요.",2000);
-  });
-  const contextGearClearBtn=contextAction("교구 치우기","꺼내 놓은 자·각도기·컴퍼스 치우기 (Esc)","",()=>{
-    gear.ruler=null;gear.protractor=null;gear.compass=null;syncGearButtons();redraw();
-  });
-  contextGearActions.append(contextRulerBtn,contextProtractorBtn,contextCompassBtn,contextSnapBtn,contextTidyBtn,contextGearClearBtn);
-  contextGearSection.appendChild(contextGearActions);
-
-  const contextOutputSection=makeContextSection("출력·공유","wb-context-output");
-  const contextOutputActions=document.createElement("div"); contextOutputActions.className="wb-context-actions wb-context-output-actions";
-  const contextPngBtn=contextAction("PNG 저장","현재 보드를 PNG 이미지로 저장","",exportPng);
-  const contextPdfBtn=contextAction("PDF 저장","현재 보드를 PDF로 저장","",exportPdf);
-  const contextPrintBtn=contextAction("인쇄","현재 보드 판서 내용 인쇄","",printBoard);
-  const contextMemoBtn=contextAction("메모로","현재 보드를 편집 가능한 상태로 메모창에 보내기","",sendToMemo);
-  contextOutputActions.append(contextPngBtn,contextPdfBtn,contextPrintBtn,contextMemoBtn); contextOutputSection.appendChild(contextOutputActions);
-
-  const contextRecordSection=makeContextSection("수업 기록","wb-context-record-section");
-  const contextRecordActions=document.createElement("div"); contextRecordActions.className="wb-context-actions wb-context-record-actions";
-  const contextRecordBtn=contextAction("● 녹화 시작","수업 리플레이 녹화 시작","wb-context-record",toggleRecord);
-  const contextMicBtn=contextAction("마이크 함께 녹음","녹화할 때 마이크 소리도 함께 녹음","wb-context-mic",toggleRecordMic);
-  contextRecordActions.append(contextRecordBtn,contextMicBtn); contextRecordSection.appendChild(contextRecordActions);
-
-  const contextToolbarSection=makeContextSection("도구막대","wb-context-toolbar-section");
-  const contextToolbarActions=document.createElement("div"); contextToolbarActions.className="wb-context-actions wb-context-toolbar-actions";
-  const contextToolbarToggle=contextAction("편집 도구막대 숨기기","편집 도구막대 숨기기","wb-context-toolbar-toggle",toggleToolbarVisibility);
-  contextToolbarActions.appendChild(contextToolbarToggle); contextToolbarSection.appendChild(contextToolbarActions);
-
-  const contextPositionSection=makeContextSection("도구막대 위치","wb-context-position-section");
-  const contextPositionActions=document.createElement("div"); contextPositionActions.className="wb-context-actions wb-context-position-actions";
-  const contextPositionBtns={};
-  [["top","위"],["right","오른쪽"],["bottom","아래"],["left","왼쪽"]].forEach(([position,label])=>{
-    const button=contextAction(label,"도구막대를 "+label+"에 배치","wb-context-position",()=>setToolbarPosition(position));
-    button.setAttribute("aria-pressed","false"); contextPositionBtns[position]=button; contextPositionActions.appendChild(button);
-  });
-  contextPositionSection.appendChild(contextPositionActions);
-
-  const contextToolSection=makeContextSection("필기·도형 도구");
-  const contextToolGrid=document.createElement("div"); contextToolGrid.className="wb-context-tools";
-  const contextToolLabels={select:"선택",pen:"펜",highlighter:"형광펜",eraser:"지우개",line:"직선",arrow:"화살표",rect:"사각형",ellipse:"원",text:"텍스트"};
+  // ① 바로 쓰는 묶음: 도구는 아이콘 한 줄(이름은 툴팁·aria-label), 그 아래 색·굵기. 크기 칸은 글자·수식·도형에 뜻이 있을 때만 보인다.
+  const contextQuickSection=makeContextSection("","wb-context-quick");
+  const contextToolGrid=document.createElement("div"); contextToolGrid.className="wb-context-tools"; contextToolGrid.setAttribute("role","group"); contextToolGrid.setAttribute("aria-label","필기·도형 도구");
   TOOLS.forEach(([tool,icon,title])=>{
-    const button=contextAction(contextToolLabels[tool]||tool,title,"wb-context-tool",()=>setTool(tool));
-    button.prepend(mkIcon(icon)); contextToolBtns[tool]=button; contextToolGrid.appendChild(button);
+    const button=contextAction("",title,"wb-context-tool",()=>setTool(tool));
+    button.appendChild(mkIcon(icon)); contextToolBtns[tool]=button; contextToolGrid.appendChild(button);
   });
-  contextToolSection.appendChild(contextToolGrid);
 
-  const contextInkSection=makeContextSection("색상·굵기");
   const contextInkRow=document.createElement("div"); contextInkRow.className="wb-context-ink";
   const contextColors=document.createElement("div"); contextColors.className="wb-context-colors"; contextColors.setAttribute("role","group"); contextColors.setAttribute("aria-label","필기 색상");
   COLORS.forEach(([color,name])=>{
@@ -4076,28 +4047,112 @@ function renderWhiteboard(doc, host){
   [["2","S",2],["4","M",4],["8","L",8]].forEach(([key,label,width])=>{
     const button=contextAction(label,"굵기 "+label,"wb-context-width",()=>setWidth(width)); contextWidthBtns[key]=button; contextWidths.appendChild(button);
   });
-  contextInkRow.append(contextColors,contextWidths); contextInkSection.appendChild(contextInkRow);
+  contextInkRow.append(contextColors,contextWidths);
 
-  const contextTextSizeSection=makeContextSection("크기 직접 입력","wb-context-text-size-section");
   const contextTextSizeControl=document.createElement("label"); contextTextSizeControl.className="wb-context-text-size-control";
   contextTextSizeLabel=document.createElement("span"); contextTextSizeLabel.textContent="글자";
   contextTextSizeInput=document.createElement("input"); contextTextSizeInput.type="number"; contextTextSizeInput.className="wb-text-size-input";
   contextTextSizeInput.min=String(WB_TEXT_SIZE_MIN); contextTextSizeInput.max=String(WB_TEXT_SIZE_MAX); contextTextSizeInput.step="1"; contextTextSizeInput.inputMode="numeric";
   contextTextSizeInput.value=String(wb.textSize); contextTextSizeInput.title="글자 크기 직접 입력 (12~72px)"; contextTextSizeInput.setAttribute("aria-label",contextTextSizeInput.title);
   contextTextSizeUnit=document.createElement("span"); contextTextSizeUnit.textContent="px";
-  bindTextSizeInput(contextTextSizeInput); contextTextSizeControl.append(contextTextSizeLabel,contextTextSizeInput,contextTextSizeUnit); contextTextSizeSection.appendChild(contextTextSizeControl);
+  bindTextSizeInput(contextTextSizeInput); contextTextSizeControl.append(contextTextSizeLabel,contextTextSizeInput,contextTextSizeUnit);
+  contextQuickSection.append(contextToolGrid,contextInkRow,contextTextSizeControl);
 
+  // ② 되돌리기·다시 실행과 빈 곳 붙여넣기(선택 항목에는 자체 붙여넣기가 있어 빈 곳에서만 보인다).
   const contextHistorySection=makeContextSection("","wb-context-history");
   const contextHistoryActions=document.createElement("div"); contextHistoryActions.className="wb-context-actions wb-context-history-actions";
   contextUndoBtn=contextAction("되돌리기","되돌리기 (Ctrl+Z)","",doUndo);
   contextRedoBtn=contextAction("다시 실행","다시 실행 (Ctrl+Y)","",doRedo);
-  contextHistoryActions.append(contextUndoBtn,contextRedoBtn); contextHistorySection.appendChild(contextHistoryActions);
-  focusContextMenu.append(focusContextSection,contextItemSection,contextAlignSection,contextStepSection,contextShowSection,contextBoardSection,contextGearSection,contextOutputSection,contextRecordSection,contextToolbarSection,contextPositionSection,contextToolSection,contextInkSection,contextTextSizeSection,contextHistorySection);
+  const contextPasteBoardBtn=contextAction("붙여넣기","복사한 항목을 이 위치에 붙여넣기","",()=>pasteInternalClipboardAt(contextMenuBoardPoint));
+  contextHistoryActions.append(contextUndoBtn,contextRedoBtn,contextPasteBoardBtn); contextHistorySection.appendChild(contextHistoryActions);
 
-  function closeFocusContextMenu(){ focusContextMenu.hidden=true; }
+  // ③ ▸ 묶음. 보기는 어디서 우클릭하든 남는다 — 도구막대를 숨긴 뒤 다시 켜는 길이 이 메뉴뿐이라서다.
+  const contextListActions=(group,cls="")=>{
+    const actions=document.createElement("div"); actions.className="wb-context-actions wb-context-list "+cls;
+    group.panel.appendChild(actions); return actions;
+  };
+  const contextInsertGroup=contextGroup("삽입","wb-context-insert");
+  const contextImageBtn=contextAction("이미지","이미지 파일을 이 보드에 넣기","",openImageFilePicker);
+  const contextSymbolBtn=contextAction("특수문자","특수문자를 이 위치에 넣기 (글 입력 중에는 글상자 안에서 우클릭)","",()=>openSymbolPicker({kind:"board",point:contextMenuBoardPoint},contextMenuClient.x,contextMenuClient.y));
+  const contextEducationBtn=contextAction("수학·과학","수학·과학 도구상자 열기","",()=>toggleEducationPanel(true));
+  const contextGraphBtn=contextAction("그래프","함수 그래프 만들기 — 식을 치면 곡선을 계산해 넣습니다","",()=>{eduCategory="graph";toggleEducationPanel(true);});
+  const contextChartBtn=contextAction("차트","자료 차트 만들기 — 표 숫자로 막대·꺾은선·원그래프를 넣습니다","",()=>{eduCategory="chart";toggleEducationPanel(true);});
+  const contextChemBtn=contextAction("주기율표","주기율표와 반응식 균형 맞추기 열기","",()=>{eduCategory="chemistry";toggleEducationPanel(true);});
+  const contextBackgroundBtn=contextAction("배경","보드 배경(색·무늬) 바꾸기","",()=>toggleBackgroundPanel(true));
+  contextListActions(contextInsertGroup).append(contextImageBtn,contextSymbolBtn,contextEducationBtn,contextGraphBtn,contextChartBtn,contextChemBtn,contextBackgroundBtn);
+
+  // 교구는 판서 내용이 아니라 손에 든 도구라 보드 작업과 같은 자리(선택 없을 때)에 둔다.
+  const contextGearGroup=contextGroup("교구·정리","wb-context-gear-section");
+  const contextRulerBtn=contextAction("자","자 꺼내기 — 대고 그으면 곧게 그려집니다 (왼쪽 손잡이로 길이 조절)","",()=>setGear("ruler"));
+  const contextProtractorBtn=contextAction("각도기","각도기 꺼내기 — 가운데에서 그으면 1°씩 맞춰집니다 (왼쪽 손잡이로 크기 조절)","",()=>setGear("protractor"));
+  const contextCompassBtn=contextAction("컴퍼스","컴퍼스 꺼내기 — 연필 손잡이를 돌리면 호·원이 그려집니다 (중간 손잡이로 반지름 조절)","",()=>setGear("compass"));
+  const contextSnapBtn=contextAction("15° 맞추기","직선·화살표를 15°씩 맞춰 긋기","",()=>{gear.snap=!gear.snap;saveGearPrefs();syncGearButtons();});
+  const contextTidyBtn=contextAction("손그림 정리","대충 그린 도형을 반듯하게 바꾸기","",()=>{
+    gear.tidy=!gear.tidy;saveGearPrefs();syncGearButtons();
+    if(typeof toast==="function")toast(gear.tidy?"손그림 정리를 켰어요.":"손그림 정리를 껐어요.",2000);
+  });
+  const contextGearClearBtn=contextAction("교구 치우기","꺼내 놓은 자·각도기·컴퍼스 치우기 (Esc)","",()=>{
+    gear.ruler=null;gear.protractor=null;gear.compass=null;syncGearButtons();redraw();
+  });
+  contextListActions(contextGearGroup,"wb-context-gear-actions").append(contextRulerBtn,contextProtractorBtn,contextCompassBtn,contextSnapBtn,contextTidyBtn,contextGearClearBtn);
+
+  const contextViewGroup=contextGroup("보기","wb-context-view");
+  const contextZoomActions=document.createElement("div"); contextZoomActions.className="wb-context-actions wb-context-zoom-actions";
+  contextZoomOutBtn=contextAction("축소","화이트보드 화면 축소","",()=>setViewScale(view.scale/1.25));
+  contextZoomResetBtn=contextAction("100%","화이트보드 배율 100%로 초기화","",resetView);
+  contextZoomInBtn=contextAction("확대","화이트보드 화면 확대","",()=>setViewScale(view.scale*1.25));
+  contextZoomActions.append(contextZoomOutBtn,contextZoomResetBtn,contextZoomInBtn); contextViewGroup.panel.appendChild(contextZoomActions);
+  const contextFocusBtn=contextAction("집중 도구","스포트라이트·화면 가리개 설정 열기","",()=>toggleFocusPanel(true));
+  const contextToolbarToggle=contextAction("편집 도구막대 숨기기","편집 도구막대 숨기기","wb-context-toolbar-toggle",toggleToolbarVisibility);
+  contextListActions(contextViewGroup).append(contextFocusBtn,contextToolbarToggle);
+  const contextPositionTitle=document.createElement("div"); contextPositionTitle.className="wb-context-title wb-context-sub-title"; contextPositionTitle.textContent="도구막대 위치";
+  const contextPositionActions=document.createElement("div"); contextPositionActions.className="wb-context-actions wb-context-position-actions";
+  const contextPositionBtns={};
+  [["top","위"],["right","오른쪽"],["bottom","아래"],["left","왼쪽"]].forEach(([position,label])=>{
+    const button=contextAction(label,"도구막대를 "+label+"에 배치","wb-context-position",()=>setToolbarPosition(position));
+    button.setAttribute("aria-pressed","false"); contextPositionBtns[position]=button; contextPositionActions.appendChild(button);
+  });
+  contextViewGroup.panel.append(contextPositionTitle,contextPositionActions);
+
+  const contextOutputGroup=contextGroup("출력·공유","wb-context-output");
+  const contextPngBtn=contextAction("PNG 저장","현재 보드를 PNG 이미지로 저장","",exportPng);
+  const contextPdfBtn=contextAction("PDF 저장","현재 보드를 PDF로 저장","",exportPdf);
+  const contextPrintBtn=contextAction("인쇄","현재 보드 판서 내용 인쇄","",printBoard);
+  const contextMemoBtn=contextAction("메모로","현재 보드를 편집 가능한 상태로 메모창에 보내기","",sendToMemo);
+  contextListActions(contextOutputGroup).append(contextPngBtn,contextPdfBtn,contextPrintBtn,contextMemoBtn);
+
+  const contextRecordGroup=contextGroup("수업 기록","wb-context-record-section");
+  const contextRecordBtn=contextAction("● 녹화 시작","수업 리플레이 녹화 시작","wb-context-record",toggleRecord);
+  const contextMicBtn=contextAction("마이크 함께 녹음","녹화할 때 마이크 소리도 함께 녹음","wb-context-mic",toggleRecordMic);
+  contextListActions(contextRecordGroup,"wb-context-record-actions").append(contextRecordBtn,contextMicBtn);
+
+  const contextGroupSection=makeContextSection("","wb-context-groups");
+  for(const {heading,panel} of contextGroups)contextGroupSection.append(heading,panel);
+  const boardContextGroups=[contextInsertGroup,contextGearGroup,contextOutputGroup,contextRecordGroup];
+
+  // ④ 되돌리기 어려운 전체 지우기는 맨 아래에 따로 둔다.
+  const contextClearSection=makeContextSection("","wb-context-clear-section");
+  const contextClearActions=document.createElement("div"); contextClearActions.className="wb-context-actions wb-context-clear-actions";
+  const contextClearBtn=contextAction("전체 지우기","보드 내용 전체 지우기","wb-context-danger wb-context-clear",confirmClearAll);
+  contextClearActions.appendChild(contextClearBtn); contextClearSection.appendChild(contextClearActions);
+  // 빈 곳에서만 뜻이 있는 것(붙여넣기·보드 묶음·전체 지우기)을 한 번에 켜고 끈다.
+  const showBoardContext=(show)=>{
+    contextPasteBoardBtn.hidden=!show; contextClearSection.hidden=!show;
+    for(const group of boardContextGroups)group.heading.hidden=!show;
+  };
+  focusContextMenu.append(focusContextSection,contextItemSection,contextAlignSection,contextStepSection,contextShowSection,contextQuickSection,contextHistorySection,contextGroupSection,contextClearSection);
+  focusContextMenu.addEventListener("scroll",closeContextSub);
+  // 묶음이 열린 채 메뉴의 다른 항목으로 옮겨 가면 잠깐 뒤 닫는다(대각선으로 묶음에 들어가는 동안은 유지).
+  focusContextMenu.addEventListener("pointerover",e=>{
+    if(!contextOpenGroup||contextOpenGroup.panel.contains(e.target)||(e.target.closest&&e.target.closest(".wb-context-parent"))||contextSubTimer)return;
+    contextSubTimer=setTimeout(closeContextSub,220);
+  });
+
+  function closeFocusContextMenu(){ focusContextMenu.hidden=true; closeContextSub(); }
   function onFocusContextMenu(e){
     if(focusPanel.contains(e.target)||focusControls.contains(e.target)||(!eduPanel.hidden&&eduPanel.contains(e.target))||(!bgPanel.hidden&&bgPanel.contains(e.target))||(!transformPanel.hidden&&transformPanel.contains(e.target)))return;
     e.preventDefault();e.stopPropagation();
+    closeContextSub();
     const screen=screenPoint(e); lastBoardPointer=boardPointFromScreen(screen); contextMenuBoardPoint={x:lastBoardPointer.x,y:lastBoardPointer.y}; contextMenuClient={x:e.clientX,y:e.clientY};
     closeSymbolPicker();
     const canSelect=!(focus.active&&focus.controlsVisible)&&focusAllowsScreenPoint(screen);
@@ -4110,9 +4165,9 @@ function renderWhiteboard(doc, host){
     const typeLabels={image:formula?"수식":"이미지",line:"직선",arrow:"화살표",rect:"사각형",ellipse:"원",polyline:"도형",text:"텍스트",group:stencil?"교육 도형":"그룹"};
     focusContextSection.hidden=!focus.active;
     contextItemSection.hidden=!selected;
-    contextBoardSection.hidden=!!selected;
-    contextOutputSection.hidden=!!selected; contextRecordSection.hidden=!!selected; contextPositionSection.hidden=!!selected;
-    contextGearSection.hidden=!!selected;
+    showBoardContext(!selected);
+    // 크기 칸은 글자 도구를 쥐었거나 글자·수식·교육 도형을 골랐을 때만 — 그 밖에는 쓸 데가 없다.
+    contextTextSizeControl.hidden=!(wb.tool==="text"||(selected&&(selected.type==="text"||formula||stencil)));
     const plot=selected&&selected.type==="group"&&selected.role==="education-plot";
     const chart=selected&&selected.type==="group"&&selected.role==="education-chart";
     const element=selected&&selected.type==="group"&&selected.role==="education-element";
@@ -4162,10 +4217,10 @@ function renderWhiteboard(doc, host){
     contextClearBtn.disabled=!wb.items.length;
     const boardEmpty=!wb.items.length&&!wb.bgImage;
     contextPngBtn.disabled=boardEmpty; contextPdfBtn.disabled=boardEmpty; contextPrintBtn.disabled=boardEmpty; contextMemoBtn.disabled=boardEmpty;
+    contextOutputGroup.heading.disabled=boardEmpty;
     if(keepMulti){
       // 한 개 전용(편집·측정·변환·반전·배경으로·한 칸씩 앞뒤)은 감추고 여러 개에 뜻이 있는 것만 남긴다.
-      contextItemSection.hidden=false; contextBoardSection.hidden=true; contextGearSection.hidden=true;
-      contextOutputSection.hidden=true; contextRecordSection.hidden=true; contextPositionSection.hidden=true;
+      contextItemSection.hidden=false; showBoardContext(false);
       contextItemName.textContent=multiSel.length+"개 항목";
       for(const button of contextItemActions.children)button.hidden=true;
       for(const button of [contextCopyBtn,contextCutBtn,contextPasteItemBtn,contextDuplicateBtn,contextFrontBtn,contextBackBtn,contextGroupBtn,contextDeleteBtn])button.hidden=false;
@@ -4175,7 +4230,8 @@ function renderWhiteboard(doc, host){
       contextDistributeXBtn.disabled=multiSel.length<3; contextDistributeYBtn.disabled=multiSel.length<3;
     }
     syncContextStepMenu(keepMulti);
-    contextShowSection.hidden=!!selected||keepMulti;
+    // 단계를 하나도 정하지 않은 보드에서는 눌러 볼 것이 없으므로 묶음째 감춘다.
+    contextShowSection.hidden=!!selected||keepMulti||(!stepView.active&&!stepValues().length);
     syncRecordButtons();
     for(const position in contextPositionBtns){
       const active=position===curPos; contextPositionBtns[position].classList.toggle("active",active); contextPositionBtns[position].setAttribute("aria-pressed",String(active));
@@ -4205,8 +4261,14 @@ function renderWhiteboard(doc, host){
   }
   focusContextMenu.addEventListener("keydown",e=>{
     if(e.target instanceof HTMLInputElement||e.target instanceof HTMLTextAreaElement||e.target instanceof HTMLSelectElement)return;
+    // ▸ 묶음 단추에서 → 는 묶음 열기, 열린 묶음 안에서 ← 는 묶음 단추로 돌아가기.
+    const group=contextGroups.find(item=>item.heading===e.target);
+    if(e.key==="ArrowRight"&&group){ e.preventDefault(); openContextSub(group,true); return; }
+    const inSub=!!(contextOpenGroup&&contextOpenGroup.panel.contains(e.target));
+    if(e.key==="ArrowLeft"&&inSub){ e.preventDefault(); const heading=contextOpenGroup.heading; closeContextSub(); heading.focus({preventScroll:true}); return; }
     if(!["ArrowDown","ArrowRight","ArrowUp","ArrowLeft","Home","End"].includes(e.key))return;
-    const buttons=[...focusContextMenu.querySelectorAll("button:not(:disabled)")].filter(button=>!button.hidden&&!button.closest("[hidden]"));
+    const layer=inSub?contextOpenGroup.panel:focusContextMenu;
+    const buttons=[...layer.querySelectorAll("button:not(:disabled)")].filter(button=>!button.hidden&&!button.closest("[hidden]")&&(inSub||!button.closest(".wb-context-sub")));
     if(!buttons.length)return; e.preventDefault();
     const current=Math.max(0,buttons.indexOf(document.activeElement));
     const next=e.key==="Home"?0:e.key==="End"?buttons.length-1:(current+(["ArrowDown","ArrowRight"].includes(e.key)?1:-1)+buttons.length)%buttons.length;
@@ -6618,6 +6680,9 @@ function renderWhiteboard(doc, host){
     contextMicBtn.textContent=(withMic?"✓ ":"")+"마이크 함께 녹음";
     contextMicBtn.classList.toggle("active",withMic); contextMicBtn.setAttribute("aria-pressed",String(withMic));
     contextMicBtn.disabled=recBusy||recording;
+    // 녹화 단추가 ▸ 묶음 안에 접혀 있어도 녹화 중인 것은 묶음 단추에서 보이게 한다.
+    contextRecordGroup.heading.classList.toggle("recording",recording);
+    contextRecordGroup.heading.title=recording?"수업 기록 — 녹화 중":"수업 기록";
   }
   async function toggleRecord(){
     if (recBusy) return;
@@ -6741,7 +6806,13 @@ function renderWhiteboard(doc, host){
     }
     if (e.key === "Escape" && !symbolPicker.hidden){ e.preventDefault(); e.stopPropagation(); closeSymbolPicker(); return; }
     if (!symbolPicker.hidden && ae && symbolPicker.contains(ae)) return;
-    if (e.key === "Escape" && !focusContextMenu.hidden){ e.preventDefault(); e.stopPropagation(); closeFocusContextMenu(); return; }
+    if (e.key === "Escape" && !focusContextMenu.hidden){
+      e.preventDefault(); e.stopPropagation();
+      // 펼친 ▸ 묶음이 있으면 그것만 접고 묶음 단추로 돌아간다.
+      if (contextOpenGroup){ const heading = contextOpenGroup.heading; closeContextSub(); heading.focus({ preventScroll:true }); }
+      else closeFocusContextMenu();
+      return;
+    }
     if (e.key === "Escape" && !focusPanel.hidden){
       e.preventDefault(); e.stopPropagation(); toggleFocusPanel(false); if (focusToolBtn) focusToolBtn.focus(); return;
     }

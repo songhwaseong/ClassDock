@@ -177,17 +177,20 @@ test("우클릭 메뉴로도 교구·측정·변환·그래프를 꺼낼 수 있
   // ① 빈 곳: 교구 구역에서 자를 꺼내고, 다시 눌러 상태가 반영되는지 본다
   await page.mouse.click(stage.x + 420, stage.y + 300, { button:"right" });
   await expect(menu).toBeVisible();
+  await menu.locator(".wb-context-parent", { hasText:"교구·정리" }).click();
   await menu.locator(".wb-context-gear-actions button", { hasText:"자" }).first().click();
   expect(await page.evaluate(() => !!docs.find((d) => d.id === activeId).boardGear.ruler)).toBe(true);
 
   await page.mouse.click(stage.x + 420, stage.y + 300, { button:"right" });
+  await menu.locator(".wb-context-parent", { hasText:"교구·정리" }).click();
   await expect(menu.locator(".wb-context-gear-actions button.active", { hasText:"자" }).first()).toBeVisible();
   await menu.locator(".wb-context-gear-actions button", { hasText:"교구 치우기" }).click();
   expect(await page.evaluate(() => !!docs.find((d) => d.id === activeId).boardGear.ruler)).toBe(false);
 
   // ② 빈 곳: 그래프 바로 열기
   await page.mouse.click(stage.x + 420, stage.y + 300, { button:"right" });
-  await menu.locator(".wb-context-board button", { hasText:"그래프" }).click();
+  await menu.locator(".wb-context-parent", { hasText:"삽입" }).click();
+  await menu.locator(".wb-context-insert button", { hasText:"그래프" }).click();
   await expect(page.locator(".wb-edu-panel").last().locator(".wb-graph-builder")).toBeVisible();
   await page.keyboard.press("Escape");
 

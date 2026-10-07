@@ -49,7 +49,8 @@ for (const k of KINDS){
     }, { build:k.build, name:k.name });
     const dirtyOf = () => page.evaluate(name => { const d = docs.find(x => x.name === name); return d ? !!d.hasUnsavedEdits : null; }, k.name);
     const expectClean = async () => { await page.waitForTimeout(400); expect(await dirtyOf()).toBe(false); };
-    const tab = () => page.locator("#docTabs .tab", { hasText:k.name }).first();
+    // 탭 글자는 확장자를 뺀 이름만 보여 준다 — 전체 파일 이름은 title 머리에 있다.
+    const tab = () => page.locator(`#docTabs .tab[title^="${k.name} "]`).first();
 
     await expectClean();
     await tab().click();
@@ -63,7 +64,7 @@ for (const k of KINDS){
     await page.mouse.wheel(0, 400); await page.mouse.wheel(300, 0);
     await page.keyboard.down("Control"); await page.mouse.wheel(0, -300); await page.keyboard.up("Control");
     await page.setViewportSize({ width:1000, height:780 });
-    await page.locator("#docTabs .tab", { hasText:"다른.txt" }).first().click();
+    await page.locator('#docTabs .tab[title^="다른.txt "]').first().click();
     await tab().click();
     await expectClean();
 

@@ -148,7 +148,7 @@ test("여러 개 위에서 우클릭하면 선택을 지킨 채 복제·색 바�
 
   await drag(page, canvas, [30, 30], [260, 140], "Control");
   await rightClick(90, 85);
-  await expect(menu.locator(".wb-context-target")).toHaveText("2개 항목");
+  await expect(menu.locator(".wb-context-item > .wb-context-target")).toHaveText("2개 항목");
   await expect(menu.locator(".wb-context-item button", { hasText:"측정" })).toBeHidden();
   await menu.locator(".wb-context-item button", { hasText:"복제" }).click();
 
@@ -158,8 +158,11 @@ test("여러 개 위에서 우클릭하면 선택을 지킨 채 복제·색 바�
   expect(items[4].x - items[1].x).toBeCloseTo(24, 0);
 
   // 복제본 둘이 골라져 있다 — 그 위에서 우클릭해 색을 칠한다.
-  await rightClick(90 + 24, 85 + 24);
-  await expect(menu.locator(".wb-context-target")).toHaveText("2개 항목");
+  // 복제본(84~144, 84~134)의 가운데 (114,109)는 원본 사각형 오른쪽 아래 모서리(120,110)에 붙어 있어
+  // 테두리 판정(7px)이 원본을 먼저 잡는다 — 원본 테두리에서 떨어진 복제본 안쪽을 누른다.
+  const dupInside = [130, 122];
+  await rightClick(...dupInside);
+  await expect(menu.locator(".wb-context-item > .wb-context-target")).toHaveText("2개 항목");
   const swatch = menu.locator(".wb-context-swatch").nth(2);
   const color = await swatch.evaluate((el) => {
     const m = getComputedStyle(el).backgroundColor.match(/\d+/g).map(Number);
@@ -171,7 +174,7 @@ test("여러 개 위에서 우클릭하면 선택을 지킨 채 복제·색 바�
   expect(items[4].color).toBe(color);
   expect(items[0].color).not.toBe(color);
 
-  await rightClick(90 + 24, 85 + 24);
+  await rightClick(...dupInside);
   await menu.locator(".wb-context-item button", { hasText:"맨 뒤로" }).click();
   items = await itemSummary(page);
   expect(items[0].color).toBe(color);                              // 고른 둘이 맨 밑 두 층으로
@@ -281,7 +284,7 @@ test("그림이 섞여도 묶이고, 복구본·녹화·붙여넣기에서 그�
   await menu.locator(".wb-context-item button", { hasText:"복사" }).click();
   await page.keyboard.press("Delete");
   await page.mouse.click(box.x + 500, box.y + 300, { button:"right" });
-  await menu.locator(".wb-context-board button", { hasText:"붙여넣기" }).click();
+  await menu.locator(".wb-context-history button", { hasText:"붙여넣기" }).click();
   await expect.poll(() => page.evaluate(() => {
     const g = docs.find((d) => d.id === activeId).boardState.items[0];
     const image = g && g.items && g.items.find((it) => it.type === "image");
@@ -304,7 +307,8 @@ test("여러 개·그룹 속 수식도 색은 다시 그려 한 번에, S/M/L �
 
   // 수식 둘을 실제 수식 창으로 넣고, 겹치지 않게 자리만 벌려 둔다.
   await page.mouse.click(box.x + 600, box.y + 400, { button:"right" });
-  await menu.locator(".wb-context-board button", { hasText:"수학·과학" }).click();
+  await menu.locator(".wb-context-parent", { hasText:"삽입" }).click();
+  await menu.locator(".wb-context-insert button", { hasText:"수학·과학" }).click();
   const panel = page.locator(".wb-edu-panel").last();
   await panel.locator(".wb-edu-tab", { hasText:/^수식$/ }).click();
   for (const source of ["x^2", String.raw`\frac{a}{b}`]){
@@ -338,7 +342,7 @@ test("여러 개·그룹 속 수식도 색은 다시 그려 한 번에, S/M/L �
   // ① 여러 개 색: 수식 둘은 새 그림(src)으로, 사각형은 색으로 — 되돌리기 한 번에 전부 돌아온다.
   await page.keyboard.press("Control+a");
   await onFormula();
-  await expect(menu.locator(".wb-context-target")).toHaveText("3개 항목");
+  await expect(menu.locator(".wb-context-item > .wb-context-target")).toHaveText("3개 항목");
   const red = menu.locator(".wb-context-swatch").nth(2);
   const redColor = await swatchColor(red);
   await red.click();
@@ -363,7 +367,7 @@ test("여러 개·그룹 속 수식도 색은 다시 그려 한 번에, S/M/L �
   await page.keyboard.press("Control+g");
   const grouped = (await model())[0];
   await page.mouse.click(box.x + grouped.x + 5, box.y + grouped.y + 5, { button:"right" });
-  await expect(menu.locator(".wb-context-target")).toHaveText("그룹");
+  await expect(menu.locator(".wb-context-item > .wb-context-target")).toHaveText("그룹");
   const blue = menu.locator(".wb-context-swatch").nth(3);
   const blueColor = await swatchColor(blue);
   await blue.click();
@@ -389,13 +393,13 @@ test("Ctrl+A 로 전부 고르고, 메뉴로 복사한 여러 개를 빈 곳에 
 
   await page.keyboard.press("Control+a");
   await page.mouse.click(box.x + 90, box.y + 85, { button:"right" });
-  await expect(menu.locator(".wb-context-target")).toHaveText("3개 항목");
+  await expect(menu.locator(".wb-context-item > .wb-context-target")).toHaveText("3개 항목");
   await menu.locator(".wb-context-item button", { hasText:"복사" }).click();
   await page.keyboard.press("Delete");
   expect(await rects(page)).toHaveLength(0);
 
   await page.mouse.click(box.x + 500, box.y + 300, { button:"right" });
-  await menu.locator(".wb-context-board button", { hasText:"붙여넣기" }).click();
+  await menu.locator(".wb-context-history button", { hasText:"붙여넣기" }).click();
   await expect.poll(() => rects(page).then((list) => list.length)).toBe(3);
   await page.keyboard.press("Delete");                             // 붙여넣은 셋이 골라진 채다
   expect(await rects(page)).toHaveLength(0);

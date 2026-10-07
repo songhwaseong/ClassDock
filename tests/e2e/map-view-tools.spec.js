@@ -145,8 +145,11 @@ test("표시 잇기는 목록 순서대로 잇고 표시가 바뀌면 저절로 
   /* 표시가 몰려 있는 한가운데를 피해 오른쪽 아래쪽에서 부르되, 맨 모서리는 쓰지 않는다 —
      거기는 Leaflet 저작권 표시 줄이라 우클릭이 지도까지 닿지 않는다(메뉴가 아예 안 열린다). */
   await page.mouse.click(box.x + box.width - 40, box.y + box.height - 70, { button:"right" });
-  await expect(page.locator(".map-context-menu")).toBeVisible();
-  const menuItem = page.locator(".map-context-menu button", { hasText:"표시 잇기" });
+  const menu = page.locator(".map-context-menu:not(.map-context-sub)");
+  await expect(menu).toBeVisible();
+  // 지도 도구는 '편집' 묶음 안에 있다 — 묶음을 열면 옆에 하위 메뉴가 따로 뜬다.
+  await menu.locator(".map-context-parent", { hasText:"편집" }).click();
+  const menuItem = page.locator(".map-context-sub:not([hidden]) button", { hasText:"표시 잇기" });
   await expect(menuItem).toBeVisible();
   await expect(menuItem).toHaveClass(/is-on/);
   // 메뉴에서 누르면 도구막대 단추를 그대로 누른 것과 같다 — 꺼지고 선도 걷힌다.
