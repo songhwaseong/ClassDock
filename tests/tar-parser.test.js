@@ -44,7 +44,8 @@ function harness(){
     parse(bytes){
       context.input = bytes;
       // 음수 크기로 같은 헤더를 되읽는 회귀도 테스트 프로세스를 멈추지 못하게 한다.
-      return vm.runInContext("parseTar(input)", context, { timeout:200 });
+      // 한도는 벽시계 기준이라 짧으면(200ms) 다른 일로 바쁜 PC 에서 멀쩡한 파싱도 끊긴다 — 무한 루프만 잡으면 되므로 넉넉히.
+      return vm.runInContext("parseTar(input)", context, { timeout:5000 });
     }
   };
 }

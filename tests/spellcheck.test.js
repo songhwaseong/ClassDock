@@ -88,7 +88,9 @@ test("확정 규칙과 사전 미등록 결과가 겹치면 확정 규칙을 우
   assert.deepEqual(merged.map(issue => issue.id), ["rule:0", "dictionary:3"]);
 });
 
-test("내장 한국어 Hunspell Worker가 미등록 단어를 찾고 기술 토큰과 사용자 사전을 제외한다", { timeout:30000 }, async t => {
+// 첫 검사는 사전을 읽느라 혼자서도 ~1초, 다른 일로 바쁜 PC 에서는 15초 넘게도 걸린다(멈춘 게 아니라 느린 것).
+// 한도를 빠듯하게 두면 npm test 가 가끔 fail 1 로 끝나므로 넉넉히 둔다.
+test("내장 한국어 Hunspell Worker가 미등록 단어를 찾고 기술 토큰과 사용자 사전을 제외한다", { timeout:120000 }, async t => {
   const vendor = fs.readFileSync(path.join(__dirname, "..", "vendor", "korean-hunspell-worker.js"), "utf8");
   const prefix = "window.__MN_KOREAN_HUNSPELL_WORKER_SOURCE__=";
   const start = vendor.indexOf(prefix);
@@ -108,7 +110,7 @@ test("내장 한국어 Hunspell Worker가 미등록 단어를 찾고 기술 토�
   t.after(() => worker.terminate());
 
   const run = payload => new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Hunspell Worker 응답 시간 초과")), 25000);
+    const timer = setTimeout(() => reject(new Error("Hunspell Worker 응답 시간 초과")), 90000);
     worker.once("message", message => { clearTimeout(timer); resolve(message); });
     worker.once("error", error => { clearTimeout(timer); reject(error); });
     worker.postMessage({ type:"check", requestId:1, ...payload });
