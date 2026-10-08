@@ -1419,6 +1419,14 @@ const PhotoAlbum = (() => {
   // 겹침 층은 무대 뒤에 둬서 root.querySelector 가 새 무대를 먼저 찾는다.
   let viewSwitchToken = 0;
   function dropViewGhosts(){ if (root) root.querySelectorAll(".pa-view-ghost").forEach(el => el.remove()); }
+  // 넘기기 도중 무대에 붙인 것(기다림 클래스·겹침 순서·그림자)을 걷어 낸다. 새 차례를 시작할 때와 감상 모드를 오갈 때 부른다.
+  function settleViewStage(stage){ if (!stage) return; stage.classList.remove("pa-view-wait"); stage.style.zIndex = ""; stage.style.boxShadow = ""; }
+  function stopViewSwitch(){
+    viewSwitchToken++; dropViewGhosts();
+    const stage = root && root.querySelector(".pa-stage"); if (!stage) return;
+    if (stage.getAnimations) stage.getAnimations({ subtree:true }).forEach(animation => { if (animation.id === "pa-view-switch") animation.cancel(); });
+    settleViewStage(stage);
+  }
   function viewGhost(){
     const stage = root && root.querySelector(".pa-stage"); dropViewGhosts();
     if (!stage || !stage.children.length || typeof stage.animate !== "function") return null;
@@ -1428,24 +1436,37 @@ const PhotoAlbum = (() => {
     ghost.append(...stage.children); ghost.querySelectorAll("video").forEach(video => video.pause());
     stage.after(ghost); return ghost;
   }
+  // 새 사진을 다 풀 때까지 기다리는 한도. 넘으면 앞 사진을 둔 채 끝까지 기다렸다가 흐려지기로만 바꾼다
+  // (빈 흰 판과 액자만 밀려 들어오고 사진이 나중에 툭 뜨는 것을 막는다).
+  const VIEW_DECODE_WAIT = 1500;
+  const insetShadows = shadow => !shadow || shadow === "none" ? "none" : shadow.split(/,(?![^(]*\))/).filter(part => /\binset\b/.test(part)).join(",") || "none";
   async function viewSwitchIn(ghost, step){
     const stage = root && root.querySelector(".pa-stage"); if (!ghost || !stage) return;
     const token = ++viewSwitchToken, reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const effect = resolveViewEffect(viewEffectId(), reduced);
-    stage.style.zIndex = "";
-    // 새 사진을 다 풀기 전에 흐려지기 시작하면 중간에 툭 나타나므로 잠깐(최대 0.4초) 기다린다. 그동안은 앞 사진이 그대로 보인다.
+    let effect = resolveViewEffect(viewEffectId(), reduced);
+    settleViewStage(stage);
+    // 새 사진을 다 풀기 전에 움직이기 시작하면 중간에 툭 나타나므로 기다린다. 그동안은 앞 사진이 그대로 보인다.
     const img = stage.querySelector(".pa-photo-surface > img");
     if (img && !img.complete){
       stage.classList.add("pa-view-wait");
-      await Promise.race([img.decode().catch(() => {}), new Promise(resolve => setTimeout(resolve, 400))]);
-      if (stage.isConnected) stage.classList.remove("pa-view-wait");
-      if (token !== viewSwitchToken || !ghost.isConnected) return;
+      const decoded = img.decode().then(() => true, () => true);
+      const ready = await Promise.race([decoded, new Promise(resolve => setTimeout(() => resolve(false), VIEW_DECODE_WAIT))]);
+      if (!ready && token === viewSwitchToken && ghost.isConnected){ await decoded; if (effect.ms > 0) effect = viewEffectById("fade"); }
+      // 끊긴 앞 차례는 새 차례가 무대를 맡으므로 아무것도 건드리지 않는다.
+      if (token !== viewSwitchToken) return;
+      stage.classList.remove("pa-view-wait");
+      if (!ghost.isConnected) return;
     }
     if (!(effect.ms > 0)){ ghost.remove(); return; }
-    if (effect.box){ const paint = getComputedStyle(stage); ghost.style.backgroundColor = paint.backgroundColor; ghost.style.backgroundImage = paint.backgroundImage; }
+    // box 효과는 무대 층이 움직이며 잘리므로 무대 테두리선·그림자를 가만히 있는 앞 층이 맡는다(움직이는 무대엔 안쪽 선만 남겨 겹쳐 진해지지 않게).
+    if (effect.box){
+      const paint = getComputedStyle(stage);
+      Object.assign(ghost.style, { backgroundColor:paint.backgroundColor, backgroundImage:paint.backgroundImage, boxShadow:paint.boxShadow });
+      stage.style.boxShadow = insetShadows(paint.boxShadow);
+    }
     const anims = await playViewEffect(effect, { ghost, stage, d:step < 0 ? -1 : 1, w:stage.offsetWidth, h:stage.offsetHeight, speed:viewSpeed()[2] });
-    ghost.remove(); anims.forEach(animation => animation.cancel());
-    if (token === viewSwitchToken) stage.style.zIndex = "";
+    if (token !== viewSwitchToken) return;
+    ghost.remove(); anims.forEach(animation => animation.cancel()); settleViewStage(stage);
   }
   // 목록 칸 위 '넘기기 효과' 단추와 고르는 창. 칸마다 작은 두 장짜리 미리 보기가 있고, 올려 두면 되풀이해 넘긴다.
   // 고른 효과·빠르기는 간격처럼 브라우저에만 기억한다(사진첩 파일과 무관).
@@ -1655,10 +1676,17 @@ const PhotoAlbum = (() => {
     event.preventDefault();   // 영상 기본 동작(영상만 전체화면)을 막고 사진첩 전체화면으로
     toggleViewFullscreen();
   }
+  // 머리 줄 감상 단추는 그림만 — 이름은 숨긴 글자 칸과 title·aria-label 로 전한다(책/사진 꾸미기/감상 중에 따라 바뀜).
+  function paintViewButton(){
+    const view = root && root.querySelector(".pa-view"); if (!view) return;
+    const [label, title] = albumMode === "book" ? ["책 감상", "책 감상 — 쪽을 크게 넘겨 봅니다 (←/→ · Esc)"] : viewing ? ["꾸미기 모드", "꾸미기 모드로 돌아갑니다 (Esc)"] : ["감상 모드", "감상 모드 — 사진만 크게 봅니다 (←/→ · Esc)"];
+    const text = view.querySelector(".pa-head-label"); if (text) text.textContent = label; else view.textContent = label;
+    view.title = title; view.setAttribute("aria-label", label);
+  }
   function setViewing(on){
     if (!root || viewing === on) return;
-    dropViewGhosts(); closeEffectPanel(); if (!on) setSlideshow(false);
-    if (!on && viewFullscreen){ viewFullscreen = false; if (viewerFullscreenOn()) toggleViewFullscreen(); } viewing = on; root.classList.toggle("pa-viewing",viewing); wakeCursor(); root.querySelector(".pa-view").textContent = viewing ? "✎ 꾸미기 모드" : "▣ 감상 모드";
+    stopViewSwitch(); closeEffectPanel(); if (!on) setSlideshow(false);
+    if (!on && viewFullscreen){ viewFullscreen = false; if (viewerFullscreenOn()) toggleViewFullscreen(); } viewing = on; root.classList.toggle("pa-viewing",viewing); wakeCursor(); paintViewButton();
     requestAnimationFrame(fitArtboard); syncMusic(); syncSfx();
     if (!viewing){ const card = root.querySelector(".pa-media-card.active"); if (card) card.scrollIntoView({ block:"nearest" }); }
   }
@@ -3403,10 +3431,17 @@ const PhotoAlbum = (() => {
     image.close();
     return canvas;
   }
+  const composedSig = item => JSON.stringify([item.background || "", item.stickers || []]);
+  // 이미 만든 쪽 그림이 지금 꾸미기와 같으면 바로 돌려준다(없으면 null). 쪽을 그릴 때 테두리 없는 썸네일을 거치지 않게.
+  function composedNow(item){
+    if (!item) return null;
+    if (item.type !== "image") return item.thumbnail ? { url:item.thumbnail, aspect:0 } : null;
+    const hit = composed.get(item.id); return hit && hit.sig === composedSig(item) ? hit : null;
+  }
   function composedImage(item){
     if (!item) return Promise.resolve(null);
     if (item.type !== "image") return Promise.resolve(item.thumbnail ? { url:item.thumbnail, aspect:0 } : null);
-    const sig = JSON.stringify([item.background || "", item.stickers || []]), hit = composed.get(item.id);
+    const sig = composedSig(item), hit = composed.get(item.id);
     if (hit && hit.sig === sig) return Promise.resolve(hit);
     const key = item.id + "|" + sig;
     if (composing.has(key)) return composing.get(key);
@@ -3433,7 +3468,7 @@ const PhotoAlbum = (() => {
     if (!options.silent){ try { localStorage.setItem(BOOK_MODE_KEY, albumMode); } catch { /* 이번 화면에만 */ } }
     root.classList.toggle("pa-book-mode", albumMode === "book");
     root.querySelectorAll(".pa-mode-tab").forEach(tab => { const on = tab.dataset.mode === albumMode; tab.setAttribute("aria-selected", String(on)); tab.tabIndex = on ? 0 : -1; });
-    const view = root.querySelector(".pa-view"); if (view) view.textContent = albumMode === "book" ? "▣ 책 감상" : viewing ? "✎ 꾸미기 모드" : "▣ 감상 모드";
+    paintViewButton();
     if (albumMode === "edit"){ paintList(); paintStage(); requestAnimationFrame(fitArtboard); }
     paintBook();
   }
@@ -3466,6 +3501,26 @@ const PhotoAlbum = (() => {
     if (forward) forward.disabled = !page || bookPage >= pages.length - 1;
     const relayout = host.querySelector(".pa-book-relayout"); if (relayout) relayout.disabled = !page || !page.slots.length;
     paintBookPaper(); paintBookPick(); paintBookTray(); if (trayTab === "deco") paintBookDeco(); syncTrayTab(); paintBookThumbs(); requestAnimationFrame(fitSpread);
+    warmBookNeighbors();
+  }
+  function slotMedia(id){
+    for (const page of bookOf().pages) for (const slot of page.slots || []) if (slot.id === id) return mediaById(slot.media);
+    return null;
+  }
+  // 앞뒤 펼침의 쪽 그림을 한 장씩 미리 만들어 둔다. 넘길 때 새 쪽이 처음부터 테두리·장식까지 갖춘 모습으로 나온다.
+  // 다시 그리면(warmToken 이 바뀌면) 남은 일은 버리고 새 자리 기준으로 다시 시작한다.
+  let warmToken = 0;
+  function warmBookNeighbors(){
+    const token = ++warmToken, pages = bookOf().pages, per = bookPerView(), list = [];
+    [bookSpread + per, bookSpread - per].forEach(start => {
+      for (let at = Math.max(0, start); at < Math.min(pages.length, start + per); at++)
+        (pages[at].slots || []).forEach(slot => { const media = mediaById(slot.media); if (media && !composedNow(media) && !list.includes(media)) list.push(media); });
+    });
+    const next = () => {
+      if (token !== warmToken || !root || albumMode !== "book" || !list.length) return;
+      composedImage(list.shift()).then(() => setTimeout(next, 30));
+    };
+    setTimeout(next, 250);
   }
   function blankPage(index){
     const el = document.createElement("div"); el.className = "pa-page is-blank";
@@ -3529,14 +3584,15 @@ const PhotoAlbum = (() => {
     el.style.left = slot.x + "%"; el.style.top = slot.y + "%"; el.style.width = slot.w + "%";
     el.style.aspectRatio = "1 / " + (slot.a || mediaAspect(media)); el.style.transform = "rotate(" + slot.r + "deg)";
     const img = document.createElement("img"); img.alt = media ? media.name : ""; img.draggable = false;
-    if (media && media.thumbnail) img.src = media.thumbnail;
-    el.appendChild(img);
-    if (media && media.type === "video"){ const badge = document.createElement("span"); badge.className = "pa-slot-play"; badge.innerHTML = uiIconHtml("play", "▶"); el.appendChild(badge); }
-    composedImage(media).then(row => {
-      if (!row || !img.isConnected) return;
+    const apply = row => {
       img.src = row.url;
       if (row.aspect && (!slot.a || Math.abs(slot.a - row.aspect) > .01) && media.type !== "image"){ slot.a = row.aspect; el.style.aspectRatio = "1 / " + slot.a; }
-    });
+    };
+    const ready = composedNow(media);
+    if (ready) apply(ready); else if (media && media.thumbnail) img.src = media.thumbnail;
+    el.appendChild(img);
+    if (media && media.type === "video"){ const badge = document.createElement("span"); badge.className = "pa-slot-play"; badge.innerHTML = uiIconHtml("play", "▶"); el.appendChild(badge); }
+    if (!ready) composedImage(media).then(row => { if (row && img.isConnected) apply(row); });
     if (bookReading) return el;
     el.title = (media ? media.name + " · " : "") + "끌어서 옮기기 · 두 번 누르면 이 사진 꾸미기 · Alt+누르기는 아래 겹친 사진";
     el.addEventListener("pointerdown", event => startSlotDrag(event, pageIndex, slot, el, "move"));
@@ -3703,32 +3759,18 @@ const PhotoAlbum = (() => {
     const page = bookOf().pages[bookPick.page];
     return page ? page.slots.find(row => row.id === bookPick.id) || null : null;
   }
-  // 위쪽 도구 줄: 이 쪽 사진 목록(가려진 사진도 여기서 고른다) + 고른 사진 도구. 목록에 올리면 쪽 위 그 사진을 점선으로 짚는다.
+  // 위 줄엔 고른 것의 도구만 띄운다(쪽 번호·이 쪽 사진 목록은 아래 쪽 미리보기와 겹쳐 뺐다 — 가려진 사진은 Alt+누르기로 고른다).
   function paintBookPick(){
     const host = root.querySelector(".pa-book-pick"); if (!host) return; host.replaceChildren();
     const page = bookOf().pages[bookPage];
     const stickerPick = pickedSticker() && bookPick.page === bookPage ? pickedSticker() : null;
-    host.hidden = bookReading || !page || (!page.slots.length && !stickerPick);
-    if (!host.hidden && stickerPick){
+    const slot = pickedSlot() && bookPick.page === bookPage ? pickedSlot() : null;
+    host.hidden = bookReading || !page || (!slot && !stickerPick);
+    if (host.hidden) return;
+    if (stickerPick){
       const label = document.createElement("span"); label.className = "pa-book-pick-label"; label.textContent = "고른 장식";
       host.append(label, stickerTools(bookPage, stickerPick)); return;
     }
-    if (host.hidden) return;
-    const label = document.createElement("span"); label.className = "pa-book-pick-label"; label.textContent = "이 쪽 사진";
-    const chips = document.createElement("span"); chips.className = "pa-book-layers"; chips.setAttribute("role", "listbox"); chips.setAttribute("aria-label", "이 쪽 사진 (뒤 → 앞)");
-    page.slots.forEach((slot, at) => {
-      const media = mediaById(slot.media), on = bookPick && bookPick.id === slot.id;
-      const chip = button("", () => pickSlot(bookPage, slot.id), "pa-book-layer" + (on ? " active" : ""));
-      chip.setAttribute("role", "option"); chip.setAttribute("aria-selected", String(!!on));
-      chip.title = (media ? media.name : "사진") + " · " + (at + 1) + "번째 (뒤 → 앞)";
-      const img = document.createElement("img"); img.alt = ""; if (media && media.thumbnail) img.src = media.thumbnail; chip.appendChild(img);
-      const hint = state => { const node = root.querySelector(`.pa-slot[data-id="${CSS.escape(slot.id)}"]`); if (node) node.classList.toggle("is-hint", state); };
-      chip.addEventListener("pointerenter", () => hint(true)); chip.addEventListener("pointerleave", () => hint(false));
-      chip.addEventListener("focus", () => hint(true)); chip.addEventListener("blur", () => hint(false));
-      chips.appendChild(chip);
-    });
-    host.append(label, chips);
-    const slot = pickedSlot(); if (!slot || bookPick.page !== bookPage) return;
     const media = mediaById(slot.media), at = bookPick.page;
     const tools = document.createElement("span"); tools.className = "pa-book-pick-tools";
     tools.append(
@@ -3776,8 +3818,13 @@ const PhotoAlbum = (() => {
     if (!pageEl){ face.className = "pa-page"; face.style.background = "#fbf6ea"; }
     face.classList.remove("is-current", "is-drop");
     face.querySelectorAll(".pa-slot-handle,.pa-drop-ghost,.pa-turn-corner").forEach(node => node.remove());
-    face.querySelectorAll(".is-picked,.is-hint").forEach(node => node.classList.remove("is-picked", "is-hint"));
+    face.querySelectorAll(".is-picked").forEach(node => node.classList.remove("is-picked"));
     face.classList.add("pa-turn-face"); face.removeAttribute("data-index"); face.setAttribute("aria-hidden", "true");
+    // 아직 썸네일인 칸은 꾸민 그림(테두리·장식)이 다 되면 복제 쪽에서도 바꾼다(넘기는 중에 테두리 없는 사진이 보이지 않게).
+    face.querySelectorAll(".pa-slot[data-id]").forEach(node => {
+      const media = slotMedia(node.dataset.id), img = node.querySelector(":scope > img");
+      if (media && img && !composedNow(media)) composedImage(media).then(row => { if (row && img.isConnected) img.src = row.url; });
+    });
     face.style.borderRadius = side === "left" ? "6px 0 0 6px" : side === "right" ? "0 6px 6px 0" : "6px";
     face.style.boxShadow = side === "left" ? "inset -16px 0 18px -16px rgba(58,50,38,.4)" : side === "right" ? "inset 16px 0 18px -16px rgba(58,50,38,.4)" : "none";
     const shade = document.createElement("span"); shade.className = "pa-turn-shade"; face.appendChild(shade);
@@ -3867,6 +3914,42 @@ const PhotoAlbum = (() => {
   }
   /* 넘김 귀퉁이(시안 C) — 쪽 아래 바깥 귀퉁이가 접힌 모양의 단추다. 누르면 넘어가고, 끌면 끄는 만큼 손으로 넘긴다.
      키보드로도 고른다(Enter·Space). 접힌 뒷면 색은 그 쪽 바탕색을 따른다. */
+  // 말린 귀퉁이 그림(모양 시안 A). 귀퉁이(그림의 오른쪽 아래 100,100)에서 접힌 길이 100 으로 그려, 크기는 .pa-curl 의 scale 로만 바꾼다.
+  // 그러데이션·그림자 id 는 귀퉁이마다 따로 둔다(같은 id 면 앞 귀퉁이 것을 따라가 쪽 바탕색이 섞인다).
+  let curlIds = 0;
+  function cornerCurlSvg(){
+    const id = "pa-curl-" + (++curlIds), under = "M-100 0Q-40 -40 0 -100L0 0Z";
+    return '<svg class="pa-turn-curl" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><defs>'
+      + `<filter id="${id}-s" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="-2" dy="-2" stdDeviation="2.6" flood-color="#3a3226" flood-opacity=".28"/></filter>`
+      + `<linearGradient id="${id}-u" gradientUnits="userSpaceOnUse" x1="-45" y1="-45" x2="0" y2="0"><stop offset="0" class="pa-curl-shade" stop-opacity=".38"/><stop offset=".5" class="pa-curl-shade" stop-opacity="0"/></linearGradient>`
+      + `<linearGradient id="${id}-f" gradientUnits="userSpaceOnUse" x1="-45" y1="-45" x2="-84" y2="-84"><stop offset="0" class="pa-curl-crease"/><stop offset=".2" class="pa-curl-light"/><stop offset=".6" class="pa-curl-shine"/><stop offset="1" class="pa-curl-edge"/></linearGradient></defs>`
+      + `<g class="pa-curl"><g transform="translate(100 100)"><path class="pa-curl-under" d="${under}"/><path d="${under}" fill="url(#${id}-u)"/>`
+      + `<path d="M-100 0C-100 -90 -90 -100 0 -100Q-40 -40 -100 0Z" fill="url(#${id}-f)" filter="url(#${id}-s)"/></g></g></svg>`;
+  }
+  // 평소엔 말린 데 없는 반듯한 종이다. 올리면(움직임 시안 D) 귀퉁이가 말려 나와 크게 들렸다가 조금 내려앉고, 올려 둔 동안
+  // 숨 쉬듯 살랑인다. 떼면 지금 크기에서 다시 펴진다. 동작 줄이기면 움직이지 않고 CSS :hover 가 들린 채로 둔다.
+  // 평소 크기를 0 이 아닌 .01 로 두는 건 0 이면 행렬을 풀 수 없어 움직임이 끊겨 툭 바뀌기 때문(대신 투명하게 감춘다).
+  const CURL_REST = "scale(.01)", CURL_SETTLE = "scale(.8)";
+  function wireCornerCurl(el){
+    const curl = el.querySelector(".pa-curl"); if (!curl || typeof curl.animate !== "function") return;
+    let anims = [];
+    const stop = () => { anims.forEach(animation => animation.cancel()); anims = []; };
+    el.addEventListener("pointerenter", () => {
+      if (reduceMotion()) return;
+      const now = getComputedStyle(curl), from = { transform:now.transform, opacity:now.opacity }; stop();
+      const lift = curl.animate([from, { offset:.55, transform:"scale(1)", opacity:1 }, { transform:CURL_SETTLE, opacity:1 }], { duration:450, easing:"ease-out", fill:"forwards" });
+      anims = [lift];
+      lift.finished.then(() => {
+        if (anims[0] !== lift) return;
+        anims.push(curl.animate([{ transform:CURL_SETTLE }, { transform:"scale(.87)" }], { duration:800, easing:"ease-in-out", direction:"alternate", iterations:Infinity }));
+      }, () => {});
+    });
+    el.addEventListener("pointerleave", () => {
+      if (!anims.length) return;
+      const now = getComputedStyle(curl), from = { transform:now.transform, opacity:now.opacity }; stop();
+      anims = [curl.animate([from, { offset:.7, opacity:1 }, { transform:CURL_REST, opacity:0 }], { duration:200, easing:"ease-out" })];
+    });
+  }
   function addTurnCorners(spread){
     const pages = bookOf().pages, per = bookPerView();
     const corner = (cls, step, label, pageAt) => {
@@ -3874,9 +3957,7 @@ const PhotoAlbum = (() => {
       el.title = label + " — 누르거나 끌어서 넘기기 (" + (step > 0 ? "→" : "←") + ")"; el.setAttribute("aria-label", label);
       const paper = pages[pageAt] ? bookPaper(pages[pageAt].paper)[2] : "#fbf6ea";
       el.style.setProperty("--corner-paper", paper);
-      const icon = document.createElement("span"); icon.className = "pa-turn-corner-icon"; icon.setAttribute("aria-hidden", "true");
-      icon.innerHTML = uiIconHtml(step > 0 ? "arrow" : "arrowLeft", step > 0 ? "›" : "‹");
-      el.appendChild(icon);
+      el.innerHTML = cornerCurlSvg(); wireCornerCurl(el);
       el.addEventListener("pointerdown", event => startCornerTurn(event, step));
       el.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " "){ event.preventDefault(); event.stopPropagation(); goSpread(step); } });
       spread.appendChild(el);
@@ -3897,7 +3978,7 @@ const PhotoAlbum = (() => {
     bookReading = !!on; bookPick = null;
     root.classList.toggle("pa-book-reading", bookReading);
     if (!bookReading && viewFullscreen){ viewFullscreen = false; if (viewerFullscreenOn()) toggleViewFullscreen(); }
-    const view = root.querySelector(".pa-view"); if (view) view.textContent = "▣ 책 감상";
+    paintViewButton();
     paintBook();
     status(bookReading ? "책 감상 — ←/→·휠로 넘기거나 쪽 모서리를 끌어 넘깁니다. Esc 로 돌아가고, 두 번 누르면 전체화면." : "앨범 편집으로 돌아왔습니다.");
   }
@@ -3942,7 +4023,9 @@ const PhotoAlbum = (() => {
     const host = root.querySelector(".pa-book-tray-list"); if (!host) return; host.replaceChildren();
     const used = new Map();
     bookOf().pages.forEach((page, at) => page.slots.forEach(slot => { if (!used.has(slot.media)) used.set(slot.media, at); }));
-    const count = root.querySelector(".pa-book-tray-count"); if (count) count.textContent = records.length + "개";
+    const count = root.querySelector(".pa-book-tray-count"); if (count) count.textContent = String(records.length);
+    // 탭은 그림만이라 개수는 작은 숫자로 두고, 이름(title·aria-label)에 "사진 N개" 로 함께 적는다.
+    const mediaTab = root.querySelector('.pa-book-tray-tab[data-tray="media"]'); if (mediaTab){ const name = "사진 " + records.length + "개"; mediaTab.title = name; mediaTab.setAttribute("aria-label", name); }
     if (!records.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = "사진·영상을 가져와 시작하세요."; host.appendChild(p); return; }
     for (const item of records){
       const card = button("", () => { const pages = bookOf().pages; if (!pages.length) addPage(); placeMedia(Math.min(bookPage, bookOf().pages.length - 1), item, null); }, "pa-book-tray-item");
@@ -4360,7 +4443,7 @@ const PhotoAlbum = (() => {
   }
   function makeUi(host){
     closeEffectPanel(); host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
-    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-mode" role="tablist" aria-label="사진첩 화면"><button type="button" class="pa-mode-tab" role="tab" data-mode="book" title="꾸민 사진을 쪽마다 붙인 앨범 책"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.6 5 6.6 4.6 3.5 5v13c3.1-.4 6.1 0 8.5 1.5 2.4-1.5 5.4-1.9 8.5-1.5V5c-3.1-.4-6.1 0-8.5 1.5z"/><path d="M12 6.5v13"/></svg><span>앨범 책</span></button><button type="button" class="pa-mode-tab" role="tab" data-mode="edit" title="사진 한 장씩 장식·배경·음악으로 꾸미기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/></svg><span>사진 꾸미기</span></button></div><div class="pa-header-actions"><button type="button" class="pa-view">▣ 감상 모드</button><button type="button" class="pa-import primary">＋ 가져오기</button></div></header><div class="pa-book"><div class="pa-book-bar"><strong class="pa-book-where"></strong><span class="pa-book-pick" hidden></span><span class="pa-book-tools"><button type="button" class="pa-book-text" data-needs-page title="지금 쪽에 손글씨 글 넣기">가 글 넣기</button><button type="button" class="pa-book-relayout" title="지금 쪽 사진을 자동으로 다시 배치합니다">자동 배치</button><span class="pa-book-papers" role="group" aria-label="쪽 바탕"></span><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-page-back" title="지금 쪽을 한 쪽 앞으로">◂ 쪽 앞으로</button><button type="button" class="pa-book-page-forward" title="지금 쪽을 한 쪽 뒤로">쪽 뒤로 ▸</button><button type="button" class="pa-book-page-add" title="지금 쪽 다음에 빈 쪽 더하기">＋ 쪽</button><button type="button" class="pa-book-page-remove" title="지금 쪽 빼기 (사진은 사진첩에 남음)">쪽 빼기</button><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-save" data-needs-page aria-haspopup="menu" title="쪽 그림 저장(PNG)·인쇄">저장·인쇄 ▾</button></span><button type="button" class="pa-book-sound" aria-pressed="false"></button><button type="button" class="pa-book-read-exit" title="앨범 편집으로 돌아갑니다 (Esc)">✎ 감상 끝</button></div><div class="pa-book-main"><div class="pa-book-stage"><div class="pa-spread"></div></div><aside class="pa-book-tray"><div class="pa-book-tray-tabs" role="tablist" aria-label="쪽에 넣을 것"><button type="button" class="pa-book-tray-tab" role="tab" data-tray="media">사진 <span class="pa-book-tray-count"></span></button><button type="button" class="pa-book-tray-tab" role="tab" data-tray="deco">장식</button></div><p class="pa-book-tray-hint">쪽으로 끌거나 눌러서 넣기</p><div class="pa-book-tray-list" role="tabpanel"></div><div class="pa-book-deco" role="tabpanel"></div></aside></div><div class="pa-book-thumbs" aria-label="쪽 미리보기"></div></div><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div></div><aside class="pa-tools"><div class="pa-tool-tabs" role="tablist" aria-label="꾸미기 도구"><button type="button" class="pa-tool-tab" role="tab" data-tab="deco" aria-selected="false" title="사진 위에 장식을 올립니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span>꾸미기</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="bg" aria-selected="false" title="사진 둘레 배경을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="7.5" y="8.5" width="9" height="7" rx="1"/></svg><span>배경</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="music" aria-selected="false" title="배경음악과 재생 설정"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.5" r="2.4"/></svg><span>음악</span></button></div><div class="pa-deco-section pa-tab-panel" role="tabpanel" data-tab="deco" aria-label="꾸미기"><svg class="pa-sparkles is-right" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><svg class="pa-sparkles is-left" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></div><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="bg" aria-label="배경" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div></section><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="music" aria-label="음악" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-music"></div><p class="pa-music-none">사진을 고르면 배경음악을 넣을 수 있어요.</p><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></aside><div class="pa-split" data-side="left" role="separator" aria-orientation="vertical" aria-label="목록 칸 폭" title="끌어서 목록 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div><div class="pa-split" data-side="right" role="separator" aria-orientation="vertical" aria-label="꾸미기 칸 폭" title="끌어서 꾸미기 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
+    root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-mode" role="tablist" aria-label="사진첩 화면"><button type="button" class="pa-mode-tab" role="tab" data-mode="book" title="꾸민 사진을 쪽마다 붙인 앨범 책"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.6 5 6.6 4.6 3.5 5v13c3.1-.4 6.1 0 8.5 1.5 2.4-1.5 5.4-1.9 8.5-1.5V5c-3.1-.4-6.1 0-8.5 1.5z"/><path d="M12 6.5v13"/></svg><span>앨범 책</span></button><button type="button" class="pa-mode-tab" role="tab" data-mode="edit" title="사진 한 장씩 장식·배경·음악으로 꾸미기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/></svg><span>사진 꾸미기</span></button></div><div class="pa-header-actions"><button type="button" class="pa-view pa-head-ico"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M10.5 8.3v5l4-2.5z" fill="currentColor"/><path d="M8.5 20.5h7M12 17v3.5"/></svg><span class="pa-head-label">감상 모드</span></button><button type="button" class="pa-import primary pa-head-ico" title="사진·영상 가져오기" aria-label="사진·영상 가져오기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span class="pa-head-label">가져오기</span></button></div></header><div class="pa-book"><div class="pa-book-bar"><strong class="pa-book-where"></strong><span class="pa-book-pick" hidden></span><span class="pa-book-tools"><button type="button" class="pa-book-text" data-needs-page title="지금 쪽에 손글씨 글 넣기" aria-label="글 넣기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h14M12 5.5V19M9.5 19h5"/></svg><span class="pa-head-label">글 넣기</span></button><button type="button" class="pa-book-relayout" title="지금 쪽 사진을 자동으로 다시 배치합니다" aria-label="자동 배치"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="8" height="16" rx="1.5"/><rect x="13.5" y="4" width="7" height="7" rx="1.5"/><rect x="13.5" y="13" width="7" height="7" rx="1.5"/></svg><span class="pa-head-label">자동 배치</span></button><span class="pa-book-papers" role="group" aria-label="쪽 바탕"></span><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-page-back" title="지금 쪽을 한 쪽 앞으로" aria-label="쪽 앞으로"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="4" width="11.5" height="16" rx="2"/><path d="M6 8.5 2.5 12 6 15.5"/></svg><span class="pa-head-label">쪽 앞으로</span></button><button type="button" class="pa-book-page-forward" title="지금 쪽을 한 쪽 뒤로" aria-label="쪽 뒤로"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="11.5" height="16" rx="2"/><path d="M18 8.5l3.5 3.5-3.5 3.5"/></svg><span class="pa-head-label">쪽 뒤로</span></button><button type="button" class="pa-book-page-add" title="지금 쪽 다음에 빈 쪽 더하기" aria-label="쪽 더하기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M12 8.5v7M8.5 12h7"/></svg><span class="pa-head-label">쪽 더하기</span></button><button type="button" class="pa-book-page-remove" title="지금 쪽 빼기 (사진은 사진첩에 남음)" aria-label="쪽 빼기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.5 12h7"/></svg><span class="pa-head-label">쪽 빼기</span></button><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-save" data-needs-page aria-haspopup="menu" title="쪽 그림 저장(PNG)·인쇄" aria-label="저장·인쇄"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10.5M7.5 10 12 14.5 16.5 10"/><path d="M4.5 16.5v3h15v-3"/></svg><span class="pa-head-label">저장·인쇄</span><svg class="pa-caret" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg></button></span><button type="button" class="pa-book-sound" aria-pressed="false"></button><button type="button" class="pa-book-read-exit" title="감상 끝 — 앨범 편집으로 돌아갑니다 (Esc)" aria-label="감상 끝"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4.5L19.3 9.2a2.1 2.1 0 0 0-3-3L5.5 17v3"/><path d="M14.5 8l3 3"/></svg><span class="pa-head-label">감상 끝</span></button></div><div class="pa-book-main"><div class="pa-book-stage"><div class="pa-spread"></div></div><aside class="pa-book-tray"><div class="pa-book-tray-tabs" role="tablist" aria-label="쪽에 넣을 것"><button type="button" class="pa-book-tray-tab" role="tab" data-tray="media" title="사진" aria-label="사진"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5l-4.5-4.5-8 8"/></svg><span class="pa-head-label">사진</span><span class="pa-book-tray-count"></span></button><button type="button" class="pa-book-tray-tab" role="tab" data-tray="deco" title="장식" aria-label="장식"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span class="pa-head-label">장식</span></button></div><p class="pa-book-tray-hint">쪽으로 끌거나 눌러서 넣기</p><div class="pa-book-tray-list" role="tabpanel"></div><div class="pa-book-deco" role="tabpanel"></div></aside></div><div class="pa-book-thumbs" aria-label="쪽 미리보기"></div></div><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div></div><aside class="pa-tools"><div class="pa-tool-tabs" role="tablist" aria-label="꾸미기 도구"><button type="button" class="pa-tool-tab" role="tab" data-tab="deco" aria-selected="false" title="사진 위에 장식을 올립니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span>꾸미기</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="bg" aria-selected="false" title="사진 둘레 배경을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="7.5" y="8.5" width="9" height="7" rx="1"/></svg><span>배경</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="music" aria-selected="false" title="배경음악과 재생 설정"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.5" r="2.4"/></svg><span>음악</span></button></div><div class="pa-deco-section pa-tab-panel" role="tabpanel" data-tab="deco" aria-label="꾸미기"><svg class="pa-sparkles is-right" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><svg class="pa-sparkles is-left" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></div><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="bg" aria-label="배경" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div></section><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="music" aria-label="음악" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-music"></div><p class="pa-music-none">사진을 고르면 배경음악을 넣을 수 있어요.</p><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></aside><div class="pa-split" data-side="left" role="separator" aria-orientation="vertical" aria-label="목록 칸 폭" title="끌어서 목록 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div><div class="pa-split" data-side="right" role="separator" aria-orientation="vertical" aria-label="꾸미기 칸 폭" title="끌어서 꾸미기 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
     host.appendChild(root);
     root.querySelector(".pa-import").onclick = () => root.querySelector(".pa-input").click();
     root.querySelector(".pa-input").onchange = async event => { await importFiles(event.target.files); event.target.value = ""; };

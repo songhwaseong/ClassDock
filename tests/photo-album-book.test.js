@@ -110,3 +110,14 @@ test("쪽 장식은 읽을 때 값을 정리하고, 모르는 장식·이모지�
   const pages = plain(album.autoFillPages([photo("q", day(2))]));
   assert.deepEqual(pages[0].stickers, []);
 });
+
+test("이미 만든 쪽 그림은 꾸미기가 같을 때만 바로 쓴다(넘김 복제 쪽이 썸네일을 거치지 않게)", () => {
+  const album = loadAlbum();
+  const item = { ...photo("p1", day(1)), background:"none" };
+  assert.equal(album.composedNow(item), null);
+  album.composed.set("p1", { sig:album.composedSig(item), url:"blob:p1", aspect:.75 });
+  assert.equal(album.composedNow(item).url, "blob:p1");
+  item.stickers = [{ id:"s1", art:"round", x:50, y:50, w:20, r:0 }];
+  assert.equal(album.composedNow(item), null, "꾸미기가 바뀌면 옛 그림을 쓰지 않는다");
+  assert.deepEqual(plain(album.composedNow({ id:"v1", type:"video", thumbnail:"data:v" })), { url:"data:v", aspect:0 });
+});

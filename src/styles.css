@@ -10998,12 +10998,18 @@ a.diary-school-card-value{color:var(--accent)}
 .photo-album button:disabled{opacity:.42;cursor:default}
 .photo-album .primary{color:#fff!important;background:var(--pa-accent)!important;border-color:var(--pa-accent)!important;box-shadow:0 5px 13px rgba(49,119,239,.2)}
 [data-theme="dark"] .photo-album{--pa-bg:#0b1118;--pa-panel:#151e28;--pa-text:#f2f6fa;--pa-muted:#9facbd;--pa-line:#293544;--pa-soft:#202c39;--pa-accent:#5c9bff}
-.pa-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 24px;background:var(--pa-panel);border-bottom:1px solid var(--pa-line);min-height:94px}
-.pa-header h2{margin:0;font-size:25px;line-height:1.2;letter-spacing:-.04em}
-.pa-header p{margin:5px 0 0;color:var(--pa-muted);font-size:12px}
-.pa-kicker{display:block;margin-bottom:3px;color:var(--pa-accent);font-size:10px;font-weight:800;letter-spacing:.18em}
-.pa-header-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.pa-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 12px;background:var(--pa-panel);border-bottom:1px solid var(--pa-line)}
+/* 머리 줄은 한 줄로 얇게 — 이름만 작게 두고 영문 머리말·안내 문구는 감춘다(요소는 남김). */
+.pa-header h2{margin:0;font-size:15px;line-height:1.2;letter-spacing:-.03em}
+.pa-header p,.pa-kicker{display:none}
+.pa-header-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
 .pa-header-actions button,.pa-caption-actions button{padding:8px 12px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-panel);color:var(--pa-text);white-space:nowrap;font-size:12px;font-weight:700}
+.pa-header-actions button{padding:4px 10px;border-radius:7px;font-size:11px}
+.photo-album .pa-header-actions .primary{box-shadow:0 2px 6px rgba(49,119,239,.2)}
+/* 머리 줄 단추·탭은 그림만. 글자 칸은 지우지 않고 감춘다(이름은 title·aria-label). */
+.pa-header-actions .pa-head-ico{display:inline-flex;align-items:center;justify-content:center;padding:4px 7px}
+.pa-head-ico svg{width:16px;height:16px}
+.pa-head-label,.pa-mode-tab span{display:none}
 .pa-header-actions button:hover,.pa-caption-actions button:hover{border-color:var(--pa-accent)}
 .pa-layout{--pa-left-w:190px;--pa-right-w:280px;position:relative;display:grid;grid-template-columns:min(var(--pa-left-w),24%) minmax(0,1fr) min(var(--pa-right-w),36%);flex:1;min-height:0;overflow:hidden}
 .pa-sidebar,.pa-tools{background:var(--pa-panel);min-height:0;overflow:auto}
@@ -11418,6 +11424,8 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-viewing .pa-video-wrap{width:100%;height:100%}
 .pa-view-ghost{position:absolute;z-index:4;display:flex;align-items:center;justify-content:center;overflow:hidden;pointer-events:none;border-radius:8px}
 .pa-view-wait>*{opacity:0}
+/* 감상 모드에선 넘기기에서 움직이는 알맹이를 늘 따로 된 층에 둔다. 움직임이 끝나 층이 풀리며 다시 그려질 때 액자 가장자리가 툭 또렷해지지 않게. */
+.pa-viewing .pa-stage>.pa-artboard,.pa-viewing .pa-stage>.pa-video-wrap,.pa-view-ghost>*{will-change:transform,opacity}
 .pa-view-bar{display:none}
 .pa-viewing .pa-view-bar{display:flex;align-items:center;gap:6px;position:absolute;top:20px;right:20px;z-index:5;opacity:.3;transition:opacity .2s}
 .pa-viewing .pa-view-bar:hover,.pa-viewing .pa-view-bar:has(:focus-visible){opacity:1}
@@ -11428,28 +11436,37 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-view-bar .pa-slide-toggle[aria-pressed="true"]{border-color:var(--pa-accent);background:color-mix(in srgb,var(--pa-accent) 70%,#000)}.pa-viewing .pa-part{pointer-events:none}
 .pa-viewing .pa-part.selected{border-color:transparent;box-shadow:none}.pa-viewing .pa-handle,.pa-viewing .pa-part-bar,.pa-viewing .pa-group-box{display:none!important}
 .pa-viewing .pa-artboard{max-width:calc(100% - 20px);max-height:calc(100% - 20px)}
-@media(max-width:900px){.pa-layout{grid-template-columns:145px minmax(0,1fr) 220px}.pa-split{display:none}.pa-list{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-sidebar{padding:10px 7px}.pa-tools{--pa-tools-pad:8px;padding-bottom:12px}.pa-sticker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-flip-row{grid-template-columns:1fr}.pa-header{padding:10px 14px}.pa-header h2{font-size:21px}.pa-header p{display:none}.pa-caption{display:block}.pa-caption-actions{justify-content:flex-start;margin-top:4px}.pa-artboard{max-height:calc(100% - 115px)}}
-@media(max-width:650px){.pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.photo-album .pa-fx-open{padding:6px 4px;gap:0;justify-content:center}.pa-fx-open svg{display:none}.pa-fx-open small{font-size:9px}.pa-fx-open b{font-size:10px}.pa-layout{grid-template-rows:minmax(0,1fr) auto}.pa-sidebar{grid-row:1/-1}.pa-tools{grid-column:2;max-height:42vh;border-left:0;border-top:1px solid var(--pa-line)}.pa-header-actions button{font-size:10px;padding:6px}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}
+@media(max-width:900px){.pa-layout{grid-template-columns:145px minmax(0,1fr) 220px}.pa-split{display:none}.pa-list{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-sidebar{padding:10px 7px}.pa-tools{--pa-tools-pad:8px;padding-bottom:12px}.pa-sticker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-flip-row{grid-template-columns:1fr}.pa-caption{display:block}.pa-caption-actions{justify-content:flex-start;margin-top:4px}.pa-artboard{max-height:calc(100% - 115px)}}
+@media(max-width:650px){.pa-layout{grid-template-columns:82px minmax(0,1fr)}.pa-viewing .pa-layout{grid-template-columns:minmax(0,1fr)}.pa-sidebar{padding:8px 4px}.pa-filters button{padding:9px 4px;font-size:10px}.pa-list{grid-template-columns:1fr}.pa-list-title{font-size:10px}.photo-album .pa-fx-open{padding:6px 4px;gap:0;justify-content:center}.pa-fx-open svg{display:none}.pa-fx-open small{font-size:9px}.pa-fx-open b{font-size:10px}.pa-layout{grid-template-rows:minmax(0,1fr) auto}.pa-sidebar{grid-row:1/-1}.pa-tools{grid-column:2;max-height:42vh;border-left:0;border-top:1px solid var(--pa-line)}.pa-center{padding:7px}.pa-bg-section{padding:7px}.pa-footer>span:last-child{display:none}}
 /* ===== 사진첩 앨범 책(시안 C · 1단계) — photo-album.js '앨범 책' 묶음과 짝 =====
    쪽은 세로 3:4, 두 쪽 펼침(900px 이하는 한 쪽). 칸·글 자리는 쪽에 대한 % 라 쪽 크기만 바꾸면 따라온다.
    글 크기는 쪽 폭 기준(cqw) — 쪽이 inline-size 컨테이너다. */
-.pa-mode{display:flex;gap:2px;margin-left:auto;padding:3px;border:1px solid var(--pa-line);border-radius:10px;background:var(--pa-soft)}
-.photo-album .pa-mode-tab{display:inline-flex;align-items:center;gap:5px;padding:7px 12px;border:0;border-radius:8px;background:transparent;color:var(--pa-muted);font-size:12px;font-weight:700;white-space:nowrap}
+.pa-mode{display:flex;gap:2px;margin-left:auto;padding:2px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft)}
+.photo-album .pa-mode-tab{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border:0;border-radius:6px;background:transparent;color:var(--pa-muted);font-size:11px;font-weight:700;white-space:nowrap}
 .photo-album .pa-mode-tab[aria-selected="true"]{background:var(--pa-panel);color:var(--pa-accent);box-shadow:0 1px 4px rgba(25,37,59,.12)}
 .pa-mode-tab svg{width:16px;height:16px}
 .pa-book{position:relative;display:none;flex:1;min-height:0;flex-direction:column;background:#ede6d6}
 .pa-book-mode .pa-book{display:flex}
 .pa-book-mode .pa-layout{display:none}
 .pa-book-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--pa-line);background:var(--pa-panel)}
-.pa-book-where{min-width:110px;font-size:13px}
+/* 쪽 번호는 아래 쪽 미리보기에 같은 정보가 있어 편집 중엔 감춘다(책 감상에선 미리보기가 없어 보인다). 요소는 남김. */
+.pa-book-where{display:none;min-width:110px;font-size:13px}
+.pa-book-reading .pa-book-where{display:block}
 .pa-book-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:auto}
 .photo-album .pa-book-tools>button,.photo-album .pa-book-read-exit{padding:6px 10px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-panel);color:var(--pa-text);font-size:12px;font-weight:700;white-space:nowrap}
 .photo-album .pa-book-tools>button:hover:not(:disabled){border-color:var(--pa-accent);color:var(--pa-accent)}
+/* 쪽 도구 단추는 그림만(이름은 title·aria-label, 글자 칸 .pa-head-label 은 감춤). 저장·인쇄만 ▾ 를 곁에 둔다. */
+.photo-album .pa-book-tools>button{display:inline-flex;align-items:center;justify-content:center;gap:1px;padding:5px 7px}
+.pa-book-tools>button>svg{width:16px;height:16px}
+.pa-book-tools>button>svg.pa-caret{width:11px;height:11px;margin-right:-2px}
 .pa-book-papers{display:flex;gap:4px}
 .photo-album .pa-book-paper{width:22px;height:22px;padding:0;border:2px solid #fff;border-radius:50%;box-shadow:0 0 0 1px var(--pa-line)}
 .photo-album .pa-book-paper.active{box-shadow:0 0 0 2px var(--pa-accent)}
 .pa-book-sep{width:1px;height:22px;background:var(--pa-line)}
 .pa-book-read-exit{display:none}
+/* 감상 끝도 그림만 — 곁의 소리 단추와 같은 크기 */
+.photo-album .pa-book-read-exit{align-items:center;justify-content:center;width:32px;height:30px;padding:0}
+.pa-book-read-exit svg{width:16px;height:16px}
 .pa-book-main{display:flex;flex:1;min-height:0}
 .pa-book-stage{position:relative;display:flex;flex:1;align-items:center;justify-content:center;gap:10px;min-width:0;min-height:0;padding:0 6px}
 .pa-spread{position:relative;display:flex;flex:none;border-radius:6px;box-shadow:0 10px 30px rgba(58,50,38,.25)}
@@ -11475,16 +11492,10 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-slot-handle.is-rotate::after{content:"";position:absolute;inset:3px;border:1.5px solid var(--pa-accent);border-top-color:transparent;border-radius:50%}
 /* 잡힐 사진 미리 보이기 — 올린 사진은 점선, 위 줄 사진 목록에 올린 사진은 굵은 점선 */
 .photo-album:not(.pa-book-reading) .pa-slot:hover:not(.is-picked){outline:2px dashed color-mix(in srgb,var(--pa-accent) 70%,transparent);outline-offset:2px}
-.pa-slot.is-hint{z-index:4;outline:3px dashed var(--pa-accent)!important;outline-offset:3px}
 .pa-book-pick{display:flex;align-items:center;gap:6px;min-width:0}
 .pa-book-pick[hidden]{display:none}
 .pa-book-pick-label{color:var(--pa-muted);font-size:11px;white-space:nowrap}
-.pa-book-layers{display:flex;gap:3px}
-.photo-album .pa-book-layer{width:30px;height:30px;padding:0;overflow:hidden;border:1px solid var(--pa-line);border-radius:6px;background:var(--pa-soft)}
-.pa-book-layer img{display:block;width:100%;height:100%;object-fit:cover}
-.photo-album .pa-book-layer:hover{border-color:var(--pa-accent)}
-.photo-album .pa-book-layer.active{border-color:var(--pa-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--pa-accent) 35%,transparent)}
-.pa-book-pick-tools{display:flex;gap:2px;margin-left:4px;padding-left:8px;border-left:1px solid var(--pa-line)}
+.pa-book-pick-tools{display:flex;gap:2px}
 .photo-album .pa-book-pick-tools button{display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-panel);color:var(--pa-text)}
 .photo-album .pa-book-pick-tools button:hover{border-color:var(--pa-accent);color:var(--pa-accent)}
 .pa-book-pick-tools .ui-icon{width:16px;height:16px}
@@ -11509,6 +11520,9 @@ a.diary-school-card-value{color:var(--accent)}
 .photo-album .pa-book-tray-tab{flex:1;padding:6px 4px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft);color:var(--pa-muted);font-size:12px;font-weight:700;white-space:nowrap}
 .photo-album .pa-book-tray-tab[aria-selected="true"]{border-color:var(--pa-accent);background:var(--pa-panel);color:var(--pa-accent)}
 .pa-book-tray-tab .pa-book-tray-count{color:var(--pa-muted);font-size:10.5px;font-weight:500}
+/* 사진·장식 탭은 그림만(글자 칸 .pa-head-label 은 감춤). 사진 탭엔 개수만 작게 곁에 둔다. */
+.photo-album .pa-book-tray-tab{display:inline-flex;align-items:center;justify-content:center;gap:3px;padding:4px}
+.pa-book-tray-tab svg{width:17px;height:17px}
 .pa-book-tray[data-tab="deco"] .pa-book-tray-list{display:none}
 .pa-book-tray:not([data-tab="deco"]) .pa-book-deco{display:none}
 .pa-book-deco{display:flex;flex:1;flex-direction:column;min-height:0}
@@ -11581,21 +11595,24 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-turn-leaf>.pa-turn-face.is-back{transform:rotateY(180deg)}
 .pa-turn-cover.pa-turn-face{outline:0}
 .pa-turn-shade,.pa-turn-under{position:absolute;inset:0;z-index:30;background:#2a2016;opacity:0;pointer-events:none}
-/* 넘김 귀퉁이(시안 C) — 쪽 아래 바깥 귀퉁이가 접힌 단추. 접힌 뒷면은 쪽 바탕색(--corner-paper)을 조금 어둡게,
-   그 위에 화살표. 올리면 더 크게 접힌다. 누르면 넘기고, 끌면 손으로 넘긴다. */
+/* 넘김 귀퉁이 — 쪽 아래 바깥 귀퉁이의 보이지 않는 단추. 평소엔 반듯한 종이이고, 올리면 말려 들린다(모양 시안 A · 움직임 시안 D). 말린 면·그늘·아래 면은 SVG 하나(.pa-turn-curl)이고
+   크기는 .pa-curl 의 scale 로만 바꾼다(귀퉁이 = 그림의 오른쪽 아래). 색은 쪽 바탕색(--corner-paper)을 따른다. 앞 쪽 귀퉁이는 좌우만 뒤집는다.
+   올렸을 때 들썩임은 wireCornerCurl(JS) 이 맡고, 동작 줄이기·키보드 초점에선 CSS 가 멈춘 채 크게 둔다. 누르면 넘기고, 끌면 손으로 넘긴다. */
 .photo-album .pa-turn-corner{position:absolute;bottom:0;z-index:15;width:58px;height:58px;padding:0;border:0;background:transparent;cursor:pointer;touch-action:none;transition:width .18s ease,height .18s ease}
 .pa-turn-corner.is-next{right:0}.pa-turn-corner.is-prev{left:0}
-.pa-turn-corner::before{content:"";position:absolute;inset:0;transition:filter .18s ease}
-.pa-turn-corner.is-next::before{border-radius:0 0 6px 0;background:linear-gradient(135deg,transparent 50%,color-mix(in srgb,var(--corner-paper,#fbf6ea) 82%,#3a3226) 50%);box-shadow:-4px -4px 8px -4px rgba(58,50,38,.25);clip-path:polygon(100% 0,100% 100%,0 100%)}
-.pa-turn-corner.is-prev::before{border-radius:0 0 0 6px;background:linear-gradient(225deg,transparent 50%,color-mix(in srgb,var(--corner-paper,#fbf6ea) 82%,#3a3226) 50%);clip-path:polygon(0 0,100% 100%,0 100%)}
-.pa-turn-corner-icon{position:absolute;bottom:7px;display:flex;color:#5b4a33;opacity:.8;transition:opacity .18s ease,color .18s ease}
-.pa-turn-corner.is-next .pa-turn-corner-icon{right:7px}.pa-turn-corner.is-prev .pa-turn-corner-icon{left:7px}
-.pa-turn-corner-icon .ui-icon{width:17px;height:17px}
-.photo-album .pa-turn-corner:hover,.photo-album .pa-turn-corner:focus-visible{width:72px;height:72px}
-.pa-turn-corner:hover .pa-turn-corner-icon,.pa-turn-corner:focus-visible .pa-turn-corner-icon{opacity:1;color:var(--pa-accent)}
-.pa-turn-corner:hover::before,.pa-turn-corner:focus-visible::before{filter:brightness(.94)}
+.photo-album .pa-turn-corner:hover,.photo-album .pa-turn-corner:focus-visible{width:84px;height:84px}
+.pa-turn-curl{position:absolute;right:0;bottom:0;width:100px;height:100px;overflow:visible;pointer-events:none}
+.pa-turn-corner.is-prev .pa-turn-curl{right:auto;left:0;transform:scaleX(-1)}
+.pa-curl{opacity:0;transform:scale(.01);transform-box:view-box;transform-origin:100px 100px;transition:transform .18s ease,opacity .18s ease}
+.pa-turn-corner:focus-visible .pa-curl{opacity:1;transform:scale(.8)}
+@media (prefers-reduced-motion:reduce){.pa-turn-corner:hover .pa-curl{opacity:1;transform:scale(.8)}}
+.pa-curl-under{fill:color-mix(in srgb,var(--corner-paper,#fbf6ea) 84%,#7d6843)}
+.pa-curl-shade{stop-color:#3a3226}
+.pa-curl-crease{stop-color:color-mix(in srgb,var(--corner-paper,#fbf6ea) 80%,#6b5530)}
+.pa-curl-light{stop-color:color-mix(in srgb,var(--corner-paper,#fbf6ea) 96%,#6b5530)}
+.pa-curl-shine{stop-color:color-mix(in srgb,var(--corner-paper,#fbf6ea) 55%,#fff)}
+.pa-curl-edge{stop-color:color-mix(in srgb,var(--corner-paper,#fbf6ea) 86%,#6b5530)}
 .photo-album .pa-turn-corner:focus-visible{outline:2px solid var(--pa-accent);outline-offset:-4px}
-.pa-book-reading .pa-turn-corner-icon{color:#3a3226}
 .pa-turning,.pa-turning *{cursor:grabbing!important;user-select:none}
 /* 트레이에서 사진·장식을 끄는 동안엔 귀퉁이가 놓기를 막지 않게 비킨다. */
 .pa-tray-dragging .pa-turn-corner{pointer-events:none}
@@ -11618,7 +11635,7 @@ a.diary-school-card-value{color:var(--accent)}
 [data-theme="dark"] .pa-book{background:#1d1a16}
 [data-theme="dark"] .pa-page.is-blank{background:rgba(251,246,234,.08)}
 [data-theme="dark"] .photo-album .pa-book-blank-add{border-color:#6b5f4c;color:#d8c9ad}
-@media(max-width:900px){.pa-book-tray{width:118px}.pa-book-tray-list{grid-template-columns:1fr}.pa-mode-tab span{display:none}}
+@media(max-width:900px){.pa-book-tray{width:118px}.pa-book-tray-list{grid-template-columns:1fr}}
 
 /* 로또 6/45 — 다크 바이올렛, 기존 문서 테마와 독립된 도구 창 */
 .modal.lotto-modal{container:lotto-viewport / inline-size;z-index:1250;padding:20px;background:rgba(2,6,18,.82);color:#f5f5ff;color-scheme:dark}

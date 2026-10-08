@@ -104,7 +104,7 @@ function harness(){
   for (const match of source.matchAll(/clickId\("([^"]+)"\)/g)){
     if (!document.getElementById(match[1])) element("button", match[1]).onclick = () => record(match[1]);
   }
-  for (const id of ["studyToggle","saveFolderOpen"]){
+  for (const id of ["studyToggle","saveFolderOpen","petFocusWrap"]){
     const control = document.getElementById(id) || element("button", id); control.hidden = true;
   }
   for (const match of source.matchAll(/callFn\("([^"]+)"/g)) window[match[1]] = (...args) => record(match[1], args);
@@ -150,11 +150,11 @@ function harness(){
     flushFrames, flushTimers, internals:window.__testPalette };
 }
 
-test("all 93 original commands have categories, descriptions and existing SVG icons", () => {
+test("all 108 original commands have categories, descriptions and existing SVG icons", () => {
   const h = harness(), { COMMANDS, COMMAND_UI, CATEGORIES } = h.internals;
   const iconSource = fs.readFileSync(path.join(__dirname, "../src/js/icons.js"), "utf8");
   const existingIcons = new Set([...iconSource.matchAll(/^    (\w+):/gm)].map(match => match[1]));
-  assert.equal(COMMANDS.length, 93);
+  assert.equal(COMMANDS.length, 108);
   assert.deepEqual(Object.keys(COMMAND_UI).sort(), Array.from(COMMANDS, cmd => cmd.id).sort());
   for (const cmd of COMMANDS){
     const [category, icon, description] = COMMAND_UI[cmd.id];
@@ -222,7 +222,7 @@ test("execution closes first, fires once and leaves the new target focused", () 
   assert.equal(h.calls.at(-1).name, "files"); assert.equal(h.calls.at(-1).args[0].id, "fileInput");
 });
 
-test("all 93 commands retain one execution of their original function or toolbar target", () => {
+test("all 108 commands retain one execution of their original function or toolbar target", () => {
   const commands = harness().internals.COMMANDS;
   const selectors = [...new Set([...source.matchAll(/hasBtn\("([^"]+)"\)/g)].map(match => match[1]).concat(".run-go"))];
   for (const command of commands){
@@ -232,7 +232,7 @@ test("all 93 commands retain one execution of their original function or toolbar
       openGotoLine:() => h.record("goto")
     });
     h.context.docs.push({ id:"doc-2" });
-    for (const id of ["studyToggle","saveFolderOpen"]) h.document.getElementById(id).hidden = false;
+    for (const id of ["studyToggle","saveFolderOpen","petFocusWrap"]) h.document.getElementById(id).hidden = false;
     h.open();
     const row = h.overlay().querySelectorAll(".cmdk-item").find(el => el.dataset.command === command.id);
     assert.ok(row, command.id + " remains available under its original conditions");

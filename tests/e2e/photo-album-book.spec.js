@@ -78,7 +78,7 @@ test("칸을 끌어 옮기고 글을 넣으면 저장되어 다시 열어도 그
   const body = page.locator(".pa-btext-body").first();
   await expect(body).toBeFocused();
   await page.keyboard.type("제주 첫날");
-  await page.locator(".pa-book-where").click();       // 바깥 → 글 확정
+  await page.locator(".pa-book-bar").click({ position:{ x:6, y:6 } });   // 바깥 → 글 확정
   await expect(page.locator(".pa-btext-body")).toHaveText("제주 첫날");
   await expect(page.locator(".pa-status")).toHaveText("앨범을 저장했습니다.", { timeout:5000 });
 
@@ -139,7 +139,7 @@ test("쪽 더하기·넘기기와 책 감상(←/→·Esc)", async ({ page }) =>
   await expect(page.locator(".pa-book-where")).toHaveText("3쪽 / 3");
 });
 
-test("겹쳐 가려진 사진도 위 줄 '이 쪽 사진' 목록이나 Alt+누르기로 골라 끌 수 있고, 도구·손잡이는 잘리지 않는다", async ({ page }) => {
+test("겹쳐 가려진 사진도 Alt+누르기로 골라 끌 수 있고, 도구·손잡이는 잘리지 않는다", async ({ page }) => {
   await boot(page);
   await importImages(page, 4);
   await expect(pageSlots(page, 0)).toHaveCount(4);
@@ -156,12 +156,10 @@ test("겹쳐 가려진 사진도 위 줄 '이 쪽 사진' 목록이나 Alt+누�
   const top = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).closest(".pa-slot").dataset.id, { x:a.x + a.width / 2, y:a.y + a.height / 2 });
   expect(top).not.toBe(firstId);
 
-  // 위 줄 목록에 이 쪽 사진 4장이 뒤→앞 차례로 있다. 첫 칩(맨 뒤 = 1번)을 누르면 1번이 골라지고 맨 위로 뜬다
-  const chips = page.locator(".pa-book-pick .pa-book-layer");
-  await expect(chips).toHaveCount(4);
-  await chips.first().hover();
-  await expect(page.locator(`.pa-slot[data-id="${firstId}"]`)).toHaveClass(/is-hint/);
-  await chips.first().click();
+  // 위 줄엔 쪽 사진 목록이 없다(아래 쪽 미리보기와 겹침) — 가려진 1번은 Alt+누르기로 골라 맨 위로 띄운다
+  await expect(page.locator(".pa-book-layer")).toHaveCount(0);
+  await page.mouse.click(a.x + a.width / 2, a.y + a.height / 2);
+  await page.keyboard.down("Alt"); await page.mouse.click(a.x + a.width / 2, a.y + a.height / 2); await page.keyboard.up("Alt");
   const first = page.locator(`.pa-slot[data-id="${firstId}"]`);
   await expect(first).toHaveClass(/is-picked/);
   const lifted = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).closest(".pa-slot").dataset.id, { x:a.x + a.width / 2, y:a.y + a.height / 2 });
@@ -493,13 +491,30 @@ test("장식을 쪽으로 끌면 놓일 자리가 보이고 그 자리에 붙으
   expect(probe).toBeGreaterThan(20);                                     // 장식이 그려졌다
 });
 
-test("쪽 넘김 단추는 접힌 귀퉁이 — 누르면 넘어가고, 키보드(Enter)로도 넘기며, 둥근 ‹ › 단추는 없다", async ({ page }) => {
+test("쪽 넘김 단추는 귀퉁이 — 평소엔 반듯하고 올리면 말려 들썩이고, 누르면 넘어가고, 키보드(Enter)로도 넘기며, 둥근 ‹ › 단추는 없다", async ({ page }) => {
   await boot(page);
   await importImages(page, 13);                                  // 4쪽
   await expect(page.locator(".pa-book-prev, .pa-book-next")).toHaveCount(0);
   const next = page.locator(".pa-turn-corner.is-next");
   await expect(next).toHaveAttribute("aria-label", "다음 쪽");
   await expect(page.locator(".pa-turn-corner.is-prev")).toHaveCount(0);   // 첫 펼침엔 앞 쪽 귀퉁이가 없다
+
+  // 귀퉁이는 화살표 없이 평소엔 반듯한 종이(말린 면이 숨어 있음). 올리면 말려 크게 들렸다가 내려앉아 살랑이고, 떼면 다시 펴진다.
+  await expect(next.locator(".pa-turn-corner-icon")).toHaveCount(0);
+  const curlWidth = () => next.locator(".pa-curl").evaluate((el) => el.getBoundingClientRect().width);
+  const rest = await curlWidth();
+  expect(rest).toBeLessThan(3);
+  expect(await next.locator(".pa-curl").evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
+  // 말린 면은 쪽 귀퉁이에 붙어 있다(다음 = 오른쪽 아래, 앞 = 왼쪽 아래)
+  const anchored = (locator, side) => locator.evaluate((el, side) => {
+    const box = el.getBoundingClientRect(), curl = el.querySelector(".pa-curl").getBoundingClientRect();
+    return Math.abs(curl.bottom - box.bottom) < 2 && Math.abs(curl[side] - box[side]) < 2;
+  }, side);
+  expect(await anchored(next, "right")).toBe(true);
+  await next.hover();
+  await expect.poll(curlWidth).toBeGreaterThan(75);
+  await page.mouse.move(5, 5);
+  await expect.poll(curlWidth).toBeLessThan(3);
 
   // 누르기 = 끝까지 넘김(넘어가는 장이 나타났다가 걷힌다)
   await next.click();
@@ -509,6 +524,7 @@ test("쪽 넘김 단추는 접힌 귀퉁이 — 누르면 넘어가고, 키보�
 
   // 키보드: 앞 쪽 귀퉁이에 초점을 두고 Enter
   const prev = page.locator(".pa-turn-corner.is-prev");
+  expect(await anchored(prev, "left")).toBe(true);
   await prev.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator(".pa-book-where")).toHaveText("1–2쪽 / 4");
@@ -521,7 +537,7 @@ test("사이드바 '사진첩 열기'는 하나뿐인 사진첩을 열고, 이�
   await page.addInitScript(() => { try { localStorage.setItem("mn_onboarded_v1", "1"); localStorage.setItem("uiLang", "ko"); } catch (_) {} });
   await page.goto("/");
   await expect(page.locator("#commandPaletteOpen")).toBeVisible();
-  await expect(page.locator("#sbNewPhotoAlbum span")).toHaveText("사진첩 열기");
+  await expect(page.locator("#sbNewPhotoAlbum .sb-create-label")).toHaveText("사진첩 열기");
   const press = () => page.evaluate(() => document.getElementById("sbNewPhotoAlbum").click());
   await press();
   await expect(page.locator(".photo-album")).toBeVisible();

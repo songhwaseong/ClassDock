@@ -76,3 +76,53 @@ test("알맹이 효과는 두 층의 액자를, box 효과는 새 층 전체를 
   assert.deepEqual(plain(await album.playViewEffect(album.viewEffectById("none"), parts())), []);
   assert.equal(log.length, 0);
 });
+
+// viewSwitchIn 에 넘길 가짜 무대·앞 층. 무대엔 새 사진 img 하나, 앞 층엔 앞 사진 액자 하나.
+function fakeSwitch(album, log, img){
+  const classes = new Set();
+  const stage = fakeElement(log, "stage", [fakeElement(log, "new-board")]);
+  Object.assign(stage, { isConnected:true, offsetWidth:400, offsetHeight:300,
+    classList:{ add:name => classes.add(name), remove:name => classes.delete(name), contains:name => classes.has(name) },
+    querySelector:selector => selector === ".pa-photo-surface > img" ? img : null });
+  const ghost = fakeElement(log, "ghost", [fakeElement(log, "old-board")]);
+  Object.assign(ghost, { isConnected:true, remove(){ ghost.isConnected = false; } });
+  album.set("root", { querySelector:selector => selector === ".pa-stage" ? stage : null });
+  return { stage, ghost, classes };
+}
+
+test("무대 그림자 중 안쪽 선만 골라 낸다(괄호 속 쉼표는 나누지 않음)", () => {
+  const album = loadAlbum();
+  assert.equal(album.insetShadows("rgb(39, 51, 64) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.33) 0px 15px 40px 0px"), "rgb(39, 51, 64) 0px 0px 0px 1px inset");
+  assert.equal(album.insetShadows("rgba(0, 0, 0, 0.33) 0px 15px 40px 0px"), "none");
+  assert.equal(album.insetShadows("none"), "none");
+});
+
+test("새 사진을 한도 안에 다 못 풀면 앞 사진을 둔 채 기다렸다가 흐려지기로 넘긴다", async () => {
+  let finishDecode;
+  const album = loadAlbum({ context:{ setTimeout:fn => setTimeout(fn, 0) } });
+  const log = [], img = { complete:false, decode:() => new Promise(resolve => { finishDecode = resolve; }) };
+  const { ghost, classes } = fakeSwitch(album, log, img);
+  const running = album.viewSwitchIn(ghost, 1);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(classes.has("pa-view-wait"), "다 풀 때까지 새 사진은 감춘다");
+  assert.equal(log.length, 0, "기다리는 동안은 움직이지 않는다");
+  assert.ok(ghost.isConnected, "그동안 앞 사진이 그대로 보인다");
+  finishDecode(); await running;
+  assert.ok(!classes.has("pa-view-wait"));
+  assert.deepEqual(log.map(row => row.name), ["old-board", "new-board"]);
+  assert.deepEqual(log[1].frames, [{ opacity:0 }, { opacity:1 }], "밀기 대신 흐려지기");
+  assert.ok(!ghost.isConnected);
+});
+
+test("box 효과는 무대 테두리선·그림자를 앞 층이 맡고, 끝나면 무대 것을 되돌린다", async () => {
+  const shadow = "rgb(39, 51, 64) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.33) 0px 15px 40px 0px";
+  const album = loadAlbum({ context:{ getComputedStyle:() => ({ backgroundColor:"rgb(7, 10, 14)", backgroundImage:"none", boxShadow:shadow }) } });
+  album.storage.setItem("classdock.photoAlbum.viewEffect", "wipe");
+  const log = [], { stage, ghost } = fakeSwitch(album, log, { complete:true });
+  let during = null;
+  stage.animate = () => { during = { stage:stage.style.boxShadow, ghost:ghost.style.boxShadow, zIndex:stage.style.zIndex }; return { finished:Promise.resolve(), cancel(){} }; };
+  await album.viewSwitchIn(ghost, 1);
+  assert.deepEqual(during, { stage:"rgb(39, 51, 64) 0px 0px 0px 1px inset", ghost:shadow, zIndex:"1" });
+  assert.equal(stage.style.boxShadow, "");
+  assert.equal(stage.style.zIndex, "");
+});
