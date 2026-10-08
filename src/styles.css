@@ -7284,7 +7284,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .timeline-viewport{position:relative;flex:1 1 auto;min-width:0;min-height:0;overflow:auto;outline:none;
     background-color:var(--workspace-bg);
     background-image:radial-gradient(circle at 1px 1px,color-mix(in srgb,var(--muted) 20%,transparent) 1px,transparent 0);
-    background-size:24px 24px;scrollbar-gutter:stable;cursor:grab}
+    background-size:24px 24px;scrollbar-width:none;-ms-overflow-style:none;cursor:grab}
+  .timeline-viewport::-webkit-scrollbar{width:0;height:0;display:none}
   .timeline-viewport:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
   .timeline-stage{position:relative;min-width:100%;transition:width .16s ease,height .16s ease;cursor:grab}
   .timeline-canvas{position:absolute;left:0;top:0;height:780px;transform-origin:top left;
