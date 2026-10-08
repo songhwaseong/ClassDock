@@ -1602,10 +1602,11 @@ const PhotoAlbum = (() => {
   }
   function onHistoryKey(event){
     if (!root || !root.isConnected || root.closest("[hidden]") || drawing || event.altKey) return;
+    if (closeAlbumMenu) return;
     if (albumMode === "book"){ onBookKey(event); return; }
     if (viewing){ onViewingKey(event); return; }
     const target = event.target;
-    if (target && target.closest && target.closest("textarea,select,[contenteditable=true],input:not([type=range])")) return;
+    if (target && target.closest && target.closest("textarea,select,[contenteditable],input:not([type=range])")) return;
     const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
     if (mod && key === "z"){ event.preventDefault(); stepHistory(event.shiftKey ? 1 : -1); }
     else if (mod && key === "y"){ event.preventDefault(); stepHistory(1); }
@@ -1697,6 +1698,7 @@ const PhotoAlbum = (() => {
     if (!shown.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = records.length ? "이 항목에 미디어가 없습니다." : "사진·영상을 가져와 시작하세요."; host.appendChild(p); }
     shown.forEach(item => {
       const card = button("", () => selectItem(item.id), "pa-media-card" + (selectedId === item.id ? " active" : ""));
+      card.dataset.mediaId = item.id;
       const thumb = document.createElement("span"); thumb.className = "pa-thumb";
       if (item.thumbnail || (item.type === "image" && item.blob)){
         const img = document.createElement("img"); img.alt = ""; img.loading = "lazy";
@@ -1754,6 +1756,7 @@ const PhotoAlbum = (() => {
     if (category === TEXT_GROUP){
       const box = document.createElement("div"); box.className = "pa-text-new";
       const area = document.createElement("textarea"); area.rows = 2; area.maxLength = TEXT_MAX; area.placeholder = "넣을 글자 (Enter 로 줄 바꿈)"; area.setAttribute("aria-label","넣을 글자");
+      if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
       const add = button("T 글자 붙이기", () => { if (!area.value.trim()){ area.focus(); return; } addText(area.value); area.value = ""; }, "pa-text-add");
       add.title = "사진에 붙이기 (Ctrl+Enter)";
       area.onkeydown = event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)){ event.preventDefault(); add.click(); } };
@@ -1935,6 +1938,7 @@ const PhotoAlbum = (() => {
       const textBody = section(host, "text", "글자", true), tx = cleanText(parts[0].tx);
       if (!many){
         const area = document.createElement("textarea"); area.className = "pa-text-input"; area.rows = 2; area.maxLength = TEXT_MAX; area.value = tx.t; area.setAttribute("aria-label","글자 내용");
+        if (typeof attachTextCaseContextMenu === "function") attachTextCaseContextMenu(area);
         area.oninput = () => { const part = pickedParts(item)[0]; if (!part || !part.tx) return; part.tx = cleanText({ ...cleanText(part.tx), t:area.value }); updateStickerElements(); paintLayers(); saveSoon(item); };
         textBody.appendChild(area);
       }
@@ -2761,6 +2765,7 @@ const PhotoAlbum = (() => {
   }
   // 모서리 점=크기, 둥근 점=회전. 하나면 그 장식 중심, 여럿이면 묶음 틀 중심을 기준으로 함께 바꾼다.
   function partHandleDrag(event, parts, item, surface, mode){
+    if (event.button !== 0) return;
     event.preventDefault(); event.stopPropagation(); releaseFieldFocus();
     if (!parts.length) return;
     const handle = event.currentTarget; handle.setPointerCapture(event.pointerId);
@@ -2958,7 +2963,7 @@ const PhotoAlbum = (() => {
       layer.appendChild(partBar(item));
       // 장식 밖 사진을 누르고 끌면 사각형으로 여러 개를 고르고, 누르기만 하면 선택을 푼다.
       surface.addEventListener("pointerdown", event => {
-        if (viewing || event.target.closest(".pa-part,.pa-part-bar,.pa-group-box")) return;
+        if (event.button !== 0 || viewing || event.target.closest(".pa-part,.pa-part-bar,.pa-group-box")) return;
         event.preventDefault(); releaseFieldFocus(); startMarquee(event, item, surface, layer);
       });
       stageStartedAt = performance.now(); if (viewing) syncSfx();
@@ -2977,12 +2982,18 @@ const PhotoAlbum = (() => {
       saveBtn.insertAdjacentHTML("beforeend", '<span class="pa-save-caret" aria-hidden="true">' + uiIconHtml("chevronDown", "▾") + '</span>');
       actions.appendChild(saveBtn); syncSaveButton(item);
     }
-    actions.appendChild(iconButton("delete", "삭제", async () => {
-      if (!await confirmDialog("사진첩에서 이 항목을 삭제할까요?", "삭제", "취소")) return;
-      try { await deleteItem(item); if (musicSession && musicSession.item === item) stopMusic(); records = records.filter(row => row.id !== item.id); removeFromBook(item.id); for (const track of musicTracks(item.music)) await dropAudioRecord(track.id); selectedId = records[0] && records[0].id; picked = new Set(); paintList(); paintStage(); paintBackgrounds(); paintAdjust(); }
-      catch(error){ console.error(error); notice("항목을 삭제하지 못했습니다."); }
-    }, "pa-ico pa-delete"));
+    actions.appendChild(iconButton("delete", "삭제", () => removeMedia(item), "pa-ico pa-delete"));
     caption.append(name,actions); host.appendChild(caption);
+  }
+  async function removeMedia(item){
+    if (!await confirmDialog("사진첩에서 이 항목을 삭제할까요?", "삭제", "취소")) return;
+    try {
+      await deleteItem(item); if (musicSession && musicSession.item === item) stopMusic();
+      records = records.filter(row => row.id !== item.id); removeFromBook(item.id);
+      for (const track of musicTracks(item.music)) await dropAudioRecord(track.id);
+      if (selectedId === item.id){ selectedId = records[0] && records[0].id; picked = new Set(); }
+      paintList(); paintStage(); paintBackgrounds(); paintAdjust(); paintBook();
+    } catch(error){ console.error(error); notice("항목을 삭제하지 못했습니다."); }
   }
   async function dimensions(blob){ const image = await createImageBitmap(blob); const size = { width:image.width, height:image.height }; image.close(); return size; }
   async function imageThumbnail(blob){
@@ -3555,7 +3566,7 @@ const PhotoAlbum = (() => {
       const hint = document.createElement("p"); hint.className = "pa-page-hint"; hint.textContent = "오른쪽 사진을 끌어다 놓거나 눌러서 넣으세요"; el.appendChild(hint);
     }
     el.addEventListener("pointerdown", event => {
-      if (bookReading || event.target.closest(".pa-slot,.pa-btext,.pa-book-blank-add")) return;
+      if (event.button !== 0 || bookReading || event.target.closest(".pa-slot,.pa-btext,.pa-bsticker,.pa-book-blank-add")) return;
       bookPage = index; if (bookPick){ bookPick = null; } paintBook();
     });
     el.addEventListener("dragover", event => {
@@ -3617,6 +3628,7 @@ const PhotoAlbum = (() => {
     el.appendChild(body);
     if (bookReading) return el;
     body.contentEditable = "plaintext-only"; body.spellcheck = false; body.setAttribute("aria-label", "쪽 글");
+    if (typeof attachEditableContextMenu === "function") attachEditableContextMenu(body);
     body.addEventListener("focus", () => { if (!(bookPick && bookPick.id === text.id)){ bookPick = { kind:"text", page:pageIndex, id:text.id }; bookPage = pageIndex; el.classList.add("is-picked"); addTextTools(el, pageIndex, text); } });
     body.addEventListener("blur", () => {
       const value = body.textContent.replace(/\s+$/,"");
@@ -3688,7 +3700,7 @@ const PhotoAlbum = (() => {
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
   }
   function startTextDrag(event, pageIndex, text, el){
-    if (event.button !== 0) return;
+    if (event.button !== 0 || bookReading) return;
     event.preventDefault(); event.stopPropagation();
     const rect = el.closest(".pa-page").getBoundingClientRect(), start = { x:event.clientX, y:event.clientY, sx:text.x, sy:text.y };
     let moved = false;
@@ -3724,7 +3736,7 @@ const PhotoAlbum = (() => {
   }
   async function removePage(){
     const pages = bookOf().pages, page = pages[bookPage]; if (!page) return;
-    if ((page.slots.length || page.texts.length) && typeof confirmDialog === "function"
+    if ((page.slots.length || page.texts.length || (page.stickers || []).length) && typeof confirmDialog === "function"
       && !await confirmDialog(pageLabel(bookPage) + "을 뺄까요? 쪽 위 사진은 사진첩에 그대로 남습니다.", "쪽 빼기", "취소")) return;
     pages.splice(bookPage, 1); bookPage = Math.max(0, Math.min(bookPage, pages.length - 1)); bookPick = null; bookChanged(); status("쪽을 뺐습니다. Ctrl+Z 로 되돌릴 수 있습니다.");
   }
@@ -4029,6 +4041,7 @@ const PhotoAlbum = (() => {
     if (!records.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = "사진·영상을 가져와 시작하세요."; host.appendChild(p); return; }
     for (const item of records){
       const card = button("", () => { const pages = bookOf().pages; if (!pages.length) addPage(); placeMedia(Math.min(bookPage, bookOf().pages.length - 1), item, null); }, "pa-book-tray-item");
+      card.dataset.mediaId = item.id;
       card.draggable = true; card.title = item.name + " · 쪽으로 끌어다 놓거나 눌러서 지금 쪽에 넣기";
       card.addEventListener("dragstart", event => startTrayDrag(event, item, card));
       card.addEventListener("dragend", endTrayDrag);
@@ -4086,6 +4099,7 @@ const PhotoAlbum = (() => {
     const pages = bookOf().pages, per = bookPerView();
     for (let at = 0; at < pages.length; at += per){
       const thumb = button("", () => { bookSpread = at; bookPage = at; bookPick = null; paintBook(); }, "pa-book-thumb" + (at === bookSpread ? " active" : ""));
+      thumb.dataset.index = String(at);
       thumb.title = per === 2 && pages[at + 1] ? `${at + 1}–${at + 2}쪽` : `${at + 1}쪽`;
       for (let k = at; k < Math.min(at + per, pages.length); k++){
         const mini = document.createElement("span"); mini.className = "pa-mini-page"; mini.style.background = bookPaper(pages[k].paper)[2];
@@ -4246,6 +4260,123 @@ const PhotoAlbum = (() => {
     anchor.classList.add("is-open");
     MNContextMenu.open(rect.left, rect.bottom + 6, items, { base:"text-context", onClose:() => anchor.classList.remove("is-open") });
   }
+  // 대상별 메뉴도 도구막대와 같은 편집·저장 함수를 타므로 되돌리기와 자동 저장이 함께 적용된다.
+  let closeAlbumMenu = null;
+  function albumMediaMenuItems(item){
+    return [
+      { label:"사진·영상 보기", action:() => { setAlbumMode("edit"); selectItem(item.id); setViewing(true); } },
+      ...(item.type === "image" ? [{ label:"이 사진 꾸미기", action:() => openInEditor(item.id) }] : []),
+      { label:"지금 쪽에 넣기", disabled:bookReading, action:() => { if (!bookOf().pages.length) addPage(); placeMedia(bookPage, item, null); setAlbumMode("book"); } },
+      { label:item.favorite ? "즐겨찾기 해제" : "즐겨찾기", active:!!item.favorite,
+        action:() => { item.favorite = !item.favorite; save(item); paintList(); paintStage(); paintBookTray(); } },
+      ...(item.type === "image" ? [{ label:"그림 저장", children:[
+        { label:"PNG", action:() => exportImage(item) },
+        ...(hasMotion(item) ? [{ label:"GIF", action:() => exportGif(item) }, { label:"MP4", action:() => exportMp4(item) }] : [])
+      ] }] : []),
+      { separator:true },
+      { label:"사진첩에서 삭제", disabled:bookReading, action:() => removeMedia(item) }
+    ];
+  }
+  function albumPartMenuItems(item){
+    const parts = pickedParts(item), room = orderRoom(item);
+    return [
+      { label:"복사", action:() => copyParts(item, false) },
+      { label:"잘라내기", action:() => copyParts(item, true) },
+      { label:"복제", action:() => duplicateParts(item) },
+      { label:"순서", children:ORDERS.map(([where,,label]) => ({ label,
+        disabled:!(where === "front" || where === "forward" ? room.forward : room.backward), action:() => moveParts(item, where) })) },
+      { label:"뒤집기", children:FLIPS.map(([key,,label]) => ({ label, active:parts.every(part => !!part[key]), action:() => { flipParts(item, key); save(item); } })) },
+      { label:"묶기", disabled:parts.length < 2, action:() => groupParts(item) },
+      { label:"묶음 풀기", disabled:!parts.some(part => part.g), action:() => ungroupParts(item) },
+      { label:"회전·투명도·뒤집기 원래대로", action:() => { resetParts(item); save(item); } },
+      { separator:true }, { label:"장식 삭제", action:() => removeParts(item) }
+    ];
+  }
+  function albumPageMenuItems(pageIndex, pick){
+    const page = bookOf().pages[pageIndex]; if (!page) return [];
+    const items = [];
+    if (pick && pick.kind === "slot"){
+      const slot = page.slots.find(row => row.id === pick.id), media = slot && mediaById(slot.media);
+      if (slot) items.push(
+        { label:"이 사진 꾸미기", disabled:!media || media.type !== "image", action:() => openInEditor(slot.media) },
+        { label:"맨 앞으로", action:() => reorderSlot(pageIndex, slot.id) },
+        { label:"맨 뒤로", action:() => sendSlotBack(pageIndex, slot.id) },
+        { label:"바르게 (기울기 0°)", action:() => { slot.r = 0; bookChanged(); } },
+        { label:"쪽에서 빼기 (사진은 사진첩에 남음)", action:() => removeSlot(pageIndex, slot.id) }, { separator:true });
+    } else if (pick && pick.kind === "sticker"){
+      const part = (page.stickers || []).find(row => row.id === pick.id);
+      if (part) items.push(...bookStickerMenuItems(pageIndex, part), { separator:true });
+    } else if (pick && pick.kind === "text"){
+      const text = page.texts.find(row => row.id === pick.id);
+      if (text) items.push(
+        { label:"글자 크게", disabled:text.s >= 14, action:() => { text.s = clampNum(text.s + .7, 3, 14, 5.5); bookChanged(); } },
+        { label:"글자 작게", disabled:text.s <= 3, action:() => { text.s = clampNum(text.s - .7, 3, 14, 5.5); bookChanged(); } },
+        { label:"글 지우기", action:() => { page.texts = page.texts.filter(row => row.id !== text.id); bookPick = null; bookChanged(); } }, { separator:true });
+    }
+    items.push(
+      { label:"글 넣기", action:addBookText },
+      { label:"사진 자동 배치", disabled:!page.slots.length || page.slots.length > BOOK_MAX_PER_PAGE, action:relayoutPage },
+      { label:"종이 바탕", children:BOOK_PAPERS.map(([id,label]) => ({ label, active:page.paper === id, action:() => setPaper(id) })) },
+      { separator:true },
+      { label:"쪽 더하기", disabled:bookOf().pages.length >= BOOK_MAX_PAGES, action:addPage },
+      { label:"쪽을 앞으로", disabled:pageIndex <= 0, action:() => movePage(-1) },
+      { label:"쪽을 뒤로", disabled:pageIndex >= bookOf().pages.length - 1, action:() => movePage(1) },
+      { label:"쪽 빼기", action:removePage },
+      { separator:true },
+      { label:"되돌리기", disabled:!bookHistory.undo.length, action:() => stepBookHistory(-1) },
+      { label:"다시 하기", disabled:!bookHistory.redo.length, action:() => stepBookHistory(1) },
+      { label:"이 쪽 그림 저장 (PNG)", action:() => exportBookPng("page") });
+    return items;
+  }
+  function onAlbumContextMenu(event){
+    if (event.defaultPrevented || drawing || typeof MNContextMenu === "undefined") return;
+    const target = event.target;
+    if (!target || !target.closest || target.closest("input,textarea,select,[contenteditable]")) return;
+    const card = target.closest(".pa-media-card,.pa-book-tray-item"), pageNode = target.closest(".pa-page,.pa-book-thumb"), partNode = target.closest(".pa-part");
+    let items;
+    if (card){
+      const media = mediaById(card.dataset.mediaId); if (!media) return;
+      items = albumMediaMenuItems(media);
+    } else if (pageNode){
+      bookPage = Number(pageNode.dataset.index);
+      if (!bookOf().pages[bookPage]) return;
+      if (bookReading){
+        items = [{ label:"책 감상 끝내기", action:() => setBookReading(false) },
+          { label:"이전 쪽", disabled:bookSpread <= 0, action:() => goSpread(-1) },
+          { label:"다음 쪽", disabled:bookSpread + bookPerView() >= bookOf().pages.length, action:() => goSpread(1) }];
+      } else {
+        const slot = target.closest(".pa-slot"), sticker = target.closest(".pa-bsticker"), text = target.closest(".pa-btext");
+        bookPick = slot ? { kind:"slot", page:bookPage, id:slot.dataset.id } : sticker ? { kind:"sticker", page:bookPage, id:sticker.dataset.id } : text ? { kind:"text", page:bookPage, id:text.dataset.id } : null;
+        bookSpread = bookPage - bookPage % bookPerView();
+        paintBook(); items = albumPageMenuItems(bookPage, bookPick);
+      }
+    } else if (target.closest(".pa-book-stage,.pa-book-thumbs")){
+      items = [{ label:"쪽 더하기", disabled:bookReading || bookOf().pages.length >= BOOK_MAX_PAGES, action:addPage },
+        { label:"사진·영상 가져오기", action:() => root.querySelector(".pa-input").click() }];
+    } else if (target.closest(".pa-stage")){
+      const item = selected();
+      if (viewing){
+        items = [{ label:"꾸미기 모드", action:() => setViewing(false) },
+          { label:slideshow ? "슬라이드쇼 멈추기" : "슬라이드쇼 시작", action:() => setSlideshow(!slideshow) },
+          { label:"전체화면", action:toggleViewFullscreen }];
+      } else if (partNode && item){
+        const part = item.stickers.find(row => row.id === partNode.dataset.id); if (!part) return;
+        if (part.l) items = [{ label:"잠금 해제", action:() => toggleLayerFlag(item, part, "l") }];
+        else {
+          if (!picked.has(part.id)){ picked = withGroups(item, [part.id]); refreshPicked(); }
+          items = albumPartMenuItems(item);
+          items.push({ label:"장식 잠그기", action:() => toggleLayerFlag(item, part, "l") });
+        }
+      } else {
+        items = [{ label:"사진·영상 가져오기", action:() => root.querySelector(".pa-input").click() },
+          { label:"장식 붙여넣기", disabled:!partClipboard || !item || item.type !== "image", action:() => pasteParts(item) }];
+        if (item) items.push({ separator:true }, ...albumMediaMenuItems(item));
+      }
+    } else return;
+    event.preventDefault(); event.stopPropagation(); closeSaveMenu(); closeEffectPanel();
+    if (closeAlbumMenu) closeAlbumMenu();
+    closeAlbumMenu = MNContextMenu.open(event.clientX, event.clientY, items, { base:"text-context", autoFocus:true, onClose:() => { closeAlbumMenu = null; } });
+  }
   /* ----- 쪽 위 장식 -----
      사진 꾸미기의 장식(안경·모자·옷·신발·이모지·내 그림)을 쪽에도 붙인다. 모양은 사진 장식과 같다
      ({ id, art, x, y, w, r, f?, em? }) — x·y 는 장식 가운데(쪽에 대한 %), w 는 쪽 폭에 대한 %, 높이 = w × 105/120.
@@ -4353,16 +4484,19 @@ const PhotoAlbum = (() => {
   }
   function stickerTools(at, part){
     const tools = document.createElement("span"); tools.className = "pa-book-pick-tools";
-    const list = () => bookOf().pages[at].stickers;
-    tools.append(
-      iconButton("layers", "맨 앞으로", () => { const rows = list(), i = rows.indexOf(part); if (i >= 0){ rows.push(rows.splice(i, 1)[0]); bookChanged(); } }, "pa-ico"),
-      iconButton("arrowDown", "맨 뒤로", () => { const rows = list(), i = rows.indexOf(part); if (i > 0){ rows.unshift(rows.splice(i, 1)[0]); bookChanged(); } }, "pa-ico"),
-      iconButton("flipH", "좌우 뒤집기", () => { part.f = !part.f; if (!part.f) delete part.f; bookChanged(); }, "pa-ico"),
-      iconButton("rotateLeft", "바르게 (기울기 0°)", () => { part.r = 0; bookChanged(); }, "pa-ico"),
-      iconButton("copy", "복제", () => { const copy = { ...part, id:bookId(), x:part.x + 4, y:part.y + 3 }; list().push(copy); bookPick = { kind:"sticker", page:at, id:copy.id }; bookChanged(); }, "pa-ico"),
-      iconButton("delete", "장식 떼기", () => removeSticker(at, part.id), "pa-ico")
-    );
+    tools.append(...bookStickerMenuItems(at, part).map(item => iconButton(item.icon, item.label, item.action, "pa-ico")));
     return tools;
+  }
+  function bookStickerMenuItems(at, part){
+    const list = () => bookOf().pages[at].stickers;
+    return [
+      { icon:"layers", label:"맨 앞으로", action:() => { const rows = list(), i = rows.indexOf(part); if (i >= 0){ rows.push(rows.splice(i, 1)[0]); bookChanged(); } } },
+      { icon:"arrowDown", label:"맨 뒤로", action:() => { const rows = list(), i = rows.indexOf(part); if (i > 0){ rows.unshift(rows.splice(i, 1)[0]); bookChanged(); } } },
+      { icon:"flipH", label:"좌우 뒤집기", action:() => { part.f = !part.f; if (!part.f) delete part.f; bookChanged(); } },
+      { icon:"rotateLeft", label:"바르게 (기울기 0°)", action:() => { part.r = 0; bookChanged(); } },
+      { icon:"copy", label:"복제", action:() => { const copy = { ...part, id:bookId(), x:part.x + 4, y:part.y + 3 }; list().push(copy); bookPick = { kind:"sticker", page:at, id:copy.id }; bookChanged(); } },
+      { icon:"delete", label:"장식 떼기", action:() => removeSticker(at, part.id) }
+    ];
   }
   function removeSticker(pageIndex, id){ const page = bookOf().pages[pageIndex]; if (!page) return; page.stickers = page.stickers.filter(row => row.id !== id); bookPick = null; bookChanged(); }
   // 오른쪽 칸 '장식' 탭 — 갈래 칩 + 장식 그림. 쪽으로 끌어 놓거나 누르면 지금 쪽 가운데에 붙는다.
@@ -4445,6 +4579,7 @@ const PhotoAlbum = (() => {
     closeEffectPanel(); host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
     root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-mode" role="tablist" aria-label="사진첩 화면"><button type="button" class="pa-mode-tab" role="tab" data-mode="book" title="꾸민 사진을 쪽마다 붙인 앨범 책"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.6 5 6.6 4.6 3.5 5v13c3.1-.4 6.1 0 8.5 1.5 2.4-1.5 5.4-1.9 8.5-1.5V5c-3.1-.4-6.1 0-8.5 1.5z"/><path d="M12 6.5v13"/></svg><span>앨범 책</span></button><button type="button" class="pa-mode-tab" role="tab" data-mode="edit" title="사진 한 장씩 장식·배경·음악으로 꾸미기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/></svg><span>사진 꾸미기</span></button></div><div class="pa-header-actions"><button type="button" class="pa-view pa-head-ico"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M10.5 8.3v5l4-2.5z" fill="currentColor"/><path d="M8.5 20.5h7M12 17v3.5"/></svg><span class="pa-head-label">감상 모드</span></button><button type="button" class="pa-import primary pa-head-ico" title="사진·영상 가져오기" aria-label="사진·영상 가져오기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span class="pa-head-label">가져오기</span></button></div></header><div class="pa-book"><div class="pa-book-bar"><strong class="pa-book-where"></strong><span class="pa-book-pick" hidden></span><span class="pa-book-tools"><button type="button" class="pa-book-text" data-needs-page title="지금 쪽에 손글씨 글 넣기" aria-label="글 넣기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h14M12 5.5V19M9.5 19h5"/></svg><span class="pa-head-label">글 넣기</span></button><button type="button" class="pa-book-relayout" title="지금 쪽 사진을 자동으로 다시 배치합니다" aria-label="자동 배치"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="8" height="16" rx="1.5"/><rect x="13.5" y="4" width="7" height="7" rx="1.5"/><rect x="13.5" y="13" width="7" height="7" rx="1.5"/></svg><span class="pa-head-label">자동 배치</span></button><span class="pa-book-papers" role="group" aria-label="쪽 바탕"></span><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-page-back" title="지금 쪽을 한 쪽 앞으로" aria-label="쪽 앞으로"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="4" width="11.5" height="16" rx="2"/><path d="M6 8.5 2.5 12 6 15.5"/></svg><span class="pa-head-label">쪽 앞으로</span></button><button type="button" class="pa-book-page-forward" title="지금 쪽을 한 쪽 뒤로" aria-label="쪽 뒤로"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="11.5" height="16" rx="2"/><path d="M18 8.5l3.5 3.5-3.5 3.5"/></svg><span class="pa-head-label">쪽 뒤로</span></button><button type="button" class="pa-book-page-add" title="지금 쪽 다음에 빈 쪽 더하기" aria-label="쪽 더하기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M12 8.5v7M8.5 12h7"/></svg><span class="pa-head-label">쪽 더하기</span></button><button type="button" class="pa-book-page-remove" title="지금 쪽 빼기 (사진은 사진첩에 남음)" aria-label="쪽 빼기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.5 12h7"/></svg><span class="pa-head-label">쪽 빼기</span></button><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-save" data-needs-page aria-haspopup="menu" title="쪽 그림 저장(PNG)·인쇄" aria-label="저장·인쇄"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10.5M7.5 10 12 14.5 16.5 10"/><path d="M4.5 16.5v3h15v-3"/></svg><span class="pa-head-label">저장·인쇄</span><svg class="pa-caret" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg></button></span><button type="button" class="pa-book-sound" aria-pressed="false"></button><button type="button" class="pa-book-read-exit" title="감상 끝 — 앨범 편집으로 돌아갑니다 (Esc)" aria-label="감상 끝"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4.5L19.3 9.2a2.1 2.1 0 0 0-3-3L5.5 17v3"/><path d="M14.5 8l3 3"/></svg><span class="pa-head-label">감상 끝</span></button></div><div class="pa-book-main"><div class="pa-book-stage"><div class="pa-spread"></div></div><aside class="pa-book-tray"><div class="pa-book-tray-tabs" role="tablist" aria-label="쪽에 넣을 것"><button type="button" class="pa-book-tray-tab" role="tab" data-tray="media" title="사진" aria-label="사진"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5l-4.5-4.5-8 8"/></svg><span class="pa-head-label">사진</span><span class="pa-book-tray-count"></span></button><button type="button" class="pa-book-tray-tab" role="tab" data-tray="deco" title="장식" aria-label="장식"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span class="pa-head-label">장식</span></button></div><p class="pa-book-tray-hint">쪽으로 끌거나 눌러서 넣기</p><div class="pa-book-tray-list" role="tabpanel"></div><div class="pa-book-deco" role="tabpanel"></div></aside></div><div class="pa-book-thumbs" aria-label="쪽 미리보기"></div></div><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div></div><aside class="pa-tools"><div class="pa-tool-tabs" role="tablist" aria-label="꾸미기 도구"><button type="button" class="pa-tool-tab" role="tab" data-tab="deco" aria-selected="false" title="사진 위에 장식을 올립니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span>꾸미기</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="bg" aria-selected="false" title="사진 둘레 배경을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="7.5" y="8.5" width="9" height="7" rx="1"/></svg><span>배경</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="music" aria-selected="false" title="배경음악과 재생 설정"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.5" r="2.4"/></svg><span>음악</span></button></div><div class="pa-deco-section pa-tab-panel" role="tabpanel" data-tab="deco" aria-label="꾸미기"><svg class="pa-sparkles is-right" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><svg class="pa-sparkles is-left" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></div><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="bg" aria-label="배경" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div></section><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="music" aria-label="음악" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-music"></div><p class="pa-music-none">사진을 고르면 배경음악을 넣을 수 있어요.</p><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></aside><div class="pa-split" data-side="left" role="separator" aria-orientation="vertical" aria-label="목록 칸 폭" title="끌어서 목록 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div><div class="pa-split" data-side="right" role="separator" aria-orientation="vertical" aria-label="꾸미기 칸 폭" title="끌어서 꾸미기 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
     host.appendChild(root);
+    root.addEventListener("contextmenu", onAlbumContextMenu);
     root.querySelector(".pa-import").onclick = () => root.querySelector(".pa-input").click();
     root.querySelector(".pa-input").onchange = async event => { await importFiles(event.target.files); event.target.value = ""; };
     root.querySelector(".pa-view").onclick = () => albumMode === "book" ? setBookReading(!bookReading) : setViewing(!viewing);
@@ -4556,7 +4691,7 @@ const PhotoAlbum = (() => {
     makeUi(host); applyMotionSetting();
     window.addEventListener("keydown", onHistoryKey);
   }
-  function cleanup(){ closeSaveMenu(); closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null;
+  function cleanup(){ if (closeAlbumMenu) closeAlbumMenu(); if (root) root.removeEventListener("contextmenu", onAlbumContextMenu); closeSaveMenu(); closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null;
     // 앨범 쪽 저장이 기다리는 중이면 닫기 전에 바로 보낸다(닫은 뒤에 타이머가 돌면 root 가 없다).
     if (bookSaveTimer){ clearTimeout(bookSaveTimer); bookSaveTimer = 0; persistMetadata(albumItem).catch(error => console.warn("앨범 쪽을 저장하지 못했습니다:", error)); }
     clearTimeout(bookTurnTimer); clearPrintLayer(); if (bookTurn) bookTurn.finish(bookTurn.commit); if (turnAudio){ turnAudio.close().catch(() => {}); turnAudio = null; }

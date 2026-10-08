@@ -293,12 +293,42 @@ function mountStudyEditor(doc){
     ], { base:"text-context", onClose:() => moreBtn.classList.remove("is-open") });
   };
   saveBtn.onclick = () => saveStudyDoc(doc);
+  let closeStudyMenu = null;
+  function onStudyContextMenu(event){
+    if (event.defaultPrevented || typeof MNContextMenu === "undefined") return;
+    const target = event.target;
+    if (!target || !target.closest || target.closest("input,textarea,select,[contenteditable]")) return;
+    const node = target.closest(".study-list-card"), items = [];
+    if (node){
+      const card = model.cards.find(row => row.id === node.dataset.cardId); if (!card) return;
+      selectedId = card.id; render();
+      items.push(
+        { label:"이 카드부터 학습", action:() => { const visible = visibleCards(), at = visible.findIndex(row => row.id === card.id); if (at >= 0) startSession(visible.slice(at)); } },
+        { label:"카드 수정", action:() => openCardDialog(card.id) },
+        { label:"카드 복제", disabled:model.cards.length >= STUDY_MAX_CARDS, action:() => {
+          if (model.cards.length >= STUDY_MAX_CARDS) return;
+          const copy = studyNormalizeCard({ ...card, id:studyId(), result:"new", due:"", reviews:0, streak:0, lastReviewed:"" });
+          model.cards.splice(model.cards.indexOf(card) + 1, 0, copy); selectedId = copy.id; history.commit(); touch(); render();
+        } },
+        { label:"카드 삭제", action:() => deleteCard(card.id) }, { separator:true });
+    }
+    items.push(
+      { label:"카드 추가", disabled:model.cards.length >= STUDY_MAX_CARDS, action:() => openCardDialog() },
+      { label:"학습 시작", disabled:!visibleCards().length, action:() => startSession() },
+      { label:"되돌리기", disabled:!history.canUndo(), action:() => history.undo() },
+      { label:"다시 하기", disabled:!history.canRedo(), action:() => history.redo() },
+      { label:"저장", action:() => saveStudyDoc(doc) });
+    event.preventDefault(); event.stopPropagation();
+    if (closeStudyMenu) closeStudyMenu();
+    closeStudyMenu = MNContextMenu.open(event.clientX, event.clientY, items, { base:"text-context", autoFocus:true, onClose:() => { closeStudyMenu = null; } });
+  }
+  list.addEventListener("contextmenu", onStudyContextMenu);
   const keydown = event => {
-    if (doc.el.hidden || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return;
+    if (doc.el.hidden || closeStudyMenu || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return;
     const key = String(event.key || "").toLowerCase();
     if ((event.ctrlKey || event.metaKey) && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); } else if ((event.ctrlKey || event.metaKey) && key === "y"){ event.preventDefault(); history.redo(); } else if (event.key === "Delete" && selectedId && !document.querySelector(".study-modal") && !root.querySelector(".study-session")) deleteCard(selectedId);
   };
-  window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { clearTimeout(recoveryTimer); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.studySelectCard) delete doc.studySelectCard; });
+  window.addEventListener("keydown", keydown); if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = []; doc.cleanupFns.push(() => { if (closeStudyMenu) closeStudyMenu(); list.removeEventListener("contextmenu", onStudyContextMenu); clearTimeout(recoveryTimer); if (history) history.cancel(); window.removeEventListener("keydown", keydown); if (doc.flushBackupRecovery === flushRecovery) delete doc.flushBackupRecovery; if (doc.studySelectCard) delete doc.studySelectCard; });
   render(); touch();
 }
 

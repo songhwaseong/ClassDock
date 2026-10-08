@@ -31,6 +31,32 @@
 
   /* ── 원자 문구 사전(한국어 → English). 트림된 텍스트/속성 값이 키. ── */
   var DICT = {
+    // 사진첩·관계도·티어표·암기 카드의 대상별 우클릭 메뉴
+    "사진·영상 보기": "View photo or video",
+    "지금 쪽에 넣기": "Add to current page",
+    "그림 저장": "Save image",
+    "사진첩에서 삭제": "Delete from album",
+    "순서": "Order",
+    "사진 자동 배치": "Arrange photos automatically",
+    "쪽을 앞으로": "Move page earlier",
+    "쪽을 뒤로": "Move page later",
+    "책 감상 끝내기": "Exit book viewing",
+    "이전 쪽": "Previous page",
+    "전체화면": "Fullscreen",
+    "장식 붙여넣기": "Paste decorations",
+    "이 개념에서 관계 추가": "Add relation from this concept",
+    "개념 삭제": "Delete concept",
+    "선택한 관계 삭제": "Delete selected relations",
+    "줄로 이동": "Move to tier",
+    "카드 삭제": "Delete card",
+    "줄을 위로": "Move tier up",
+    "줄을 아래로": "Move tier down",
+    "이 줄 비우기": "Clear this tier",
+    "글 카드 추가": "Add text card",
+    "이 카드부터 학습": "Study from this card",
+    "카드 복제": "Duplicate card",
+    "잠금 해제": "Unlock",
+    "장식 잠그기": "Lock decoration",
     // 항공 운항(한국공항공사 공항 게시판)
     "항공": "Flights",
     "항공 운항": "Flights",

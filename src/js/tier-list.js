@@ -645,10 +645,7 @@ function mountTierEditor(doc){
     } catch(error){ console.warn("티어표 칠판 보내기 실패:", error); if (typeof toast === "function") toast("칠판에 티어표를 넣지 못했어요.", 3000, { type:"error" }); }
     finally { sendingToBoard = false; }
   };
-  moreBtn.onclick = () => {
-    if (typeof MNContextMenu === "undefined"){ exportPng(); return; }
-    const rect = moreBtn.getBoundingClientRect(); moreBtn.classList.add("is-open");
-    MNContextMenu.open(rect.right - 210, rect.bottom + 6, [
+  const tierToolMenuItems = () => [
       { label:"월드컵", title:"카드 둘 중 하나를 골라 올라가며 우승 뽑기", icon:"play", disabled:model.items.length < 2, action:openCupSetup },
       { label:"줄 추가", title:"맨 아래에 등급 줄 추가", icon:"plus", disabled:model.tiers.length >= TIER_MAX_TIERS, action:addRowAndEdit },
       { separator:true },
@@ -662,9 +659,12 @@ function mountTierEditor(doc){
       { label:"보유 카드 섞기", title:"보유 카드의 차례를 무작위로 섞기", icon:"shuffle", disabled:tierItemsIn(model, "").length < 2, action:() => { tierShufflePool(model); changed(); } },
       { label:"모두 보유 카드로 내리기", title:"줄에 올린 카드를 전부 보유 카드로 되돌리기(다시 매기기)", icon:"refresh", disabled:!model.items.some(item => item.tier),
         action:async () => { if (typeof confirmDialog === "function" && !await confirmDialog("줄에 올린 카드를 모두 보유 카드로 내릴까요?", "내리기", "취소")) return; tierResetAll(model); changed(); } }
-    ], { base:"text-context", onClose:() => moreBtn.classList.remove("is-open") });
+    ];
+  moreBtn.onclick = () => {
+    if (typeof MNContextMenu === "undefined"){ exportPng(); return; }
+    const rect = moreBtn.getBoundingClientRect(); moreBtn.classList.add("is-open");
+    MNContextMenu.open(rect.right - 210, rect.bottom + 6, tierToolMenuItems(), { base:"text-context", onClose:() => moreBtn.classList.remove("is-open") });
   };
-
   /* ── 월드컵 ── 고를 카드·강 수를 정하는 창 → 둘 중 하나 고르기 → 순위와 '결과를 줄에 놓기'. */
   let cupUi = null;
   function openCupSetup(){
@@ -787,8 +787,42 @@ function mountTierEditor(doc){
   }
   cupBtn.onclick = openCupSetup;
 
+  let closeTierMenu = null;
+  function onTierContextMenu(event){
+    if (event.defaultPrevented || typeof MNContextMenu === "undefined") return;
+    const target = event.target;
+    if (!target || !target.closest || target.closest("input,textarea,select,[contenteditable]")) return;
+    const card = target.closest(".tier-item"), rowEl = target.closest(".tier-row");
+    const items = [];
+    if (card){
+      const item = model.items.find(row => row.id === card.dataset.itemId); if (!item) return;
+      selectedId = item.id; render();
+      items.push(
+        { label:"카드 수정", action:() => openItemDialog(item.id) },
+        { label:"줄로 이동", children:[{ id:"", label:"보유 카드" }, ...model.tiers].map(row => ({ label:row.label, active:item.tier === row.id,
+          action:() => { if (tierMoveItem(model, item.id, row.id, "")) changed(); } })) },
+        { label:"카드 삭제", action:() => deleteItem(item.id) }, { separator:true });
+    } else if (rowEl){
+      const row = model.tiers.find(item => item.id === rowEl.dataset.tierRow); if (!row) return;
+      const at = model.tiers.indexOf(row);
+      items.push(
+        { label:"등급 줄 설정", action:() => openRowDialog(row.id) },
+        { label:"줄을 위로", disabled:at === 0, action:() => moveRow(at, -1) },
+        { label:"줄을 아래로", disabled:at === model.tiers.length - 1, action:() => moveRow(at, 1) },
+        { label:"이 줄 비우기", disabled:!tierItemsIn(model, row.id).length, action:() => clearRow(row.id) },
+        { label:"줄 지우기", disabled:model.tiers.length <= 1, action:() => removeRow(row.id) }, { separator:true });
+    }
+    items.push({ label:"글 카드 추가", disabled:model.items.length >= TIER_MAX_ITEMS, action:() => openItemDialog() },
+      { label:"되돌리기", disabled:!history.canUndo(), action:() => history.undo() },
+      { label:"다시 하기", disabled:!history.canRedo(), action:() => history.redo() },
+      { separator:true }, ...tierToolMenuItems());
+    event.preventDefault(); event.stopPropagation();
+    if (closeTierMenu) closeTierMenu();
+    closeTierMenu = MNContextMenu.open(event.clientX, event.clientY, items, { base:"text-context", autoFocus:true, onClose:() => { closeTierMenu = null; } });
+  }
+  board.addEventListener("contextmenu", onTierContextMenu);
   const keydown = event => {
-    if (doc.el.hidden || !doc.el.isConnected || document.querySelector(".tier-modal")) return;
+    if (doc.el.hidden || closeTierMenu || !doc.el.isConnected || document.querySelector(".tier-modal")) return;
     if (event.target && event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]")) return;
     const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
     if (mod && key === "z"){ event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); return; }
@@ -810,6 +844,8 @@ function mountTierEditor(doc){
   window.addEventListener("keydown", keydown);
   if (!Array.isArray(doc.cleanupFns)) doc.cleanupFns = [];
   doc.cleanupFns.push(() => {
+    if (closeTierMenu) closeTierMenu();
+    board.removeEventListener("contextmenu", onTierContextMenu);
     clearTimeout(recoveryTimer); if (history) history.cancel(); if (cupUi) cupUi.close(); if (drag && drag.ghost) drag.ghost.remove(); drag = null; if (rowDrag && rowDrag.ghost) rowDrag.ghost.remove(); rowDrag = null;
     window.removeEventListener("keydown", keydown); document.removeEventListener("paste", onPaste); if (gutterObserver) gutterObserver.disconnect();
     window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onCancel);

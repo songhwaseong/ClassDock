@@ -1039,6 +1039,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
     redraw(); if (ok) recordEdit();
   };
   canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
     if (!state.output) return;
     if (state.cropMode){
       e.preventDefault(); canvas.setPointerCapture(e.pointerId);
@@ -1136,6 +1137,7 @@ function setupImageEditor(file, host, img, ownerDoc=null){
   });
   let cropDrag = null;   // { mode:"move"|"resize", dir, start, rect }
   cropBox.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
     if (!state.cropMode || !state.cropRect || !state.output) return;
     e.preventDefault(); e.stopPropagation();
     cropBox.setPointerCapture(e.pointerId);

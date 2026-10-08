@@ -1122,6 +1122,61 @@ function mountConceptEditor(doc){
     renderList(); setTimeout(() => list.querySelector("button:not(:disabled)")?.focus(), 0);
   }
 
+  async function deleteNode(id){
+    if (!model.nodes.some(node => node.id === id) || typeof confirmDialog !== "function"
+      || !await confirmDialog("이 개념과 연결된 관계를 함께 삭제할까요?", "삭제", "취소")) return false;
+    model.nodes = model.nodes.filter(node => node.id !== id);
+    model.edges = model.edges.filter(edge => edge.from !== id && edge.to !== id);
+    model.presentation = conceptNormalizePresentation(model.presentation, model.nodes);
+    if (selectedId === id) selectedId = "";
+    history.commit(); touch(); render(); return true;
+  }
+  function deleteEdges(ids){
+    model.edges = model.edges.filter(edge => !ids.includes(edge.id));
+    history.commit(); touch(); render();
+  }
+  let closeConceptMenu = null;
+  function onConceptContextMenu(event){
+    if (event.defaultPrevented || typeof MNContextMenu === "undefined") return;
+    const target = event.target;
+    if (!target || !target.closest || target.closest("input,textarea,select,[contenteditable]")) return;
+    clearTimeout(previewTimer); previewTimer = 0;
+    const card = target.closest(".concept-card"), line = target.closest(".concept-edge");
+    const items = [];
+    if (card){
+      const node = model.nodes.find(row => row.id === card.dataset.nodeId); if (!node) return;
+      selectCard(node.id);
+      items.push(
+        { label:"개념 수정", action:() => openNodeDialog(node.id) },
+        { label:"크게 보기", action:() => openNodePreview(node.id, card) },
+        { label:node.pinned ? "위치 고정 해제" : "위치 고정", active:!!node.pinned,
+          action:() => { node.pinned = !node.pinned; history.commit(); touch(); render(); } },
+        { label:"이 개념에서 관계 추가", disabled:model.nodes.length < 2 || model.edges.length >= CONCEPT_MAX_EDGES, action:() => openEdgeDialog() },
+        { label:"개념 삭제", action:() => deleteNode(node.id) }, { separator:true });
+    } else if (line){
+      const id = line.dataset.edgeId; if (!model.edges.some(edge => edge.id === id)) return;
+      if (!selectedEdgeIds.has(id)) selectEdge(id);
+      const ids = [...selectedEdgeIds];
+      items.push({ label:"관계 수정", action:() => openEdgeDialog(id) },
+        { label:"관계 강도", children:[1,2,3,4,5].map(weight => ({ label:String(weight),
+          action:() => { model.edges.filter(edge => ids.includes(edge.id)).forEach(edge => { edge.weight = weight; }); history.commit(); touch(); render(); } })) },
+        { label:ids.length > 1 ? "선택한 관계 삭제" : "관계 삭제", action:() => deleteEdges(ids) }, { separator:true });
+    }
+    items.push(
+      { label:"개념 추가", disabled:model.nodes.length >= CONCEPT_MAX_NODES, action:() => openNodeDialog() },
+      { label:"관계 추가", disabled:model.nodes.length < 2 || model.edges.length >= CONCEPT_MAX_EDGES, action:() => openEdgeDialog() },
+      { label:"자동 정렬", disabled:!model.nodes.length, action:openAutoLayoutDialog },
+      { label:"표·개요", action:openTableOutlineDialog },
+      { label:"발표 순서", disabled:!model.nodes.length, action:openPresentationOrderDialog },
+      { separator:true },
+      { label:"되돌리기", disabled:!history.canUndo(), action:() => history.undo() },
+      { label:"다시 하기", disabled:!history.canRedo(), action:() => history.redo() },
+      { label:"저장", action:() => saveConceptDoc(doc) });
+    event.preventDefault(); event.stopPropagation();
+    if (closeConceptMenu) closeConceptMenu();
+    closeConceptMenu = MNContextMenu.open(event.clientX, event.clientY, items, { base:"text-context", autoFocus:true, onClose:() => { closeConceptMenu = null; } });
+  }
+  viewport.addEventListener("contextmenu", onConceptContextMenu);
   function openNodeDialog(id){
     const current = model.nodes.find(node => node.id === id) || null, body = document.createElement("div"); body.className = "concept-form";
     body.innerHTML = '<label><span>개념 이름</span><input class="cn-title" maxlength="120"></label><label><span>분류</span><input class="cn-category" maxlength="60" placeholder="예: 원인·인물·공식"></label><label><span>색상</span><select class="cn-color"><option value="blue">파랑</option><option value="green">초록</option><option value="amber">노랑</option><option value="rose">빨강</option><option value="purple">보라</option><option value="slate">검정</option></select></label><label class="wide"><span>설명</span><textarea class="cn-description" rows="6" maxlength="3000"></textarea></label><label class="wide concept-pin-field"><input type="checkbox" class="cn-pinned"><span>카드 위치 고정 · 자동정렬과 끌기에서 제자리 유지</span></label><div class="concept-photo wide"><span>사진</span><div class="cn-photo-preview"></div><button type="button" class="cn-photo-pick">사진 넣기</button><button type="button" class="cn-photo-remove">지우기</button><input type="file" accept="image/png,image/jpeg,image/webp" hidden></div><p class="concept-form-error wide" role="alert"></p><footer class="wide"><button type="button" class="cn-delete danger">삭제</button><span></span><button type="button" class="cn-cancel">취소</button><button type="button" class="cn-save primary">저장</button></footer>';
@@ -1132,15 +1187,7 @@ function mountConceptEditor(doc){
     photoInput.onchange = async () => { const file = photoInput.files && photoInput.files[0]; if (!file) return; try { if (typeof timelinePreparePhoto !== "function") throw new Error("photo-runtime"); image = await timelinePreparePhoto(file); showPhoto(); } catch(_){ body.querySelector(".concept-form-error").textContent = "사진을 넣지 못했어요. PNG·JPG·WebP를 사용하세요."; } };
     body.querySelector(".cn-cancel").onclick = ui.dispose; const del = body.querySelector(".cn-delete"); del.hidden = !current;
     del.onclick = async () => {
-      if (typeof confirmDialog !== "function" || !await confirmDialog("이 개념과 연결된 관계를 함께 삭제할까요?", "삭제", "취소")) return;
-      model.nodes = model.nodes.filter(node => node.id !== current.id);
-      model.edges = model.edges.filter(edge => edge.from !== current.id && edge.to !== current.id);
-      model.presentation = conceptNormalizePresentation(model.presentation, model.nodes);
-      selectedId = "";
-      ui.dispose();
-      history.commit();
-      touch();
-      render();
+      if (await deleteNode(current.id)) ui.dispose();
     };
     body.querySelector(".cn-save").onclick = () => { if (!title.value.trim()){ body.querySelector(".concept-form-error").textContent = "개념 이름을 입력하세요."; title.focus(); return; }
       if (current) Object.assign(current, { title:title.value.trim(), category:category.value.trim(), color:color.value, description:description.value, image, pinned:pinned.checked });
@@ -1420,7 +1467,7 @@ function mountConceptEditor(doc){
     touch();
   }); orderBtn.onclick = openPresentationOrderDialog; animationSelect.addEventListener("change", () => { model.presentation.animation = animationSelect.value; history.commit(); touch(); }); presentBtn.onclick = startPresentation; buildPresentBtn.onclick = startBuildPresentation; printBtn.onclick = printConcept; saveBtn.onclick = () => saveConceptDoc(doc);
   const keydown = event => {
-    if (doc.el.hidden || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return;
+    if (doc.el.hidden || closeConceptMenu || closeBuildPresentation || closeNodePreview || (event.target.closest && event.target.closest("input,textarea,select,[contenteditable=true]"))) return;
     const key = String(event.key || "").toLowerCase();
     if ((event.ctrlKey || event.metaKey) && key === "z"){
       event.preventDefault();
@@ -1431,6 +1478,8 @@ function mountConceptEditor(doc){
     clearTimeout(recoveryTimer);
     clearTimeout(previewTimer);
     if (closeNodePreview) closeNodePreview();
+    if (closeConceptMenu) closeConceptMenu();
+    viewport.removeEventListener("contextmenu", onConceptContextMenu);
     if (closeBuildPresentation) closeBuildPresentation();
     if (viewportResizeObserver) viewportResizeObserver.disconnect();
     viewport.removeEventListener("wheel", onViewportWheel);
