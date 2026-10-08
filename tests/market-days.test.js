@@ -202,9 +202,9 @@ test("런처·지도·도구 목록에 장날 층이 이어져 있다", () => {
 });
 
 // 가짜 DOM·지도로 단추 → 받기 → 점 찍기 → 날짜 바꾸기 → 지우기 → 치우기를 따라간다. 브라우저·화면 캡처는 쓰지 않는다.
-function mountHarness(fetch, now = Date.UTC(2026, 9, 4, 1)){
+function mountHarness(fetch, now = Date.UTC(2026, 9, 4, 1), zoom = 15){
   const nodes = [], listeners = new Map(), saved = new Map();
-  let markers = [], popups = 0;
+  let markers = [], popups = 0, clusters = [], views = [];
   function node(tag){
     const n = { tag, style:{}, children:[], events:{}, attributes:{}, hidden:false, disabled:false, value:"", checked:false, textContent:"",
       classList:{ add(){}, toggle(){} }, append(...items){ this.children.push(...items); }, setAttribute(k, v){ this.attributes[k] = v; },
@@ -212,13 +212,20 @@ function mountHarness(fetch, now = Date.UTC(2026, 9, 4, 1)){
     nodes.push(n); return n;
   }
   const svgRenderer = { renderer:true }, removed = [];
-  const layer = () => { const g = { items:[], onMap:false, addTo(){ this.onMap = true; return this; }, clearLayers(){ this.items = []; } }; return g; };
+  const layer = () => { const g = { items:[], onMap:false, addTo(){ this.onMap = true; return this; }, clearLayers(){ this.items = []; clusters = []; } }; return g; };
   const group = layer();
   const L = { DomEvent:{ disableClickPropagation(){}, disableScrollPropagation(){} }, svg:options => { svgRenderer.options = options; return svgRenderer; }, layerGroup:() => group,
     circleMarker:(at, options) => { const m = { at, options, events:{}, bindTooltip(fn, o){ m.tip = fn; m.tipOptions = o; return m; }, bindPopup(fn){ m.popup = fn; return m; },
       on(k, fn){ m.events[k] = fn; return m; }, setStyle(o){ Object.assign(m.options, o); return m; },
-      addTo(g){ g.items.push(m); markers = g.items; return m; }, openPopup(){ popups++; } }; return m; } };
-  const map = { createPane:() => node("pane"), getZoom:() => 7, setView(){}, closePopup(){}, removeLayer(g){ g.onMap = false; removed.push(g); },
+      addTo(g){ g.items.push(m); markers = g.items; return m; }, openPopup(){ popups++; } }; return m; },
+    // 묶음 표시(L.marker+divIcon)는 점 목록과 따로 모은다.
+    divIcon:options => options,
+    marker:(at, options) => { const c = { at, options, events:{}, bindTooltip(fn, o){ c.tip = fn; c.tipOptions = o; return c; }, on(k, fn){ c.events[k] = fn; return c; },
+      addTo(){ clusters.push(c); return c; } }; return c; },
+    latLngBounds:points => ({ points, getNorthEast:() => ({ equals:() => false }), getSouthWest:() => ({}), pad(){ return this; } }) };
+  const map = { createPane:() => node("pane"), getZoom:() => zoom, setView(at, z){ views.push([at, z]); }, fitBounds(b, o){ views.push([b.points, o.maxZoom]); }, closePopup(){},
+    // 웹 메르카토르 화면 자리(묶기 판정에만 쓴다)
+    project:([lat, lng], z) => { const s = 256 * 2 ** z, r = lat * Math.PI / 180; return { x:(lng + 180) / 360 * s, y:(1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * s }; }, removeLayer(g){ g.onMap = false; removed.push(g); },
     getCenter:() => ({ lat:36.5, lng:127.5, distanceTo:([lat, lng]) => Math.hypot(lat - 36.5, lng - 127.5) * 111000 }),
     getBounds:() => ({ contains:([lat, lng]) => lat > 33 && lat < 39 && lng > 124 && lng < 132 }),
     on(name, fn){ listeners.set(name, fn); }, off(name){ listeners.delete(name); } };
@@ -231,7 +238,7 @@ function mountHarness(fetch, now = Date.UTC(2026, 9, 4, 1)){
   const doc = { cleanupFns:[] }, stage = node("stage"), toolRow = node("tools");
   const controller = context.module.exports.mount({ map, stage, toolRow, doc });
   const find = cls => nodes.find(n => (n.className || "").split(" ").includes(cls));
-  return { svgRenderer, removed, setEnglish:on => { window.MNI18N = on ? { lang:"en" } : undefined; }, controller, find, group, doc, listeners, saved, markers:() => markers, popups:() => popups };
+  return { svgRenderer, removed, setEnglish:on => { window.MNI18N = on ? { lang:"en" } : undefined; }, controller, find, group, doc, listeners, saved, markers:() => markers, popups:() => popups, clusters:() => clusters, views:() => views, setZoom:z => { zoom = z; } };
 }
 const vm = require("node:vm");
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -321,14 +328,15 @@ test("장날 단추: 오늘 장 서는 곳만 찍고, 날짜·상설 보기를 �
   const popup = h.markers().find(m => Math.abs(m.at[0] - 37.11809055) < 1e-6).popup();
   assert.equal(popup.children[0].textContent, "장호원전통시장");
   assert.ok(popup.children.some(row => row.children && row.children[1] && row.children[1].textContent === "4·9일 (상설시장 함께)"));
-  // 간판형 이름표: 그림 · 이름 · 장날 주기. 가리키면 점이 커지고 떠나면 돌아온다.
+  // 간판형 이름표(늘 보임): 그림 · 이름 · 장날 주기. 가리키면 점이 커지고 떠나면 돌아온다.
   const jangho = h.markers().find(m => Math.abs(m.at[0] - 37.11809055) < 1e-6);
-  assert.equal(jangho.tipOptions.className, "map-market-tip");
+  assert.equal(jangho.tipOptions.className, "map-market-tip is-label");
+  assert.equal(jangho.tipOptions.permanent, true); // 이름표는 늘 띄운다
   assert.deepEqual(jangho.tip().children.map(c => c.textContent || ""), ["", "장호원전통시장", "4·9일장"]);
   jangho.events.mouseover(); assert.equal(jangho.options.radius, 10);
   jangho.events.mouseout(); assert.equal(jangho.options.radius, 7);
   const daily = h.markers().find(m => m.options.fillColor === "#6b7f86");
-  assert.equal(daily.tipOptions.className, "map-market-tip is-permanent");
+  assert.equal(daily.tipOptions.className, "map-market-tip is-label is-permanent");
   assert.equal(daily.tip().children[2].textContent, "매일");
   // 영어 이름표는 짧게: "Days 4·9"
   h.setEnglish(true);
@@ -364,4 +372,36 @@ test("늦게 온 응답은 지운 뒤에 찍지 않는다", async () => {
   h.controller.destroy();
   finish({ ok:true, json:async () => sample }); await settle(); await settle();
   assert.equal(h.markers().length, 0);
+});
+
+test("겹치는 화면 자리끼리 묶는다: 먼저 온 것이 기준 자리", () => {
+  const groups = days.groupByPixels([{ x:0, y:0, id:"a" }, { x:100, y:20, id:"b" }, { x:160, y:0, id:"c" }, { x:90, y:40, id:"d" }], 150, 30);
+  assert.deepEqual(groups.map(g => g.items.map(i => i.id)), [["a", "b"], ["c"], ["d"]]);
+});
+
+test("멀리서 보면 이름표가 겹칠 시장끼리 '장 N곳' 묶음이 되고, 누르면 다가가며, 확대하면 풀린다", async () => {
+  const h = mountHarness(async url => url === "/can-proxy-weather"
+    ? { ok:true, text:async () => "yes" } : { ok:true, json:async () => url.endsWith("page=1") ? sample : nodata }, undefined, 5);
+  await settle();
+  h.find("map-toolvis-market").events.click(); await settle(); await settle();
+  // 10월 4일 확대 5: 김포 하성·이천 장호원·청송 안덕은 한 묶음, 광주 말바우만 따로 이름표.
+  assert.equal(h.clusters().length, 1);
+  const cluster = h.clusters()[0];
+  assert.match(cluster.options.icon.html, /map-market-cluster-dot[^>]*>3</);
+  assert.match(cluster.options.icon.html, /장 3곳/);
+  assert.equal(cluster.options.icon.className, "map-market-cluster");
+  assert.equal(h.markers().length, 1);
+  assert.ok(h.markers().every(m => m.tipOptions.permanent));
+  // 묶음 이름표: 머리 + 시장 세 줄(점포 많은 곳 먼저)
+  const tip = cluster.tip();
+  assert.match(tip.children[0].textContent, /^장 3곳/);
+  assert.deepEqual(tip.children.slice(1).map(row => row.children[0].textContent), ["장호원전통시장", "안덕시장", "하성5일장"]);
+  cluster.events.click();
+  assert.equal(h.views().at(-1)[1], 15);
+  // 확대가 바뀌면 다시 묶는다: 15 에서는 모두 따로.
+  h.setZoom(15); h.listeners.get("zoomend")();
+  assert.equal(h.clusters().length, 0);
+  assert.equal(h.markers().length, 4);
+  h.controller.destroy();
+  assert.ok(!h.listeners.has("zoomend"));
 });

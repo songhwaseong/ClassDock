@@ -194,6 +194,27 @@ const MNMarketDays = (() => {
 
   /* ── 지도 ── */
   const ON = "#e8590c", PERMANENT = "#6b7f86";
+  // 늘 띄우는 이름표 한 장이 차지하는 대략의 화면 크기(px). 이보다 가까우면 겹치므로 묶는다.
+  const LABEL_BOX = [150, 30], CLUSTER_UNTIL = 14, CLUSTER_TIP_ROWS = 6;
+  // 화면 픽셀 자리로 겹치는 것끼리 묶는다. 먼저 온 것이 묶음의 기준 자리가 되므로 넘길 때 중요한 것부터 넘긴다.
+  function groupByPixels(items, width, height){
+    const cells = new Map(), groups = [];
+    for (const item of items){
+      const cx = Math.floor(item.x / width), cy = Math.floor(item.y / height);
+      let found = null;
+      for (let dx = -1; dx <= 1 && !found; dx++) for (let dy = -1; dy <= 1 && !found; dy++){
+        for (const g of cells.get((cx + dx) + ":" + (cy + dy)) || []){
+          if (Math.abs(g.x - item.x) < width && Math.abs(g.y - item.y) < height){ found = g; break; }
+        }
+      }
+      if (found){ found.items.push(item); continue; }
+      const g = { x:item.x, y:item.y, items:[item] }, key = cx + ":" + cy;
+      groups.push(g);
+      if (!cells.has(key)) cells.set(key, []);
+      cells.get(key).push(g);
+    }
+    return groups;
+  }
   function mount({ map, stage, toolRow, doc, t = value => value, movePanel = null }){
     const english = () => !!(window.MNI18N && window.MNI18N.lang === "en");
     const word = (ko, en) => english() ? en : ko;
@@ -296,7 +317,7 @@ const MNMarketDays = (() => {
       }
       return box;
     }
-    // 마우스를 올리면 뜨는 간판형 이름표: 시장 그림 · 이름 · 장날 주기(상설은 '매일').
+    // 점 위에 늘 붙는 간판형 이름표: 시장 그림 · 이름 · 장날 주기(상설은 '매일').
     function tipOf(m){
       const box = el("span", "map-market-tip-body");
       const icon = el("span", "map-market-tip-ico");
@@ -307,25 +328,93 @@ const MNMarketDays = (() => {
       box.append(icon, name, cycle);
       return box;
     }
+    // 묶음에 마우스를 올리면 안에 든 시장 이름을 몇 줄 미리 보여 준다.
+    function clusterTipOf(group, ymd){
+      const box = el("span", "map-market-cluster-tip-body");
+      const head = el("span", "map-market-cluster-tip-head");
+      head.textContent = word("장 " + group.length + "곳 · 눌러서 펼치기 ›", group.length + " markets · click to expand ›");
+      box.append(head);
+      const rows = group.slice().sort((a, b) => opensOn(b, ymd) - opensOn(a, ymd) || b.stores - a.stores);
+      for (const m of rows.slice(0, CLUSTER_TIP_ROWS)){
+        const row = el("span", "map-market-cluster-tip-row" + (opensOn(m, ymd) ? "" : " is-permanent"));
+        const name = el("span", "map-market-cluster-tip-name"); name.textContent = m.name;
+        const cycle = el("span", "map-market-tip-cycle");
+        cycle.textContent = m.digits.length ? cycleLabel(m.digits, english()) + word("장", "") : word("매일", "Daily");
+        row.append(name, cycle); box.append(row);
+      }
+      if (rows.length > CLUSTER_TIP_ROWS){
+        const more = el("span", "map-market-cluster-tip-more");
+        more.textContent = word("외 " + (rows.length - CLUSTER_TIP_ROWS) + "곳", "+" + (rows.length - CLUSTER_TIP_ROWS) + " more");
+        box.append(more);
+      }
+      return box;
+    }
     const markerOf = new Map();
+    let pendingPopup = null;
+    function drawMarket(m, ymd){
+      const on = opensOn(m, ymd);
+      const marker = L.circleMarker([m.lat, m.lng], { renderer, radius:on ? 7 : 4, color:"#fff", weight:on ? 2 : 1,
+        fillColor:on ? ON : PERMANENT, fillOpacity:on ? .95 : .7, bubblingMouseEvents:false });
+      // 이름표는 늘 띄운다. 이름표도 점과 같이 누르고 가리킬 수 있게 DOM 에 직접 건다(툴팁은 원래 마우스를 통과시킨다).
+      marker.bindTooltip(() => tipOf(m), { permanent:true, direction:"top", offset:[0, -9], pane:"mapMarketPane", opacity:1,
+        className:"map-market-tip is-label" + (on ? "" : " is-permanent") });
+      // 가리킨 점을 키우고 이름표를 맨 위로 올려 어느 점의 이름표인지 바로 보이게 한다.
+      const hover = active => {
+        marker.setStyle(active ? { radius:on ? 10 : 6, weight:3 } : { radius:on ? 7 : 4, weight:on ? 2 : 1 });
+        const tip = marker.getTooltip && marker.getTooltip(), node = tip && tip.getElement && tip.getElement();
+        if (node) node.classList.toggle("is-hover", active);
+      };
+      marker.on("mouseover", () => hover(true));
+      marker.on("mouseout", () => hover(false));
+      marker.on("tooltipopen", event => {
+        const node = event.tooltip && event.tooltip.getElement && event.tooltip.getElement();
+        if (!node || node.dataset.marketBound) return;
+        node.dataset.marketBound = "1";
+        node.addEventListener("click", e => { e.stopPropagation(); marker.openPopup(); });
+        node.addEventListener("mouseenter", () => hover(true));
+        node.addEventListener("mouseleave", () => hover(false));
+      });
+      marker.bindPopup(() => popupOf(m, selected()), { maxWidth:280, className:"map-market-popup-wrap" });
+      marker.addTo(layer); markerOf.set(m, marker);
+    }
+    function drawCluster(group, ymd){
+      const open = group.some(m => opensOn(m, ymd));
+      const lat = group.reduce((sum, m) => sum + m.lat, 0) / group.length, lng = group.reduce((sum, m) => sum + m.lng, 0) / group.length;
+      const size = Math.round(Math.min(40, 24 + Math.log2(group.length) * 3));
+      const html = '<span class="map-market-cluster-dot" style="--size:' + size + 'px">' + group.length + '</span>'
+        + '<span class="map-market-cluster-word">' + word("장 " + group.length + "곳", group.length + " markets") + '</span>';
+      const icon = L.divIcon({ className:"map-market-cluster" + (open ? "" : " is-permanent"), html, iconSize:[72, size + 22], iconAnchor:[36, size / 2] });
+      const cluster = L.marker([lat, lng], { icon, pane:"mapMarketPane", keyboard:true, title:word("장 " + group.length + "곳", group.length + " markets"), bubblingMouseEvents:false });
+      cluster.bindTooltip(() => clusterTipOf(group, selected()), { direction:"top", offset:[0, -size / 2 - 4], className:"map-market-tip map-market-cluster-tip" });
+      cluster.on("click", () => {
+        const bounds = L.latLngBounds(group.map(m => [m.lat, m.lng]));
+        if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView([lat, lng], CLUSTER_UNTIL + 1);
+        else map.fitBounds(bounds.pad(0.3), { maxZoom:CLUSTER_UNTIL + 1, animate:true });
+      });
+      cluster.addTo(layer);
+      return cluster;
+    }
     function draw(){
       layer.clearLayers(); markerOf.clear();
       if (!shown){ map.removeLayer(layer); map.removeLayer(renderer); return; }
-      const ymd = selected();
-      // 상설시장을 먼저(아래에) 깔고 장 서는 곳을 위에 얹는다.
-      const order = markets.filter(m => visible(m, ymd)).sort((a, b) => opensOn(a, ymd) - opensOn(b, ymd));
-      for (const m of order){
-        const on = opensOn(m, ymd);
-        const marker = L.circleMarker([m.lat, m.lng], { renderer, radius:on ? 7 : 4, color:"#fff", weight:on ? 2 : 1,
-          fillColor:on ? ON : PERMANENT, fillOpacity:on ? .95 : .7, bubblingMouseEvents:false });
-        marker.bindTooltip(() => tipOf(m), { direction:"top", offset:[0, -10], className:"map-market-tip" + (on ? "" : " is-permanent") });
-        // 가리킨 점을 키워 어느 점의 이름표인지 바로 보이게 한다.
-        marker.on("mouseover", () => marker.setStyle({ radius:on ? 10 : 6, weight:3 }));
-        marker.on("mouseout", () => marker.setStyle({ radius:on ? 7 : 4, weight:on ? 2 : 1 }));
-        marker.bindPopup(() => popupOf(m, selected()), { maxWidth:280, className:"map-market-popup-wrap" });
-        marker.addTo(layer); markerOf.set(m, marker);
+      const ymd = selected(), zoom = map.getZoom();
+      let singles = markets.filter(m => visible(m, ymd)), groups = [];
+      // 멀리서 보면 이름표가 겹치니 겹칠 만큼 가까운 시장끼리 '장 N곳' 묶음으로 모은다.
+      // 화면 자리는 확대 단계만으로 정해지므로(옮기기와 무관) 확대가 바뀔 때만 다시 묶는다.
+      if (zoom <= CLUSTER_UNTIL && singles.length > 1){
+        const items = singles.map(m => { const p = map.project([m.lat, m.lng], zoom); return { m, x:p.x, y:p.y }; })
+          .sort((a, b) => opensOn(b.m, ymd) - opensOn(a.m, ymd) || b.m.stores - a.m.stores);
+        const found = groupByPixels(items, LABEL_BOX[0], LABEL_BOX[1]);
+        singles = found.filter(g => g.items.length === 1).map(g => g.items[0].m);
+        groups = found.filter(g => g.items.length > 1).map(g => g.items.map(item => item.m));
       }
+      // 상설시장을 먼저(아래에) 깔고 장 서는 곳을 위에 얹는다.
+      singles.sort((a, b) => opensOn(a, ymd) - opensOn(b, ymd));
+      for (const m of singles) drawMarket(m, ymd);
+      for (const group of groups) drawCluster(group, ymd);
       layer.addTo(map);
+      if (pendingPopup && markerOf.has(pendingPopup)) markerOf.get(pendingPopup).openPopup();
+      pendingPopup = null;
     }
     function renderList(){
       clearTimeout(listTimer); listTimer = 0;
@@ -347,8 +436,11 @@ const MNMarketDays = (() => {
           m.address.split(" ").slice(0, 2).join(" ")].join(" · ");
         go.append(name, meta);
         go.addEventListener("click", () => {
-          map.setView([m.lat, m.lng], Math.max(map.getZoom(), 13));
-          const marker = markerOf.get(m); if (marker) marker.openPopup();
+          // 묶음이 풀리는 확대까지 다가간다. 확대가 바뀌면 다시 그린 뒤(zoomend) 말풍선을 연다.
+          const zoom = Math.max(map.getZoom(), CLUSTER_UNTIL + 1);
+          if (zoom !== map.getZoom()) pendingPopup = m;
+          map.setView([m.lat, m.lng], zoom);
+          const marker = pendingPopup ? null : markerOf.get(m); if (marker) marker.openPopup();
         });
         item.append(go); list.append(item);
       }
@@ -409,7 +501,9 @@ const MNMarketDays = (() => {
     close.addEventListener("click", () => { panel.hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.focus(); });
     panel.addEventListener("keydown", event => { if (event.key === "Escape"){ event.stopPropagation(); close.click(); } });
     map.on("moveend", renderListSoon);
-    const onLang = () => { showDate(); if (shown){ map.closePopup(); renderList(); } };
+    const onZoom = () => { if (shown) draw(); };
+    map.on("zoomend", onZoom);
+    const onLang = () => { showDate(); if (shown){ map.closePopup(); draw(); renderList(); } };
     window.addEventListener("mni18nchange", onLang);
 
     fetch("/can-proxy-weather", { cache:"no-store", signal:capability.signal }).then(r => r.ok ? r.text() : "").then(value => {
@@ -425,7 +519,7 @@ const MNMarketDays = (() => {
       },
       destroy(){
         destroyed = true; generation++; if (abort) abort.abort(); capability.abort(); clearTimeout(listTimer);
-        window.removeEventListener("mni18nchange", onLang); map.off("moveend", renderListSoon);
+        window.removeEventListener("mni18nchange", onLang); map.off("moveend", renderListSoon); map.off("zoomend", onZoom);
         layer.clearLayers(); map.removeLayer(layer); map.removeLayer(renderer); panel.remove(); toggle.remove(); pane.remove();
       }
     };
@@ -434,6 +528,6 @@ const MNMarketDays = (() => {
     return controller;
   }
 
-  return { mount, cycleDigits, isMarketDay, cycleLabel, rows, market, parse, supplement, siteUrl, koreaToday, addDays, nextMarketDay, loadAll, load, failureText, CACHE_KEY };
+  return { mount, groupByPixels, cycleDigits, isMarketDay, cycleLabel, rows, market, parse, supplement, siteUrl, koreaToday, addDays, nextMarketDay, loadAll, load, failureText, CACHE_KEY };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = MNMarketDays;
