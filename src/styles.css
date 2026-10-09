@@ -4973,6 +4973,11 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapWeather .map-toolvis-weather,
   html.hide-tool-mapWind .map-toolvis-wind,
   html.hide-tool-mapMarket .map-toolvis-market,
+  html.hide-tool-mapAirQuality .map-toolvis-air-quality,
+  html.hide-tool-mapTourism .map-toolvis-tourism,
+  html.hide-tool-mapProtectionZones .map-toolvis-protection-zones,
+  html.hide-tool-mapParkingFees .map-toolvis-parking-fees,
+  html.hide-tool-mapEvChargers .map-toolvis-ev-chargers,
   html.hide-tool-mapTransit .map-toolvis-transit,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
@@ -9707,6 +9712,168 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-typhoon-plan{margin-top:6px;font-size:12px}
 .map-typhoon-plan summary{cursor:pointer;font-weight:700}
 .map-typhoon-plan p{margin:3px 0 3px 12px}
+/* 에어코리아 관측 층 */
+/* 보호구역: 실제 다각형의 경계와 갈래를 함께 읽는다. */
+.map-zone-panel[hidden]{display:none}
+.map-zone-regions{display:flex;gap:6px;margin:8px 0}
+.map-zone-regions select{flex:1;min-width:0;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--panel,#fff);color:inherit}
+.map-zone-types{display:flex;flex-wrap:wrap;gap:6px 12px;margin:8px 0;font-size:12px}
+.map-zone-type{display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+.map-zone-type input{margin:0}
+.map-zone-type i{width:9px;height:9px;border-radius:3px}
+.map-zone-summary{font-size:12px;font-weight:600;line-height:1.5;font-variant-numeric:tabular-nums}
+.map-zone-list{list-style:none;margin:0;padding:0;max-height:min(300px,36vh);overflow:auto}
+.map-zone-go{display:flex;flex-direction:column;align-items:flex-start;width:100%;box-sizing:border-box;border:0;border-left:4px solid transparent;border-radius:0;border-bottom:1px solid var(--border);padding:8px;text-align:left;background:transparent;color:inherit;white-space:normal}
+.map-zone-go:hover,.map-zone-go:focus-visible{background:#147fa810}
+.map-zone-go-name{font-weight:700;overflow-wrap:anywhere}
+.map-zone-go-meta{margin-top:3px;font-size:11px;opacity:.8;overflow-wrap:anywhere}
+.map-zone-empty{padding:8px;font-size:12px;color:var(--muted)}
+.map-zone-card{max-width:270px;padding-left:9px;border-left:4px solid var(--zone-color,#147fa8);font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+.map-zone-card>strong{display:block;margin-bottom:6px;font-size:15px;font-weight:800}
+.map-zone-card p{margin:5px 0}
+.map-zone-badge{display:inline-block;padding:2px 7px;border:1px solid var(--zone-color,#147fa8);border-radius:99px;color:var(--zone-color,#147fa8);font-size:11px;font-weight:700}
+.map-zone-key{opacity:.75}
+.leaflet-tooltip.map-zone-tooltip{padding:10px 12px;border:1px solid #dce4e9;border-radius:10px;background:#fff;color:#24323f;box-shadow:0 5px 16px #172e4322;white-space:normal}
+.leaflet-tooltip-top.map-zone-tooltip:before{border-top-color:#fff}
+.leaflet-tooltip-bottom.map-zone-tooltip:before{border-bottom-color:#fff}
+
+/* 주차요금 비교: 가격을 크게, 거리·운영시간·전체 규모를 한 줄에 표시한다. */
+.map-parking-panel{width:420px;max-width:calc(100% - 24px)}
+.map-parking-filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.map-parking-field{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:12px}
+.map-parking-field select{min-width:0;max-width:64%;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);font:inherit}
+.map-parking-free-label{display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer}
+.map-parking-summary{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.map-parking-list{list-style:none;margin:0;padding:0;max-height:min(310px,36vh);overflow:auto}
+.map-parking-go{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;width:100%;box-sizing:border-box;border:0;border-left:4px solid transparent;border-bottom:1px solid var(--border);border-radius:0;padding:10px 8px;background:transparent;color:inherit;text-align:left;white-space:normal}
+.map-parking-go:hover,.map-parking-go:focus-visible{background:#3066c510}
+.map-parking-go-name{font-size:12px;font-weight:700;overflow-wrap:anywhere}
+.map-parking-go-price{font-size:15px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.map-parking-go-meta{grid-column:1/-1;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.map-parking-empty{padding:10px;font-size:12px;color:var(--muted)}
+.map-parking-card{min-width:205px;max-width:290px;font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+.map-parking-name{display:block;margin-bottom:8px;font-size:15px;font-weight:800}
+.map-parking-price{display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:8px;padding:7px 9px;background:#edf3fa;color:var(--parking-color,#3066c5)}
+.map-parking-price span{font-size:11px}.map-parking-price b{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.map-parking-card p{margin:6px 0}.map-parking-key{display:inline-block;margin-right:6px;opacity:.75}
+.map-parking-popup .leaflet-popup-content{overscroll-behavior:contain}
+.leaflet-tooltip.map-parking-tooltip{padding:12px;border:1px solid #dce4e9;border-radius:11px;background:#fff;color:#24323f;box-shadow:0 5px 16px #172e4322;white-space:normal}
+.leaflet-tooltip-top.map-parking-tooltip:before{border-top-color:#fff}
+.leaflet-tooltip-bottom.map-parking-tooltip:before{border-bottom-color:#fff}
+/* 전기차 충전기: 충전소별 대수와 커넥터, 조회 시각을 함께 보여 준다. */
+.map-ev-panel{width:420px;max-width:calc(100% - 24px)}
+.map-ev-regions{display:flex;gap:6px;margin:8px 0}
+.map-ev-regions select{flex:1;min-width:0;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);font:inherit}
+.map-ev-filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;font-size:12px}
+.map-ev-filters select{min-width:0;padding:5px;border:1px solid var(--border);border-radius:6px;background:var(--field);color:var(--ink);font:inherit}
+.map-ev-filters label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.map-ev-summary{font-size:12px;font-weight:700;line-height:1.5;font-variant-numeric:tabular-nums}
+.map-ev-list{list-style:none;margin:0;padding:0;max-height:min(310px,36vh);overflow:auto}
+.map-ev-go{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;box-sizing:border-box;border:0;border-left:4px solid transparent;border-bottom:1px solid var(--border);border-radius:0;padding:9px 8px;background:transparent;color:inherit;text-align:left;white-space:normal}
+.map-ev-go:hover,.map-ev-go:focus-visible{background:#16826310}
+.map-ev-go-name{font-size:12px;font-weight:700;overflow-wrap:anywhere}
+.map-ev-go-meta{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.map-ev-empty{padding:10px;font-size:12px;color:var(--muted)}
+.map-ev-card{min-width:205px;max-width:300px;font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+.map-ev-name{display:block;margin-bottom:8px;font-size:15px;font-weight:800}
+.map-ev-badge{padding:7px 10px;border-radius:8px;background:#edf7f3;color:var(--ev-color,#168263);font-size:18px;font-weight:800;font-variant-numeric:tabular-nums}
+.map-ev-card p{margin:6px 0}.map-ev-key{display:inline-block;margin-right:6px;opacity:.75}
+.map-ev-charger{margin-top:9px;padding-top:9px;border-top:1px solid #dce4e9}.map-ev-charger>strong{font-size:12px}
+.map-ev-popup .leaflet-popup-content{overscroll-behavior:contain}
+.leaflet-tooltip.map-ev-tooltip{padding:12px;border:1px solid #dce4e9;border-radius:11px;background:#fff;color:#24323f;box-shadow:0 5px 16px #172e4322;white-space:normal}
+.leaflet-tooltip-top.map-ev-tooltip:before{border-top-color:#fff}
+.leaflet-tooltip-bottom.map-ev-tooltip:before{border-bottom-color:#fff}
+/* 관광·축제 — 관광은 청록색, 축제는 보라색. */
+.map-tour-panel[hidden],.map-tour-filters[hidden],.map-tour-details[hidden],.map-tour-search[hidden]{display:none}
+.map-tour-modes{display:flex;gap:6px;margin:6px 0 10px}
+.map-tour-modes .map-btn{flex:1;justify-content:center}
+.map-tour-modes .map-btn[aria-pressed="true"]{background:#1684a018;border-color:#1684a0;color:var(--ink)}
+.map-tour-modes .map-tour-festivals[aria-pressed="true"]{background:#8b4ec618;border-color:#8b4ec6}
+.map-tour-filters select{flex:1;min-width:0;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--panel,#fff);color:inherit}
+.map-tour-summary{font-size:12px;font-weight:600;line-height:1.5;font-variant-numeric:tabular-nums}
+.map-tour-list{list-style:none;margin:0;padding:0;max-height:min(300px,36vh);overflow:auto}
+.map-tour-go{display:flex;flex-direction:column;align-items:flex-start;width:100%;box-sizing:border-box;border:0;border-left:4px solid #1684a0;border-radius:0;border-bottom:1px solid var(--border);padding:8px;text-align:left;background:transparent;color:inherit;white-space:normal}
+.map-tour-go:hover,.map-tour-go:focus-visible{background:#1684a012}
+.map-tour-go-name{font-weight:700;overflow-wrap:anywhere}
+.map-tour-go-meta{margin-top:3px;font-size:11px;opacity:.8;white-space:pre-line;overflow-wrap:anywhere}
+.map-tour-empty{padding:8px;font-size:12px;color:var(--muted)}
+.map-tour-details{margin:10px 0;padding:10px;border:1px solid var(--border);border-radius:8px;max-height:min(300px,35vh);overflow:auto;font-size:12px}
+.map-tour-detail-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.map-tour-detail-heading strong{font-size:14px;overflow-wrap:anywhere}
+.map-tour-detail-row{display:flex;align-items:baseline;gap:8px;margin:3px 0;white-space:pre-line;overflow-wrap:anywhere}
+.map-tour-detail-key{flex:0 0 44px;color:var(--muted)}
+.map-tour-detail-row>span:last-child{min-width:0}
+.map-tour-overview{white-space:pre-line;line-height:1.6;overflow-wrap:anywhere}
+.map-tour-homepage{display:inline-block;margin:4px 0}
+.map-tour-popup{font:12px/1.5 sans-serif;min-width:200px;max-width:280px}
+.map-tour-popup-name{display:block;font-size:14px;margin-bottom:6px;overflow-wrap:anywhere}
+.map-tour-popup .map-btn{margin-top:7px}
+.leaflet-tooltip.map-tour-tooltip{padding:0;border:1px solid #d8dee5;border-radius:12px;background:#fff;color:#243341;box-shadow:0 4px 18px #1523332b;white-space:normal;pointer-events:none}
+.map-tour-tooltip.leaflet-tooltip-top:before{border-top-color:#fff}
+.map-tour-tip{--tour-accent:#1684a0;--tour-tint:#ecf6f8;width:270px;max-width:calc(100vw - 48px);font:12px/1.45 "Malgun Gothic",system-ui,sans-serif;overflow-wrap:anywhere}
+.map-tour-tip-festival{--tour-accent:#8b4ec6;--tour-tint:#f4edf9}
+.map-tour-tip-body{padding:12px 14px}
+.map-tour-tip-heading{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.map-tour-tip-name{min-width:0;font-size:19px;font-weight:800;line-height:1.3;word-break:keep-all}
+.map-tour-tip-icon{flex:none;width:26px;height:26px;border-radius:50%;background:var(--tour-tint);display:flex;align-items:center;justify-content:center}
+.map-tour-tip-icon:before{content:"";width:18px;height:18px;background:var(--tour-accent);-webkit-mask:var(--tour-hill-icon) center/contain no-repeat;mask:var(--tour-hill-icon) center/contain no-repeat}
+.map-tour-tip{--tour-hill-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 18 6-10 4 6 3-4 5 8H3z'/%3E%3C/svg%3E")}
+.map-tour-tip-meta{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;color:#536270;font-size:12px}
+.map-tour-tip-category{padding:3px 9px;border-radius:8px;background:var(--tour-tint);color:var(--tour-accent);font-weight:600}
+.map-tour-tip-distance{display:flex;align-items:center;gap:5px;border-left:1px solid #d8dee5;padding-left:10px;font-size:13px;font-variant-numeric:tabular-nums}
+.map-tour-tip-pin{order:-1;display:block;position:relative;width:9px;height:9px;margin:0 3px 3px 2px;background:#768591;border-radius:50% 50% 50% 0;transform:rotate(-45deg)}
+.map-tour-tip-pin:after{content:"";position:absolute;top:3px;left:3px;width:3px;height:3px;border-radius:50%;background:#fff}
+.map-tour-tip-schedule{margin-top:9px;padding-top:8px;border-top:1px solid #e8edf0;color:#687784;font-size:11px;font-variant-numeric:tabular-nums}
+/* 등록 사진은 잘라내거나 필터를 적용하지 않고 원래 비율대로 보여 준다. */
+.map-tour-tip-media{height:160px;background:#f2f5f6;border-radius:11px 11px 0 0;overflow:hidden}
+.map-tour-tip-photo{display:block;width:100%;height:100%;object-fit:contain}
+.map-tour-tip-credit{margin-top:8px;color:#87939b;font-size:10px}
+.map-tour-tip-media[hidden],.map-tour-tip-credit[hidden],.map-tour-tip-icon[hidden]{display:none}
+.map-air-panel[hidden]{display:none}
+.map-air-metric{flex:1;min-width:0;padding:5px;border:1px solid #98b9bd;border-radius:6px;background:var(--panel,#fff);color:inherit}
+.map-air-legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin:8px 0;font-size:12px}
+.map-air-grade{display:inline-flex;align-items:center;gap:5px}
+.map-air-grade i{width:10px;height:10px;border-radius:50%;display:inline-block}
+.map-air-summary{font-weight:600;font-size:12px;font-variant-numeric:tabular-nums}
+.map-air-list{list-style:none;margin:0;padding:0;max-height:min(320px,40vh);overflow:auto}
+.map-air-go{display:flex;flex-direction:column;align-items:flex-start;width:100%;box-sizing:border-box;border:0;border-left:4px solid #7b8794;border-radius:0;border-bottom:1px solid #98b9bd33;padding:7px 8px;text-align:left;background:transparent;color:inherit}
+.map-air-go:hover,.map-air-go:focus-visible{background:#98b9bd22}
+.map-air-go-name,.map-air-popup-name{font-weight:700}
+.map-air-go-meta,.map-air-empty{font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
+.map-air-empty{padding:7px 8px}
+.map-air-popup{font:12px/1.5 sans-serif;min-width:210px}
+.map-air-popup-name{display:block;font-size:14px;margin-bottom:5px}
+.map-air-popup-row{display:flex;gap:8px}
+.map-air-popup-key{flex:0 0 110px;opacity:.7}
+/* 등급 강조형 툴팁: 흰 카드, 등급·농도 강조, 4색 막대와 현재 등급 표시 */
+.leaflet-tooltip.map-air-tooltip{padding:12px;border:1px solid #d8dee5;border-radius:12px;background:#fff;color:#202b36;box-shadow:0 3px 14px #15233329;font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.35;white-space:normal;pointer-events:none}
+.map-air-tooltip.leaflet-tooltip-top:before{border-top-color:#fff}
+.map-air-tip{--air-tip-ink:#526170;--air-tip-tint:#f1f4f7;width:248px;max-width:calc(100vw - 48px)}
+.map-air-tip-grade-1{--air-tip-ink:#116497;--air-tip-tint:#edf7fe}
+.map-air-tip-grade-2{--air-tip-ink:#176936;--air-tip-tint:#edf8ee}
+.map-air-tip-grade-3{--air-tip-ink:#945100;--air-tip-tint:#fff4e5}
+.map-air-tip-grade-4{--air-tip-ink:#ac2333;--air-tip-tint:#ffedf0}
+.map-air-tip-header{display:flex;align-items:center;gap:12px;margin:0 2px 10px}
+.map-air-tip-name{min-width:0;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:700}
+.map-air-tip-metric{flex:0 0 auto;border-left:1px solid #d8dee5;padding-left:12px;color:#66727f;font-size:13px;font-weight:600}
+.map-air-tip-reading{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;min-height:68px;box-sizing:border-box;padding:12px;border-radius:8px;background:var(--air-tip-tint);color:var(--air-tip-ink)}
+.map-air-tip-status{min-width:0;font-size:26px;font-weight:800;line-height:1.2;letter-spacing:-.5px;word-break:keep-all;overflow-wrap:anywhere}
+.map-air-tip-grade-4 .map-air-tip-status{font-size:24px}
+.map-air-tip:lang(en) .map-air-tip-status{font-size:18px;letter-spacing:0}
+.map-air-tip-grade-0 .map-air-tip-status{font-size:15px;letter-spacing:0}
+.map-air-tip-amount{display:flex;align-items:baseline;justify-content:flex-end;gap:5px;border-left:1px solid #a6b5ae44;padding-left:12px;white-space:nowrap}
+.map-air-tip-value{font-size:32px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-1px}
+.map-air-tip-o3 .map-air-tip-value{font-size:28px}
+.map-air-tip-unit{font-size:12px;font-weight:500;letter-spacing:0}
+.map-air-tip-scale{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;margin-top:12px}
+.map-air-tip-cell{min-width:0;text-align:center}
+.map-air-tip-bar{position:relative;display:block;height:8px;margin-bottom:7px}
+.map-air-tip-cell:first-child .map-air-tip-bar{border-radius:5px 0 0 5px}
+.map-air-tip-cell:last-child .map-air-tip-bar{border-radius:0 5px 5px 0}
+.map-air-tip-position{position:absolute;top:50%;left:50%;width:12px;height:12px;box-sizing:border-box;border:2px solid #fff;border-radius:50%;background:inherit;box-shadow:0 1px 4px #15233344;transform:translate(-50%,-50%)}
+.map-air-tip-label{display:block;color:#73808d;font-size:10px;font-weight:600;line-height:1.3;word-break:keep-all;overflow-wrap:anywhere}
+.map-air-tip-cell[aria-current="true"] .map-air-tip-label{color:var(--air-tip-ink);font-weight:800}
+.map-air-tip-time{margin-top:8px;color:#66727f;font-size:10px;font-variant-numeric:tabular-nums}
 /* 지도 장날 층(market-days.js) — 판은 날씨 창 모양을 같이 쓴다 */
 .map-market-tools{flex-wrap:nowrap}
 .map-market-prev,.map-market-next{min-width:32px;justify-content:center;font-size:16px;line-height:1}

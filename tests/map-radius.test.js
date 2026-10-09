@@ -207,9 +207,18 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
     weather:{freeze(){return ()=>{};},captureNote:()=>""},
     wind:{freeze(){windFrozen=true;return ()=>{windFrozen=false;};},captureNote:()=>"wind snapshot"},
     markets:{captureNote:()=>""},
+    airQuality:{captureNote:()=>"air quality snapshot"},
+    tourism:{captureNote:()=>"tourism snapshot"},
+    protectionZones:{captureNote:()=>"protection zones snapshot"},
+    parkingFees:{captureNote:()=>"parking fees snapshot"},
+    evChargers:{captureNote:()=>"ev chargers snapshot"},
     mapCaptureDataUrl:async(stage,attribution)=>{
       assert.equal(busFrozen,true); assert.match(attribution,/bus snapshot/);
       assert.equal(windFrozen,true); assert.match(attribution,/wind snapshot/);
+      assert.match(attribution,/air quality snapshot/);
+      assert.match(attribution,/protection zones snapshot/);
+      assert.match(attribution,/parking fees snapshot/);
+      assert.match(attribution,/ev chargers snapshot/);
       const summary=vm.runInContext("radiusExport",context);
       captured={hidden:summary.hidden,text:summary.textContent};
       if(fail) throw new Error("capture failed");

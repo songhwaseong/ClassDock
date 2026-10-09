@@ -3376,6 +3376,24 @@ function mapChoroRegions(level, vintage, scope){
   }
   return (set.sgg || []).map(([sido, sgg, geom]) => ({ key:sido + "|" + sgg, sido, sgg, name:sido + " " + sgg, geom }));
 }
+/* 보호구역 API의 행안부 5자리 시군구 코드. 내장 행정동 코드와 시군구 경계를 맞춘다. */
+async function mapProtectionDistricts(){
+  await Promise.all([mapChoroData() ? null : MNLazy.need("koreaRegions"), mapChoroEmdData() ? null : MNLazy.need("koreaEmd")]);
+  const vintage = MAP_CHORO_VINTAGES[0], codeByName = new Map();
+  for (const emd of mapChoroEmdAll(vintage)){
+    if (!/^[1-9]\d{9}$/.test(emd.code)) continue;
+    const key = emd.sido + "|" + emd.sgg, code = emd.code.slice(0, 5);
+    if (!codeByName.has(key)) codeByName.set(key, new Set()); codeByName.get(key).add(code);
+  }
+  return mapChoroRegions("sgg", vintage).flatMap(region => {
+    const codes = codeByName.get(region.key);
+    // 하나의 경계가 서로 다른 시군구 코드를 섞으면 임의의 코드를 고르지 않는다.
+    if (!codes || codes.size !== 1) return [];
+    const geometry = mapChoroGeometry(region.geom);
+    return [{ code:[...codes][0], sido:region.sido, sgg:region.sgg, name:region.name,
+      contains:(lat, lng) => mapChoroContains(geometry, lat, lng) }];
+  });
+}
 /* 누른 좌표가 속한 중기예보 광역구역. 행정경계를 사용해 도 경계에서도 가까운 도시의
    잘못된 예보를 붙이지 않는다. 영동·영서만 시군구를 한 번 더 가른다. */
 async function mapWeatherAreaAt(lat, lng){
@@ -5763,6 +5781,11 @@ const MAP_TOOL_ICONS = {
   sunCloud: '<circle cx="8" cy="8" r="3"/><path d="M8 2v1.3M2 8h1.3M3.8 3.8l.9.9M12.2 3.8l-.9.9"/><path d="M8.5 20a3.5 3.5 0 0 1-.4-7 5 5 0 0 1 9.6 1.2A3 3 0 0 1 17.5 20z"/>',
   market: '<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 12v8.5h13V12M10 20.5v-5h4v5"/>',
   wind: '<path d="M3 8.5h9.5a2.5 2.5 0 1 0-2.5-2.5"/><path d="M3 12.5h14.5a3 3 0 1 1-3 3"/><path d="M3 16.5h6.5"/>',
+  airQuality: '<path d="M3 9h9a3 3 0 1 0-3-3M3 13h14a3 3 0 1 1-3 3"/><circle cx="6" cy="19" r="1"/><circle cx="10" cy="20" r="1"/>',
+  tourism: '<path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><path d="m12 5 1.2 2.4 2.7.4-2 1.9.5 2.7-2.4-1.3-2.4 1.3.5-2.7-2-1.9 2.7-.4z"/>',
+  protectionZones: '<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/>',
+  evChargers: '<path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/><path d="m13 9-3 3h3l-2 3"/>',
+  parkingFees: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 18V7h4a3 3 0 0 1 0 6H9"/>',
   ship: '<path d="M12 10.2V14M12 2v3"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M19.4 20A11.6 11.6 0 0 0 21 14l-8.2-3.6a2 2 0 0 0-1.6 0L3 14a11.6 11.6 0 0 0 2.8 7.8"/><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
   save: '<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
@@ -7279,6 +7302,16 @@ async function mountMapEditor(doc){
   // 오늘 장날(전국전통시장표준데이터). 같은 공공데이터포털 키를 쓴다.
   const markets = typeof MNMarketDays !== "undefined" ? MNMarketDays.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  const airQuality = typeof MNAirQuality !== "undefined" ? MNAirQuality.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  const tourism = typeof MNTourism !== "undefined" ? MNTourism.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  const protectionZones = typeof MNProtectionZones !== "undefined" ? MNProtectionZones.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    getDistricts:mapProtectionDistricts, movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  const parkingFees = typeof MNParkingFees !== "undefined" ? MNParkingFees.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  const evChargers = typeof MNEvChargers !== "undefined" ? MNEvChargers.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    getDistricts:mapProtectionDistricts, movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   // 주변 교통 자동 표시(지하철역은 내장 좌표, 버스 정류장은 같은 공공데이터포털 키). 버스 창·지하철 도착 창을 빌려 쓴다.
   const nearbyTransit = typeof MNNearbyTransit === "undefined" ? null : MNNearbyTransit.mount({ map, stage, toolRow:toolChips, doc, t:mapT, bus:jejuBus,
     subwayColors:MAP_SUBWAY_COLORS, say:setStatus,
@@ -9921,7 +9954,7 @@ async function mountMapEditor(doc){
     if (button) contextMirror(button);
   }
   contextGroup("날씨·생활");
-  for (const selector of [".map-toolvis-weather", ".map-toolvis-wind", ".map-toolvis-market"]){
+  for (const selector of [".map-toolvis-weather", ".map-toolvis-wind", ".map-toolvis-market", ".map-toolvis-air-quality", ".map-toolvis-tourism", ".map-toolvis-protection-zones", ".map-toolvis-parking-fees", ".map-toolvis-ev-chargers"]){
     const button = toolChips.querySelector(selector);
     if (button) contextMirror(button);
   }
@@ -10152,7 +10185,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote(), wind && wind.captureNote(), markets && markets.captureNote()].filter(Boolean).join(" · "), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote(), wind && wind.captureNote(), markets && markets.captureNote(), airQuality && airQuality.captureNote(), tourism && tourism.captureNote(), protectionZones && protectionZones.captureNote(), parkingFees && parkingFees.captureNote(), evChargers && evChargers.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 

@@ -1041,6 +1041,12 @@ class ClassDockLauncher
             if (path == "/can-proxy-ship" || path.StartsWith("/ship-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-weather" || path.StartsWith("/weather-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/market-days?", StringComparison.Ordinal)) return true;
+        if (path.StartsWith("/air-quality-", StringComparison.Ordinal)) return true;
+        if (path.StartsWith("/tourism-", StringComparison.Ordinal)) return true;
+        if (path == "/protection-zones" || path.StartsWith("/protection-zones?", StringComparison.Ordinal)) return true;
+        if (path == "/parking-fees" || path.StartsWith("/parking-fees?", StringComparison.Ordinal)) return true;
+            if (path == "/ev-chargers" || path.StartsWith("/ev-chargers?", StringComparison.Ordinal)
+                || path == "/ev-charger-status" || path.StartsWith("/ev-charger-status?", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-world-wind" || path.StartsWith("/world-wind-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
@@ -3501,7 +3507,13 @@ class ClassDockLauncher
                     || path == "/ship-ports" || path.StartsWith("/ship-ports?", StringComparison.Ordinal)
                     || path.StartsWith("/ship-schedule?", StringComparison.Ordinal)
                     || path.StartsWith("/weather-", StringComparison.Ordinal)
-                    || path.StartsWith("/market-days?", StringComparison.Ordinal)))
+                    || path.StartsWith("/market-days?", StringComparison.Ordinal)
+                    || path.StartsWith("/air-quality-", StringComparison.Ordinal)
+                    || path.StartsWith("/tourism-", StringComparison.Ordinal)
+                    || path == "/protection-zones" || path.StartsWith("/protection-zones?", StringComparison.Ordinal)
+                    || path == "/parking-fees" || path.StartsWith("/parking-fees?", StringComparison.Ordinal)
+                    || path == "/ev-chargers" || path.StartsWith("/ev-chargers?", StringComparison.Ordinal)
+                    || path == "/ev-charger-status" || path.StartsWith("/ev-charger-status?", StringComparison.Ordinal)))
                 {
                     // 항공 운항(한국공항공사)도 같은 공공데이터포털 키·같은 캐시·같은 오류 알림을 쓴다. 조회 이름만 다르다.
                     int question = path.IndexOf('?');
@@ -3513,14 +3525,23 @@ class ClassDockLauncher
                         : route == "/weather-day" ? "wx-day" : route == "/weather-holidays" ? "holidays" : route == "/weather-terms" ? "terms"
                         : route == "/weather-typhoon" ? "wx-typhoon" : route == "/weather-typhoon-fcst" ? "wx-typhoon-fcst"
                         : route == "/market-days" ? "markets"
+                        : route == "/air-quality-stations" ? "air-stations" : route == "/air-quality-readings" ? "air-readings"
+                        : route == "/tourism-nearby" ? "tour-nearby" : route == "/tourism-festivals" ? "tour-festivals"
+                        : route == "/tourism-common" ? "tour-common" : route == "/tourism-intro" ? "tour-intro"
+                        : route == "/protection-zones" ? "zones"
+                        : route == "/parking-fees" ? "parking"
+                        : route == "/ev-chargers" ? "ev-info" : route == "/ev-charger-status" ? "ev-status"
                         : route.StartsWith("/jeju-bus-", StringComparison.Ordinal) ? route.Substring("/jeju-bus-".Length) : "";
                     string value = kind == "cities" ? "all"
+                        : kind == "ev-info" || kind == "ev-status" ? (QueryValue(path, "district") ?? "").Trim() + "," + (QueryValue(path, "page") ?? "").Trim()
+                        : kind == "zones" ? (QueryValue(path, "sgg") ?? "").Trim() + "," + (QueryValue(path, "page") ?? "").Trim()
+                        : kind.StartsWith("tour-", StringComparison.Ordinal) ? TourQueryValue(kind, path)
                         : (kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst") ? (QueryValue(path, "nx") ?? "").Trim() + "," + (QueryValue(path, "ny") ?? "").Trim()
                         : kind == "wx-mid-land" || kind == "wx-mid-temp" ? (QueryValue(path, "reg") ?? "").Trim()
                         : kind == "wx-day" ? (QueryValue(path, "stn") ?? "").Trim() + "-" + (QueryValue(path, "date") ?? "").Trim()
                         : kind == "holidays" || kind == "terms" ? (QueryValue(path, "year") ?? "").Trim() + (QueryValue(path, "month") ?? "").Trim().PadLeft(2, '0')
                         : kind == "wx-typhoon" ? "now"
-                        : kind == "markets" ? (QueryValue(path, "page") ?? "").Trim()
+                        : kind == "markets" || kind == "air-stations" || kind == "air-readings" || kind == "parking" ? (QueryValue(path, "page") ?? "").Trim()
                         : kind == "wx-typhoon-fcst" ? (QueryValue(path, "seq") ?? "").Trim() + "-" + (QueryValue(path, "tmfc") ?? "").Trim()
                         : kind == "nearby" ? (QueryValue(path, "lat") ?? "").Trim() + "," + (QueryValue(path, "lng") ?? "").Trim()
                         : kind == "flights" ? String.Join("-", new[] { "airport", "io", "line", "page" }.Select(name => (QueryValue(path, name) ?? "").Trim()))
@@ -3530,11 +3551,12 @@ class ClassDockLauncher
                         : (QueryValue(path, kind == "routes" ? "keyword" : kind == "arrivals" ? "nodeId" : "routeId") ?? "").Trim();
                     bool weather = kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp"
                         || kind == "wx-day" || kind == "holidays" || kind == "terms" || kind == "wx-typhoon" || kind == "wx-typhoon-fcst"
-                        || kind == "markets";
-                    bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather;
+                        || kind == "markets" || kind == "air-stations" || kind == "air-readings" || kind == "zones" || kind == "parking" || kind == "ev-info" || kind == "ev-status";
+                    bool tourism = kind == "tour-nearby" || kind == "tour-festivals" || kind == "tour-common" || kind == "tour-intro";
+                    bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather || tourism;
                     string busCity = noCity ? "" : (QueryValue(path, "city") ?? "").Trim();
                     if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby"
-                            || kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather)
+                            || kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather || tourism)
                         || !ValidJejuBusValue(kind, value) || !ValidBusCity(busCity))
                     { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
                     byte[] result; DateTime fetchedAt; bool stale; int retry; string busError;
@@ -5881,6 +5903,10 @@ class ClassDockLauncher
     static bool ValidJejuBusValue(string kind, string value)
     {
         if (String.IsNullOrEmpty(value)) return false;
+        if (kind == "zones") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9][0-9]{4},([1-9]|10)$");
+        if (kind == "parking") return System.Text.RegularExpressions.Regex.IsMatch(value, "^([1-9]|[1-4][0-9]|50)$");
+        if (kind == "ev-info" || kind == "ev-status") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9][0-9]{4},([1-9]|10)$");
+        if (kind.StartsWith("tour-", StringComparison.Ordinal)) return ValidTourValue(kind, value);
         if (kind == "routes") return ValidBusRouteNumber(value);
         if (kind == "cities") return value == "all";
         // 항공: 게시판 = "공항-출도착-국내국제-쪽"(GMP-O-D-1), 편명 = KE1201·7C101·ZE781A.
@@ -5928,6 +5954,7 @@ class ClassDockLauncher
         }
         // 전통시장(장날): 1000줄씩 쪽 번호만. 전국이 1,400곳 남짓이라 몇 쪽이면 끝난다.
         if (kind == "markets") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9]$");
+        if (kind == "air-stations" || kind == "air-readings") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9]$");
         if (kind == "holidays" || kind == "terms")
         {
             int year, month;
@@ -5946,6 +5973,38 @@ class ClassDockLauncher
                 && lat >= 33 && lat <= 38.7 && lng >= 124.5 && lng <= 132;
         }
         return value.Length <= 30 && value.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
+    }
+    // TourAPI 조회값은 허용한 숫자·갈래만 받는다. 임의 서비스 주소나 추가 매개변수는 전달하지 않는다.
+    static string TourQueryValue(string kind, string path)
+    {
+        string[] fields = kind == "tour-nearby" ? new[] { "lat", "lng", "radius", "type", "page" }
+            : kind == "tour-festivals" ? new[] { "start", "end", "page" }
+            : kind == "tour-intro" ? new[] { "id", "type" } : new[] { "id" };
+        return String.Join(",", fields.Select(name => (QueryValue(path, name) ?? "").Trim()));
+    }
+    static bool ValidTourValue(string kind, string value)
+    {
+        if (String.IsNullOrEmpty(value) || value.Length > 80) return false;
+        if (kind == "tour-common") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9][0-9]{0,11}$");
+        if (kind == "tour-intro") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9][0-9]{0,11},(12|14|15|28)$");
+        if (kind == "tour-nearby")
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(value,
+                "^([0-9]{2}(?:\\.[0-9]{1,6})?),([0-9]{3}(?:\\.[0-9]{1,6})?),(1000|3000|5000|10000|20000),(12|14|28),[1-3]$");
+            if (!match.Success) return false;
+            double lat = Double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), lng = Double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+            return lat >= 32.5 && lat <= 39 && lng >= 124 && lng <= 132.5;
+        }
+        if (kind == "tour-festivals")
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(value, "^([0-9]{8}),([0-9]{8}),(10|[1-9])$");
+            DateTime start, end;
+            if (!match.Success || !DateTime.TryParseExact(match.Groups[1].Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out start)
+                || !DateTime.TryParseExact(match.Groups[2].Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out end)) return false;
+            DateTime today = KmaKstNow().Date;
+            return start.DayOfWeek == DayOfWeek.Monday && end == start.AddDays(6) && start >= today.AddDays(-13) && start <= today;
+        }
+        return false;
     }
     static string NearbyBusSpot(string value)
     {
@@ -6044,6 +6103,67 @@ class ClassDockLauncher
                 service = MarketBase; operation = "tn_pubr_public_trdit_mrkt_api"; needsCity = false;
                 query = "type=json&numOfRows=1000&pageNo=" + value;
                 break;
+            // 전국주차장정보표준데이터. 1000줄씩 최대 50쪽, 요금 계산과 거리 비교는 화면에서 한다.
+            case "parking":
+                if (!ValidJejuBusValue(kind, value)) { error = "bus-bad-request"; return false; }
+                service = MarketBase; operation = "tn_pubr_prkplce_info_api"; needsCity = false;
+                query = "type=json&numOfRows=1000&pageNo=" + value;
+                break;
+            // 전기차 충전기: 시군구 전체 정보와 최근 10분의 상태 변경. 지역·쪽 수를 검증한다.
+            case "ev-info": case "ev-status":
+            {
+                if (!ValidJejuBusValue(kind, value)) { error = "bus-bad-request"; return false; }
+                string[] ev = value.Split(','); needsCity = false;
+                service = "https://apis.data.go.kr/B552584/EvCharger/"; operation = kind == "ev-info" ? "getChargerInfo" : "getChargerStatus";
+                query = "dataType=JSON&numOfRows=5000&pageNo=" + ev[1] + "&zcode=" + ev[0].Substring(0, 2) + "&zscode=" + ev[0]
+                    + (kind == "ev-status" ? "&period=10" : "");
+                break;
+            }
+            // 에어코리아: 측정소 위치 목록과 전국 최신 관측. 주소와 쪽 번호는 런처가 고정·검증한다.
+            case "air-stations":
+                service = "https://apis.data.go.kr/B552584/MsrstnInfoInqireSvc/"; operation = "getMsrstnList"; needsCity = false;
+                query = "returnType=json&numOfRows=1000&pageNo=" + value;
+                break;
+            case "air-readings":
+                service = "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/"; operation = "getCtprvnRltmMesureDnsty"; needsCity = false;
+                query = "returnType=json&numOfRows=1000&pageNo=" + value + "&sidoName=" + Uri.EscapeDataString("전국") + "&ver=1.5";
+                break;
+            // 관광·축제(한국관광공사 국문 관광정보 서비스_GW). 축제는 주간과 겹치는 일정으로 조회한다.
+            case "zones":
+            {
+                if (!ValidJejuBusValue(kind, value)) { error = "bus-bad-request"; return false; }
+                string[] zone = value.Split(','); needsCity = false;
+                service = "https://apis.data.go.kr/1320000/safetyzonedtlinfo/"; operation = "getdtllist";
+                query = "sggCd=" + zone[0] + "&numOfRows=100&pageNo=" + zone[1];
+                break;
+            }
+            case "tour-nearby": case "tour-festivals": case "tour-common": case "tour-intro":
+            {
+                if (!ValidTourValue(kind, value)) { error = "bus-bad-request"; return false; }
+                string[] tour = value.Split(',');
+                service = "https://apis.data.go.kr/B551011/KorService2/"; needsCity = false;
+                query = "MobileOS=ETC&MobileApp=ClassDock&_type=json";
+                if (kind == "tour-nearby")
+                {
+                    operation = "locationBasedList2";
+                    string tourSpot = NearbyBusSpot(tour[0] + "," + tour[1]); string[] coords = tourSpot.Split(',');
+                    query += "&mapY=" + coords[0] + "&mapX=" + coords[1] + "&radius=" + tour[2] + "&contentTypeId=" + tour[3]
+                        + "&arrange=E&numOfRows=100&pageNo=" + tour[4];
+                    value = tourSpot + "," + String.Join(",", tour.Skip(2));
+                }
+                else if (kind == "tour-festivals")
+                {
+                    operation = "searchFestival2";
+                    query += "&eventStartDate=" + tour[0] + "&eventEndDate=" + tour[1] + "&arrange=A&numOfRows=100&pageNo=" + tour[2];
+                }
+                else
+                {
+                    operation = kind == "tour-common" ? "detailCommon2" : "detailIntro2";
+                    query += "&contentId=" + tour[0] + "&numOfRows=1&pageNo=1";
+                    if (kind == "tour-intro") query += "&contentTypeId=" + tour[1];
+                }
+                break;
+            }
             case "holidays": case "terms":
                 service = KasiBase + "SpcdeInfoService/"; operation = kind == "holidays" ? "getRestDeInfo" : "get24DivisionsInfo"; needsCity = false;
                 query = "_type=json&numOfRows=50&solYear=" + value.Substring(0, 4) + "&solMonth=" + value.Substring(4);
@@ -6051,7 +6171,8 @@ class ClassDockLauncher
             default: return false;
         }
         bool kac = kind == "flights" || kind == "flight";
-        bool dataGo = kind.StartsWith("wx-", StringComparison.Ordinal) || kind == "holidays" || kind == "terms" || kind == "markets";
+        bool dataGo = kind.StartsWith("wx-", StringComparison.Ordinal) || kind == "holidays" || kind == "terms" || kind == "markets"
+            || kind == "air-stations" || kind == "air-readings" || kind == "parking";
         // 서울은 근처 정류장도 서울 API 로 묻는다(TAGO 좌표 조회에는 서울 정류장이 없다). 도시 목록은 TAGO 것 그대로.
         bool seoul = city == SeoulBusCity && kind != "cities";
         if (seoul)
@@ -6076,8 +6197,11 @@ class ClassDockLauncher
         // 여객선 시간표는 하루 안에 거의 바뀌지 않는다(상태 필드도 없다). 10분이면 충분하다.
         // 실황·초단기예보는 한 시간마다, 단기예보는 세 시간마다 발표된다(캐시 열쇠에 발표 시각이 들어 있다).
         // 지난 날 관측·특일은 바뀌지 않는다.
-        int ttl = kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600
-            : kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-typhoon" ? 600 : kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp" ? 1800 : 86400;
+        int ttl = kind == "ev-info" || kind == "ev-status" ? 60 : kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600
+            : kind == "air-readings" ? 600 : kind == "air-stations" ? 7 * 86400
+            : kind.StartsWith("tour-", StringComparison.Ordinal) ? 3600
+            : kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-typhoon" ? 600
+            : kind == "wx-fcst" || kind == "wx-mid-land" || kind == "wx-mid-temp" ? 1800 : 86400;
         lock (JejuBusGates[(cacheKey.GetHashCode() & Int32.MaxValue) % JejuBusGates.Length])
         {
             JejuBusCacheEntry entry;
@@ -6102,9 +6226,12 @@ class ClassDockLauncher
             {
                 try
                 {
-                    int max = kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+                    int max = kind == "ev-info" || kind == "ev-status" ? 16 * 1024 * 1024 : kind == "zones" ? 10 * 1024 * 1024 : kind == "position" ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
                     byte[] received = seoul ? SeoulBusGet(service, query, key, max)
                         : kac ? KacGet(service, query, key, max)
+                        : kind.StartsWith("tour-", StringComparison.Ordinal) ? TourGet(service + operation + "?serviceKey=" + TagoKeyParameter(key) + "&" + query, max)
+                        : kind == "zones" ? ProtectionZonesGet(service + operation + "?serviceKey=" + TagoKeyParameter(key) + "&" + query, max)
+                        : kind == "ev-info" || kind == "ev-status" ? EvChargerGet(service + operation + "?serviceKey=" + TagoKeyParameter(key) + "&" + query, max)
                         : dataGo ? DataGoGet(service + operation + "?serviceKey=" + TagoKeyParameter(key) + "&" + query, max)
                         : TagoGetRaw(service, operation, query, key, max);
                     entry.Data = received; entry.FetchedAt = DateTime.UtcNow; entry.RetryAt = DateTime.MinValue; entry.Error = ""; entry.Upstream = "";
@@ -6222,6 +6349,39 @@ class ClassDockLauncher
         }
         baseDate = at.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
     }
+    // TourAPI는 정상 결과를 0000으로 준다(일반 공공데이터 API의 00과 다름).
+    static string TourResultCode(byte[] received)
+    {
+        string code = TagoResultCode(received); int numeric;
+        return code.Length <= 4 && Int32.TryParse(code, NumberStyles.None, CultureInfo.InvariantCulture, out numeric)
+            && numeric <= 99 ? numeric.ToString("D2", CultureInfo.InvariantCulture) : code;
+    }
+    static byte[] TourGet(string url, int max)
+    {
+        byte[] received = BusHttpGet(url, max, TourResultCode, "22");
+        string code = TourResultCode(received);
+        if (code == "00" || code == "03") return received;
+        string upstream = "HTTP 200 - " + (code.Length > 0 ? code : "?");
+        if (code == "22") throw new TagoException("bus-quota", upstream);
+        if (code == "20" || code == "30" || code == "31" || code == "32") throw new TagoException("bus-key-invalid", upstream);
+        throw new TagoException("bus-invalid-data", upstream);
+    }
+    // 경찰청 명세의 ERR_03은 정상적인 자료 없음이다. 인증·한도 오류는 공용 처리에 맡긴다.
+    static string ProtectionZonesResultCode(byte[] received)
+    {
+        string code = TourResultCode(received);
+        return code == "ERR_03" ? "03" : code;
+    }
+    static byte[] ProtectionZonesGet(string url, int max)
+    {
+        byte[] received = BusHttpGet(url, max, ProtectionZonesResultCode, "22");
+        string code = ProtectionZonesResultCode(received);
+        if (code == "00" || code == "03") return received;
+        string upstream = "HTTP 200 - " + (code.Length > 0 ? code : "?");
+        if (code == "22") throw new TagoException("bus-quota", upstream);
+        if (code == "20" || code == "30" || code == "31" || code == "32") throw new TagoException("bus-key-invalid", upstream);
+        throw new TagoException("bus-invalid-data", upstream);
+    }
     static byte[] DataGoGet(string url, int max)
     {
         byte[] received = BusHttpGet(url, max, TagoResultCode, "22");
@@ -6229,6 +6389,36 @@ class ClassDockLauncher
         if (code == "00" || code == "03") return received;
         string upstream = "HTTP 200 - " + (code.Length > 0 ? code : "?");
         if (code == "22") throw new TagoException("bus-quota", upstream);
+        if (code == "20" || code == "30" || code == "31" || code == "32") throw new TagoException("bus-key-invalid", upstream);
+        throw new TagoException("bus-invalid-data", upstream);
+    }
+    // 충전기 JSON은 header/body 껍질 없이 결과코드·items를 직접 준다.
+    static string EvChargerResultCode(byte[] body)
+    {
+        string source = Encoding.UTF8.GetString(body).Trim();
+        if (source.StartsWith("{", StringComparison.Ordinal))
+        {
+            try
+            {
+                var parser = new System.Web.Script.Serialization.JavaScriptSerializer(); parser.MaxJsonLength = Math.Max(source.Length, 1024);
+                var root = parser.DeserializeObject(source) as Dictionary<string, object>; object value;
+                if (root != null && root.TryGetValue("resultCode", out value) && value != null)
+                {
+                    string code = Convert.ToString(value, CultureInfo.InvariantCulture).Trim();
+                    return code == "00" && (!root.ContainsKey("items") || !root.ContainsKey("totalCount")) ? "" : code;
+                }
+            }
+            catch { }
+        }
+        return TagoResultCode(body);
+    }
+    static byte[] EvChargerGet(string url, int max)
+    {
+        byte[] received = BusHttpGet(url, max, EvChargerResultCode, "22"); string code = EvChargerResultCode(received);
+        if (code == "00" || code == "03") return received;
+        string upstream = "HTTP 200 - " + (code.Length > 0 ? code : "?");
+        if (code == "22") throw new TagoException("bus-quota", upstream);
+        if (code == "23") throw new TagoException("bus-rate-limit", upstream);
         if (code == "20" || code == "30" || code == "31" || code == "32") throw new TagoException("bus-key-invalid", upstream);
         throw new TagoException("bus-invalid-data", upstream);
     }

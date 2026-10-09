@@ -96,10 +96,15 @@
     "weather-typhoon.js",
     "weather-wind.js",
     "market-days.js",
+    "air-quality.js",
+    "tourism-map.js",
     "nearby-transit.js",
     "kosis-api.js",
     "kosis-choro.js",
     "korea-coords.js",
+    "protection-zones.js",
+    "parking-fees.js",
+    "ev-chargers.js",
     "map-viewer.js",
     "timeline.js",
     "concept-doc.js",
@@ -284,10 +289,15 @@
         "weather-typhoon.js",
         "weather-wind.js",
         "market-days.js",
+        "air-quality.js",
+        "tourism-map.js",
         "nearby-transit.js",
         "kosis-api.js",
         "kosis-choro.js",
         "korea-coords.js",
+        "protection-zones.js",
+        "parking-fees.js",
+        "ev-chargers.js",
         "map-viewer.js",
         "timeline.js",
         "concept-doc.js",
@@ -492,6 +502,11 @@
       "weather-map.js",
       "weather-wind.js",
       "market-days.js",
+      "air-quality.js",
+      "tourism-map.js",
+      "protection-zones.js",
+      "parking-fees.js",
+      "ev-chargers.js",
       "nearby-transit.js",
       "kosis-choro.js"
     ],
@@ -781,6 +796,9 @@
     ],
     "kosis-choro.js": [
       "kosis-api.js"
+    ],
+    "protection-zones.js": [
+      "korea-coords.js"
     ],
     "trip.js": [
       "diary.js",
