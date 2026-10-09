@@ -59,6 +59,7 @@ test("지도 타일 프록시 허용 호스트는 두 런처가 같은 목록이
 test("프록시 크기·캐시 상한과 시간 간격은 두 런처가 같다", () => {
   const sizes = [
     ["TileMaxBytes", "tileMaxBytes"], ["TileCacheMaxBytes", "tileCacheMaxBytes"],
+    ["TileRefreshMaxPending", "tileRefreshMaxPending"], ["TileRefreshMaxWorkers", "tileRefreshMaxWorkers"],
     ["GeocodeMaxBytes", "geocodeMaxBytes"], ["DirectionsMaxBytes", "directionsMaxBytes"],
     ["RateMaxBytes", "rateMaxBytes"], ["RateCacheMaxBytes", "rateCacheMaxBytes"],
     ["SubwayMaxBytes", "subwayMaxBytes"], ["SubwayRowLimit", "subwayRowLimit"]
@@ -67,7 +68,7 @@ test("프록시 크기·캐시 상한과 시간 간격은 두 런처가 같다",
     assert.equal(product(goConst(goName), goName), product(csConst(csName), csName), `${csName} ↔ ${goName}`);
   }
   const durations = [
-    ["TileCacheMaxAge", "tileCacheMaxAge"], ["RateTodayCacheMaxAge", "rateTodayCacheAge"], ["SubwayCacheMaxAge", "subwayCacheAge"]
+    ["TileCacheMaxAge", "tileCacheMaxAge"], ["TileRefreshRetryGap", "tileRefreshRetryGap"], ["RateTodayCacheMaxAge", "rateTodayCacheAge"], ["SubwayCacheMaxAge", "subwayCacheAge"]
   ];
   for (const [csName, goName] of durations){
     assert.equal(goDurationMs(goName), csTimeSpanMs(csName), `${csName} ↔ ${goName}`);

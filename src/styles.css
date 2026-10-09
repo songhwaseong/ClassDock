@@ -1382,6 +1382,19 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   .map-save{font-weight:600}
   .map-coord{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
   .map-status{color:var(--muted);font-size:11px;margin-left:auto}
+  .map-bike-status{position:absolute;left:10px;bottom:12px;z-index:800;margin:0;padding:6px 9px;
+    max-width:calc(100% - 24px);box-sizing:border-box;border:1px solid var(--border);border-radius:9px;
+    background:var(--panel);color:var(--ink);box-shadow:0 2px 8px rgba(15,23,42,.12);font-size:11px;line-height:1.5}
+  .map-bike-status[hidden],.map-bike-status-row[hidden],.map-bike-status button[hidden]{display:none}
+  .map-bike-status-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .map-bike-status-row+.map-bike-status-row:not([hidden]){margin-top:3px}
+  .map-bike-status-row::before{content:"";width:6px;height:6px;border-radius:50%;background:#16a34a;flex:none}
+  .map-bike-status-row.is-loading::before{background:#3b82f6}
+  .map-bike-status-row.is-error::before{background:#d97706}
+  .map-bike-status-message{color:var(--muted)}
+  .map-bike-status button{padding:1px 5px;border:1px solid var(--border);border-radius:5px;
+    background:var(--field);color:var(--ink);font:inherit;cursor:pointer}
+  .map-bike-status button:hover{background:var(--panel-hover);border-color:var(--accent)}
   /* 지도 칸 + 표시 목록을 나란히 놓는 줄 */
   .map-body{flex:1 1 auto;display:flex;min-height:0;min-width:0}
   .map-stage{flex:1 1 auto;min-height:0;min-width:0;background:var(--panel)}
@@ -4970,6 +4983,7 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapSubway .map-toolvis-subway,
   html.hide-tool-mapFlight .map-toolvis-flight,
   html.hide-tool-mapShip .map-toolvis-ship,
+  html.hide-tool-mapTrain .map-toolvis-train,
   html.hide-tool-mapWeather .map-toolvis-weather,
   html.hide-tool-mapWind .map-toolvis-wind,
   html.hide-tool-mapMarket .map-toolvis-market,
@@ -9591,6 +9605,49 @@ html[data-theme="dark"] .map-flight-dest.is-delayed:not(.is-on){color:#fbbf24}ht
 .map-flight-tip-status .is-normal{color:#93c5fd}.map-flight-tip-status .is-delayed{color:#fbbf24}
 .map-flight-tip-status .is-cancelled{color:#f87171}.map-flight-tip-status .is-diverted{color:#c4b5fd}
 .map-flight-status{margin:6px 0 0;font-size:12px}.map-flight-note{font-size:12px;opacity:.8}.map-flight-panel a{color:#087f8c}
+/* KTX 역 표시와 열차 시간표. */
+.map-train-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(460px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
+.map-train-panel[hidden],.map-train-list[hidden]{display:none}
+.map-train-heading,.map-train-tools{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.map-train-heading{justify-content:space-between}
+.map-train-route,.map-train-query{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.map-train-field{display:flex;flex:1 1 140px;flex-direction:column;gap:3px;min-width:0}
+.map-train-field>span{font-size:12px;opacity:.8}
+.map-train-field input,.map-train-field select{width:100%;min-width:0;box-sizing:border-box}
+.map-train-swap{flex:0 0 100%}
+.map-train-hide{display:inline-flex;align-items:center;gap:4px;margin-right:auto;font-size:12px;cursor:pointer}
+.map-train-catalogue,.map-train-status{margin:6px 0;font-size:12px}
+.map-train-summary{font-weight:600;margin:10px 0 6px;overflow-wrap:anywhere}
+.map-train-list{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto;border:1px solid #98b9bd66;border-radius:8px}
+.map-train-item{padding:7px 9px;border-bottom:1px solid #98b9bd33}
+.map-train-item:last-child{border-bottom:0}
+.map-train-item-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.map-train-time{font-variant-numeric:tabular-nums;color:#1d6fb8}
+html[data-theme="dark"] .map-train-time{color:#93c5fd}
+.map-train-fare{font-size:12px;white-space:nowrap}
+.map-train-detail{font-size:12px;opacity:.8}
+.map-train-empty{padding:10px;font-size:12px}
+.map-train-note{font-size:12px;opacity:.8}
+.map-train-panel>a{color:#087f8c}
+.map-train-map-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0 0 10px;margin-bottom:10px;border-bottom:1px solid #98b9bd55}
+.map-train-station-icon{background:none;border:0}
+.map-train-station-badge{display:block;width:40px;height:44px;color:#1d4ed8;filter:drop-shadow(0 1px 2px #172b3340)}
+.map-train-station-badge svg{display:block;width:100%;height:100%}
+.map-train-station-badge.is-from{color:#b45309}.map-train-station-badge.is-to{color:#0f766e}
+.map-train-station-icon:hover .map-train-station-badge,.map-train-station-icon:focus-visible .map-train-station-badge{filter:drop-shadow(0 2px 4px #172b3360)}
+.leaflet-tooltip.map-train-station-label{padding:0;border:0;border-radius:0;background:none;color:#102442;box-shadow:none;font:13px/1.3 "Malgun Gothic",system-ui,sans-serif;white-space:nowrap}
+.leaflet-tooltip.map-train-station-label::before{display:none}
+.map-train-station-label-body{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.map-train-station-name{font-weight:800;letter-spacing:-.3px;text-shadow:-1px -1px 0 #fff,0 -1px 0 #fff,1px -1px 0 #fff,-1px 0 0 #fff,1px 0 0 #fff,-1px 1px 0 #fff,0 1px 0 #fff,1px 1px 0 #fff,0 0 4px #fff}
+.map-train-station-tag{padding:1px 6px;border:1px solid #fff;border-radius:999px;background:#e0edff;color:#1d4ed8;font:700 9px/1.2 "Malgun Gothic",system-ui,sans-serif;letter-spacing:.2px}
+.map-train-station-label-body.is-from .map-train-station-tag{background:#fff1df;color:#92400e}
+.map-train-station-label-body.is-to .map-train-station-tag{background:#dcf5ef;color:#0f766e}
+.map-train-station-label:hover .map-train-station-name{text-decoration:underline;text-underline-offset:2px}
+.map-train-station-info{font:13px/1.5 sans-serif;overflow-wrap:anywhere}
+.map-train-station-title{display:block;font-size:17px}.map-train-station-info p{margin:6px 0}
+.map-train-popup-actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.map-train-coords{font-variant-numeric:tabular-nums;font-size:12px;opacity:.8}
+.map-train-station-info a{color:#087f8c}
 /* 여객선 시간표 — 항공 칸과 같은 자리·모양. */
 .map-ship-panel{position:absolute;top:12px;right:12px;z-index:1000;width:min(420px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;box-sizing:border-box;padding:14px;border:1px solid #98b9bd;border-radius:12px;background:var(--panel,#fff);color:var(--ink,#172b33);box-shadow:0 5px 20px #0003;font:13px/1.5 sans-serif}
 .map-ship-panel[hidden],.map-ship-dests[hidden],.map-ship-list[hidden],.map-ship-near-list[hidden]{display:none}

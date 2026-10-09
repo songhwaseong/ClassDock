@@ -1039,6 +1039,7 @@ class ClassDockLauncher
             if (path == "/can-proxy-jeju-bus" || path.StartsWith("/jeju-bus-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-flight" || path.StartsWith("/flight-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-ship" || path.StartsWith("/ship-", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-train" || path.StartsWith("/train-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-weather" || path.StartsWith("/weather-", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/market-days?", StringComparison.Ordinal)) return true;
         if (path.StartsWith("/air-quality-", StringComparison.Ordinal)) return true;
@@ -3418,8 +3419,9 @@ class ClassDockLauncher
                 {
                     // 노트북 PDF 지도 스냅샷용 — sandbox iframe 의 fetch 가 차단되는 타일을 서버가 대신 받아온다
                     byte[] tileData; string tileMime;
-                    if (TryProxyMapTile(QueryValue(path, "u"), out tileData, out tileMime))
-                        WriteCorsResponse(stream, "200 OK", tileMime, tileData);
+                    string tileUrl = QueryValue(path, "u");
+                    if (TryProxyMapTile(tileUrl, out tileData, out tileMime))
+                        WriteCorsResponse(stream, "200 OK", tileMime, tileData, TileProxyMaxAge(tileUrl, tileData));
                     else
                         WriteCorsResponse(stream, "502 Bad Gateway", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("tile-proxy-failed"));
                 }
@@ -3462,7 +3464,7 @@ class ClassDockLauncher
                     catch (InvalidDataException) { WriteResponse(stream, "502 Bad Gateway", "text/plain", Encoding.UTF8.GetBytes("world-wind-data")); }
                     catch (Exception) { WriteResponse(stream, "503 Service Unavailable", "text/plain", Encoding.UTF8.GetBytes("world-wind-network")); }
                 }
-                else if (method == "GET" && (path == "/can-proxy-jeju-bus" || path == "/can-proxy-flight" || path == "/can-proxy-ship" || path == "/can-proxy-weather"))
+                else if (method == "GET" && (path == "/can-proxy-jeju-bus" || path == "/can-proxy-flight" || path == "/can-proxy-ship" || path == "/can-proxy-train" || path == "/can-proxy-weather"))
                 {
                     WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
                 }
@@ -3506,6 +3508,7 @@ class ClassDockLauncher
                     || path.StartsWith("/flight-board?", StringComparison.Ordinal) || path.StartsWith("/flight-search?", StringComparison.Ordinal)
                     || path == "/ship-ports" || path.StartsWith("/ship-ports?", StringComparison.Ordinal)
                     || path.StartsWith("/ship-schedule?", StringComparison.Ordinal)
+                    || path.StartsWith("/train-", StringComparison.Ordinal)
                     || path.StartsWith("/weather-", StringComparison.Ordinal)
                     || path.StartsWith("/market-days?", StringComparison.Ordinal)
                     || path.StartsWith("/air-quality-", StringComparison.Ordinal)
@@ -3520,6 +3523,8 @@ class ClassDockLauncher
                     string route = question < 0 ? path : path.Substring(0, question);
                     string kind = route == "/flight-board" ? "flights" : route == "/flight-search" ? "flight"
                         : route == "/ship-ports" ? "ports" : route == "/ship-schedule" ? "ships"
+                        : route == "/train-cities" ? "train-cities" : route == "/train-grades" ? "train-grades"
+                        : route == "/train-stations" ? "train-stations" : route == "/train-schedule" ? "train-schedule"
                         : route == "/weather-now" ? "wx-ncst" : route == "/weather-ultra" ? "wx-ultra" : route == "/weather-forecast" ? "wx-fcst"
                         : route == "/weather-mid-land" ? "wx-mid-land" : route == "/weather-mid-temp" ? "wx-mid-temp"
                         : route == "/weather-day" ? "wx-day" : route == "/weather-holidays" ? "holidays" : route == "/weather-terms" ? "terms"
@@ -3533,6 +3538,9 @@ class ClassDockLauncher
                         : route == "/ev-chargers" ? "ev-info" : route == "/ev-charger-status" ? "ev-status"
                         : route.StartsWith("/jeju-bus-", StringComparison.Ordinal) ? route.Substring("/jeju-bus-".Length) : "";
                     string value = kind == "cities" ? "all"
+                        : kind == "train-cities" || kind == "train-grades" ? "all"
+                        : kind == "train-stations" ? String.Join(",", new[] { "city", "page" }.Select(name => (QueryValue(path, name) ?? "").Trim()))
+                        : kind == "train-schedule" ? String.Join(",", new[] { "from", "to", "date", "page" }.Select(name => (QueryValue(path, name) ?? "").Trim()))
                         : kind == "ev-info" || kind == "ev-status" ? (QueryValue(path, "district") ?? "").Trim() + "," + (QueryValue(path, "page") ?? "").Trim()
                         : kind == "zones" ? (QueryValue(path, "sgg") ?? "").Trim() + "," + (QueryValue(path, "page") ?? "").Trim()
                         : kind.StartsWith("tour-", StringComparison.Ordinal) ? TourQueryValue(kind, path)
@@ -3553,10 +3561,11 @@ class ClassDockLauncher
                         || kind == "wx-day" || kind == "holidays" || kind == "terms" || kind == "wx-typhoon" || kind == "wx-typhoon-fcst"
                         || kind == "markets" || kind == "air-stations" || kind == "air-readings" || kind == "zones" || kind == "parking" || kind == "ev-info" || kind == "ev-status";
                     bool tourism = kind == "tour-nearby" || kind == "tour-festivals" || kind == "tour-common" || kind == "tour-intro";
-                    bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather || tourism;
+                    bool train = kind.StartsWith("train-", StringComparison.Ordinal);
+                    bool noCity = kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather || tourism || train;
                     string busCity = noCity ? "" : (QueryValue(path, "city") ?? "").Trim();
                     if (!(kind == "routes" || kind == "route" || kind == "position" || kind == "cities" || kind == "arrivals" || kind == "nearby"
-                            || kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather || tourism)
+                            || kind == "flights" || kind == "flight" || kind == "ports" || kind == "ships" || weather || tourism || train)
                         || !ValidJejuBusValue(kind, value) || !ValidBusCity(busCity))
                     { WriteResponse(stream, "400 Bad Request", "text/plain", Encoding.UTF8.GetBytes("bus-bad-request")); return; }
                     byte[] result; DateTime fetchedAt; bool stale; int retry; string busError;
@@ -4558,14 +4567,14 @@ class ClassDockLauncher
     }
 
     // sandbox(origin null) iframe 의 fetch 가 읽을 수 있도록 CORS 를 허용한 응답 — 지도 타일 프록시 전용
-    static void WriteCorsResponse(Stream stream, string status, string contentType, byte[] body)
+    static void WriteCorsResponse(Stream stream, string status, string contentType, byte[] body, int maxAge = 600)
     {
         string header =
             "HTTP/1.1 " + status + "\r\n" +
             "Content-Type: " + contentType + "\r\n" +
             "Content-Length: " + body.Length + "\r\n" +
             "Access-Control-Allow-Origin: *\r\n" +
-            "Cache-Control: max-age=600\r\n" +
+            (status.StartsWith("200", StringComparison.Ordinal) ? "Cache-Control: max-age=" + maxAge + "\r\n" : "Cache-Control: no-store\r\n") +
             "X-Content-Type-Options: nosniff\r\n" +
             "Referrer-Policy: no-referrer\r\n" +
             "X-App: classdock\r\n" +
@@ -4599,6 +4608,21 @@ class ClassDockLauncher
     }
     static readonly object TileCacheLock = new object();
     static readonly Dictionary<string, TileMemoryEntry> TileCache = new Dictionary<string, TileMemoryEntry>();
+    sealed class TileRefreshJob
+    {
+        public string Url;
+        public int Generation;
+        public TileRefreshJob(string url, int generation) { Url = url; Generation = generation; }
+    }
+    static readonly object TileRefreshLock = new object();
+    static readonly Queue<TileRefreshJob> TileRefreshQueue = new Queue<TileRefreshJob>();
+    static readonly HashSet<string> TileRefreshPending = new HashSet<string>();
+    static readonly Dictionary<string, DateTime> TileRefreshAfter = new Dictionary<string, DateTime>();
+    static int TileRefreshWorkers;
+    static int TileCacheGeneration;
+    const int TileRefreshMaxPending = 128;
+    const int TileRefreshMaxWorkers = 2;
+    static readonly TimeSpan TileRefreshRetryGap = TimeSpan.FromMinutes(1);
     static bool TileTlsReady;
     static readonly string TileCacheDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -4737,12 +4761,18 @@ class ClassDockLauncher
     {
         try
         {
-            lock (TileDiskLock)
+            // 갱신 도중 비우기를 눌러도 늦게 끝난 요청이 캐시를 다시 채우지 않게 한다.
+            lock (TileRefreshLock)
             {
-                if (Directory.Exists(TileCacheDir)) Directory.Delete(TileCacheDir, true);
-                TileDiskBytes = 0;
+                TileCacheGeneration++;
+                TileRefreshAfter.Clear();
+                lock (TileDiskLock)
+                {
+                    if (Directory.Exists(TileCacheDir)) Directory.Delete(TileCacheDir, true);
+                    TileDiskBytes = 0;
+                }
+                lock (TileCacheLock) TileCache.Clear();
             }
-            lock (TileCacheLock) TileCache.Clear();
             return true;
         }
         catch { return false; }
@@ -5903,6 +5933,7 @@ class ClassDockLauncher
     static bool ValidJejuBusValue(string kind, string value)
     {
         if (String.IsNullOrEmpty(value)) return false;
+        if (kind.StartsWith("train-", StringComparison.Ordinal)) return ValidTrainValue(kind, value);
         if (kind == "zones") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9][0-9]{4},([1-9]|10)$");
         if (kind == "parking") return System.Text.RegularExpressions.Regex.IsMatch(value, "^([1-9]|[1-4][0-9]|50)$");
         if (kind == "ev-info" || kind == "ev-status") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9][0-9]{4},([1-9]|10)$");
@@ -5973,6 +6004,20 @@ class ClassDockLauncher
                 && lat >= 33 && lat <= 38.7 && lng >= 124.5 && lng <= 132;
         }
         return value.Length <= 30 && value.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
+    }
+    // 열차정보: 공식 역 ID·시도 코드·쪽 번호·한국 날짜만 받는다. 키나 임의 URL은 브라우저에서 받지 않는다.
+    static bool ValidTrainValue(string kind, string value)
+    {
+        if (kind == "train-cities" || kind == "train-grades") return value == "all";
+        if (kind == "train-stations") return System.Text.RegularExpressions.Regex.IsMatch(value, "^[1-9][0-9]{1,2},([1-9]|10)$");
+        if (kind != "train-schedule") return false;
+        var match = System.Text.RegularExpressions.Regex.Match(value,
+            "^(NAT[A-Z0-9]{6,9}),(NAT[A-Z0-9]{6,9}),([0-9]{8}),([1-9]|10)$");
+        DateTime day;
+        if (!match.Success || match.Groups[1].Value == match.Groups[2].Value
+            || !DateTime.TryParseExact(match.Groups[3].Value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out day)) return false;
+        DateTime today = KmaKstNow().Date;
+        return day >= today && day <= today.AddDays(30);
     }
     // TourAPI 조회값은 허용한 숫자·갈래만 받는다. 임의 서비스 주소나 추가 매개변수는 전달하지 않는다.
     static string TourQueryValue(string kind, string path)
@@ -6048,6 +6093,22 @@ class ClassDockLauncher
                 string[] ship = value.Split('-');
                 service = "DmstcShipNvgInfo"; operation = "GetShipOpratInfoList";
                 query = "depNodeId=" + ship[0] + "&depPlandTime=" + ship[1] + "&numOfRows=500&pageNo=1"; needsCity = false; break;
+            }
+            // TAGO 열차정보. 최신 공식 주소는 TrainInfo/Get… (TrainInfoService/get… 는 종료된 주소).
+            case "train-cities": service = "TrainInfo"; operation = "GetCtyCodeList"; query = ""; needsCity = false; break;
+            case "train-grades": service = "TrainInfo"; operation = "GetVhcleKndList"; query = ""; needsCity = false; break;
+            case "train-stations":
+            {
+                string[] station = value.Split(',');
+                service = "TrainInfo"; operation = "GetCtyAcctoTrainSttnList";
+                query = "cityCode=" + station[0] + "&numOfRows=300&pageNo=" + station[1]; needsCity = false; break;
+            }
+            case "train-schedule":
+            {
+                string[] train = value.Split(',');
+                service = "TrainInfo"; operation = "GetStrtpntAlocFndTrainInfo";
+                query = "depPlaceId=" + train[0] + "&arrPlaceId=" + train[1] + "&depPlandTime=" + train[2]
+                    + "&numOfRows=300&pageNo=" + train[3]; needsCity = false; break;
             }
             // 날씨(기상청)·특일(한국천문연구원). 같은 공공데이터포털 키, 활용신청은 서비스마다 따로.
             // 발표 시각은 런처가 한국 시각으로 정한다 — 화면이 고르면 아직 안 나온 발표를 물어 03(자료 없음)을 받는다.
@@ -6197,7 +6258,7 @@ class ClassDockLauncher
         // 여객선 시간표는 하루 안에 거의 바뀌지 않는다(상태 필드도 없다). 10분이면 충분하다.
         // 실황·초단기예보는 한 시간마다, 단기예보는 세 시간마다 발표된다(캐시 열쇠에 발표 시각이 들어 있다).
         // 지난 날 관측·특일은 바뀌지 않는다.
-        int ttl = kind == "ev-info" || kind == "ev-status" ? 60 : kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" ? 600
+        int ttl = kind == "ev-info" || kind == "ev-status" ? 60 : kind == "position" ? 30 : kind == "arrivals" ? 20 : kac ? 60 : kind == "ships" || kind == "train-schedule" ? 600
             : kind == "air-readings" ? 600 : kind == "air-stations" ? 7 * 86400
             : kind.StartsWith("tour-", StringComparison.Ordinal) ? 3600
             : kind == "wx-ncst" || kind == "wx-ultra" || kind == "wx-typhoon" ? 600
@@ -7340,6 +7401,8 @@ class ClassDockLauncher
             foreach (string candidate in TileProxyHosts)
                 if (host == candidate || host.EndsWith("." + candidate, StringComparison.Ordinal)) { allowed = true; break; }
             if (!allowed) return false;
+            int generation;
+            lock (TileRefreshLock) generation = TileCacheGeneration;
             lock (TileCacheLock)
             {
                 TileMemoryEntry cached;
@@ -7353,18 +7416,119 @@ class ClassDockLauncher
                     staleData = cached.Data; staleMime = cached.Mime;
                 }
             }
-            // 7일 안에 받은 타일은 그대로 쓴다. 만료된 타일은 새로 받되, 오프라인이면 catch 에서
-            // stale 복사본을 반환해 인터넷 없는 교실에서도 전에 본 지역은 계속 열리게 한다.
+            // 만료된 타일도 먼저 보여 주고 뒤에서 갱신한다. 네트워크를 기다린 뒤에야 저장된
+            // 그림을 보여 주면 느린 서버·오프라인에서 같은 지역도 10초씩 비어 보인다.
             DateTime cachedAtUtc;
             if (staleData == null && TryReadCachedTile(url, out data, out mime, out cachedAtUtc))
             {
                 if (IsTileCacheFresh(cachedAtUtc))
                 {
-                    lock (TileCacheLock) TileCache[url] = new TileMemoryEntry(data, mime, cachedAtUtc);
+                    lock (TileRefreshLock)
+                        if (generation == TileCacheGeneration)
+                            lock (TileCacheLock) TileCache[url] = new TileMemoryEntry(data, mime, cachedAtUtc);
                     return true;
                 }
                 staleData = data; staleMime = mime;
             }
+            if (staleData != null && staleData.Length > 0)
+            {
+                data = staleData; mime = staleMime;
+                QueueTileRefresh(url, generation);
+                return true;
+            }
+            return TryDownloadMapTile(url, generation, out data, out mime);
+        }
+        catch
+        {
+            if (staleData != null) { data = staleData; mime = staleMime; return true; }
+            DateTime cachedAtUtc;
+            if (TryReadCachedTile(url, out data, out mime, out cachedAtUtc)) return true;
+            data = null; return false;
+        }
+    }
+
+    // 만료 그림은 브라우저에 오래 남기지 않아 다음 요청에서 갱신된 그림을 읽을 수 있다.
+    static int TileProxyMaxAge(string url, byte[] data)
+    {
+        lock (TileCacheLock)
+        {
+            TileMemoryEntry cached;
+            return TileCache.TryGetValue(url, out cached) && IsTileCacheFresh(cached.CachedAtUtc)
+                && object.ReferenceEquals(data, cached.Data) ? 600 : 0;
+        }
+    }
+    // 실제로 요청된 만료 타일만 갱신한다. 한 URL은 한 번만, 동시에 두 작업만 진행하며
+    // 실패하면 1분 쉬어 지도 이동 때마다 같은 느린 서버에 다시 요청하지 않는다.
+    static void QueueTileRefresh(string url, int generation)
+    {
+        lock (TileRefreshLock)
+        {
+            DateTime retryAt;
+            if (generation != TileCacheGeneration || TileRefreshPending.Contains(url)
+                || TileRefreshPending.Count >= TileRefreshMaxPending
+                || (TileRefreshAfter.TryGetValue(url, out retryAt) && DateTime.UtcNow < retryAt)) return;
+            TileRefreshPending.Add(url);
+            TileRefreshQueue.Enqueue(new TileRefreshJob(url, generation));
+            if (TileRefreshWorkers >= TileRefreshMaxWorkers) return;
+            TileRefreshWorkers++;
+            ThreadPool.QueueUserWorkItem(delegate { RunTileRefreshQueue(); });
+        }
+    }
+    static void RunTileRefreshQueue()
+    {
+        while (true)
+        {
+            TileRefreshJob job;
+            lock (TileRefreshLock)
+            {
+                if (TileRefreshQueue.Count == 0) { TileRefreshWorkers--; return; }
+                job = TileRefreshQueue.Dequeue();
+            }
+            byte[] data;
+            string mime;
+            bool ok = TryDownloadMapTile(job.Url, job.Generation, out data, out mime);
+            lock (TileRefreshLock)
+            {
+                TileRefreshPending.Remove(job.Url);
+                if (job.Generation != TileCacheGeneration) continue;
+                if (ok) TileRefreshAfter.Remove(job.Url);
+                else
+                {
+                    if (TileRefreshAfter.Count >= 500) TileRefreshAfter.Clear();
+                    TileRefreshAfter[job.Url] = DateTime.UtcNow + TileRefreshRetryGap;
+                }
+            }
+        }
+    }
+    static bool TryDownloadMapTile(string url, int generation, out byte[] data, out string mime)
+    {
+        data = null; mime = "image/png";
+        try
+        {
+            lock (TileRefreshLock) if (generation != TileCacheGeneration) return false;
+            if (!TryReadMapTileRemote(url, out data, out mime)) return false;
+            lock (TileRefreshLock)
+            {
+                if (generation == TileCacheGeneration)
+                {
+                    lock (TileCacheLock)
+                    {
+                        if (TileCache.Count > 500) TileCache.Clear();
+                        TileCache[url] = new TileMemoryEntry(data, mime, DateTime.UtcNow);
+                    }
+                    WriteCachedTile(url, data, mime);
+                }
+            }
+            return true;
+        }
+        catch { data = null; return false; }
+    }
+    static bool TryReadMapTileRemote(string url, out byte[] data, out string mime)
+    {
+        data = null; mime = "image/png";
+        try
+        {
+            Uri uri = new Uri(url);
             if (!TileTlsReady)
             {
                 try { ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12; } catch { }
@@ -7386,7 +7550,6 @@ class ClassDockLauncher
                     total += read;
                     if (total > TileMaxBytes)
                     {
-                        if (staleData != null) { data = staleData; mime = staleMime; return true; }
                         return false;   // 타일치고 비정상적으로 크면 중단
                     }
                     buffer.Write(chunk, 0, read);
@@ -7394,22 +7557,9 @@ class ClassDockLauncher
                 if (!string.IsNullOrEmpty(response.ContentType)) mime = response.ContentType;
                 data = buffer.ToArray();
             }
-            lock (TileCacheLock)
-            {
-                if (TileCache.Count > 500) TileCache.Clear();   // 단순 상한 — 지도 몇 장 분량이면 충분
-                TileCache[url] = new TileMemoryEntry(data, mime, DateTime.UtcNow);
-            }
-            WriteCachedTile(url, data, mime);
-            return true;
+            return data.Length > 0;
         }
-        catch
-        {
-            // 갱신에 실패해도 디스크에 남은 만료 타일은 오프라인 fallback으로 계속 쓴다.
-            if (staleData != null) { data = staleData; mime = staleMime; return true; }
-            DateTime cachedAtUtc;
-            if (TryReadCachedTile(url, out data, out mime, out cachedAtUtc)) return true;
-            data = null; return false;
-        }
+        catch { data = null; return false; }
     }
 
     // 번들된 Pyodide 코어 파일(vendor/pyodide/<파일명>)을 안전하게 읽어 적절한 MIME 과 돌려준다.

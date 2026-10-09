@@ -315,6 +315,7 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"mapSubway", label:"실시간 열차", cls:"map-toolvis-subway", target:"map" },
   { id:"mapFlight", label:"항공 운항", cls:"map-toolvis-flight", target:"map" },
   { id:"mapShip", label:"여객선 시간표", cls:"map-toolvis-ship", target:"map" },
+  { id:"mapTrain", label:"KTX·열차 시간표", cls:"map-toolvis-train", target:"map" },
   { id:"mapWeather", label:"날씨", cls:"map-toolvis-weather", target:"map" },
   { id:"mapWind", label:"바람·기온", cls:"map-toolvis-wind", target:"map" },
   { id:"mapMarket", label:"장날", cls:"map-toolvis-market", target:"map" },

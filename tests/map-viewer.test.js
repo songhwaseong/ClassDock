@@ -315,18 +315,20 @@ test("캐시 용량은 사람이 읽는 단위로 보여 준다", () => {
 
 /* 타일 디스크 캐시(런처). exe 는 실행마다 포트가 달라 브라우저 저장소를 못 쓰므로, 이 캐시가
    "인터넷 없는 교실"의 유일한 근거다. 계약이 조용히 뒤집히지 않게 소스에서 확인한다. */
-test("런처 타일 프록시는 7일 캐시를 우선하고 만료 캐시는 오프라인 fallback으로 쓴다", () => {
+test("런처 타일 프록시는 만료 캐시도 먼저 보여 주고 뒤에서 갱신한다", () => {
   const launcher = fs.readFileSync(path.join(__dirname, "../desktop/launcher.cs"), "utf8");
   const body = /static bool TryProxyMapTile\(([\s\S]*?)\n    \}/.exec(launcher);
   assert.ok(body, "TryProxyMapTile 을 찾지 못했다");
   const diskRead = body[1].indexOf("TryReadCachedTile");
-  const network = body[1].indexOf("WebRequest.Create");
+  const network = body[1].indexOf("TryDownloadMapTile");
   assert.ok(diskRead >= 0 && network >= 0);
   assert.ok(diskRead < network, "디스크를 먼저 확인해야 인터넷이 끊겨도 열린다");
   assert.match(launcher, /TileCacheMaxAge = TimeSpan\.FromDays\(7\)/);
   assert.match(body[1], /IsTileCacheFresh\(cachedAtUtc\)/);
   assert.match(body[1], /staleData/);
-  assert.ok(body[1].includes("WriteCachedTile"), "받아 온 타일은 디스크에 남겨야 한다");
+  assert.match(body[1], /QueueTileRefresh\(url, generation\)/);
+  const download = /static bool TryDownloadMapTile\(([\s\S]*?)\n    \}/.exec(launcher);
+  assert.ok(download[1].includes("WriteCachedTile"), "받아 온 타일은 디스크에 남겨야 한다");
   // 받다가 실패해도(오프라인) 이미 받아 둔 타일은 계속 나와야 한다.
   assert.match(body[1], /catch\s*\{[\s\S]*staleData[\s\S]*TryReadCachedTile/);
 });
@@ -545,11 +547,13 @@ test("Go 폴백 런처도 타일 프록시·디스크 캐시·장소 검색을 �
   // 디스크를 인터넷보다 먼저 본다(끊긴 교실에서 열리는 근거).
   const proxy = /func proxyMapTile\(([\s\S]*?)\n\}/.exec(go);
   assert.ok(proxy);
-  assert.ok(proxy[1].indexOf("readCachedTile") < proxy[1].indexOf("httpClient.Do"));
+  assert.ok(proxy[1].indexOf("readCachedTile") < proxy[1].indexOf("return downloadMapTile"));
   assert.match(go, /tileCacheMaxAge\s*= 7 \* 24 \* time\.Hour/);
   assert.ok(proxy[1].includes("tileCacheFresh(cachedAt)"));
-  assert.ok(proxy[1].includes("return staleData, staleMime, cached"));
-  assert.ok(proxy[1].includes("writeCachedTile"));
+  assert.ok(proxy[1].includes("return staleData, staleMime, true"));
+  assert.ok(proxy[1].includes("queueTileRefresh(rawURL, generation)"));
+  const download = /func downloadMapTile\(([\s\S]*?)\n\}/.exec(go);
+  assert.ok(download[1].includes("writeCachedTile"));
   // 지우는 쪽은 동작 헤더를 요구한다(C# 과 같은 규칙).
   assert.match(go, /tile-cache-clear[\s\S]{0,320}X-ClassDock-Action/);
 });

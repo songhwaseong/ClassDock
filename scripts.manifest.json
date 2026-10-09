@@ -91,6 +91,9 @@
     "ship-ports-data.js",
     "ship-api.js",
     "ship-map.js",
+    "train-api.js",
+    "train-stations-data.js",
+    "train-map.js",
     "weather-api.js",
     "weather-map.js",
     "weather-typhoon.js",
@@ -284,6 +287,9 @@
         "ship-ports-data.js",
         "ship-api.js",
         "ship-map.js",
+        "train-api.js",
+        "train-stations-data.js",
+        "train-map.js",
         "weather-api.js",
         "weather-map.js",
         "weather-typhoon.js",
@@ -499,6 +505,7 @@
       "jeju-bus-map.js",
       "flight-map.js",
       "ship-map.js",
+      "train-map.js",
       "weather-map.js",
       "weather-wind.js",
       "market-days.js",
@@ -784,6 +791,10 @@
     "ship-map.js": [
       "ship-api.js",
       "ship-ports-data.js"
+    ],
+    "train-map.js": [
+      "train-api.js",
+      "train-stations-data.js"
     ],
     "weather-map.js": [
       "weather-api.js"

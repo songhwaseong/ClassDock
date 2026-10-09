@@ -51,14 +51,17 @@ var tileProxyHosts = []string{
 }
 
 const (
-	tileMaxBytes      = 2 * 1024 * 1024
-	tileCacheMaxBytes = 400 * 1024 * 1024
-	tileCacheMaxAge   = 7 * 24 * time.Hour
-	geocodeMinGap     = 1100 * time.Millisecond
-	userAgent         = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)"
-	defaultGeocoder   = "https://nominatim.openstreetmap.org/search"
-	kakaoAddressURL   = "https://dapi.kakao.com/v2/local/search/address.json"
-	kakaoKeywordURL   = "https://dapi.kakao.com/v2/local/search/keyword.json"
+	tileMaxBytes          = 2 * 1024 * 1024
+	tileCacheMaxBytes     = 400 * 1024 * 1024
+	tileCacheMaxAge       = 7 * 24 * time.Hour
+	tileRefreshMaxPending = 128
+	tileRefreshMaxWorkers = 2
+	tileRefreshRetryGap   = 1 * time.Minute
+	geocodeMinGap         = 1100 * time.Millisecond
+	userAgent             = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)"
+	defaultGeocoder       = "https://nominatim.openstreetmap.org/search"
+	kakaoAddressURL       = "https://dapi.kakao.com/v2/local/search/address.json"
+	kakaoKeywordURL       = "https://dapi.kakao.com/v2/local/search/keyword.json"
 	// 같은 REST 키로 쓰는 나머지 Local API — 반경 갈래별 장소, 좌표→주소·행정구역.
 	kakaoCategoryURL     = "https://dapi.kakao.com/v2/local/search/category.json"
 	kakaoCoordAddressURL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
@@ -92,7 +95,7 @@ const (
 	   하루 1,000회 제한이 빡빡해서 캐시가 '절약' 이 아니라 '필수' 다. 한 교실에서 화면 여럿이
 	   같은 노선을 보면 상류 호출은 subwayCacheAge 에 한 번으로 묶인다. */
 	subwayPositionURL = "http://swopenapi.seoul.go.kr/api/subway/%s/json/realtimePosition/0/%d/%s"
-	subwayRowLimit    = 400              // 가장 붐비는 노선의 열차 수보다 넉넉히(상한은 1000)
+	subwayRowLimit    = 400 // 가장 붐비는 노선의 열차 수보다 넉넉히(상한은 1000)
 	subwayMaxBytes    = 512 * 1024
 	subwayCacheAge    = 12 * time.Second // 열차 보고 간격이 30초 안팎이라 이 정도면 화면이 안 끊긴다
 
@@ -109,17 +112,23 @@ const (
 )
 
 var (
-	tileDiskMu        sync.Mutex
-	tileDiskBytes     int64 = -1
-	geocodeMu         sync.Mutex
-	geocodeLast       time.Time
-	geocodeCache      = map[string][]byte{}
-	mapSearchKeyMu    sync.RWMutex
-	kakaoMapKey       string
-	mapSearchProvider = "osm"
-	httpClient        = &http.Client{Timeout: 15 * time.Second}
-	rateCacheMu       sync.Mutex
-	rateKeyMu         sync.RWMutex
+	tileDiskMu          sync.Mutex
+	tileDiskBytes       int64 = -1
+	tileRefreshMu       sync.Mutex
+	tileRefreshPending  = map[string]bool{}
+	tileRefreshAfter    = map[string]time.Time{}
+	tileRefreshJobs     = make(chan tileRefreshJob, tileRefreshMaxPending)
+	tileRefreshStart    sync.Once
+	tileCacheGeneration uint64
+	geocodeMu           sync.Mutex
+	geocodeLast         time.Time
+	geocodeCache        = map[string][]byte{}
+	mapSearchKeyMu      sync.RWMutex
+	kakaoMapKey         string
+	mapSearchProvider   = "osm"
+	httpClient          = &http.Client{Timeout: 15 * time.Second}
+	rateCacheMu         sync.Mutex
+	rateKeyMu           sync.RWMutex
 	// 이 런처는 DPAPI 가 없는 곳(Windows 밖)에서도 돌아야 해서 인증키를 파일로 남기지 않는다.
 	// 카카오 키와 같은 규칙이며, 상태 응답의 persistentSupported 가 false 인 까닭이다.
 	exchangeRateKey string
@@ -277,40 +286,114 @@ func sweepTileCache() {
 	tileDiskBytes = total
 }
 
+type tileRefreshJob struct {
+	url        string
+	generation uint64
+}
+
+func queueTileRefresh(rawURL string, generation uint64) {
+	tileRefreshMu.Lock()
+	defer tileRefreshMu.Unlock()
+	if generation != tileCacheGeneration || tileRefreshPending[rawURL] || len(tileRefreshPending) >= tileRefreshMaxPending || time.Now().Before(tileRefreshAfter[rawURL]) {
+		return
+	}
+	tileRefreshStart.Do(func() {
+		for i := 0; i < tileRefreshMaxWorkers; i++ {
+			go runTileRefreshQueue()
+		}
+	})
+	tileRefreshPending[rawURL] = true
+	select {
+	case tileRefreshJobs <- tileRefreshJob{rawURL, generation}:
+	default:
+		delete(tileRefreshPending, rawURL)
+	}
+}
+
+func runTileRefreshQueue() {
+	for job := range tileRefreshJobs {
+		_, _, ok := downloadMapTile(job.url, job.generation)
+		tileRefreshMu.Lock()
+		delete(tileRefreshPending, job.url)
+		if job.generation == tileCacheGeneration {
+			if ok {
+				delete(tileRefreshAfter, job.url)
+			} else {
+				if len(tileRefreshAfter) >= 500 {
+					clear(tileRefreshAfter)
+				}
+				tileRefreshAfter[job.url] = time.Now().Add(tileRefreshRetryGap)
+			}
+		}
+		tileRefreshMu.Unlock()
+	}
+}
+
+func clearTileCache() error {
+	tileRefreshMu.Lock()
+	defer tileRefreshMu.Unlock()
+	tileCacheGeneration++
+	clear(tileRefreshAfter)
+	tileDiskMu.Lock()
+	defer tileDiskMu.Unlock()
+	err := os.RemoveAll(tileCacheDir())
+	tileDiskBytes = 0
+	return err
+}
+
 func proxyMapTile(rawURL string) ([]byte, string, bool) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil || parsed.Scheme != "https" || !tileHostAllowed(parsed.Host) {
 		return nil, "", false
 	}
-	// 7일 안에 받은 타일은 그대로 쓴다. 만료된 타일은 새로 받되, 오프라인이면 아래의 stale
-	// 복사본을 반환해 인터넷 없는 교실에서도 전에 본 지역은 계속 열리게 한다.
+	tileRefreshMu.Lock()
+	generation := tileCacheGeneration
+	tileRefreshMu.Unlock()
+	// 만료된 그림도 즉시 보여 주고 실제로 요청된 타일만 뒤에서 갱신한다.
 	staleData, staleMime, cachedAt, cached := readCachedTile(rawURL)
-	if cached && tileCacheFresh(cachedAt) {
+	if cached {
+		if !tileCacheFresh(cachedAt) {
+			queueTileRefresh(rawURL, generation)
+		}
 		return staleData, staleMime, true
+	}
+	return downloadMapTile(rawURL, generation)
+}
+
+func downloadMapTile(rawURL string, generation uint64) ([]byte, string, bool) {
+	tileRefreshMu.Lock()
+	current := generation == tileCacheGeneration
+	tileRefreshMu.Unlock()
+	if !current {
+		return nil, "", false
 	}
 	request, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
-		return staleData, staleMime, cached
+		return nil, "", false
 	}
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "image/*")
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return staleData, staleMime, cached
+		return nil, "", false
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return staleData, staleMime, cached
+		return nil, "", false
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, tileMaxBytes+1))
 	if err != nil || len(data) == 0 || len(data) > tileMaxBytes {
-		return staleData, staleMime, cached
+		return nil, "", false
 	}
 	mime := response.Header.Get("Content-Type")
 	if mime == "" {
 		mime = "image/png"
 	}
-	writeCachedTile(rawURL, data, mime)
+	tileRefreshMu.Lock()
+	if generation == tileCacheGeneration {
+		writeCachedTile(rawURL, data, mime)
+	}
+	tileRefreshMu.Unlock()
 	return data, mime, true
 }
 
@@ -1091,9 +1174,12 @@ func lastWeekdayCompact() string {
 
 /* ===== 지하철 실시간 열차 위치 ===== */
 
-/* 노선 이름이 그대로 URL 경로에 들어가므로 목록에 있는 것만 통과시킨다.
-   src/js/subway-stations.js 의 SUBWAY_LINES 키, launcher.cs 의 SubwayLines 와 같은 목록이어야 한다
-   (tests/subway-stations.test.js 가 세 곳을 함께 본다). 김포골드라인은 이 API 가 다루지 않는다. */
+/*
+노선 이름이 그대로 URL 경로에 들어가므로 목록에 있는 것만 통과시킨다.
+
+	src/js/subway-stations.js 의 SUBWAY_LINES 키, launcher.cs 의 SubwayLines 와 같은 목록이어야 한다
+	(tests/subway-stations.test.js 가 세 곳을 함께 본다). 김포골드라인은 이 API 가 다루지 않는다.
+*/
 var subwayLines = []string{
 	"1호선", "2호선", "3호선", "4호선", "5호선", "6호선", "7호선", "8호선", "9호선",
 	"수인분당선", "신분당선", "경의중앙선", "공항철도", "우이신설선", "경춘선", "서해선",
@@ -1145,10 +1231,13 @@ func setSubwayKey(value string) {
 	subwayKeyMu.Unlock()
 }
 
-/* 이 API 는 오류도 HTTP 200 으로 준다 — 본문의 code 를 봐야 한다(수출입은행 환율과 같은 함정).
-   INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선)
-   · ERROR-337 하루 한도(1,000회) 초과 — 자정까지 풀리지 않으니 화면이 '다시 시도' 대신 멈추게 따로 알린다.
-   정상일 때는 code 가 errorMessage 안에 있고, 오류일 때는 맨 바깥에 있다. */
+/*
+이 API 는 오류도 HTTP 200 으로 준다 — 본문의 code 를 봐야 한다(수출입은행 환율과 같은 함정).
+
+	INFO-000 정상 · INFO-100 인증키 오류 · INFO-200 자료 없음(심야·이 API 가 안 다루는 노선)
+	· ERROR-337 하루 한도(1,000회) 초과 — 자정까지 풀리지 않으니 화면이 '다시 시도' 대신 멈추게 따로 알린다.
+	정상일 때는 code 가 errorMessage 안에 있고, 오류일 때는 맨 바깥에 있다.
+*/
 func subwayResultCode(data []byte) string {
 	var parsed struct {
 		Code         string `json:"code"`
@@ -1255,10 +1344,13 @@ func fetchSubway(endpoint string) ([]byte, string) {
 	}
 }
 
-/* 캐시 → 낡았으면 새로 받기 → 받기에 실패하면 1분 안쪽 캐시라도 내주기.
-   하루 1,000회 제한이 있어 캐시가 절약이 아니라 필수다 — 한 교실에서 화면 여럿이
-   같은 노선을 봐도 상류 호출은 subwayCacheAge 에 한 번으로 묶인다.
-   오래된 값을 오래 붙들지는 않는다. 낡은 열차 위치는 없는 것보다 나쁘다. */
+/*
+캐시 → 낡았으면 새로 받기 → 받기에 실패하면 1분 안쪽 캐시라도 내주기.
+
+	하루 1,000회 제한이 있어 캐시가 절약이 아니라 필수다 — 한 교실에서 화면 여럿이
+	같은 노선을 봐도 상류 호출은 subwayCacheAge 에 한 번으로 묶인다.
+	오래된 값을 오래 붙들지는 않는다. 낡은 열차 위치는 없는 것보다 나쁘다.
+*/
 func subwayPosition(line string) ([]byte, bool, string) {
 	key := currentSubwayKey()
 	if key == "" {
@@ -1381,10 +1473,7 @@ func main() {
 			http.Error(w, "action-header-required", http.StatusForbidden)
 			return
 		}
-		tileDiskMu.Lock()
-		err := os.RemoveAll(tileCacheDir())
-		tileDiskBytes = 0
-		tileDiskMu.Unlock()
+		err := clearTileCache()
 		if err != nil {
 			http.Error(w, "tile-cache-clear-failed", http.StatusInternalServerError)
 			return

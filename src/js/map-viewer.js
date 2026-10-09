@@ -2590,6 +2590,106 @@ function mapCreateBikeLayer(overlayId, maxZoom, proxyBase, pane){
     zIndex: overlayId === "routes" ? 2 : 1
   }, proxyBase, null);
 }
+/* 선택이 달라져도 계속 켜진 층은 그대로 둔다. 예: 도로 → 도로+노선에서 도로 타일을
+   버리지 않는다. 타일 이벤트는 지도(map)가 아닌 각 층에서 받아야 한다. */
+function mapBikeLayerController(map, onChange, createLayer = mapCreateBikeLayer){
+  const entries = new Map();
+  const states = () => [...entries].map(([id, entry]) => ({ id, ...entry.state }));
+  const notify = () => { if (onChange) onChange(states()); };
+  const remove = (id) => {
+    const entry = entries.get(id);
+    if (!entry) return;
+    entries.delete(id);
+    for (const [event, handler] of Object.entries(entry.handlers)) entry.layer.off(event, handler);
+    map.removeLayer(entry.layer);
+  };
+  return {
+    sync(model, maxZoom, proxyBase, pane){
+      const ids = mapBikeLayerIds(model);
+      const key = JSON.stringify([maxZoom, proxyBase, pane]);
+      for (const [id, entry] of entries){
+        if (!ids.includes(id) || entry.key !== key) remove(id);
+      }
+      for (const id of ids){
+        if (entries.has(id)) continue;
+        const layer = createLayer(id, maxZoom, proxyBase, pane);
+        if (!layer) continue;
+        const entry = { layer, key, state:{ loading:false, loaded:0, failed:0 }, handlers:{} };
+        const update = (change) => {
+          if (entries.get(id) !== entry) return;
+          change(entry.state);
+          notify();
+        };
+        entry.handlers = {
+          loading:() => update(state => { state.loading = true; state.loaded = 0; state.failed = 0; }),
+          tileload:() => { entry.state.loaded++; },
+          tileerror:() => update(state => { state.failed++; }),
+          load:() => update(state => { state.loading = false; })
+        };
+        entries.set(id, entry);
+        for (const [event, handler] of Object.entries(entry.handlers)) layer.on(event, handler);
+        layer.addTo(map);
+      }
+      notify();
+    },
+    retry(id){
+      const entry = entries.get(id);
+      if (entry && !entry.state.loading) entry.layer.redraw();
+    },
+    isLoading(){ return [...entries.values()].some(entry => entry.layer.isLoading()); },
+    destroy(){ for (const id of entries.keys()) remove(id); notify(); }
+  };
+}
+function mapBikeLoadLabel(state){
+  if (state.loading) return "불러오는 중…";
+  if (state.failed) return state.loaded ? "일부 타일을 불러오지 못했어요" : "타일을 불러오지 못했어요";
+  return "불러오기 완료";
+}
+/* 작은 상태창은 지도 안에 두어 편집 도구를 접어도 보인다. 타일이 비어 있다는 사실만으로
+   '자전거길 없음'을 판단할 수 없으므로 정상 응답은 불러오기 완료로만 표시한다. */
+function mapBikeStatusPanel(stage, retry){
+  const panel = document.createElement("div");
+  panel.className = "map-bike-status";
+  panel.hidden = true;
+  const rows = new Map();
+  for (const [id, spec] of Object.entries(MAP_BIKE_OVERLAYS)){
+    const row = document.createElement("div");
+    row.className = "map-bike-status-row";
+    const name = document.createElement("strong");
+    name.textContent = mapT(spec.label);
+    const message = document.createElement("span");
+    message.className = "map-bike-status-message";
+    message.setAttribute("role", "status");
+    message.setAttribute("aria-live", "polite");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = mapT("다시 시도");
+    button.setAttribute("aria-label", mapT(spec.label) + " · " + mapT("다시 시도"));
+    button.addEventListener("click", () => retry(id));
+    row.append(name, message, button);
+    panel.appendChild(row);
+    rows.set(id, { row, message, button });
+  }
+  L.DomEvent.disableClickPropagation(panel);
+  L.DomEvent.disableScrollPropagation(panel);
+  stage.appendChild(panel);
+  return {
+    update(states){
+      panel.hidden = !states.length;
+      for (const [id, parts] of rows){
+        const state = states.find(item => item.id === id);
+        parts.row.hidden = !state;
+        if (!state) continue;
+        parts.row.classList.toggle("is-loading", state.loading);
+        parts.row.classList.toggle("is-error", !!state.failed && !state.loading);
+        const label = mapT(mapBikeLoadLabel(state));
+        if (parts.message.textContent !== label) parts.message.textContent = label;
+        parts.button.hidden = !state.failed || state.loading;
+      }
+    },
+    destroy(){ panel.remove(); }
+  };
+}
 function mapWrapTileLayer(url, options, proxyBase, onProxyTrouble){
   const layer = L.tileLayer(url, Object.assign({
     subdomains: url.includes("{s}") ? ["a", "b", "c"] : "abc",
@@ -2856,7 +2956,7 @@ async function mapStampCapture(pngUrl, attribution, labels){
    확대·이동 단추는 정지 그림에서 쓸모가 없고, 말풍선·이름표는 더 고약하다 — Leaflet 은 닫은
    말풍선을 페이드아웃으로 지워서 closePopup() 뒤에도 200ms 가량 DOM 에 남는다. 그대로 찍으면
    편집 서식이 지도 한복판에 박힌 그림이 나온다(실측 확인). display:none 이면 시점과 무관하다. */
-const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-radius-panel", ".map-jeju-bus-panel", ".map-flight-panel", ".map-ship-panel", ".map-subway-arrival-panel", ".map-choro-hover", ".map-wind-panel"];
+const MAP_CAPTURE_HIDDEN_PANES = [".leaflet-control-container", ".leaflet-popup-pane", ".leaflet-tooltip-pane", ".map-search-location-pane", ".map-network-notice", ".map-bike-status", ".map-radius-panel", ".map-jeju-bus-panel", ".map-flight-panel", ".map-ship-panel", ".map-train-panel", ".map-subway-arrival-panel", ".map-choro-hover", ".map-wind-panel"];
 
 /* 지금 보고 있는 지도를 PNG data URL 로 굳힌다. 노트북 PDF 가 folium 지도를 찍을 때 쓰는
    html-to-image(capture 묶음)를 그대로 쓴다 — Leaflet 지도에서 검증된 경로다.
@@ -5787,6 +5887,7 @@ const MAP_TOOL_ICONS = {
   evChargers: '<path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/><path d="m13 9-3 3h3l-2 3"/>',
   parkingFees: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 18V7h4a3 3 0 0 1 0 6H9"/>',
   ship: '<path d="M12 10.2V14M12 2v3"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M19.4 20A11.6 11.6 0 0 0 21 14l-8.2-3.6a2 2 0 0 0-1.6 0L3 14a11.6 11.6 0 0 0 2.8 7.8"/><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
+  train: '<rect x="5" y="3" width="14" height="15" rx="4"/><path d="M5 10h14M9 3v7M15 3v7M8 21l2-3M16 21l-2-3"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/>',
   save: '<path d="M5 3h12l2 2v16H5zM8 3v6h8V3M8 21v-7h8v7"/>',
   panel: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/>',
@@ -6791,36 +6892,34 @@ async function mountMapEditor(doc){
     mapTranslate(toolRow);
   }
 
-  /* 캡처는 타일이 다 들어온 뒤에 찍어야 반쯤 빈 그림이 안 나온다. Leaflet 은 보이는 타일이
-     전부 끝나면(실패한 것 포함) load 를 한 번 쏘므로 그것을 기다린다. */
-  let tilesSettled = false;
-  let tileWaiters = [];
-  const settleTiles = () => { tilesSettled = true; tileWaiters.splice(0).forEach(fn => fn()); };
+  /* 배경뿐 아니라 자전거 층도 기다린다. 이동할 때마다 새 타일이 생기므로 예전에 끝났다는
+     표시를 기억하지 않고, 지금 층들의 isLoading()을 확인한다. */
+  const tileWaiters = new Set();
+  const settleTiles = () => { for (const check of tileWaiters) check(); };
+  const bikeStatus = mapBikeStatusPanel(stage, id => bikeController.retry(id));
+  const bikeController = mapBikeLayerController(map, states => {
+    bikeStatus.update(states);
+    settleTiles();
+  });
+  const tilesLoading = () => !!(tiles && tiles.isLoading()) || bikeController.isLoading();
   const waitForTiles = (timeoutMs) => new Promise((resolve) => {
-    if (tilesSettled) return resolve();
-    const timer = setTimeout(resolve, timeoutMs);        // 인터넷이 없으면 기다리다 그냥 찍는다
-    tileWaiters.push(() => { clearTimeout(timer); resolve(); });
+    if (!tilesLoading()) return resolve();
+    const finish = () => { clearTimeout(timer); tileWaiters.delete(check); resolve(); };
+    const check = () => { if (!tilesLoading()) finish(); };
+    const timer = setTimeout(finish, timeoutMs);
+    tileWaiters.add(check);
   });
 
-  /* 자전거 겹침 층은 배경을 바꿀 때마다 다시 만든다 — 최대 확대를 배경에 맞추고, 프록시에서
-     직접 주소로 갈아탔을 때 층도 함께 따라가야 하기 때문이다. 내 지도 이미지 위에는 얹지 않으므로
-     그때는 고르는 칸도 잠근다(골라 봐야 아무것도 안 보이면 고장으로 보인다). */
-  let bikeLayers = [];
+  /* 계속 켜진 자전거 층은 유지한다. 최대 확대나 프록시 주소가 달라질 때만 다시 만든다.
+     내 지도 이미지 위에는 얹지 않으므로 그때는 고르는 칸도 잠근다. */
   const applyBikeLayers = () => {
-    for (const layer of bikeLayers) map.removeLayer(layer);
-    bikeLayers = [];
     const custom = model.basemap === "custom";
     bikeSelect.disabled = custom;
     bikeTile.classList.toggle("is-unavailable", custom);
     bikeTile.title = custom ? mapT("내 지도 이미지 위에는 자전거길을 겹치지 않아요") : "";
     bikeSelect.value = mapBikeChoiceOf(model);
     const maxZoom = custom ? 19 : (MAP_BASEMAPS[model.basemap] || MAP_BASEMAPS.osm).maxZoom;
-    for (const id of mapBikeLayerIds(model)){
-      const layer = mapCreateBikeLayer(id, maxZoom, usingProxy ? proxyBase : "", "mapBikePane");
-      if (!layer) continue;
-      layer.addTo(map);
-      bikeLayers.push(layer);
-    }
+    bikeController.sync(model, maxZoom, usingProxy ? proxyBase : "", "mapBikePane");
   };
 
   const applyBasemap = () => {
@@ -6828,8 +6927,6 @@ async function mountMapEditor(doc){
     if (backgroundLayer) map.removeLayer(backgroundLayer);
     tiles = null;
     backgroundLayer = null;
-    tilesSettled = false;
-    applyBikeLayers();
     if (model.basemap === "custom" && model.backgroundImage){
       backgroundLayer = L.imageOverlay(model.backgroundImage.dataUrl, model.backgroundImage.bounds, {
         opacity: 1,
@@ -6837,7 +6934,7 @@ async function mountMapEditor(doc){
         pane: "mapImagePane"
       });
       backgroundLayer.addTo(map);
-      tilesSettled = true;
+      applyBikeLayers();
       cleanupNetworkNotice.hide();
       settleTiles();
       return;
@@ -6851,6 +6948,7 @@ async function mountMapEditor(doc){
     });
     tiles.on("load", settleTiles);
     tiles.addTo(map);
+    applyBikeLayers();
     cleanupNetworkNotice.refresh();
   };
   applyBasemap();
@@ -7293,6 +7391,9 @@ async function mountMapEditor(doc){
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   // 여객선 시간표(항구 → 도착지 점선). 같은 TAGO 키를 쓴다.
   const ships = typeof MNShipMap !== "undefined" ? MNShipMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // KTX 역 위치·안내 팝업과 TAGO 구간 시간표.
+  const trains = typeof MNTrainMap !== "undefined" ? MNTrainMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   // 기상청 날씨(지도 가운데·전국 주요 도시). 같은 공공데이터포털 키를 쓴다.
   const weather = typeof MNWeatherMap !== "undefined" ? MNWeatherMap.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
@@ -9949,7 +10050,7 @@ async function mountMapEditor(doc){
     contextHost.appendChild(item);
     contextMirrors.push({ item, button:source, fixedLabel:true });
   }
-  for (const selector of [".map-toolvis-jeju-bus", ".map-toolvis-flight", ".map-toolvis-ship"]){
+  for (const selector of [".map-toolvis-jeju-bus", ".map-toolvis-flight", ".map-toolvis-ship", ".map-toolvis-train"]){
     const button = toolChips.querySelector(selector);
     if (button) contextMirror(button);
   }
@@ -10136,6 +10237,7 @@ async function mountMapEditor(doc){
     });
     // 실시간 열차를 켠 채로 보내면 화면에 떠 있던 역 이름도 그림에 남긴다.
     labels.push(...subwayCaptureLabels());
+    if(trains)labels.push(...trains.captureLabels());
     for (const shape of model.shapes){
       if (!shape.points.length) continue;
       const center = shape.points.reduce((sum, point) => [sum[0] + point[0], sum[1] + point[1]], [0,0])
@@ -10185,7 +10287,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), weather && weather.captureNote(), wind && wind.captureNote(), markets && markets.captureNote(), airQuality && airQuality.captureNote(), tourism && tourism.captureNote(), protectionZones && protectionZones.captureNote(), parkingFees && parkingFees.captureNote(), evChargers && evChargers.captureNote()].filter(Boolean).join(" · "), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), trains && trains.captureNote(), weather && weather.captureNote(), wind && wind.captureNote(), markets && markets.captureNote(), airQuality && airQuality.captureNote(), tourism && tourism.captureNote(), protectionZones && protectionZones.captureNote(), parkingFees && parkingFees.captureNote(), evChargers && evChargers.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 
@@ -10647,6 +10749,9 @@ async function mountMapEditor(doc){
     contextMenu.remove();
     if (history) history.cancel();      // 묶는 중이던 변경을 버린다(사라진 화면을 capture 하지 않게)
     cleanupNetworkNotice();
+    bikeController.destroy();
+    bikeStatus.destroy();
+    settleTiles();
     if (mapResizeObserver) mapResizeObserver.disconnect();
     clearTimeout(listTimer);      // 사라진 목록을 뒤늦게 다시 그리지 않게
     try { map.remove(); } catch(_){}
