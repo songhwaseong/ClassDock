@@ -962,10 +962,10 @@ test("주변 시설로 넣은 표시·반경 원은 꼬리표를 달고 묶음�
   assert.equal((nearby[1].match(/source:"nearby", batch/g) || []).length, 2);
   assert.match(nearby[1], /action:\{ label:mapT\("되돌리기"\)/);
   assert.match(nearby[1], /removeTagged\(item => item\.batch === batch\)/);
-  // 지우기: 좁게 지우는 쪽(주변 시설만)이 Enter 기본값인 ok 자리에 온다.
+  // 지우기는 설명·개수를 보여 주는 지도 전용 창으로 열고 기존 두 범위의 삭제 경로를 따른다.
   const clear = /clearItemsBtn\.addEventListener\("click", async \(\) => \{([\s\S]*?)\n  \}\);/.exec(source);
   assert.ok(clear);
-  assert.match(clear[1], /confirmDialog\(message,\s*\n?\s*mapTf\("주변 시설로 넣은 것만[^)]*\)[\s\S]*?altText:allText/);
+  assert.match(clear[1], /openMapClearItems\(\{ markers, shapes, nearby:countNearbyItems\(\) \}, \{ doc, returnFocus:clearItemsBtn \}\)/);
   assert.match(clear[1], /if \(answer === "ok"\) announceRemoved\(removeTagged\(isNearbyItem\)\)/);
   assert.match(clear[1], /else if \(answer === "alt"\) announceRemoved\(removeTagged\(\(\) => true\)\)/);
   // 손으로 찍은 표시는 꼬리표가 없으므로 '주변 시설만' 에 휩쓸리지 않는다.

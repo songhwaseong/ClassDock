@@ -183,7 +183,7 @@ function mapRememberListPanel(on){
   try { localStorage.setItem(MAP_LIST_PANEL_KEY, on ? "1" : "0"); } catch(_){}
 }
 
-/* 멀리서 수십 개 핀이 겹치는 것을 화면 칸별 숫자 묶음으로 볼지. 이것도 문서 내용이 아니라
+/* 멀리서 수십 개 핀이 겹치는 것을 가까운 표시끼리 숫자 묶음으로 볼지. 이것도 문서 내용이 아니라
    보는 사람의 작업 방식이므로 지도 파일에는 넣지 않고 모든 지도에서 이어 쓴다. 기본은 켬. */
 const MAP_CLUSTER_KEY = "mn.mapMarkerClusters";
 function mapClustersOn(){
@@ -700,6 +700,51 @@ function mapShapeLabelAnchor(shape){
 function mapShapeMeasureText(shape){
   return shape && shape.type === "area" ? mapFormatArea(mapPolygonAreaSquareMeters(shape.points)) : mapFormatDistance(mapLineLengthMeters(shape && shape.points));
 }
+/* 주변 시설의 원은 옛 지도에도 다각형으로 저장되어 있다. 이름에 적힌 숫자 대신 실제 남북
+   지름에서 반경을 구하면 이름을 고쳐도 반경·면적을 계속 읽을 수 있다. */
+function mapNearbyCircleInfo(shape){
+  if (!shape || shape.type !== "area" || shape.source !== "nearby") return null;
+  const points = Array.isArray(shape.points) ? shape.points : [];
+  if (points.length < 3) return null;
+  let north = points[0][0], south = points[0][0];
+  for (const point of points){
+    north = Math.max(north, point[0]); south = Math.min(south, point[0]);
+  }
+  // 부동소수점 오차로 1 km가 1000 m로 표시되지 않도록 밀리미터 단위로 정리한다.
+  const radius = Math.round((mapDistanceMeters([south, 0], [north, 0]) / 2) * 1000) / 1000;
+  if (!(radius > 0)) return null;
+  let title = String(shape.label || "").trim();
+  const suffix = /\s+(\d+(?:\.\d+)?)\s*(km|m)$/i.exec(title);
+  if (suffix){
+    const namedRadius = Number(suffix[1]) * (suffix[2].toLowerCase() === "km" ? 1000 : 1);
+    // 자동 이름 끝의 반경만 두 번째 줄로 옮긴다. 다른 숫자를 쓴 사용자 이름은 그대로 둔다.
+    if (Math.abs(namedRadius - radius) <= Math.max(2, radius * 0.01)) title = title.slice(0, suffix.index).trim();
+  }
+  return { title:title || "주변 시설", radius:mapFormatDistance(radius), area:mapShapeMeasureText(shape) };
+}
+function mapNearbyCircleTip(shape){
+  const info = mapNearbyCircleInfo(shape);
+  if (!info) return null;
+  const make = (tag, cls, text) => {
+    const node = document.createElement(tag); node.className = cls;
+    if (text != null) node.textContent = text;
+    return node;
+  };
+  const box = make("div", "map-nearby-circle-info");
+  const head = make("div", "map-nearby-circle-head");
+  const icon = make("span", "map-nearby-circle-icon"); icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + MAP_TOOL_ICONS.pin + '</svg>';
+  head.append(icon, make("span", "map-nearby-circle-title", mapT(info.title)));
+  const metrics = make("div", "map-nearby-circle-metrics");
+  for (const [caption, value] of [["반경", info.radius], ["면적", info.area]]){
+    const metric = make("span", "map-nearby-circle-metric");
+    metric.append(make("span", "map-nearby-circle-caption", mapT(caption)),
+      make("strong", "map-nearby-circle-value", value));
+    metrics.append(metric);
+  }
+  box.append(head, metrics);
+  return box;
+}
 
 /* ===== 축척 막대 · 방위표 · 위경도 격자 =====
    거리선이 "3.2 km"라고 알려 줘도 화면에 견줄 기준이 없으면 그 길이를 가늠할 수 없다. 축척과
@@ -1148,13 +1193,32 @@ function mapMarkersInArea(markers, shape){
   return (Array.isArray(markers) ? markers : []).filter(marker => mapPointInPolygon([marker.lat, marker.lng], shape.points));
 }
 function mapClusterPixelGroups(items, cellSize){
-  const size = Math.max(20, Number(cellSize) || 72), buckets = new Map();
+  const size = Math.max(20, Number(cellSize) || 72), buckets = new Map(), groups = [];
+  /* 격자는 가까운 묶음을 빨리 찾는 색인으로만 쓴다. 칸이 다르다는 이유로 겹친 핀을
+     나누면 지도를 조금 움직일 때마다 묶음이 갈라진다. 실제 화면 거리를 비교하고,
+     첫 표시를 기준점으로 고정해 긴 표시 사슬이 전부 한 덩어리로 이어지는 것을 막는다. */
   for (const item of Array.isArray(items) ? items : []){
-    const key = Math.floor(Number(item.x) / size) + ":" + Math.floor(Number(item.y) / size);
+    const x = Number(item.x), y = Number(item.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)){ groups.push([item]); continue; }
+    const col = Math.floor(x / size), row = Math.floor(y / size);
+    let nearest = null, distance = size * size;
+    for (let dx = -1; dx <= 1; dx++){
+      for (let dy = -1; dy <= 1; dy++){
+        for (const candidate of buckets.get((col + dx) + ":" + (row + dy)) || []){
+          const squared = (candidate.x - x) ** 2 + (candidate.y - y) ** 2;
+          if (squared < distance || (squared === distance && (!nearest || candidate.order < nearest.order))){
+            nearest = candidate; distance = squared;
+          }
+        }
+      }
+    }
+    if (nearest){ nearest.items.push(item); continue; }
+    const group = [item], key = col + ":" + row;
+    groups.push(group);
     if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key).push(item);
+    buckets.get(key).push({ x, y, items:group, order:groups.length });
   }
-  return [...buckets.values()];
+  return groups;
 }
 function mapKakaoRoadviewUrl(lat, lng){
   const y = Number(lat), x = Number(lng);
@@ -4909,6 +4973,101 @@ function openMapDriveSettings(config){
   return true;
 }
 
+/* ===== 지도 항목 지우기 =====
+   두 범위를 설명·개수와 함께 한 줄씩 보여 준다. 줄 자체가 실행 단추이며 주변 시설만 지우는
+   좁은 범위를 먼저 둔다. 공용 확인창을 바꾸지 않아 다른 문서의 확인 동작에는 영향을 주지 않는다. */
+function openMapClearItems(counts, opts = {}){
+  return new Promise(resolve => {
+    const make = (tag, cls, text) => {
+      const node = document.createElement(tag);
+      node.className = cls;
+      if (text != null) node.textContent = text;
+      return node;
+    };
+    const modal = make("div", "modal map-clear-modal");
+    modal.setAttribute("data-i18n-ui", "");
+    const card = make("div", "modal-card map-clear-card");
+    card.setAttribute("role", "dialog"); card.setAttribute("aria-modal", "true");
+    const heading = make("div", "map-clear-head");
+    // 원문을 DOM에 남긴 뒤 통째 번역해야 창을 연 채 EN/한을 바꿔도 다시 한국어로 돌아온다.
+    const title = make("h3", "map-clear-title", "무엇을 지울까요?");
+    const summary = make("p", "map-clear-summary", "표시 " + counts.markers + "개 · 거리선·면적 " + counts.shapes + "개");
+    const id = "map-clear-" + mapBatchId();
+    title.id = id + "-title"; summary.id = id + "-summary";
+    card.setAttribute("aria-labelledby", title.id); card.setAttribute("aria-describedby", summary.id);
+    heading.append(title, summary);
+    const choices = make("div", "map-clear-choices");
+    const buttons = [];
+    const addChoice = (choice, cls, iconName, label, description, count) => {
+      const button = make("button", "map-clear-choice " + cls);
+      button.type = "button";
+      const icon = make("span", "map-clear-icon");
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+        MAP_TOOL_ICONS[iconName] + '</svg>';
+      const copy = make("span", "map-clear-copy");
+      copy.append(make("strong", "map-clear-label", label), make("span", "map-clear-description", description));
+      const amount = make("span", "map-clear-count", count + "개");
+      const arrow = make("span", "map-clear-arrow", "›"); arrow.setAttribute("aria-hidden", "true");
+      button.append(icon, copy, amount, arrow);
+      button.addEventListener("click", () => finish(choice));
+      choices.appendChild(button); buttons.push(button);
+    };
+    if (counts.nearby > 0){
+      addChoice("ok", "map-clear-nearby", "pin", "주변 시설만 지우기", "직접 만든 표시와 도형은 유지해요", counts.nearby);
+    }
+    addChoice("alt", "map-clear-all", "trash", "모두 지우기", "지도 위의 표시와 도형을 모두 지워요", counts.markers + counts.shapes);
+    const footer = make("div", "map-clear-footer");
+    const cancel = make("button", "btn map-clear-cancel", "취소"); cancel.type = "button";
+    cancel.addEventListener("click", () => finish("cancel"));
+    footer.appendChild(cancel); buttons.push(cancel);
+    card.append(heading, choices, footer); modal.appendChild(card);
+
+    const returnFocus = opts.returnFocus || document.activeElement;
+    const cleanupFns = opts.doc && opts.doc.cleanupFns;
+    let closed = false;
+    const finish = (choice, restoreFocus = true) => {
+      if (closed) return;
+      closed = true;
+      window.removeEventListener("keydown", onKey, true);
+      modal.remove();
+      if (Array.isArray(cleanupFns)){
+        const index = cleanupFns.indexOf(onOwnerClose);
+        if (index >= 0) cleanupFns.splice(index, 1);
+      }
+      if (restoreFocus && returnFocus && returnFocus.isConnected && typeof returnFocus.focus === "function"){
+        returnFocus.focus({ preventScroll:true });
+      }
+      resolve(choice);
+    };
+    const onOwnerClose = () => finish("cancel", false);
+    const onKey = event => {
+      // 지도 편집·되돌리기 단축키가 창 뒤의 자료를 바꾸지 않게 한다. 버튼의 기본 Space 동작은 유지한다.
+      event.stopImmediatePropagation();
+      if (event.key === "Escape"){
+        event.preventDefault(); finish("cancel");
+      } else if (event.key === "Enter"){
+        event.preventDefault();
+        if (!event.repeat && !event.isComposing){
+          const target = buttons.includes(document.activeElement) ? document.activeElement : buttons[0];
+          target.click();
+        }
+      } else if (event.key === "Tab"){
+        const index = buttons.indexOf(document.activeElement);
+        if (index < 0 || (!event.shiftKey && index === buttons.length - 1) || (event.shiftKey && index === 0)){
+          event.preventDefault(); buttons[event.shiftKey ? buttons.length - 1 : 0].focus();
+        }
+      }
+    };
+    modal.addEventListener("mousedown", event => { if (event.target === modal) finish("cancel"); });
+    window.addEventListener("keydown", onKey, true);
+    if (Array.isArray(cleanupFns)) cleanupFns.push(onOwnerClose);
+    (document.fullscreenElement || document.body).appendChild(modal);
+    mapTranslate(modal);
+    buttons[0].focus({ preventScroll:true });
+  });
+}
+
 /* ===== 주변 시설 찾기 창 =====
    지도 가운데를 기준으로 반경 안의 갈래들을 모아 온다. '우리 동네에 학교와 병원이 몇 곳인가'처럼
    사회과에서 바로 쓰는 물음이라, 찾은 개수를 창 안에서 먼저 보여 주고 넣을지 고르게 한다.
@@ -7692,7 +7851,8 @@ async function mountMapEditor(doc){
         const cluster = L.marker(center, { icon, keyboard:true, title:mapTf("표시 {count}개", { count:group.length }) });
         cluster.on("click", () => {
           const bounds = L.latLngBounds(group.map(item => [item.marker.lat, item.marker.lng]));
-          if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(center, Math.min(15, map.getZoom() + 2));
+          // 같은 좌표는 아무리 조금씩 확대해도 갈라지지 않는다. 한 번에 개별 핀이 보이는 단계로 간다.
+          if (bounds.getNorthEast().equals(bounds.getSouthWest())) map.setView(center, 15);
           else map.fitBounds(bounds.pad(0.2), { maxZoom:15, animate:true });
         });
         cluster.bindTooltip(() => mapClusterTip(group.map(item => item.marker)), { direction:"top", className:"map-cluster-tip" });
@@ -8478,6 +8638,8 @@ async function mountMapEditor(doc){
     const measure = mapShapeMeasureText(shape);
     return (shape.label ? shape.label + " · " : "") + measure;
   };
+  // PNG·인쇄에는 문자열 이름표를 쓰고, 지도 위 반경 원에는 두 줄 정보를 올린다.
+  const shapeTooltipContent = (shape) => mapNearbyCircleTip(shape) || shapeTooltip(shape);
   const removeShape = (shape) => {
     const index = model.shapes.findIndex(item => item.id === shape.id);
     if (index >= 0) model.shapes.splice(index, 1);
@@ -8505,7 +8667,7 @@ async function mountMapEditor(doc){
     analyze.title = "이 면적 안에 있는 표시를 세고 CSV·메모로 내보냅니다 — API 키가 필요하지 않습니다";
     analyze.hidden = shape.type !== "area";
     label.addEventListener("input", () => {
-      shape.label = label.value.slice(0, 120); layer.setTooltipContent(shapeTooltip(shape)); touch();
+      shape.label = label.value.slice(0, 120); layer.setTooltipContent(shapeTooltipContent(shape)); touch();
     });
     color.addEventListener("input", () => {
       shape.color = color.value; layer.setStyle({ color:shape.color, fillColor:shape.color }); touch();
@@ -8524,10 +8686,11 @@ async function mountMapEditor(doc){
       ? L.polygon(shape.points, { ...options, fillColor:shape.color, fillOpacity:0.18 })
       : L.polyline(shape.points, options);
     const anchor = mapShapeLabelAnchor(shape);
-    layer.bindTooltip(shapeTooltip(shape), {
+    layer.bindTooltip(shapeTooltipContent(shape), {
       permanent:true,
       direction:(shape.type === "area" && !anchor) ? "center" : "top",
-      className:"map-shape-label"
+      className:"map-shape-label" + (anchor ? " map-nearby-circle-label" : ""),
+      opacity:anchor ? 1 : 0.9
     });
     layer.bindPopup(buildShapePopup(shape, layer), { minWidth:190 });
     layer.on("click", () => selectShape(shape));
@@ -9191,24 +9354,18 @@ async function mountMapEditor(doc){
     if (typeof toast === "function") toast(mapTf("{count}개를 지웠습니다", { count }), 2600);
   };
 
+  let clearingItems = false;
   clearItemsBtn.addEventListener("click", async () => {
+    if (clearingItems) return;
     const markers = model.markers.length;
     const shapes = (model.shapes || []).length;
     if (!markers && !shapes){ setStatus(mapT("지울 표시나 도형이 없어요.")); return; }
-    if (typeof confirmDialog !== "function"){ announceRemoved(removeTagged(() => true)); return; }
-    const nearby = countNearbyItems();
-    const message = mapTf("표시 {markers}개, 거리선·면적 {shapes}개가 있어요. 무엇을 지울까요?", { markers, shapes });
-    const allText = mapTf("모두 지우기 ({count}개)", { count:markers + shapes });
-    /* 주변 시설로 넣은 것이 있으면 그쪽을 기본(Enter·ok)으로 둔다 — Enter 한 번에 직접 찍은
-       표시까지 날아가지 않게, 더 좁게 지우는 쪽이 언제나 기본이다. */
-    if (nearby){
-      const answer = await confirmDialog(message,
-        mapTf("주변 시설로 넣은 것만 ({count}개)", { count:nearby }), mapT("취소"), { altText:allText });
+    clearingItems = true;
+    try {
+      const answer = await openMapClearItems({ markers, shapes, nearby:countNearbyItems() }, { doc, returnFocus:clearItemsBtn });
       if (answer === "ok") announceRemoved(removeTagged(isNearbyItem));
       else if (answer === "alt") announceRemoved(removeTagged(() => true));
-      return;
-    }
-    if (await confirmDialog(message, allText, mapT("취소"))) announceRemoved(removeTagged(() => true));
+    } finally { clearingItems = false; }
   });
 
   /* ── 주변 시설 ──

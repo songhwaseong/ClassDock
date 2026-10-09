@@ -88,6 +88,32 @@ function harness(language = "en") {
   return { api: window.MNI18N, document, element, ready: () => listener(), flush };
 }
 
+test("지도 지우기 창의 범위·설명·개수는 한국어와 영어로 번역한다", () => {
+  const { api } = harness();
+  assert.equal(api.t("무엇을 지울까요?"), "What would you like to clear?");
+  assert.equal(api.tf("표시 {markers}개 · 거리선·면적 {shapes}개", { markers:75, shapes:1 }), "75 pins · 1 path/area");
+  assert.equal(api.t("주변 시설만 지우기"), "Clear nearby places only");
+  assert.equal(api.t("직접 만든 표시와 도형은 유지해요"), "Keeps pins and shapes you created");
+  assert.equal(api.t("지도 위의 표시와 도형을 모두 지워요"), "Clears every pin and shape on the map");
+  assert.equal(api.t("76개"), "76");
+  const ko = harness("ko").api;
+  assert.equal(ko.t("76개"), "76개");
+  assert.equal(ko.t("주변 시설만 지우기"), "주변 시설만 지우기");
+  const h = harness();
+  const modal = h.element("div", null); modal.setAttribute("data-i18n-ui", "");
+  const title = h.element("h3", "무엇을 지울까요?", modal);
+  const summary = h.element("p", "표시 75개 · 거리선·면적 1개", modal);
+  const amount = h.element("span", "76개", modal);
+  h.ready(); h.flush();
+  assert.equal(title.textContent, "What would you like to clear?");
+  assert.equal(summary.textContent, "75 pins · 1 path/area");
+  assert.equal(amount.textContent, "76", "숫자 칸은 앱의 기존 영문 개수 표기를 따른다");
+  h.api.setLang("ko"); h.flush();
+  assert.equal(title.textContent, "무엇을 지울까요?");
+  assert.equal(summary.textContent, "표시 75개 · 거리선·면적 1개");
+  assert.equal(amount.textContent, "76개");
+});
+
 test("known missing labels and variable messages translate without changing document names", () => {
   const { api } = harness();
   assert.equal(api.t("편집 도구"), "Editing tools");
