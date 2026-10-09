@@ -62,7 +62,9 @@ test("경유지가 5곳을 넘으면 다중 경유지로 한 번에 잇는다", 
   const call = calls[0];
   expect(call.provider).toBe("kakao-waypoints");
   expect(call.via.split("|")).toHaveLength(8);              // 표시 10개 = 출발 + 경유 8 + 도착
-  await expect(page.locator(".map-drive-label")).toContainText("표시 10개");
+  await expect(page.locator(".map-drive-summary-count")).toContainText("10곳 연결");
+  await expect(page.locator(".map-drive-comparison")).toBeVisible();
+  await page.locator(".map-drive-close").click();
 
   // 교통 구간 이름표(시안 C): 상태 색 알약 + 도로 이름 + 속도·거리.
   await page.locator("path.map-drive-traffic-line").first().hover();
@@ -79,6 +81,7 @@ test("출발 시각을 정하면 미래 길찾기로 묻고, 지난 시각은 �
   await addMarkers(page, 3);
   await page.locator(".map-drive-toggle").click();
   const modal = page.locator(".map-drive-settings-modal");
+  await modal.locator(".map-drive-details summary").click();
   await modal.locator('input[name="map-drive-depart"][value="later"]').check();
   await modal.locator(".map-drive-depart-at").fill("2020-01-01T08:30");
   await modal.locator(".map-drive-apply").click();
@@ -91,7 +94,7 @@ test("출발 시각을 정하면 미래 길찾기로 묻고, 지난 시각은 �
   await expect.poll(() => calls.length).toBe(1);
   expect(calls[0].provider).toBe("kakao-future");
   expect(calls[0].depart).toBe(value.replace(/[-T:]/g, ""));
-  await expect(page.locator(".map-drive-label")).toContainText("출발 예상");
+  await expect(page.locator(".map-drive-summary-note")).toContainText("출발 예상");
   // 출발 시각은 문서에 남기지 않는다(다음에 열면 이미 지난 시각이다).
   expect(await page.evaluate(() => JSON.stringify(docs.find(d => d.kind === "map").mapDoc))).not.toContain(value.replace(/[-T:]/g, ""));
 });
@@ -102,7 +105,8 @@ test("첫 표시에서 나머지까지 비교하면 시간순 표로 보이고 �
   await addMarkers(page, 4);
   await page.locator(".map-drive-toggle").click();
   const modal = page.locator(".map-drive-settings-modal");
-  await expect(modal.locator(".map-drive-destinations-sub")).toContainText("곳1에서 다른 표시 3곳");
+  await modal.locator(".map-drive-destinations summary").click();
+  await expect(modal.locator(".map-drive-destinations-sub")).toContainText("곳1에서 다른 장소 3곳");
   await modal.locator(".map-drive-destinations-run").click();
   const rows = modal.locator(".map-drive-destinations-wrap tbody tr");
   await expect(rows).toHaveCount(3);

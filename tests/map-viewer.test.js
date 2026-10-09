@@ -45,8 +45,10 @@ function loadMapViewer(windowOverrides, contextOverrides){
       , MAP_DRIVE_MAX_MARKERS, MAP_DRIVE_COLOR, MAP_DRIVE_CACHE_MAX
       , MAP_DRIVE_FUTURE_MAX_MARKERS, mapDriveDepartValue, mapDriveDepartDate, mapDirectionsProvider
       , MAP_DRIVE_PRIORITIES, MAP_DRIVE_AVOIDS, MAP_DRIVE_FUELS, mapNormalizeDriveOptions
+      , mapNormalizeDriveStops, mapResolveDriveStops, mapDriveRouteItems, mapAddDriveStopsAsMarkers
       , MAP_DRIVE_TRAFFIC, mapDriveTrafficInfo, mapOptimizeDriveOrder, mapDriveOrderedItems, mapSampleRoutePoints
       , mapFormatDuration, mapDirectionsSpot, mapDirectionsRoute, mapDirectionsRoutes, mapDriveGuide
+      , mapFormatDriveFare, mapDriveSummaryData
       , MAP_NEARBY_MAX_KINDS, MAP_NEARBY_TOTAL_CHOICES, MAP_NEARBY_DEFAULT_TOTAL
       , MAP_NEARBY_MAX_PER_KIND, mapNearbyKindLimits, mapNearbyKindColors
     };`, context);
@@ -1186,7 +1188,7 @@ test("검색란을 누르면 최근 검색어를 펼치고 화살표·Enter 로 
   assert.ok(attach);
   assert.match(attach[1], /input\.addEventListener\("focus", openHistory\)/);
   assert.match(attach[1], /input\.addEventListener\("click", openHistory\)/);
-  assert.match(attach[1], /input\.addEventListener\("input", \(\) => \{ cancelPendingClose\(\); showHistory\(\); \}\)/);
+  assert.match(attach[1], /input\.addEventListener\("input", \(\) => \{ requestSeq\+\+; cancelPendingClose\(\); showHistory\(\); \}\)/);
   // 치는 중에는 그 글자가 든 기록만 남긴다.
   assert.match(attach[1], /history = mapSearchHistory\(\)\.filter\(item => !typed \|\| item\.toLowerCase\(\)\.includes\(typed\)\)/);
   assert.match(attach[1], /e\.key === "ArrowDown" \|\| e\.key === "ArrowUp"/);
@@ -2134,7 +2136,7 @@ test("표시 잇는 선은 목록 순서를 따르고 감춘 묶음은 빼며 �
   // 끄는 동안에도 따라온다(놓는 순간에만 그리면 선이 툭 튄다). 다만 그때 touch 는 부르지 않는다.
   assert.match(source, /layer\.on\("drag", \(\) => \{\n\s*if \(!model\.route\) return;/);
   // 되돌리기 범위도 격자·이름표와 같다.
-  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive,[\s\S]*?mapNormalizeDriveOptions\(model\.driveOptions\), mapNormalizeRadius\(model\.radius\), mapNormalizeChoropleth\(model\.choropleth\),\s*!!model\.bikeLanes, !!model\.bikeRoutes\]\)/);
+  assert.match(source, /!!model\.grid, !!model\.labels, !!model\.route, !!model\.drive,[\s\S]*?mapNormalizeDriveOptions\(model\.driveOptions\), mapNormalizeRadius\(model\.radius\), mapNormalizeChoropleth\(model\.choropleth\),\s*!!model\.bikeLanes, !!model\.bikeRoutes, mapNormalizeDriveStops\(model\.driveStops\)\]\)/);
   assert.match(source, /model\.route = saved\[7\] === true;/);
   // 되돌리기는 마커 레이어를 새로 만드므로, 감춘 묶음의 보기 상태와 선도 함께 다시 입힌다.
   assert.match(source, /drawGrid\(\);[\s\S]*?applyMarkerVisibility\(\);[\s\S]*?applyBasemap\(\);/);
@@ -2396,6 +2398,91 @@ test("경유지 자동 최적화는 출발·도착을 고정하고 가운데 표
   assert.equal(JSON.stringify(sampled.at(-1)), JSON.stringify(many.at(-1)));
 });
 
+test("길찾기에서 고른 검색 장소는 표시 없이 저장되고 관련 없는 표시를 경로에 넣지 않는다", () => {
+  const api = loadMapViewer();
+  const model = api.mapDocEmpty("검색 길찾기");
+  const before = api.mapDocContentKey(model);
+  model.drive = true;
+  model.driveStops = api.mapNormalizeDriveStops([
+    { lat:37.566, lng:126.978, label:"출발", address:"서울 중구" },
+    { lat:37.55, lng:126.97, label:"도착", address:"서울역" }
+  ]);
+  assert.equal(model.markers.length, 0);
+  assert.notEqual(api.mapDocContentKey(model), before);
+  const back = api.mapDocParse(api.mapDocSerialize(model));
+  assert.equal(back.markers.length, 0);
+  assert.equal(JSON.stringify(back.driveStops), JSON.stringify(model.driveStops));
+  model.markers.push(api.mapNormalizeMarker({ id:"unrelated", lat:35, lng:129, label:"수업용 표시" }));
+  assert.deepEqual(Array.from(api.mapDriveRouteItems(model), stop => stop.label), ["출발", "도착"]);
+  assert.equal(api.mapDirectionsSpot(api.mapDriveRouteItems(model).map(stop => [stop.lat, stop.lng]), {}).x2, "126.970000");
+});
+
+test("기존 표시에서 고른 경로는 이동을 따라가며 삭제한 장소를 다른 표시로 바꾸지 않는다", () => {
+  const api = loadMapViewer();
+  const model = api.mapDocEmpty("표시 선택");
+  model.markers = [
+    api.mapNormalizeMarker({ id:"start", lat:37.56, lng:126.98, label:"학교" }),
+    api.mapNormalizeMarker({ id:"other", lat:35, lng:129, label:"다른 표시" })
+  ];
+  model.driveStops = api.mapNormalizeDriveStops([
+    { markerId:"start", lat:37.56, lng:126.98, label:"학교" }, { lat:37.55, lng:126.97, label:"도착" }
+  ]);
+  model.markers[0].lat = 37.57;
+  model.markers[0].label = "옮긴 학교";
+  const route = api.mapDriveRouteItems(model, () => false);
+  assert.equal(route[0].lat, 37.57);
+  assert.equal(route[0].label, "옮긴 학교");
+  model.markers.shift();
+  assert.equal(api.mapDriveRouteItems(model).length, 0);
+  assert.equal(api.mapResolveDriveStops(model.driveStops, model.markers)[0], null);
+});
+
+test("옛 지도는 보이는 표시 목록을 쓰지만 명시적으로 빈 길찾기 목록은 채우지 않는다", () => {
+  const api = loadMapViewer();
+  const model = api.mapDocParse(JSON.stringify({ type:"classdock-map", markers:[
+    { id:"a", lat:37, lng:127, label:"보임" }, { id:"b", lat:38, lng:127, label:"숨김" }
+  ] }));
+  assert.equal(model.driveStops, null);
+  assert.deepEqual(Array.from(api.mapDriveRouteItems(model, marker => marker.id === "a"), marker => marker.label), ["보임"]);
+  model.driveStops = [];
+  assert.equal(api.mapDriveRouteItems(model).length, 0);
+  assert.deepEqual(Array.from(api.mapDocParse(api.mapDocSerialize(model)).driveStops), []);
+});
+
+test("검색 장소를 표시로 추가해도 반복 적용하거나 같은 좌표를 골랐을 때 중복되지 않는다", () => {
+  const api = loadMapViewer();
+  const markers = [api.mapNormalizeMarker({ id:"school", lat:37.56, lng:126.98, label:"기존 학교" })];
+  const added = [];
+  const draft = [{ lat:37.56, lng:126.98, label:"학교 검색" }, { lat:37.55, lng:126.97, label:"역", address:"서울역" }];
+  const selected = api.mapAddDriveStopsAsMarkers(draft, markers, marker => added.push(marker));
+  assert.equal(markers.length, 2);
+  assert.equal(added.length, 1);
+  assert.equal(selected[0].markerId, "school");
+  assert.equal(selected[1].markerId, added[0].id);
+  assert.equal(added[0].address, "서울역");
+  api.mapAddDriveStopsAsMarkers(selected, markers, marker => added.push(marker));
+  api.mapAddDriveStopsAsMarkers(draft, markers, marker => added.push(marker));
+  assert.equal(markers.length, 2);
+  assert.equal(added.length, 1);
+});
+
+test("길찾기 장소는 유효한 좌표와 제한된 문자열만 받고 최대 32곳까지 보존한다", () => {
+  const api = loadMapViewer();
+  assert.equal(api.mapNormalizeDriveStops(undefined), null);
+  assert.equal(api.mapNormalizeDriveStops({}), null);
+  const stops = api.mapNormalizeDriveStops([
+    null, { lat:null, lng:127 }, { lat:"", lng:127 }, { lat:" ", lng:127 },
+    { lat:999, lng:127 }, { lat:37, lng:NaN }, { lat:37, lng:181 },
+    { lat:"37.5", lng:"127", label:"가".repeat(150), address:"나".repeat(400), markerId:"x".repeat(200) }
+  ]);
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].lat, 37.5);
+  assert.equal(stops[0].label.length, 120);
+  assert.equal(stops[0].address.length, 300);
+  assert.equal(stops[0].markerId.length, 180);
+  assert.equal(api.mapNormalizeDriveStops(Array.from({ length:40 }, () => ({ lat:37, lng:127 }))).length, 32);
+});
+
 test("길을 못 찾은 답은 HTTP 200 이어도 실패로 가른다", () => {
   const api = loadMapViewer();
   // 카카오는 길이 없어도 200 을 주고 result_code 로만 알려 준다(바다 건너편 …).
@@ -2407,6 +2494,51 @@ test("길을 못 찾은 답은 HTTP 200 이어도 실패로 가른다", () => {
   assert.equal(empty.error, "directions-empty");
   assert.equal(api.mapDirectionsRoute(null).error, "directions-empty");
   assert.equal(api.mapDirectionsRoute({ routes: [] }).error, "directions-empty");
+});
+
+test("길찾기 요약은 선택 순서와 실제 거리·시간·요금을 사용하고 직선 거리 차이를 계산한다", () => {
+  const api = loadMapViewer();
+  const items = [
+    { label:"서울", lat:37.5665, lng:126.978 }, { label:"대전", lat:36.3504, lng:127.3845 }, { label:"부산", lat:35.1796, lng:129.0756 }
+  ];
+  const result = { distance:417900, duration:23940, toll:18700, taxi:492000 };
+  const data = api.mapDriveSummaryData(result, items, { priority:"TIME" }, "", 3);
+  assert.equal(data.title, "서울 → 대전 → 부산");
+  assert.deepEqual(Array.from(data.stops, stop => [stop.role, stop.label, stop.kind]), [["출발", "서울", "start"], ["경유 1", "대전", "via"], ["도착", "부산", "end"]]);
+  assert.equal(data.priority, "최단 시간");
+  assert.equal(data.count, "3곳 연결");
+  assert.equal(data.distance, "417.9 km");
+  assert.equal(data.duration, "6시간 39분");
+  assert.equal(data.toll, "18,700원");
+  assert.equal(data.taxi, "492,000원");
+  const straight = api.mapLineLengthMeters(items.map(item => [item.lat, item.lng]));
+  assert.equal(data.straight, api.mapFormatDistance(straight));
+  assert.equal(data.difference, "+" + api.mapFormatDistance(417900 - straight) + " 더 이동");
+  assert.match(data.exportText, /서울 → 대전 → 부산[\s\S]*통행료 18,700원 · 택시 예상 492,000원/);
+  const reversed = api.mapDriveSummaryData(result, api.mapDriveOrderedItems(items, { reverse:true }), {}, "", 3);
+  assert.equal(reversed.title, "부산 → 대전 → 서울");
+  assert.deepEqual(Array.from(reversed.stops, stop => [stop.role, stop.label]), [["출발", "부산"], ["경유 1", "대전"], ["도착", "서울"]]);
+  assert.equal(reversed.straight, data.straight);
+});
+
+test("요약의 누락 요금은 0원과 구별하고 출발 예상과 경로 상한을 표시한다", () => {
+  const api = loadMapViewer();
+  for (const value of [null, undefined, "", NaN, Infinity, -1, "잘못된 요금"]) assert.equal(api.mapFormatDriveFare(value), "정보 없음");
+  assert.equal(api.mapFormatDriveFare(0), "0원");
+  assert.equal(api.mapFormatDriveFare(1234), "1,234원");
+  const route = fare => api.mapDirectionsRoute({ routes:[{ result_code:0, summary:{ distance:100, duration:30, fare },
+    sections:[{ roads:[{ vertexes:[127, 37, 127.001, 37.001] }] }] }] });
+  assert.equal(route(undefined).toll, null);
+  assert.equal(route({ toll:0, taxi:0 }).toll, 0);
+  assert.equal(route({ toll:"잘못된 요금", taxi:-1 }).taxi, null);
+  const data = api.mapDriveSummaryData(route(undefined), [{ lat:37, lng:127 }, { lat:37.01, lng:127.01 }], {}, "209901010830", 8);
+  assert.equal(data.toll, "정보 없음");
+  assert.equal(data.taxi, "정보 없음");
+  assert.match(data.departure, /출발 예상/);
+  assert.equal(data.limited, "전체 8곳 중 앞 2곳의 경로입니다.");
+  assert.match(data.difference, /덜 이동/);
+  assert.equal(api.mapDriveSummaryData({ error:"failed" }, [], {}), null);
+  assert.equal(api.mapDriveSummaryData({ distance:10 }, [{ lat:37, lng:127 }], {}), null);
 });
 
 test("예상 소요시간은 분으로 읽히고 0분으로 떨어지지 않는다", () => {
@@ -2445,14 +2577,14 @@ test("자동차 길찾기는 설정한 순서에서 표시 32개(출발 시각�
   assert.equal(api.mapDriveOrderedItems(items, {}, "209901010830").length, 7);
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   assert.match(source, /const points = mapDriveOrderedItems\(allPoints, settings, driveDepart\)/);
-  assert.match(source, /설정한 순서의 \{max\}개만 길을 찾았습니다/);
+  assert.match(source, /if \(draft\.length > max\) \{ syncLocations\(\); return; \}/);
   assert.match(source, /driveTrafficLayers[\s\S]*?mapDriveTrafficInfo\(road\.trafficState\)/);
   assert.match(source, /onSaveRoute:[\s\S]*?mapSampleRoutePoints\(route\.points\)[\s\S]*?addShapeLayer\(shape\)/);
   // 표시를 끌어 옮기는 동안에는 묻지 않는다(하루 무료 몫을 드래그 한 번에 다 쓰지 않게).
   assert.match(source, /driveTimer = setTimeout\(\(\) => \{ runDrive\(\); \}, MAP_DRIVE_DELAY_MS\)/);
   // 같은 표시 배치로 두 번 묻지 않는다 — 실패한 배치도 '손을 본 것'으로 적어 같은 안내를
   // 되풀이하지 않는다(제목을 한 글자 칠 때마다 touch 가 들어온다).
-  assert.match(source, /if \(signature === driveKey\) return;/);
+  assert.match(source, /if \(signature === driveKey\)\{[\s\S]*?return lastDriveResult;/);
   assert.match(source, /driveFailed\(result\.error, signature\)/);
   // 표시가 하나 이하로 줄었을 때 진행 중이던 옛 답도 무효화해야 삭제한 경로가 되살아나지 않는다.
   assert.match(source, /const dropDrive = \(\) => \{[\s\S]*?driveSeq\+\+;[\s\S]*?driveLayer/);
