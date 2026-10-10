@@ -11416,6 +11416,20 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-thumb img{width:100%;height:100%;object-fit:cover}
 .pa-thumb b{position:absolute;left:3px;bottom:3px;padding:2px 4px;border-radius:3px;background:#000b;color:#fff;font-size:8px}
 .pa-media-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 2px 1px;font-size:10px}
+/* 목록 선택·삭제는 앨범 책과 사진 꾸미기가 같은 상태를 쓴다. */
+.pa-media-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));flex:none;gap:4px;padding:0 7px 8px}
+.photo-album .pa-media-actions button{min-width:0;padding:6px 3px;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-panel);color:var(--pa-text);font-size:10.5px;line-height:1.4;overflow-wrap:anywhere}
+.photo-album .pa-media-actions button:hover:not(:disabled){border-color:var(--pa-accent);color:var(--pa-accent)}
+.photo-album .pa-media-actions button:disabled{opacity:.45;cursor:default}
+.photo-album .pa-media-actions [data-media-action="delete"]{color:#cf5361}
+.pa-media-actions [data-media-action="all"]{grid-column:1/-1}
+.pa-media-card{position:relative}
+.pa-media-check{position:absolute;right:4px;top:4px;display:none;place-items:center;box-sizing:border-box;width:20px;height:20px;border:2px solid var(--pa-accent);border-radius:5px;background:var(--pa-panel);color:transparent;font-size:13px;font-weight:800;line-height:1;pointer-events:none}
+.pa-media-selecting .pa-media-check{display:grid}
+.pa-media-selecting .is-selected .pa-media-check{background:var(--pa-accent);color:#fff}
+.photo-album.pa-media-selecting .pa-media-card.is-selected,.photo-album.pa-media-selecting .pa-book-tray-item.is-selected{border-color:var(--pa-accent);box-shadow:0 0 0 1px var(--pa-accent)}
+.photo-album.pa-media-selecting .pa-book-tray-item{cursor:pointer}
+.pa-media-selecting .pa-book-tray-grip{display:none}
 .pa-center{display:flex;flex-direction:column;min-width:0;min-height:0;padding:15px;gap:12px;background:var(--pa-bg)}
 .pa-stage{position:relative;display:flex;flex:1;min-height:0;align-items:center;justify-content:center;overflow:hidden;padding-bottom:62px;border-radius:15px;background:#e9eff8;box-shadow:inset 0 0 0 1px var(--pa-line)}
 [data-theme="dark"] .photo-album .pa-stage{background:radial-gradient(circle at 50% 42%,#1d2b3c,#070a0e 75%);box-shadow:inset 0 0 0 1px #273340,0 15px 40px #0005}
@@ -11604,6 +11618,7 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-adjust-tip{margin:0 0 6px!important;font-size:10px}
 .pa-video-wrap{position:relative;display:grid;place-items:center;width:min(100%,1080px);height:calc(100% - 75px);background:#050607;border-radius:10px;overflow:hidden;box-shadow:0 14px 40px #0006}
 .pa-video-wrap video{width:100%;height:100%;object-fit:contain}
+.pa-video-error{position:absolute;left:12px;right:12px;bottom:48px;margin:0;padding:12px;border-radius:8px;background:#263446ee;color:#fff;font-size:13px;line-height:1.6;text-align:center}
 .pa-play{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:grid;place-items:center;width:70px;height:70px;border:2px solid #fff;border-radius:50%;background:#111b;color:#fff;font-size:30px;padding-left:6px}
 .pa-caption{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:62px;padding:9px 15px;background:var(--pa-panel);border-top:1px solid var(--pa-line)}
 .pa-caption>strong{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12px}
@@ -11803,8 +11818,23 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-slot{position:absolute;box-sizing:border-box;transform-origin:center;cursor:grab;touch-action:none}
 .pa-slot img{display:block;width:100%;height:100%;object-fit:cover;border-radius:2px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.2);user-select:none;-webkit-user-drag:none}
 .pa-slot.is-picked{z-index:3;outline:2px solid var(--pa-accent);outline-offset:3px}
-.pa-slot-play{position:absolute;left:6%;bottom:6%;display:flex;align-items:center;justify-content:center;width:22%;max-width:36px;aspect-ratio:1;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;pointer-events:none}
+.pa-spread > .pa-slot.is-moving{z-index:30;pointer-events:none;cursor:grabbing}
+.photo-album.pa-slot-dragging{cursor:grabbing;user-select:none}
+.photo-album .pa-slot-play{position:absolute;left:6%;bottom:6%;display:flex;align-items:center;justify-content:center;width:22%;max-width:36px;aspect-ratio:1;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;cursor:pointer}
+.photo-album .pa-slot-play:hover{background:var(--pa-accent)}
 .pa-slot-play svg{width:55%;height:55%}
+.pa-slot.is-playing{cursor:default}
+.pa-slot.is-playing > img,.pa-slot.is-playing > .pa-slot-play,.pa-slot.is-playing > .pa-slot-handle:not(.pa-slot-video-resize){visibility:hidden}
+.pa-slot-video{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;border-radius:2px;background:#000;box-shadow:0 2px 8px rgba(0,0,0,.2);cursor:default}
+.photo-album .pa-slot-video-close{position:absolute;top:4px;right:4px;display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:4px;border:0;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;cursor:pointer}
+.photo-album .pa-slot-video-close:hover{background:var(--pa-accent)}
+.pa-slot-video-close svg{width:100%;height:100%}
+.photo-album .pa-slot-video-move{position:absolute;top:4px;left:4px;display:flex;align-items:center;justify-content:center;width:24px;height:24px;padding:4px;border:0;border-radius:5px;background:rgba(0,0,0,.65);color:#fff;cursor:grab;touch-action:none}
+.photo-album .pa-slot-video-move:hover{background:var(--pa-accent)}
+.pa-slot-video-move svg{width:100%;height:100%}
+.photo-album .pa-slot-video-resize{display:block;width:20px;height:20px;padding:0;border:2px solid var(--pa-accent);border-radius:50%;background:#fff;cursor:nwse-resize;touch-action:none}
+.pa-slot-video-note{position:absolute;left:4%;right:4%;top:50%;transform:translateY(-50%);padding:6px;border-radius:4px;background:rgba(0,0,0,.75);color:#fff;font-size:clamp(9px,2.6cqw,13px);line-height:1.4;text-align:center;pointer-events:none}
+.pa-slot-video-note[hidden]{display:none}
 .pa-slot-handle{position:absolute;width:14px;height:14px;box-sizing:border-box;border:2px solid var(--pa-accent);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .pa-slot-handle.is-resize{right:5px;bottom:5px;width:16px;height:16px;cursor:nwse-resize}
 .pa-slot-handle.is-rotate{left:50%;top:5px;width:16px;height:16px;margin-left:-8px;cursor:grab}
@@ -11842,7 +11872,7 @@ a.diary-school-card-value{color:var(--accent)}
 /* 사진·장식 탭은 그림만(글자 칸 .pa-head-label 은 감춤). 사진 탭엔 개수만 작게 곁에 둔다. */
 .photo-album .pa-book-tray-tab{display:inline-flex;align-items:center;justify-content:center;gap:3px;padding:4px}
 .pa-book-tray-tab svg{width:17px;height:17px}
-.pa-book-tray[data-tab="deco"] .pa-book-tray-list{display:none}
+.pa-book-tray[data-tab="deco"] .pa-book-tray-list,.pa-book-tray[data-tab="deco"] .pa-media-actions{display:none}
 .pa-book-tray:not([data-tab="deco"]) .pa-book-deco{display:none}
 .pa-book-deco{display:flex;flex:1;flex-direction:column;min-height:0}
 .pa-book-deco-groups{display:flex;flex-wrap:wrap;gap:3px;padding:2px 10px 6px}
@@ -11863,7 +11893,8 @@ a.diary-school-card-value{color:var(--accent)}
 @media(max-width:900px){.pa-book-deco-grid{grid-template-columns:1fr 1fr}}
 .pa-book-tray-head span{color:var(--pa-muted);font-size:11px}
 .pa-book-tray-hint{margin:0;padding:0 12px 6px;color:var(--pa-muted);font-size:10.5px}
-.pa-book-tray-list{display:grid;flex:1;grid-template-columns:1fr 1fr;align-content:start;gap:6px;min-height:0;padding:4px 10px 12px;overflow:auto}
+.pa-book-tray-list{display:grid;flex:1;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max-content;align-content:start;gap:6px;min-height:0;padding:4px 10px 12px;overflow:auto}
+.pa-book-tray .pa-media-actions{padding:0 10px 6px}
 .photo-album .pa-book-tray-item{position:relative;aspect-ratio:1;padding:0;overflow:hidden;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft);cursor:grab}
 .pa-book-tray-item img{display:block;width:100%;height:100%;object-fit:cover}
 .photo-album .pa-book-tray-item:hover{border-color:var(--pa-accent)}
@@ -11886,11 +11917,13 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-book-tray-video{position:absolute;left:3px;bottom:3px;display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff}
 .pa-book-tray-video svg{width:10px;height:10px}
 .pa-book-thumbs{display:flex;align-items:center;gap:8px;padding:8px 14px;overflow-x:auto;border-top:1px solid var(--pa-line);background:var(--pa-panel);scrollbar-width:thin}
-.photo-album .pa-book-thumb{display:flex;flex:none;flex-wrap:wrap;gap:1px;padding:4px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft)}
+.pa-book-thumbs[hidden]{display:none}
+.photo-album .pa-book-thumb{display:flex;flex:none;flex-direction:column;align-items:center;gap:1px;padding:4px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-soft)}
 .photo-album .pa-book-thumb.active{border-color:var(--pa-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--pa-accent) 25%,transparent)}
-.pa-mini-page{position:relative;display:block;width:36px;height:48px;overflow:hidden;border-radius:2px}
+.pa-mini-spread{display:flex;justify-content:center;gap:1px}
+.pa-mini-page{position:relative;display:block;flex:none;width:36px;height:48px;overflow:hidden;border-radius:2px}
 .pa-mini-page img{position:absolute;object-fit:cover;box-shadow:0 0 0 .5px rgba(0,0,0,.15)}
-.pa-book-thumb small{flex-basis:100%;margin-top:2px;color:var(--pa-muted);font-size:10px;text-align:center}
+.pa-book-thumb small{margin-top:2px;color:var(--pa-muted);font-size:10px;text-align:center;white-space:nowrap}
 .photo-album .pa-book-thumb-add{flex:none;width:52px;height:66px;border:1px dashed var(--pa-line);border-radius:8px;background:transparent;color:var(--pa-muted);font-weight:700}
 .pa-book-reading .pa-header,.pa-book-reading .pa-footer,.pa-book-reading .pa-book-tray,.pa-book-reading .pa-book-thumbs,.pa-book-reading .pa-book-tools{display:none}
 .pa-book-reading .pa-book{background:#2a2622}

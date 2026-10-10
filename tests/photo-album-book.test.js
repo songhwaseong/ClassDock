@@ -119,5 +119,57 @@ test("이미 만든 쪽 그림은 꾸미기가 같을 때만 바로 쓴다(넘�
   assert.equal(album.composedNow(item).url, "blob:p1");
   item.stickers = [{ id:"s1", art:"round", x:50, y:50, w:20, r:0 }];
   assert.equal(album.composedNow(item), null, "꾸미기가 바뀌면 옛 그림을 쓰지 않는다");
-  assert.deepEqual(plain(album.composedNow({ id:"v1", type:"video", thumbnail:"data:v" })), { url:"data:v", aspect:0 });
+  assert.deepEqual(plain(album.composedNow({ id:"v1", type:"video", thumbnail:"data:v" })), { url:"data:v", aspect:9/16 });
+});
+
+test("사진과 가로·세로 영상을 함께 가져와도 빈 쪽 없이 올바른 비율로 배치한다", () => {
+  const album = loadAlbum();
+  const records = [photo("p", day(1)), { id:"wide", type:"video", created:day(1), width:1920, height:1080 }, { id:"tall", type:"video", created:day(1), width:720, height:1280 }];
+  album.useRecords(records);
+  album.set("albumItem", { id:album.ALBUM_ID, type:"album", book:{ v:1, pages:[] } });
+  album.appendToBook(records);
+  const pages = album.get("albumItem").book.pages;
+  assert.equal(pages.length, 1);
+  assert.deepEqual(plain(pages[0].slots.map(slot => slot.media)), ["p", "wide", "tall"]);
+  assert.equal(pages[0].slots[1].a, 1080/1920);
+  assert.equal(pages[0].slots[2].a, 1280/720);
+  assert.ok(pages.every(page => page.slots.length > 0));
+  for (const slot of pages[0].slots){
+    assert.ok(slot.x + slot.w <= 100.01);
+    assert.ok(slot.y + slot.w * slot.a * .75 <= 100.01);
+  }
+  clearTimeout(album.get("bookSaveTimer"));
+});
+
+test("재실행·다시 가져오기는 예전 자동 빈 쪽을 정리하되 직접 만든 빈 쪽과 글 쪽은 보존한다", async () => {
+  const album = loadAlbum();
+  const p = photo("p", day(1)); album.useRecords([p]);
+  album.set("albumItem", { id:album.ALBUM_ID, type:"album", book:{ v:1, pages:[
+    { id:"ghost", slots:[], texts:[], stickers:[] },
+    { id:"used", slots:[{ id:"s", media:"p" }], texts:[], stickers:[] },
+    { id:"manual", slots:[], texts:[], stickers:[], keepEmpty:true },
+    { id:"note", slots:[], texts:[{ id:"t", text:"기억" }], stickers:[] }
+  ] } });
+  await album.ensureBook();
+  assert.deepEqual(plain(album.get("albumItem").book.pages.map(page => page.id)), ["used", "manual", "note"]);
+  assert.equal(album.get("albumItem").book.pages[1].keepEmpty, true);
+  const v = { id:"v", type:"video", created:day(2), width:720, height:1280 };
+  album.useRecords([v, p]); album.appendToBook([v]);
+  assert.deepEqual(plain(album.get("albumItem").book.pages.map(page => page.id)), ["used", "manual", "note"]);
+  assert.equal(album.get("albumItem").book.pages[2].slots[0].media, "v");
+  clearTimeout(album.get("bookSaveTimer"));
+});
+
+test("중간 쪽의 마지막 사진 삭제는 자동 빈 쪽을 빼고 뒤쪽 선택의 쪽 번호를 맞춘다", () => {
+  const album = loadAlbum(); album.useRecords([photo("a", day(1)), photo("b", day(2))]);
+  album.set("albumItem", { id:album.ALBUM_ID, type:"album", book:{ v:1, pages:[
+    { id:"p1", slots:[{ id:"a-slot", media:"a" }], texts:[], stickers:[] },
+    { id:"p2", slots:[{ id:"b-slot", media:"b" }], texts:[], stickers:[] }
+  ] } });
+  album.set("bookPage", 1).set("bookPick", { kind:"slot", page:1, id:"b-slot" });
+  album.removeFromBook("a");
+  assert.deepEqual(plain(album.get("albumItem").book.pages.map(page => page.id)), ["p2"]);
+  assert.equal(album.get("bookPage"), 0);
+  assert.equal(album.get("bookPick").page, 0);
+  clearTimeout(album.get("bookSaveTimer"));
 });

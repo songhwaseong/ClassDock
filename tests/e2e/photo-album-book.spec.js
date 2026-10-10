@@ -165,7 +165,7 @@ test("겹쳐 가려진 사진도 Alt+누르기로 골라 끌 수 있고, 도구�
   const lifted = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).closest(".pa-slot").dataset.id, { x:a.x + a.width / 2, y:a.y + a.height / 2 });
   expect(lifted).toBe(firstId);
   // 고른 사진 도구는 위 줄에 뜬다
-  await expect(page.locator(".pa-book-pick-tools button")).toHaveCount(5);
+  await expect(page.locator(".pa-book-pick-tools button")).toHaveCount(6);
 
   // 손잡이는 쪽 안(잘리지 않는 자리)에 있다
   const pageBox = await page.locator('.pa-page[data-index="0"]').boundingBox();
@@ -199,7 +199,7 @@ test("겹쳐 가려진 사진도 Alt+누르기로 골라 끌 수 있고, 도구�
   }
 });
 
-test("사진 칸(트레이)에서 끌면 손잡이·끄는 그림·놓일 자리 점선이 보이고, 보인 자리에 놓인다", async ({ page }) => {
+test("사진 칸(트레이)에서 끌면 기존 사진을 복제하지 않고 미리 보인 자리에 옮긴다", async ({ page }) => {
   await boot(page);
   await importImages(page, 3);
   await expect(pageSlots(page, 0)).toHaveCount(3);
@@ -225,6 +225,8 @@ test("사진 칸(트레이)에서 끌면 손잡이·끄는 그림·놓일 자리
   await page.mouse.up();
 
   await expect(target.locator(".pa-slot")).toHaveCount(1);
+  await expect(pageSlots(page, 0)).toHaveCount(2);
+  await expect(page.locator(".pa-spread .pa-slot")).toHaveCount(3);
   expect(await target.locator(".pa-slot").evaluate((el) => [el.style.left, el.style.top, el.style.width])).toEqual(ghostAt);   // 보인 자리 그대로
   await expect(page.locator(".pa-drop-ghost")).toHaveCount(0);
   await expect(page.locator(".photo-album")).not.toHaveClass(/pa-tray-dragging/);

@@ -90,6 +90,7 @@ const PhotoAlbum = (() => {
   const pickedIsOneGroup = item => { const parts = pickedParts(item), g = parts[0] && parts[0].g; return !!g && parts.every(part => part.g === g) && item.stickers.filter(part => part.g === g).length === parts.length; };
   const pickedHasGroup = item => pickedParts(item).some(part => part.g);
   let dbPromise, records = [], selectedId = null, filter = "all", category = "안경";
+  let mediaSelecting = false, mediaPicked = new Set(), mediaDeleteBusy = false;
   let nativeStorage = false;
   const blobLoads = new Map();
   let root = null, stageUrl = null, listUrls = [], observer = null, viewing = false;
@@ -1603,6 +1604,14 @@ const PhotoAlbum = (() => {
   function onHistoryKey(event){
     if (!root || !root.isConnected || root.closest("[hidden]") || drawing || event.altKey) return;
     if (closeAlbumMenu) return;
+    if (mediaDeleteBusy) return;
+    if (mediaSelecting && event.target && event.target.closest && event.target.closest(".pa-media-card,.pa-book-tray-item,.pa-media-actions")){
+      const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
+      if (!mod && key === "escape"){ event.preventDefault(); setMediaSelecting(false); }
+      else if (mod && key === "a"){ event.preventDefault(); selectAllMedia(albumMode); }
+      else if (!mod && (key === "delete" || key === "backspace")){ event.preventDefault(); removeMediaItems(records.filter(item => mediaPicked.has(item.id))); }
+      return;
+    }
     if (albumMode === "book"){ onBookKey(event); return; }
     if (viewing){ onViewingKey(event); return; }
     const target = event.target;
@@ -1646,6 +1655,64 @@ const PhotoAlbum = (() => {
     [["all","▦ 전체"],["image","▧ 사진"],["video","▷ 동영상"],["favorite","♡ 즐겨찾기"]].forEach(([id,label]) => host.appendChild(button(label, () => { filter = id; paintFilters(); paintList(); }, filter === id ? "active" : "")));
   }
   const shownRecords = () => records.filter(item => filter === "all" || (filter === "favorite" ? item.favorite : item.type === filter));
+  // 두 화면의 목록은 같은 사진과 선택 상태를 쓴다. 장식 선택(picked)과는 따로 둔다.
+  function setMediaSelecting(on){
+    if (mediaDeleteBusy) return;
+    mediaSelecting = on; mediaPicked.clear(); syncMediaSelection();
+  }
+  function toggleMediaSelection(id){
+    if (!mediaSelecting || mediaDeleteBusy || !records.some(item => item.id === id)) return;
+    if (mediaPicked.has(id)) mediaPicked.delete(id); else mediaPicked.add(id);
+    syncMediaSelection();
+  }
+  function selectAllMedia(scope){
+    if (!mediaSelecting || mediaDeleteBusy) return;
+    const list = scope === "edit" ? shownRecords() : records, all = list.length && list.every(item => mediaPicked.has(item.id));
+    list.forEach(item => all ? mediaPicked.delete(item.id) : mediaPicked.add(item.id));
+    syncMediaSelection();
+  }
+  function syncMediaSelection(){
+    if (!root) return;
+    const known = new Map(records.map(item => [item.id, item]));
+    mediaPicked.forEach(id => { if (!known.has(id)) mediaPicked.delete(id); });
+    root.classList.toggle("pa-media-selecting", mediaSelecting);
+    root.querySelectorAll(".pa-media-card,.pa-book-tray-item").forEach(card => {
+      const item = known.get(card.dataset.mediaId); if (!item) return;
+      const book = card.classList.contains("pa-book-tray-item");
+      card.classList.toggle("is-selected", mediaPicked.has(item.id)); card.disabled = mediaDeleteBusy;
+      if (mediaSelecting) card.setAttribute("aria-pressed", String(mediaPicked.has(item.id))); else card.removeAttribute("aria-pressed");
+      const label = item.name + (mediaSelecting ? " · 삭제할 항목 선택" : book ? card.classList.contains("is-used") ? " · 끌어다 놓거나 눌러서 기존 사진을 옮기기" : " · 쪽으로 끌거나 눌러서 넣기" : "");
+      card.title = label; card.setAttribute("aria-label", label);
+      if (book) card.draggable = !mediaSelecting && !mediaDeleteBusy;
+    });
+    root.querySelectorAll(".pa-media-actions").forEach(bar => {
+      const select = bar.querySelector('[data-media-action="select"]'), all = bar.querySelector('[data-media-action="all"]'), remove = bar.querySelector('[data-media-action="delete"]');
+      select.textContent = mediaSelecting ? "선택 끝" : "선택"; select.disabled = mediaDeleteBusy || !records.length; select.setAttribute("aria-pressed", String(mediaSelecting));
+      const list = bar.dataset.scope === "edit" ? shownRecords() : records;
+      all.hidden = !mediaSelecting; all.disabled = mediaDeleteBusy || !list.length;
+      all.textContent = list.length && list.every(item => mediaPicked.has(item.id)) ? "선택 해제" : "전체 선택";
+      all.title = bar.dataset.scope === "edit" ? "현재 필터의 사진·영상 선택 또는 해제" : "모든 사진·영상 선택 또는 해제";
+      remove.textContent = mediaDeleteBusy ? "삭제 중…" : mediaSelecting ? "선택 삭제 (" + mediaPicked.size + ")" : "전체 삭제";
+      remove.disabled = mediaDeleteBusy || !(mediaSelecting ? mediaPicked.size : records.length || (albumItem.book && albumItem.book.pages.length));
+      remove.title = mediaSelecting ? "선택한 사진·영상을 두 화면과 앨범 쪽에서 삭제" : "모든 사진·영상과 앨범 쪽·쪽 미리보기를 함께 삭제";
+    });
+    const hint = root.querySelector(".pa-book-tray-hint"); if (hint) hint.textContent = mediaSelecting ? "사진을 골라 한꺼번에 삭제" : "끌거나 눌러 배치 · 기존 사진은 이동";
+  }
+  function setupMediaActions(){
+    mediaSelecting = false; mediaPicked.clear();
+    [[".pa-book-tray-list", "book"], [".pa-list", "edit"]].forEach(([selector, scope]) => {
+      const list = root.querySelector(selector); if (!list) return;
+      const bar = document.createElement("div"); bar.className = "pa-media-actions"; bar.dataset.scope = scope; bar.setAttribute("role", "group"); bar.setAttribute("aria-label", "사진·영상 삭제");
+      const select = button("선택", () => setMediaSelecting(!mediaSelecting)); select.dataset.mediaAction = "select";
+      const all = button("전체 선택", () => selectAllMedia(scope)); all.dataset.mediaAction = "all"; all.hidden = true;
+      const remove = button("전체 삭제", () => removeMediaItems(mediaSelecting ? records.filter(item => mediaPicked.has(item.id)) : records, { all:!mediaSelecting })); remove.dataset.mediaAction = "delete";
+      bar.append(select, remove, all); list.before(bar);
+    });
+    syncMediaSelection();
+  }
+  function mediaCheck(){
+    const mark = document.createElement("span"); mark.className = "pa-media-check ui-keep-symbols"; mark.textContent = "✓"; mark.setAttribute("aria-hidden", "true"); return mark;
+  }
   function selectItem(id){ selectedId = id; picked = new Set(); syncMusic({ switching:true }); paintList(); paintStage(); paintBackgrounds(); paintStickers(); }
   // 감상 모드는 사진만 남긴다(머리 줄·목록·아래 줄은 CSS 가 감춤). 끌 때는 목록에서 보던 사진이 보이게 굴린다.
   // 감상 모드에서 마우스가 2.5초 가만히 있으면 커서와 위쪽 조작 줄을 감춘다. 움직이거나 누르면 다시 보인다.
@@ -1697,19 +1764,21 @@ const PhotoAlbum = (() => {
     root.querySelector(".pa-count").textContent = shown.length + "개";
     if (!shown.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = records.length ? "이 항목에 미디어가 없습니다." : "사진·영상을 가져와 시작하세요."; host.appendChild(p); }
     shown.forEach(item => {
-      const card = button("", () => selectItem(item.id), "pa-media-card" + (selectedId === item.id ? " active" : ""));
+      const card = button("", () => mediaSelecting ? toggleMediaSelection(item.id) : selectItem(item.id), "pa-media-card" + (selectedId === item.id ? " active" : ""));
       card.dataset.mediaId = item.id;
       const thumb = document.createElement("span"); thumb.className = "pa-thumb";
-      if (item.thumbnail || (item.type === "image" && item.blob)){
+      const preview = mediaThumbnail(item);
+      if (preview || (item.type === "image" && item.blob)){
         const img = document.createElement("img"); img.alt = ""; img.loading = "lazy";
-        if (item.thumbnail) img.src = item.thumbnail;
+        if (preview) img.src = preview;
         else { const url = URL.createObjectURL(item.blob); listUrls.push(url); img.src = url; }
         thumb.appendChild(img);
       } else thumb.textContent = item.type === "video" ? "▶" : "▧";
       if (item.type === "video"){ const badge = document.createElement("b"); badge.textContent = "▶ 영상"; thumb.appendChild(badge); }
       const name = document.createElement("span"); name.className = "pa-media-name"; name.textContent = item.name;
-      card.append(thumb,name); host.appendChild(card);
+      card.append(thumb,name,mediaCheck()); host.appendChild(card);
     });
+    syncMediaSelection();
   }
   function paintBackgrounds(){
     paintMusic();
@@ -2893,8 +2962,19 @@ const PhotoAlbum = (() => {
     stageUrl = URL.createObjectURL(item.blob);
     if (item.type === "video"){
       const wrap = document.createElement("div"); wrap.className = "pa-video-wrap";
-      const video = document.createElement("video"); video.src = stageUrl; video.poster = item.thumbnail || ""; video.controls = true; video.preload = "metadata"; video.playsInline = true;
+      const video = document.createElement("video"); video.src = stageUrl; video.poster = mediaThumbnail(item); video.controls = true; video.preload = "metadata"; video.playsInline = true;
       const play = button("▶", async () => { play.remove(); try { await video.play(); } catch(error){ console.warn(error); } }, "pa-play");
+      video.onloadedmetadata = () => {
+        if (!records.some(row => row.id === item.id)) return;
+        if (!(video.videoWidth > 0 && video.videoHeight > 0) || (item.width === video.videoWidth && item.height === video.videoHeight)) return;
+        item.width = video.videoWidth; item.height = video.videoHeight; save(item);
+      };
+      video.onerror = () => {
+        play.remove();
+        const hint = document.createElement("p"); hint.className = "pa-video-error"; hint.setAttribute("role", "status");
+        hint.textContent = "이 영상 형식을 재생하지 못했습니다. MP4(H.264) 또는 WebM으로 변환한 뒤 다시 가져와 주세요.";
+        wrap.appendChild(hint);
+      };
       video.onplay = () => play.remove(); wrap.append(video,play); host.appendChild(wrap);
     } else {
       const board = document.createElement("div"); board.className = "pa-artboard"; board.dataset.ratio = item.width / item.height || 1; board.style.aspectRatio = String(board.dataset.ratio); board.style.background = background(bgById(item.background));
@@ -2986,14 +3066,51 @@ const PhotoAlbum = (() => {
     caption.append(name,actions); host.appendChild(caption);
   }
   async function removeMedia(item){
-    if (!await confirmDialog("사진첩에서 이 항목을 삭제할까요?", "삭제", "취소")) return;
+    return removeMediaItems([item]);
+  }
+  async function removeMediaItems(items, options = {}){
+    if (mediaDeleteBusy) return;
+    const ids = new Set(items.filter(Boolean).map(item => item.id)), targets = records.filter(item => ids.has(item.id));
+    const pageCount = bookOf().pages.length;
+    if (!targets.length && !(options.all && pageCount)) return;
+    mediaDeleteBusy = true; syncMediaSelection();
     try {
-      await deleteItem(item); if (musicSession && musicSession.item === item) stopMusic();
-      records = records.filter(row => row.id !== item.id); removeFromBook(item.id);
-      for (const track of musicTracks(item.music)) await dropAudioRecord(track.id);
-      if (selectedId === item.id){ selectedId = records[0] && records[0].id; picked = new Set(); }
-      paintList(); paintStage(); paintBackgrounds(); paintAdjust(); paintBook();
-    } catch(error){ console.error(error); notice("항목을 삭제하지 못했습니다."); }
+      const question = options.all ? targets.length ? "사진첩의 사진·영상 전체 " + targets.length + "개를 삭제할까요?" : "앨범에 남은 " + pageCount + "쪽을 모두 삭제할까요?" : targets.length === 1 ? "사진첩에서 이 항목을 삭제할까요?" : "선택한 사진·영상 " + targets.length + "개를 삭제할까요?";
+      const scope = options.all ? "앨범 쪽·쪽의 글과 장식·아래 쪽 미리보기도 함께 삭제됩니다." : "앨범 쪽과 1장 보기 목록에서도 삭제됩니다.";
+      if (!await confirmDialog(question + "\n" + scope + "\n가져온 원본 파일은 그대로 두며, 삭제는 되돌릴 수 없습니다.", options.all ? "전체 삭제" : "삭제", "취소")) return;
+      const deleted = [], failed = [];
+      for (const item of targets){
+        try {
+          await deleteItem(item); deleted.push(item);
+          records = records.filter(row => row.id !== item.id); mediaPicked.delete(item.id); histories.delete(item.id);
+          if (musicSession && musicSession.item === item) stopMusic();
+          if (sfxSession && sfxSession.item === item) stopAllSfx();
+          if (bookVideo && bookVideo.mediaId === item.id) stopBookVideo();
+          const hit = composed.get(item.id); if (hit && hit.url && hit.url.startsWith("blob:")) URL.revokeObjectURL(hit.url); composed.delete(item.id);
+        } catch(error){ console.error(error); failed.push(item); }
+        status("사진·영상 삭제 중… " + (deleted.length + failed.length) + "/" + targets.length);
+      }
+      let bookSaveFailed = false;
+      const reset = options.all && !failed.length && !records.length;
+      if (deleted.length || reset){
+        if (!records.some(item => item.id === selectedId)){ selectedId = records[0] && records[0].id; picked = new Set(); }
+        if (!records.length) mediaSelecting = false;
+        if (reset) resetBook(); else removeFromBook(deleted.map(item => item.id));
+        // 쪽 저장을 끝낸 뒤 완료를 알린다. 재실행 시에도 두 화면에서 같은 항목이 빠진다.
+        if (bookSaveTimer){
+          clearTimeout(bookSaveTimer); bookSaveTimer = 0;
+          try { await persistMetadata(albumItem); } catch(error){ console.error(error); bookSaveFailed = true; }
+        }
+        const tracks = new Set(deleted.flatMap(item => musicTracks(item.music).map(track => track.id)));
+        for (const id of tracks) await dropAudioRecord(id);
+      }
+      const message = failed.length ? deleted.length + "개를 삭제했습니다. " + failed.length + "개는 삭제하지 못했습니다. 다시 시도해 주세요." : reset ? "모든 사진·영상과 앨범 쪽을 삭제했습니다." : deleted.length + "개를 사진첩에서 삭제했습니다.";
+      notice(message + (bookSaveFailed ? " 앨범 쪽 정보를 저장하지 못했습니다." : ""));
+    } catch(error){ console.error(error); notice("삭제 처리 중 오류가 발생했습니다. 남은 항목을 확인해 주세요."); }
+    finally {
+      mediaDeleteBusy = false;
+      if (root){ paintList(); paintStage(); paintBackgrounds(); paintAdjust(); paintBook(); syncMediaSelection(); }
+    }
   }
   async function dimensions(blob){ const image = await createImageBitmap(blob); const size = { width:image.width, height:image.height }; image.close(); return size; }
   async function imageThumbnail(blob){
@@ -3007,14 +3124,29 @@ const PhotoAlbum = (() => {
       return canvas.toDataURL("image/jpeg", .72);
     } finally { image.close(); }
   }
-  async function videoThumbnail(blob){
+  const VIDEO_PLACEHOLDER = "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="280" height="158" viewBox="0 0 280 158"><rect width="280" height="158" rx="8" fill="#263446"/><circle cx="140" cy="66" r="26" fill="#ffffff" opacity=".16"/><path d="M133 51l23 15-23 15z" fill="#ffffff"/><text x="140" y="119" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="17">동영상</text></svg>');
+  const mediaThumbnail = item => item && (item.thumbnail || (item.type === "video" ? VIDEO_PLACEHOLDER : "")) || "";
+  async function videoThumbnail(blob, item){
     const url = URL.createObjectURL(blob);
     try { return await new Promise(resolve => {
-      const video = document.createElement("video"); video.muted = true; video.preload = "auto"; video.src = url;
-      const timeout = setTimeout(() => resolve(null), 6000);
-      const capture = () => { clearTimeout(timeout); try { const canvas = document.createElement("canvas"); canvas.width = 280; canvas.height = Math.max(120,Math.round(280*video.videoHeight/video.videoWidth)); canvas.getContext("2d").drawImage(video,0,0,canvas.width,canvas.height); resolve(canvas.toDataURL("image/jpeg",.7)); } catch(error){ resolve(null); } };
-      video.onloadeddata = () => { if (video.duration > .2) video.currentTime = Math.min(.25,video.duration/2); else capture(); };
-      video.onseeked = capture; video.onerror = () => { clearTimeout(timeout); resolve(null); };
+      const video = document.createElement("video"); video.muted = true; video.preload = "auto"; video.playsInline = true;
+      let finished = false;
+      const size = () => { if (item && video.videoWidth > 0 && video.videoHeight > 0){ item.width = video.videoWidth; item.height = video.videoHeight; } };
+      const finish = thumbnail => {
+        if (finished) return; finished = true; clearTimeout(timeout); size();
+        video.onloadedmetadata = video.onloadeddata = video.onseeked = video.onerror = null;
+        video.pause(); video.removeAttribute("src"); video.load(); resolve(thumbnail);
+      };
+      const capture = () => {
+        if (finished) return;
+        size();
+        if (!(video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 2)){ finish(null); return; }
+        try { const canvas = document.createElement("canvas"); canvas.width = 280; canvas.height = Math.max(1,Math.round(280*video.videoHeight/video.videoWidth)); canvas.getContext("2d").drawImage(video,0,0,canvas.width,canvas.height); finish(canvas.toDataURL("image/jpeg",.7)); } catch(error){ finish(null); }
+      };
+      const timeout = setTimeout(capture, 6000);
+      video.onloadedmetadata = size;
+      video.onloadeddata = () => { size(); if (video.duration > .2){ try { video.currentTime = Math.min(.25,video.duration/2); } catch { capture(); } } else capture(); };
+      video.onseeked = capture; video.onerror = () => finish(null); video.src = url;
     }); } finally { URL.revokeObjectURL(url); }
   }
   // 가져온 파일의 갈래. 파일 종류(mime)를 먼저 보고, 없으면 확장자로 본다(음악 .webm 이 영상으로 잡히지 않게 mime 이 우선).
@@ -3040,7 +3172,7 @@ const PhotoAlbum = (() => {
     for (const {file,type} of files){
       const item = { id:crypto.randomUUID(), name:file.name, type, mime:file.type, blob:file, favorite:false, background:"white", stickers:[], created:Date.now() + count };
       try { if (type === "image"){ Object.assign(item,await dimensions(file)); item.thumbnail = await imageThumbnail(file); }
-        else item.thumbnail = await videoThumbnail(file);
+        else item.thumbnail = await videoThumbnail(file, item);
         await persistNew(item); records.unshift(item); added.push(item); if (!selectedId) selectedId = item.id; count++;
       } catch(error){ console.error(error); notice(error && error.message === "photo-album-file-too-large"
         ? file.name + " 파일은 256MB를 넘어 가져올 수 없습니다."
@@ -3048,7 +3180,7 @@ const PhotoAlbum = (() => {
     }
     paintList(); paintStage(); paintBackgrounds(); paintAdjust();
     if (added.length) appendToBook(added);   // 앨범 책: 마지막 쪽에 자리가 있으면 거기, 없으면 새 쪽에
-    status(count + "개 파일을 저장했습니다." + (added.length ? " 앨범 마지막 쪽에도 넣었습니다." : ""));
+    status(count + "개 파일을 저장했습니다." + (added.length ? " 앨범 마지막 쪽에도 넣었습니다." : "") + (added.some(item => item.type === "video" && !item.thumbnail) ? " 미리보기 없는 영상도 ▶ 단추로 열 수 있습니다." : ""));
     if (songs.length) await importSongs(songs, records.find(item => item.type === "image" && files.some(entry => entry.file === item.blob)));
   }
   async function importSongs(songs, fallback){
@@ -3286,7 +3418,7 @@ const PhotoAlbum = (() => {
   const BOOK_MODE_KEY = "classdock.photoAlbum.mode", BOOK_MEDIA_MIME = "application/x-classdock-album-media";
   const BOOK_PAPERS = [["cream","크림","#fbf6ea"],["white","하양","#ffffff"],["sky","하늘","#eaf5ff"],["mint","민트","#e7f7ef"],
     ["pink","분홍","#fdeef3"],["lavender","라벤더","#f1ecff"],["kraft","크라프트","#e6d3b3"],["night","밤","#26324a"]];
-  const BOOK_PAGE_RATIO = 0.75, BOOK_MAX_PER_PAGE = 4, BOOK_MAX_PAGES = 400, BOOK_HISTORY_LIMIT = 60;
+  const BOOK_PAGE_RATIO = 0.75, BOOK_MAX_PER_PAGE = 4, BOOK_MAX_SLOTS_PER_PAGE = 12, BOOK_MAX_PAGES = 400, BOOK_HISTORY_LIMIT = 60;
   // 쪽 안 칸 수별 자리(쪽 폭·높이에 대한 %). 사진은 칸 안에 비율을 지켜 가운데 맞춘다.
   const BOOK_CELLS = {
     1:[{ x:9, y:7, w:82, h:78 }],
@@ -3296,6 +3428,8 @@ const PhotoAlbum = (() => {
   };
   const BOOK_TILTS = [-2, 1.5, -1, 2, -1.5, 1];
   let albumMode = "book", bookSpread = 0, bookPage = 0, bookPick = null, bookReading = false, bookSaveTimer = 0, bookObserver = null, bookTurnTimer = 0;
+  let bookVideo = null;   // 펼친 쪽 안에서 재생하는 영상 한 개. 쪽·화면을 떠나면 원본 연결도 해제한다.
+  let bookSlotDrag = null;
   const bookHistory = { undo:[], redo:[], base:"" };
   const composed = new Map(), composing = new Map();   // 사진 id → { sig, url, aspect } — 쪽에 보일 '꾸민 사진' 그림(이번 실행에만)
   const bookId = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "b" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
@@ -3310,6 +3444,7 @@ const PhotoAlbum = (() => {
       const edge = Math.max(item.width, item.height) * .07;
       return (item.height + edge*2) / (item.width + edge*2);
     }
+    if (item.type === "video" && item.width > 0 && item.height > 0) return item.height / item.width;
     const hit = composed.get(item.id);
     return hit && hit.aspect ? hit.aspect : 9/16;
   }
@@ -3327,7 +3462,7 @@ const PhotoAlbum = (() => {
         x:clampNum(text.x, -20, 100, 10), y:clampNum(text.y, -20, 100, 88), s:clampNum(text.s, 3, 14, 5.5), c:/^#[0-9a-f]{6}$/i.test(String(text.c || "")) ? text.c : ""
       }));
       const stickers = (Array.isArray(page.stickers) ? page.stickers : []).slice(0, 120).map(cleanPagePart).filter(Boolean);
-      pages.push({ id:String(page.id || bookId()), paper:bookPaper(page.paper)[0], slots, texts, stickers });
+      pages.push({ id:String(page.id || bookId()), paper:bookPaper(page.paper)[0], slots, texts, stickers, ...(page.keepEmpty ? { keepEmpty:true } : {}) });
     }
     return { v:1, pages };
   }
@@ -3375,6 +3510,7 @@ const PhotoAlbum = (() => {
   function appendToBook(items){
     if (!items.length) return;
     const book = bookOf(), list = items.filter(item => item && (item.type === "image" || item.type === "video")).sort((a, b) => (a.created || 0) - (b.created || 0));
+    pruneEmptyBookPages();
     let last = book.pages[book.pages.length - 1];
     for (const item of list){
       if (!last || last.slots.length >= BOOK_MAX_PER_PAGE){
@@ -3385,21 +3521,41 @@ const PhotoAlbum = (() => {
     }
     bookChanged();
   }
-  function removeFromBook(mediaId){
+  function removeFromBook(mediaIds){
     const book = albumItem.book; if (!book || !Array.isArray(book.pages)) return;
+    const ids = new Set(Array.isArray(mediaIds) ? mediaIds : [mediaIds]);
     let touched = false;
-    for (const page of book.pages){ const before = page.slots.length; page.slots = page.slots.filter(slot => slot.media !== mediaId); if (page.slots.length !== before) touched = true; }
+    for (const page of book.pages){ const before = page.slots.length; page.slots = page.slots.filter(slot => !ids.has(slot.media)); if (page.slots.length !== before) touched = true; }
+    if (pruneEmptyBookPages()) touched = true;
     if (bookPick && bookPick.kind === "slot" && !book.pages.some(page => page.slots.some(slot => slot.id === bookPick.id))) bookPick = null;
     if (touched) bookChanged();
+  }
+  // 자동으로 생긴 빈 쪽은 정리하되, 사용자가 '쪽 더하기'로 만든 빈 쪽은 남긴다.
+  function pruneEmptyBookPages(){
+    const book = bookOf(), current = book.pages[bookPage], pickPage = bookPick && book.pages[bookPick.page];
+    const before = book.pages.length;
+    book.pages = book.pages.filter(page => page.keepEmpty || page.slots.length || page.texts.length || (page.stickers || []).length);
+    if (book.pages.length === before) return false;
+    const at = book.pages.indexOf(current); bookPage = at < 0 ? Math.max(0, Math.min(bookPage, book.pages.length - 1)) : at;
+    bookSpread = bookPage - bookPage % bookPerView();
+    if (bookPick){ const pickAt = book.pages.indexOf(pickPage); if (pickAt < 0) bookPick = null; else bookPick.page = pickAt; }
+    return true;
+  }
+  function resetBook(){
+    bookOf().pages = []; bookPage = bookSpread = 0; bookPick = null;
+    bookHistory.undo = []; bookHistory.redo = []; bookHistory.base = JSON.stringify(bookOf());
+    bookChanged({ skipHistory:true });
   }
   // 사진첩을 열 때: 쪽 정보가 없으면(처음) 가져온 사진으로 채워 저장한다. 있으면 지워진 사진 칸만 걸러 낸다.
   async function ensureBook(){
     const first = !albumItem.book || !Array.isArray(albumItem.book.pages);
     albumItem.book = normalizeBook(albumItem.book);
+    const pruned = pruneEmptyBookPages();
     if (first && records.length){
       albumItem.book.pages = autoFillPages(records);
       try { await persistMetadata(albumItem); } catch(error){ console.warn("앨범 쪽을 저장하지 못했습니다:", error); }
     }
+    else if (pruned){ try { await persistMetadata(albumItem); } catch(error){ console.warn("빈 앨범 쪽을 정리해 저장하지 못했습니다:", error); } }
     bookHistory.base = JSON.stringify(albumItem.book); bookHistory.undo = []; bookHistory.redo = [];
   }
   function bookChanged(options = {}){
@@ -3446,19 +3602,19 @@ const PhotoAlbum = (() => {
   // 이미 만든 쪽 그림이 지금 꾸미기와 같으면 바로 돌려준다(없으면 null). 쪽을 그릴 때 테두리 없는 썸네일을 거치지 않게.
   function composedNow(item){
     if (!item) return null;
-    if (item.type !== "image") return item.thumbnail ? { url:item.thumbnail, aspect:0 } : null;
+    if (item.type !== "image") return mediaThumbnail(item) ? { url:mediaThumbnail(item), aspect:mediaAspect(item) } : null;
     const hit = composed.get(item.id); return hit && hit.sig === composedSig(item) ? hit : null;
   }
   function composedImage(item){
     if (!item) return Promise.resolve(null);
-    if (item.type !== "image") return Promise.resolve(item.thumbnail ? { url:item.thumbnail, aspect:0 } : null);
+    if (item.type !== "image") return Promise.resolve(composedNow(item));
     const sig = composedSig(item), hit = composed.get(item.id);
     if (hit && hit.sig === sig) return Promise.resolve(hit);
     const key = item.id + "|" + sig;
     if (composing.has(key)) return composing.get(key);
     const job = composeCanvas(item, 1100).then(canvas => new Promise(resolve => canvas.toBlob(blob => resolve({ blob, canvas }), "image/jpeg", .9)))
       .then(({ blob, canvas }) => {
-        if (!blob) return null;
+        if (!blob || !records.some(row => row.id === item.id)) return null;
         const old = composed.get(item.id); if (old && old.url && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url);
         const row = { sig, url:URL.createObjectURL(blob), aspect:canvas.height / canvas.width };
         composed.set(item.id, row); return row;
@@ -3470,9 +3626,97 @@ const PhotoAlbum = (() => {
   }
   function releaseComposed(){ for (const row of composed.values()) if (row.url && row.url.startsWith("blob:")) URL.revokeObjectURL(row.url); composed.clear(); }
 
+  function attachBookVideo(host, session){
+    if (session.host) session.host.classList.remove("is-playing");
+    session.host = host; host.classList.add("is-playing");
+    // 재생 준비나 메타데이터 읽기로 원래 영상 칸의 모양이 달라지지 않게 한다.
+    host.style.aspectRatio = session.aspectRatio;
+    host.append(session.video, session.close, session.note);
+    if (!bookReading) host.append(session.move, session.resize);
+    else { session.move.remove(); session.resize.remove(); }
+  }
+  function stopBookVideo(focus = false){
+    const session = bookVideo; if (!session) return;
+    bookVideo = null;   // 원본을 읽는 중에 닫아도 뒤늦게 다시 재생하지 않는다.
+    const video = session.video;
+    video.onplaying = video.onerror = null;
+    video.pause(); video.removeAttribute("src"); video.load();
+    video.remove(); session.close.remove(); session.note.remove(); session.move.remove(); session.resize.remove();
+    session.host.classList.remove("is-playing");
+    if (session.url) URL.revokeObjectURL(session.url);
+    if (focus && session.host.isConnected){ const play = session.host.querySelector(".pa-slot-play"); if (play) play.focus(); }
+  }
+  function syncBookVideo(){
+    if (!bookVideo) return;
+    const session = bookVideo, visible = bookOf().pages.slice(bookSpread, bookSpread + bookPerView());
+    if (albumMode !== "book" || !mediaById(session.mediaId) || !visible.some(page => page.slots.some(slot => slot.id === session.slotId && slot.media === session.mediaId))) stopBookVideo();
+  }
+  async function playBookVideo(media, slot, host){
+    if (!root || albumMode !== "book" || mediaDeleteBusy || !host.isConnected || !media || media.type !== "video" || !mediaById(media.id)) return;
+    if (bookVideo && bookVideo.slotId === slot.id && bookVideo.mediaId === media.id) return;
+    stopBookVideo();
+    const video = document.createElement("video"), note = document.createElement("span");
+    const close = iconButton("close", "영상 재생 닫기 (Esc)", event => { event.preventDefault(); event.stopPropagation(); stopBookVideo(true); }, "pa-slot-video-close");
+    const move = iconButton("move", "영상 위치 옮기기 — 끌거나 방향키로 이동", null, "pa-slot-video-move");
+    const resize = button("", null, "pa-slot-handle is-resize pa-slot-video-resize");
+    resize.title = "영상 크기 조절 — 끌거나 방향키로 조절"; resize.setAttribute("aria-label", resize.title);
+    video.className = "pa-slot-video"; video.controls = true; video.playsInline = true;
+    video.disablePictureInPicture = true; video.disableRemotePlayback = true;
+    video.setAttribute("controlsList", "nofullscreen nodownload noremoteplayback");
+    video.setAttribute("aria-label", media.name || "앨범 영상"); video.poster = mediaThumbnail(media);
+    note.className = "pa-slot-video-note"; note.setAttribute("role", "status"); note.textContent = "영상을 준비하고 있습니다…";
+    const session = { slotId:slot.id, mediaId:media.id, host:null, video, close, note, move, resize, url:null, aspectRatio:host.style.aspectRatio };
+    bookVideo = session; attachBookVideo(host, session);
+    // 옆 쪽으로 옮긴 뒤에도, 지금 쪽·칸·영상 요소를 찾아 계속 조절한다.
+    const currentSlot = () => {
+      if (bookVideo !== session || bookReading) return null;
+      const pages = bookOf().pages, pageIndex = pages.findIndex(page => page.slots.some(row => row.id === session.slotId && row.media === session.mediaId));
+      return pageIndex < 0 ? null : { pageIndex, slot:pages[pageIndex].slots.find(row => row.id === session.slotId) };
+    };
+    for (const [control, kind] of [[move, "move"], [resize, "resize"]]){
+      control.addEventListener("pointerdown", event => { const current = currentSlot(); if (current) startSlotDrag(event, current.pageIndex, current.slot, session.host, kind); });
+      control.addEventListener("keydown", event => {
+        if (!/^Arrow(Left|Right|Up|Down)$/.test(event.key)) return;
+        const current = currentSlot(); if (!current) return;
+        event.preventDefault();
+        const { slot, pageIndex } = current, step = event.shiftKey ? 2 : .5;
+        if (kind === "resize") slot.w = clampNum(slot.w + (["ArrowRight", "ArrowUp"].includes(event.key) ? step : -step), 8, 100, slot.w);
+        else if (event.key === "ArrowLeft") slot.x = clampNum(slot.x - step, -40, 100, slot.x);
+        else if (event.key === "ArrowRight") slot.x = clampNum(slot.x + step, -40, 100, slot.x);
+        else if (event.key === "ArrowUp") slot.y = clampNum(slot.y - step, -40, 100, slot.y);
+        else slot.y = clampNum(slot.y + step, -40, 100, slot.y);
+        bookPick = { kind:"slot", page:pageIndex, id:slot.id }; bookPage = pageIndex;
+        bookChanged(); if (control.isConnected) control.focus();
+      });
+    }
+    const showError = message => { if (bookVideo === session){ note.hidden = false; note.textContent = message; } };
+    for (const control of [video, close, move, resize]){
+      for (const type of ["pointerdown", "click", "wheel", "contextmenu"]) control.addEventListener(type, event => event.stopPropagation());
+      control.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); });
+      control.addEventListener("keydown", event => {
+        event.stopPropagation();   // 영상의 탐색·음량·재생 키가 쪽 넘김·사진 이동으로 이어지지 않게.
+        if (event.key === "Escape"){ event.preventDefault(); stopBookVideo(true); }
+      });
+    }
+    video.onplaying = () => { if (bookVideo === session) note.hidden = true; };
+    video.onerror = () => showError("이 영상 형식을 재생할 수 없습니다. MP4(H.264/AAC)로 변환해 다시 가져와 주세요.");
+    try {
+      const blob = await getBlob(media);
+      if (bookVideo !== session) return;
+      if (!root || albumMode !== "book" || !session.host.isConnected || !mediaById(media.id)){ stopBookVideo(); return; }
+      session.url = URL.createObjectURL(blob); video.src = session.url;
+      try { await video.play(); }
+      catch(error){
+        if (error.name === "NotAllowedError") showError("영상 아래의 ▶를 눌러 재생하세요.");
+        else if (error.name !== "AbortError") showError("이 영상 형식을 재생할 수 없습니다. MP4(H.264/AAC)로 변환해 다시 가져와 주세요.");
+      }
+    } catch(error){ console.warn("앨범 영상을 열지 못했습니다:", error); showError("영상을 열지 못했습니다. 닫은 뒤 다시 재생해 주세요."); }
+  }
+
   /* ----- 그리기 ----- */
   function setAlbumMode(next, options = {}){
     if (!root || (next !== "book" && next !== "edit")) return;
+    if (next !== "book") stopBookVideo();
     if (next === "book" && viewing) setViewing(false);
     if (next === "edit" && bookReading) setBookReading(false);
     albumMode = next;
@@ -3493,12 +3737,14 @@ const PhotoAlbum = (() => {
   }
   function pageLabel(index){ return (index + 1) + "쪽"; }
   function paintBook(){
+    stopSlotDrag();
     if (!root) return;
     const host = root.querySelector(".pa-book"); if (!host) return;
     if (albumMode !== "book"){ return; }
     const pages = bookOf().pages, per = bookPerView();
     bookSpread = Math.max(0, Math.min(bookSpread - bookSpread % per, Math.max(0, pages.length - 1) - (Math.max(0, pages.length - 1) % per)));
     if (bookPage < bookSpread || bookPage >= bookSpread + per) bookPage = Math.min(bookSpread, Math.max(0, pages.length - 1));
+    syncBookVideo();
     const where = host.querySelector(".pa-book-where");
     if (where) where.textContent = pages.length ? (per === 2 && pages[bookSpread + 1] ? `${bookSpread + 1}–${bookSpread + 2}쪽 / ${pages.length}` : `${bookSpread + 1}쪽 / ${pages.length}`) : "빈 앨범";
     const spread = host.querySelector(".pa-spread"); spread.replaceChildren(); spread.dataset.pages = String(per);
@@ -3539,7 +3785,7 @@ const PhotoAlbum = (() => {
     // 빈 자리에 사진을 놓으면 쪽을 더하고 그 쪽에 넣는다.
     el.addEventListener("dragover", event => {
       if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes(BOOK_MEDIA_MIME)) return;
-      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; el.classList.add("is-drop");
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = trayDrag && trayDrag.item && placedMediaSlot(null, trayDrag.item) ? "move" : "copy"; el.classList.add("is-drop");
     });
     el.addEventListener("dragleave", event => { if (!el.contains(event.relatedTarget)) el.classList.remove("is-drop"); });
     el.addEventListener("drop", event => {
@@ -3547,8 +3793,9 @@ const PhotoAlbum = (() => {
       event.preventDefault(); event.stopPropagation();
       const media = mediaById(event.dataTransfer.getData(BOOK_MEDIA_MIME)); endTrayDrag(); if (!media) return;
       const pages = bookOf().pages; if (pages.length >= BOOK_MAX_PAGES) return;
+      const rect = el.getBoundingClientRect(), at = { x:(event.clientX - rect.left) / rect.width * 100, y:(event.clientY - rect.top) / rect.height * 100 };
       pages.push({ id:bookId(), paper:(pages[pages.length - 1] && pages[pages.length - 1].paper) || "cream", slots:[], texts:[], stickers:[] });
-      placeMedia(pages.length - 1, media, null);
+      placeMedia(pages.length - 1, media, at);
     });
     return el;
   }
@@ -3572,7 +3819,7 @@ const PhotoAlbum = (() => {
     el.addEventListener("dragover", event => {
       const types = event.dataTransfer ? Array.from(event.dataTransfer.types) : [];
       if (!types.includes(BOOK_MEDIA_MIME) && !types.includes(BOOK_ART_MIME)) return;
-      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; el.classList.add("is-drop");
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = trayDrag && trayDrag.item && placedMediaSlot(page, trayDrag.item) ? "move" : "copy"; el.classList.add("is-drop");
       showDropGhost(el, index, event);
     });
     el.addEventListener("dragleave", event => { if (!el.contains(event.relatedTarget)){ el.classList.remove("is-drop"); clearDropGhost(); } });
@@ -3602,12 +3849,17 @@ const PhotoAlbum = (() => {
     const ready = composedNow(media);
     if (ready) apply(ready); else if (media && media.thumbnail) img.src = media.thumbnail;
     el.appendChild(img);
-    if (media && media.type === "video"){ const badge = document.createElement("span"); badge.className = "pa-slot-play"; badge.innerHTML = uiIconHtml("play", "▶"); el.appendChild(badge); }
+    if (media && media.type === "video"){
+      const badge = iconButton("play", "이 자리에서 영상 재생", event => { event.preventDefault(); event.stopPropagation(); return playBookVideo(media, slot, el); }, "pa-slot-play");
+      badge.onpointerdown = event => event.stopPropagation(); badge.ondblclick = event => { event.preventDefault(); event.stopPropagation(); }; el.appendChild(badge);
+      el.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); return playBookVideo(media, slot, el); });
+      if (bookVideo && bookVideo.slotId === slot.id && bookVideo.mediaId === media.id) attachBookVideo(el, bookVideo);
+    }
     if (!ready) composedImage(media).then(row => { if (row && img.isConnected) apply(row); });
     if (bookReading) return el;
-    el.title = (media ? media.name + " · " : "") + "끌어서 옮기기 · 두 번 누르면 이 사진 꾸미기 · Alt+누르기는 아래 겹친 사진";
+    el.title = (media ? media.name + " · " : "") + "끌어서 옮기기 · 두 번 누르면 " + (media && media.type === "video" ? "이 자리에서 영상 재생" : "이 사진 꾸미기") + " · Alt+누르기는 아래 겹친 사진";
     el.addEventListener("pointerdown", event => startSlotDrag(event, pageIndex, slot, el, "move"));
-    el.addEventListener("dblclick", event => { event.preventDefault(); if (media) openInEditor(media.id); });
+    if (!media || media.type !== "video") el.addEventListener("dblclick", event => { event.preventDefault(); if (media) openInEditor(media.id); });
     if (picked){
       const resize = document.createElement("span"); resize.className = "pa-slot-handle is-resize"; resize.title = "끌어서 크기 조절";
       resize.addEventListener("pointerdown", event => startSlotDrag(event, pageIndex, slot, el, "resize"));
@@ -3653,8 +3905,10 @@ const PhotoAlbum = (() => {
   }
 
   /* ----- 끌기: 칸 옮기기·크기·돌리기, 글 옮기기 ----- */
+  function stopSlotDrag(){ if (bookSlotDrag) bookSlotDrag(); }
   function startSlotDrag(event, pageIndex, slot, el, kind){
     if (event.button !== 0 || bookReading) return;
+    stopSlotDrag();
     event.preventDefault(); event.stopPropagation();
     if (kind === "move" && event.altKey){ pickSlotBelow(event, pageIndex); return; }
     const pageEl = el.closest(".pa-page"), rect = pageEl.getBoundingClientRect();
@@ -3663,13 +3917,47 @@ const PhotoAlbum = (() => {
     const start = { x:event.clientX, y:event.clientY, sx:slot.x, sy:slot.y, sw:slot.w, sr:slot.r };
     const box = live().getBoundingClientRect(), center = { x:box.left + box.width/2, y:box.top + box.height/2 };
     const startAngle = Math.atan2(event.clientY - center.y, event.clientX - center.x);
-    let moved = false;
+    const source = live().closest(".pa-page") || pageEl, spread = source.closest(".pa-spread");
+    const pages = spread ? Array.from(spread.children).filter(node => node.classList.contains("pa-page") && !node.classList.contains("is-blank")) : [source];
+    const origin = { x:rect.left + start.sx / 100 * rect.width, y:rect.top + start.sy / 100 * rect.height };
+    let moved = false, lifted = null, dropPage = null;
+    // moveBefore가 있으면 재생 중 영상도 요소 상태를 지킨 채 페이지 밖으로 옮긴다.
+    const moveNode = (parent, node) => { if (typeof parent.moveBefore === "function") parent.moveBefore(node, null); else parent.appendChild(node); };
+    const landingPage = ev => pages.find(node => {
+      const area = node.getBoundingClientRect(), index = Number(node.dataset.index), page = bookOf().pages[index];
+      return ev.clientX >= area.left && ev.clientX < area.left + area.width && ev.clientY >= area.top && ev.clientY < area.top + area.height && page && (index === pageIndex || page.slots.length < BOOK_MAX_SLOTS_PER_PAGE);
+    }) || null;
+    const restore = parent => {
+      if (lifted){ moveNode(parent, lifted); lifted.classList.remove("is-moving"); lifted = null; }
+      const node = live(); node.style.left = slot.x + "%"; node.style.top = slot.y + "%"; node.style.width = slot.w + "%"; node.style.transform = "rotate(" + slot.r + "deg)";
+      if (dropPage) dropPage.classList.remove("is-drop"); dropPage = null;
+      if (root) root.classList.remove("pa-slot-dragging");
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", cancel); window.removeEventListener("blur", cancel);
+      bookSlotDrag = null;
+    };
+    const cancel = ev => {
+      if (ev && ev.type === "pointercancel" && ev.pointerId !== event.pointerId) return;
+      slot.x = start.sx; slot.y = start.sy; slot.w = start.sw; slot.r = start.sr;
+      restore(source);
+    };
     const move = ev => {
+      if (ev.pointerId !== event.pointerId) return;
       const dx = (ev.clientX - start.x) / rect.width * 100, dy = (ev.clientY - start.y) / rect.height * 100;
       if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return;
       moved = true;
       const node = live();
-      if (kind === "move"){ slot.x = clampNum(start.sx + dx, -40, 100, start.sx); slot.y = clampNum(start.sy + dy, -40, 100, start.sy); node.style.left = slot.x + "%"; node.style.top = slot.y + "%"; }
+      if (kind === "move"){
+        // 쪽의 overflow:hidden 밖인 펼침에 실제 사진을 띄운다. 경계에서도 사진 전체가 따라오며,
+        // 드래그 중에는 저장 좌표를 바꾸지 않아 취소하거나 놓을 수 없는 자리에서 놓아도 사진을 잃지 않는다.
+        if (spread){
+          if (!lifted){ lifted = node; node.style.width = start.sw / 100 * rect.width + "px"; node.classList.add("is-moving"); moveNode(spread, node); if (root) root.classList.add("pa-slot-dragging"); }
+          const area = spread.getBoundingClientRect();
+          node.style.left = origin.x + ev.clientX - start.x - area.left + "px";
+          node.style.top = origin.y + ev.clientY - start.y - area.top + "px";
+        } else { node.style.left = start.sx + dx + "%"; node.style.top = start.sy + dy + "%"; }
+        const target = landingPage(ev);
+        if (dropPage !== target){ if (dropPage) dropPage.classList.remove("is-drop"); dropPage = target; if (dropPage) dropPage.classList.add("is-drop"); }
+      }
       else if (kind === "resize"){ slot.w = clampNum(start.sw + dx, 8, 100, start.sw); node.style.width = slot.w + "%"; }
       else {
         let angle = start.sr + (Math.atan2(ev.clientY - center.y, ev.clientX - center.x) - startAngle) * 180 / Math.PI;
@@ -3678,26 +3966,27 @@ const PhotoAlbum = (() => {
       }
     };
     const up = ev => {
-      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
-      if (!moved) return;
-      // 옮기기를 옆 쪽 위에서 놓으면 그 쪽으로 넘긴다.
+      if (ev.pointerId !== event.pointerId) return;
+      if (!moved){ restore(source); return; }
+      let destination = source;
+      // 잡았던 지점을 유지해 미리 보인 자리 그대로 놓는다(사진 가운데로 갑자기 맞추지 않는다).
       if (kind === "move"){
-        const target = document.elementFromPoint(ev.clientX, ev.clientY), other = target && target.closest && target.closest(".pa-page:not(.is-blank)");
-        const toIndex = other ? Number(other.dataset.index) : pageIndex;
-        if (other && toIndex !== pageIndex){
-          const pages = bookOf().pages, from = pages[pageIndex], to = pages[toIndex], r2 = other.getBoundingClientRect();
-          if (to.slots.length < 12){
-            from.slots = from.slots.filter(row => row.id !== slot.id);
-            const a = slot.a || mediaAspect(mediaById(slot.media));
-            slot.x = clampNum((ev.clientX - r2.left) / r2.width * 100 - slot.w / 2, -40, 100, 10);
-            slot.y = clampNum((ev.clientY - r2.top) / r2.height * 100 - slot.w * a * BOOK_PAGE_RATIO / 2, -40, 100, 10);
-            to.slots.push(slot); bookPick = { kind:"slot", page:toIndex, id:slot.id }; bookPage = toIndex;
-          }
+        destination = landingPage(ev);
+        if (!destination){ cancel(); return; }
+        const toIndex = Number(destination.dataset.index), area = destination.getBoundingClientRect();
+        slot.x = clampNum((origin.x + ev.clientX - start.x - area.left) / area.width * 100, -40, 100, start.sx);
+        slot.y = clampNum((origin.y + ev.clientY - start.y - area.top) / area.height * 100, -40, 100, start.sy);
+        if (toIndex !== pageIndex){
+          const bookPages = bookOf().pages;
+          bookPages[pageIndex].slots = bookPages[pageIndex].slots.filter(row => row.id !== slot.id);
+          bookPages[toIndex].slots.push(slot); bookPick = { kind:"slot", page:toIndex, id:slot.id }; bookPage = toIndex;
         }
       }
+      restore(destination);
       bookChanged();
     };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+    bookSlotDrag = cancel;
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", cancel); window.addEventListener("blur", cancel);
   }
   function startTextDrag(event, pageIndex, text, el){
     if (event.button !== 0 || bookReading) return;
@@ -3715,23 +4004,45 @@ const PhotoAlbum = (() => {
   }
 
   /* ----- 쪽·칸 다루기 ----- */
+  // 트레이의 원본은 남기고 이미 놓인 칸을 옮긴다. 명시적으로 복제한 칸들은 그대로 두며,
+  // 같은 사진이 여럿이면 고른 칸 → 대상 쪽의 칸 → 처음 쓰인 칸 순서로 이동 대상을 고른다.
+  function placedMediaSlot(page, media){
+    if (!media) return null;
+    const pick = pickedSlot(); if (pick && pick.media === media.id) return pick;
+    const local = page && page.slots.find(slot => slot.media === media.id); if (local) return local;
+    for (const row of bookOf().pages){ const slot = row.slots.find(slot => slot.media === media.id); if (slot) return slot; }
+    return null;
+  }
   // 쪽에 놓일 자리 — 놓기와 끄는 동안의 점선 미리보기가 같은 식을 쓴다(쪽에 대한 %).
   function landingSlot(page, media, at){
-    const a = mediaAspect(media), w = page.slots.length ? 40 : 70;
+    const previous = placedMediaSlot(page, media), a = previous && previous.a || mediaAspect(media), w = previous ? previous.w : page.slots.length ? 40 : 70;
     const x = at ? at.x - w/2 : 50 - w/2, y = at ? at.y - w*a*BOOK_PAGE_RATIO/2 : 50 - w*a*BOOK_PAGE_RATIO/2;
-    return { x:clampNum(x, -40, 100, 10), y:clampNum(y, -40, 100, 10), w, a, r:BOOK_TILTS[page.slots.length % BOOK_TILTS.length] };
+    return { x:clampNum(x, -40, 100, 10), y:clampNum(y, -40, 100, 10), w, a, r:previous ? previous.r : BOOK_TILTS[page.slots.length % BOOK_TILTS.length] };
   }
   function placeMedia(pageIndex, media, at){
+    stopSlotDrag();
     const page = bookOf().pages[pageIndex]; if (!page || !media) return;
-    const spot = landingSlot(page, media, at);
-    const slot = { id:bookId(), media:media.id, x:spot.x, y:spot.y, w:spot.w, r:spot.r, a:spot.a };
+    const previous = placedMediaSlot(page, media), spot = landingSlot(page, media, at);
+    endTrayDrag();
+    if (!page.slots.includes(previous) && page.slots.length >= BOOK_MAX_SLOTS_PER_PAGE){ notice("한 쪽에는 사진·영상을 " + BOOK_MAX_SLOTS_PER_PAGE + "개까지 놓을 수 있습니다."); return; }
+    const slot = previous || { id:bookId(), media:media.id };
+    if (previous) for (const row of bookOf().pages) row.slots = row.slots.filter(item => item.id !== previous.id);
+    Object.assign(slot, spot);
     page.slots.push(slot); bookPage = pageIndex; bookPick = { kind:"slot", page:pageIndex, id:slot.id };
-    bookChanged(); status(`${media.name} 을(를) ${pageLabel(pageIndex)}에 넣었습니다.`);
+    bookChanged(); status(`${media.name} 을(를) ${pageLabel(pageIndex)}${previous ? "으로 옮겼습니다." : "에 넣었습니다."}`);
+  }
+  function duplicateSlot(pageIndex, id){
+    stopSlotDrag();
+    const page = bookOf().pages[pageIndex], slot = page && page.slots.find(row => row.id === id); if (!slot) return;
+    if (page.slots.length >= BOOK_MAX_SLOTS_PER_PAGE){ notice("한 쪽에는 사진·영상을 " + BOOK_MAX_SLOTS_PER_PAGE + "개까지 놓을 수 있습니다."); return; }
+    const copy = { ...slot, id:bookId(), x:clampNum(slot.x + (slot.x > 96 ? -3 : 3), -40, 100, slot.x), y:clampNum(slot.y + (slot.y > 96 ? -3 : 3), -40, 100, slot.y) };
+    page.slots.push(copy); bookPage = pageIndex; bookPick = { kind:"slot", page:pageIndex, id:copy.id };
+    bookChanged(); status("사진을 복제했습니다. 복제한 사진을 끌어 원하는 곳에 놓으세요.");
   }
   function addPage(){
     const pages = bookOf().pages; if (pages.length >= BOOK_MAX_PAGES){ notice("쪽은 " + BOOK_MAX_PAGES + "쪽까지 만들 수 있습니다."); return; }
     const at = pages.length ? bookPage + 1 : 0;
-    pages.splice(at, 0, { id:bookId(), paper:(pages[bookPage] && pages[bookPage].paper) || "cream", slots:[], texts:[], stickers:[] });
+    pages.splice(at, 0, { id:bookId(), paper:(pages[bookPage] && pages[bookPage].paper) || "cream", slots:[], texts:[], stickers:[], keepEmpty:true });
     bookPage = at; bookSpread = at - at % bookPerView(); bookPick = null; bookChanged(); status(pageLabel(at) + "을 더했습니다.");
   }
   async function removePage(){
@@ -3790,6 +4101,7 @@ const PhotoAlbum = (() => {
       iconButton("layers", "맨 앞으로", () => reorderSlot(at, slot.id), "pa-ico"),
       iconButton("arrowDown", "맨 뒤로", () => sendSlotBack(at, slot.id), "pa-ico"),
       iconButton("rotateLeft", "바르게 (기울기 0°)", () => { slot.r = 0; bookChanged(); }, "pa-ico"),
+      iconButton("copy", "사진 복제", () => duplicateSlot(at, slot.id), "pa-ico"),
       iconButton("delete", "쪽에서 빼기 (사진은 사진첩에 남음)", () => removeSlot(at, slot.id), "pa-ico")
     );
     host.appendChild(tools);
@@ -3846,6 +4158,7 @@ const PhotoAlbum = (() => {
     const pages = bookOf().pages, per = bookPerView(), from = bookSpread, to = from + step*per;
     const spread = root && root.querySelector(".pa-spread");
     if (!spread || to < 0 || to >= pages.length) return null;
+    stopBookVideo();
     const old = Array.from(spread.querySelectorAll(":scope > .pa-page"));
     const oldFaces = per === 2 ? [turnFace(old[0], "left"), turnFace(old[1], "right")] : [turnFace(old[0], "single")];
     bookSpread = to; bookPage = to; bookPick = null; paintBook();
@@ -3894,6 +4207,7 @@ const PhotoAlbum = (() => {
     if (bookTurn) bookTurn.finish(bookTurn.commit);
     const pages = bookOf().pages, per = bookPerView(), next = bookSpread + step * per;
     if (next < 0 || next >= pages.length) return false;
+    stopBookVideo();
     if (reduceMotion() || !root.querySelector(".pa-spread > .pa-page")){ bookSpread = next; bookPage = next; bookPick = null; paintBook(); return true; }
     const turn = prepareTurn(step); if (!turn) return false;
     bookTurn = turn; playTurnSound(); runTurn(turn, 0, 1, turnMs(), true);
@@ -3995,6 +4309,8 @@ const PhotoAlbum = (() => {
     status(bookReading ? "책 감상 — ←/→·휠로 넘기거나 쪽 모서리를 끌어 넘깁니다. Esc 로 돌아가고, 두 번 누르면 전체화면." : "앨범 편집으로 돌아왔습니다.");
   }
   function onBookKey(event){
+    if (event.key === "Escape" && bookSlotDrag){ event.preventDefault(); stopSlotDrag(); return; }
+    if (event.key === "Escape" && bookVideo){ event.preventDefault(); stopBookVideo(true); return; }
     const target = event.target;
     if (target && target.closest && target.closest("textarea,select,[contenteditable],input")) return;
     const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
@@ -4038,35 +4354,38 @@ const PhotoAlbum = (() => {
     const count = root.querySelector(".pa-book-tray-count"); if (count) count.textContent = String(records.length);
     // 탭은 그림만이라 개수는 작은 숫자로 두고, 이름(title·aria-label)에 "사진 N개" 로 함께 적는다.
     const mediaTab = root.querySelector('.pa-book-tray-tab[data-tray="media"]'); if (mediaTab){ const name = "사진 " + records.length + "개"; mediaTab.title = name; mediaTab.setAttribute("aria-label", name); }
-    if (!records.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = "사진·영상을 가져와 시작하세요."; host.appendChild(p); return; }
+    if (!records.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = "사진·영상을 가져와 시작하세요."; host.appendChild(p); syncMediaSelection(); return; }
     for (const item of records){
-      const card = button("", () => { const pages = bookOf().pages; if (!pages.length) addPage(); placeMedia(Math.min(bookPage, bookOf().pages.length - 1), item, null); }, "pa-book-tray-item");
+      const card = button("", () => { if (mediaSelecting){ toggleMediaSelection(item.id); return; } const pages = bookOf().pages; if (!pages.length) addPage(); placeMedia(Math.min(bookPage, bookOf().pages.length - 1), item, null); }, "pa-book-tray-item");
       card.dataset.mediaId = item.id;
-      card.draggable = true; card.title = item.name + " · 쪽으로 끌어다 놓거나 눌러서 지금 쪽에 넣기";
+      card.draggable = true; card.title = item.name + (used.has(item.id) ? " · 끌어다 놓거나 눌러서 기존 사진을 옮기기" : " · 쪽으로 끌어다 놓거나 눌러서 지금 쪽에 넣기");
       card.addEventListener("dragstart", event => startTrayDrag(event, item, card));
       card.addEventListener("dragend", endTrayDrag);
       // 그림 자체는 끌리지 않게 한다 — 그림이 끌리면 브라우저가 '파일'로도 실어 보내 사진첩이 새 파일로 가져오려 든다.
-      const img = document.createElement("img"); img.alt = ""; img.loading = "lazy"; img.draggable = false; if (item.thumbnail) img.src = item.thumbnail;
+      const img = document.createElement("img"); img.alt = ""; img.loading = "lazy"; img.draggable = false; const preview = mediaThumbnail(item); if (preview) img.src = preview;
       const grip = document.createElement("span"); grip.className = "pa-book-tray-grip"; grip.setAttribute("aria-hidden", "true"); grip.innerHTML = uiIconHtml("grip", "⠿");
-      card.append(img, grip);
+      card.append(img, grip, mediaCheck());
       if (item.type === "video"){ const badge = document.createElement("b"); badge.className = "pa-book-tray-video"; badge.innerHTML = uiIconHtml("play", "▶"); card.appendChild(badge); }
       if (used.has(item.id)){ const mark = document.createElement("span"); mark.className = "pa-book-tray-used"; mark.textContent = (used.get(item.id) + 1) + "쪽"; card.appendChild(mark); card.classList.add("is-used"); }
       host.appendChild(card);
     }
+    syncMediaSelection();
   }
   /* 트레이에서 끌기 — 끄는 그림은 꾸민 사진(있으면)을 큼직하게, 쪽 위에서는 놓일 자리를 점선 상자로 미리 보인다.
      끄는 동안 dataTransfer 내용은 읽을 수 없어(dragover) 끄는 사진을 변수에 둔다. */
   let trayDrag = null;
   function startTrayDrag(event, item, card){
-    event.dataTransfer.setData(BOOK_MEDIA_MIME, item.id); event.dataTransfer.effectAllowed = "copy";
+    if (mediaSelecting || mediaDeleteBusy){ event.preventDefault(); return; }
+    const moving = !!placedMediaSlot(null, item);
+    event.dataTransfer.setData(BOOK_MEDIA_MIME, item.id); event.dataTransfer.effectAllowed = moving ? "move" : "copy";
     trayDrag = { item, card }; card.classList.add("is-dragging"); root.classList.add("pa-tray-dragging");
-    const hit = composed.get(item.id), src = (hit && hit.url) || item.thumbnail;
+    const hit = composed.get(item.id), src = (hit && hit.url) || mediaThumbnail(item);
     if (src && event.dataTransfer.setDragImage){
       const ghost = document.createElement("div"); ghost.className = "pa-drag-card";
       const img = document.createElement("img"); img.src = src; img.alt = "";
       const w = 120, h = Math.round(w * Math.min(1.6, Math.max(.5, mediaAspect(item))));
       img.style.width = w + "px"; img.style.height = h + "px";
-      const label = document.createElement("span"); label.textContent = "쪽에 놓기";
+      const label = document.createElement("span"); label.textContent = moving ? "쪽으로 옮기기" : "쪽에 놓기";
       ghost.append(img, label); document.body.appendChild(ghost);
       try { event.dataTransfer.setDragImage(ghost, w / 2, h / 2); } catch { /* 기본 그림 */ }
       setTimeout(() => ghost.remove(), 0);
@@ -4097,21 +4416,23 @@ const PhotoAlbum = (() => {
   function paintBookThumbs(){
     const host = root.querySelector(".pa-book-thumbs"); if (!host) return; host.replaceChildren();
     const pages = bookOf().pages, per = bookPerView();
+    host.hidden = !pages.length; if (!pages.length) return;
     for (let at = 0; at < pages.length; at += per){
       const thumb = button("", () => { bookSpread = at; bookPage = at; bookPick = null; paintBook(); }, "pa-book-thumb" + (at === bookSpread ? " active" : ""));
       thumb.dataset.index = String(at);
       thumb.title = per === 2 && pages[at + 1] ? `${at + 1}–${at + 2}쪽` : `${at + 1}쪽`;
+      const preview = document.createElement("span"); preview.className = "pa-mini-spread";
       for (let k = at; k < Math.min(at + per, pages.length); k++){
         const mini = document.createElement("span"); mini.className = "pa-mini-page"; mini.style.background = bookPaper(pages[k].paper)[2];
         for (const slot of pages[k].slots){
           const media = mediaById(slot.media); if (!media) continue;
-          const shot = document.createElement("img"); shot.alt = ""; shot.loading = "lazy"; if (media.thumbnail) shot.src = media.thumbnail;
+          const shot = document.createElement("img"); shot.alt = ""; shot.loading = "lazy"; const preview = mediaThumbnail(media); if (preview) shot.src = preview;
           shot.style.left = slot.x + "%"; shot.style.top = slot.y + "%"; shot.style.width = slot.w + "%"; shot.style.aspectRatio = "1 / " + (slot.a || mediaAspect(media));
           shot.style.transform = "rotate(" + slot.r + "deg)"; mini.appendChild(shot);
         }
-        thumb.appendChild(mini);
+        preview.appendChild(mini);
       }
-      const label = document.createElement("small"); label.textContent = thumb.title; thumb.appendChild(label);
+      const label = document.createElement("small"); label.textContent = thumb.title; thumb.append(preview, label);
       host.appendChild(thumb);
     }
     const add = button("＋ 쪽", () => addPage(), "pa-book-thumb-add"); add.title = "지금 쪽 다음에 빈 쪽 더하기"; host.appendChild(add);
@@ -4266,7 +4587,7 @@ const PhotoAlbum = (() => {
     return [
       { label:"사진·영상 보기", action:() => { setAlbumMode("edit"); selectItem(item.id); setViewing(true); } },
       ...(item.type === "image" ? [{ label:"이 사진 꾸미기", action:() => openInEditor(item.id) }] : []),
-      { label:"지금 쪽에 넣기", disabled:bookReading, action:() => { if (!bookOf().pages.length) addPage(); placeMedia(bookPage, item, null); setAlbumMode("book"); } },
+      { label:placedMediaSlot(bookOf().pages[bookPage], item) ? "지금 쪽으로 옮기기" : "지금 쪽에 넣기", disabled:bookReading, action:() => { if (!bookOf().pages.length) addPage(); placeMedia(bookPage, item, null); setAlbumMode("book"); } },
       { label:item.favorite ? "즐겨찾기 해제" : "즐겨찾기", active:!!item.favorite,
         action:() => { item.favorite = !item.favorite; save(item); paintList(); paintStage(); paintBookTray(); } },
       ...(item.type === "image" ? [{ label:"그림 저장", children:[
@@ -4274,7 +4595,7 @@ const PhotoAlbum = (() => {
         ...(hasMotion(item) ? [{ label:"GIF", action:() => exportGif(item) }, { label:"MP4", action:() => exportMp4(item) }] : [])
       ] }] : []),
       { separator:true },
-      { label:"사진첩에서 삭제", disabled:bookReading, action:() => removeMedia(item) }
+      { label:"사진첩에서 삭제", disabled:bookReading || mediaDeleteBusy, action:() => removeMedia(item) }
     ];
   }
   function albumPartMenuItems(item){
@@ -4302,6 +4623,7 @@ const PhotoAlbum = (() => {
         { label:"맨 앞으로", action:() => reorderSlot(pageIndex, slot.id) },
         { label:"맨 뒤로", action:() => sendSlotBack(pageIndex, slot.id) },
         { label:"바르게 (기울기 0°)", action:() => { slot.r = 0; bookChanged(); } },
+        { label:"사진 복제", disabled:page.slots.length >= BOOK_MAX_SLOTS_PER_PAGE, action:() => duplicateSlot(pageIndex, slot.id) },
         { label:"쪽에서 빼기 (사진은 사진첩에 남음)", action:() => removeSlot(pageIndex, slot.id) }, { separator:true });
     } else if (pick && pick.kind === "sticker"){
       const part = (page.stickers || []).find(row => row.id === pick.id);
@@ -4576,6 +4898,8 @@ const PhotoAlbum = (() => {
     setAlbumMode(stored, { silent:true });
   }
   function makeUi(host){
+    stopSlotDrag();
+    stopBookVideo();
     closeEffectPanel(); host.replaceChildren(); root = document.createElement("section"); root.className = "photo-album"; viewing = false; slideshow = false; clearTimeout(slideTimer);
     root.innerHTML = '<header class="pa-header"><div><span class="pa-kicker">MY MOMENTS</span><h2>사진첩</h2><p>사진을 꾸미고, 영상은 큰 화면에서 감상하세요.</p></div><div class="pa-mode" role="tablist" aria-label="사진첩 화면"><button type="button" class="pa-mode-tab" role="tab" data-mode="book" title="꾸민 사진을 쪽마다 붙인 앨범 책"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C9.6 5 6.6 4.6 3.5 5v13c3.1-.4 6.1 0 8.5 1.5 2.4-1.5 5.4-1.9 8.5-1.5V5c-3.1-.4-6.1 0-8.5 1.5z"/><path d="M12 6.5v13"/></svg><span>앨범 책</span></button><button type="button" class="pa-mode-tab" role="tab" data-mode="edit" title="사진 한 장씩 장식·배경·음악으로 꾸미기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/></svg><span>사진 꾸미기</span></button></div><div class="pa-header-actions"><button type="button" class="pa-view pa-head-ico"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12.5" rx="2"/><path d="M10.5 8.3v5l4-2.5z" fill="currentColor"/><path d="M8.5 20.5h7M12 17v3.5"/></svg><span class="pa-head-label">감상 모드</span></button><button type="button" class="pa-import primary pa-head-ico" title="사진·영상 가져오기" aria-label="사진·영상 가져오기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg><span class="pa-head-label">가져오기</span></button></div></header><div class="pa-book"><div class="pa-book-bar"><strong class="pa-book-where"></strong><span class="pa-book-pick" hidden></span><span class="pa-book-tools"><button type="button" class="pa-book-text" data-needs-page title="지금 쪽에 손글씨 글 넣기" aria-label="글 넣기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5.5h14M12 5.5V19M9.5 19h5"/></svg><span class="pa-head-label">글 넣기</span></button><button type="button" class="pa-book-relayout" title="지금 쪽 사진을 자동으로 다시 배치합니다" aria-label="자동 배치"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="8" height="16" rx="1.5"/><rect x="13.5" y="4" width="7" height="7" rx="1.5"/><rect x="13.5" y="13" width="7" height="7" rx="1.5"/></svg><span class="pa-head-label">자동 배치</span></button><span class="pa-book-papers" role="group" aria-label="쪽 바탕"></span><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-page-back" title="지금 쪽을 한 쪽 앞으로" aria-label="쪽 앞으로"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="4" width="11.5" height="16" rx="2"/><path d="M6 8.5 2.5 12 6 15.5"/></svg><span class="pa-head-label">쪽 앞으로</span></button><button type="button" class="pa-book-page-forward" title="지금 쪽을 한 쪽 뒤로" aria-label="쪽 뒤로"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="11.5" height="16" rx="2"/><path d="M18 8.5l3.5 3.5-3.5 3.5"/></svg><span class="pa-head-label">쪽 뒤로</span></button><button type="button" class="pa-book-page-add" title="지금 쪽 다음에 빈 쪽 더하기" aria-label="쪽 더하기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M12 8.5v7M8.5 12h7"/></svg><span class="pa-head-label">쪽 더하기</span></button><button type="button" class="pa-book-page-remove" title="지금 쪽 빼기 (사진은 사진첩에 남음)" aria-label="쪽 빼기"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M8.5 12h7"/></svg><span class="pa-head-label">쪽 빼기</span></button><span class="pa-book-sep" aria-hidden="true"></span><button type="button" class="pa-book-save" data-needs-page aria-haspopup="menu" title="쪽 그림 저장(PNG)·인쇄" aria-label="저장·인쇄"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10.5M7.5 10 12 14.5 16.5 10"/><path d="M4.5 16.5v3h15v-3"/></svg><span class="pa-head-label">저장·인쇄</span><svg class="pa-caret" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg></button></span><button type="button" class="pa-book-sound" aria-pressed="false"></button><button type="button" class="pa-book-read-exit" title="감상 끝 — 앨범 편집으로 돌아갑니다 (Esc)" aria-label="감상 끝"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4.5L19.3 9.2a2.1 2.1 0 0 0-3-3L5.5 17v3"/><path d="M14.5 8l3 3"/></svg><span class="pa-head-label">감상 끝</span></button></div><div class="pa-book-main"><div class="pa-book-stage"><div class="pa-spread"></div></div><aside class="pa-book-tray"><div class="pa-book-tray-tabs" role="tablist" aria-label="쪽에 넣을 것"><button type="button" class="pa-book-tray-tab" role="tab" data-tray="media" title="사진" aria-label="사진"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5l-4.5-4.5-8 8"/></svg><span class="pa-head-label">사진</span><span class="pa-book-tray-count"></span></button><button type="button" class="pa-book-tray-tab" role="tab" data-tray="deco" title="장식" aria-label="장식"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span class="pa-head-label">장식</span></button></div><p class="pa-book-tray-hint">쪽으로 끌거나 눌러서 넣기</p><div class="pa-book-tray-list" role="tabpanel"></div><div class="pa-book-deco" role="tabpanel"></div></aside></div><div class="pa-book-thumbs" aria-label="쪽 미리보기"></div></div><div class="pa-layout"><aside class="pa-sidebar"><button type="button" class="pa-fx-open" aria-haspopup="dialog" aria-expanded="false" title="감상 모드에서 사진을 넘길 때의 움직임을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="12" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="5" width="12" height="14" rx="2" fill="currentColor" opacity=".35"/><path d="M13 12h6m-2.5-2.5L19 12l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span><small>넘기기 효과</small><b class="pa-fx-name">밀기</b></span></button><nav class="pa-filters" aria-label="사진첩 필터"></nav><div class="pa-list-title"><strong>내 미디어</strong><span class="pa-count"></span></div><div class="pa-list"></div></aside><div class="pa-center"><div class="pa-view-bar"><button type="button" class="pa-slide-toggle" aria-pressed="false" title="사진을 저절로 넘깁니다 (Space)">▶ 슬라이드쇼</button><select class="pa-slide-seconds" aria-label="슬라이드쇼 간격" title="사진 한 장을 보여 줄 시간 (영상은 끝까지 본 뒤 넘어갑니다)"></select><select class="pa-view-effect" aria-label="넘기기 효과" title="사진을 넘길 때의 움직임 (빠르기는 꾸미기 모드의 목록 위 넘기기 효과 단추에서)"></select><button type="button" class="pa-view-exit" title="꾸미기 모드로 돌아갑니다 (Esc) · ←/→ 로 사진 넘기기 · 사진을 두 번 누르면 전체화면">✎ 꾸미기 모드</button></div><div class="pa-stage"></div></div><aside class="pa-tools"><div class="pa-tool-tabs" role="tablist" aria-label="꾸미기 도구"><button type="button" class="pa-tool-tab" role="tab" data-tab="deco" aria-selected="false" title="사진 위에 장식을 올립니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2 5.3 5.5 1.5-5.5 1.6L12 17.2l-2-5.3-5.5-1.6L10 8.8z"/><path d="M18.5 15.5l.8 2 2 .7-2 .8-.8 2-.7-2-2-.8 2-.7z"/></svg><span>꾸미기</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="bg" aria-selected="false" title="사진 둘레 배경을 고릅니다"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><rect x="7.5" y="8.5" width="9" height="7" rx="1"/></svg><span>배경</span></button><button type="button" class="pa-tool-tab" role="tab" data-tab="music" aria-selected="false" title="배경음악과 재생 설정"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17.5V6.2l10-2v11.3"/><circle cx="6.6" cy="17.5" r="2.4"/><circle cx="16.6" cy="15.5" r="2.4"/></svg><span>음악</span></button></div><div class="pa-deco-section pa-tab-panel" role="tabpanel" data-tab="deco" aria-label="꾸미기"><svg class="pa-sparkles is-right" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><svg class="pa-sparkles is-left" viewBox="0 0 100 100" aria-hidden="true"><g fill="currentColor"><path d="M50 4C53 34 66 47 96 50C66 53 53 66 50 96C47 66 34 53 4 50C34 47 47 34 50 4Z"/><path d="M84 76C85 84 88 87 96 88C88 89 85 92 84 100C83 92 80 89 72 88C80 87 83 84 84 76Z"/></g></svg><div class="pa-categories"></div><div class="pa-sticker-grid"></div><div class="pa-adjust"></div><div class="pa-layers" hidden></div></div><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="bg" aria-label="배경" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-bg-card"><div class="pa-bg-head"><strong>배경 템플릿</strong><small>사진 둘레를 꾸며보세요</small></div><div class="pa-backgrounds"></div></div></section><section class="pa-bg-section pa-tab-panel" role="tabpanel" data-tab="music" aria-label="음악" hidden><svg class="pa-leaves is-left" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><svg class="pa-leaves is-right" viewBox="0 0 140 140" aria-hidden="true"><path d="M4 138C38 112 66 82 92 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><g fill="currentColor"><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(26 118) rotate(-60)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(30 116) rotate(-10)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(52 94) rotate(-75)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(56 92) rotate(-20)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(74 64) rotate(-85)"/><path d="M0 0c10-14 30-16 44-8C32 4 14 8 0 0Z" transform="translate(78 62) rotate(-30)"/><path d="M0 0c8-12 24-14 36-7C26 3 12 6 0 0Z" transform="translate(90 32) rotate(-65)"/></g></svg><div class="pa-music"></div><p class="pa-music-none">사진을 고르면 배경음악을 넣을 수 있어요.</p><div class="pa-music-play"></div><div class="pa-more" hidden><div class="pa-music-more"></div><div class="pa-sfx-master"></div></div></section></aside><div class="pa-split" data-side="left" role="separator" aria-orientation="vertical" aria-label="목록 칸 폭" title="끌어서 목록 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div><div class="pa-split" data-side="right" role="separator" aria-orientation="vertical" aria-label="꾸미기 칸 폭" title="끌어서 꾸미기 칸 폭 조절 · 두 번 누르면 처음 폭" tabindex="0"></div></div><footer class="pa-footer"><span class="pa-status ui-keep-symbols" role="status">사진과 영상을 가져와 시작하세요.</span><span>원본은 그대로 보관됩니다</span></footer><input class="pa-input" type="file" accept="image/*,video/*,audio/*,.mp3,.m4a,.aac,.wav,.ogg,.flac,.opus" multiple hidden>';
     host.appendChild(root);
@@ -4633,7 +4957,7 @@ const PhotoAlbum = (() => {
       if (surface) surface.classList.remove("pa-drop-target");
     };
     observer = new ResizeObserver(fitArtboard); observer.observe(root.querySelector(".pa-stage"));
-    setupToolTabs(); setupPaneSplitters();
+    setupToolTabs(); setupPaneSplitters(); setupMediaActions();
     paintFilters(); paintList(); paintBackgrounds(); paintStickers(); paintStage();
     bookReading = false; bookPick = null; setupBook();
   }
@@ -4692,6 +5016,8 @@ const PhotoAlbum = (() => {
     window.addEventListener("keydown", onHistoryKey);
   }
   function cleanup(){ if (closeAlbumMenu) closeAlbumMenu(); if (root) root.removeEventListener("contextmenu", onAlbumContextMenu); closeSaveMenu(); closeEffectPanel(); slideshow = false; clearTimeout(slideTimer); slideTimer = null; clearTimeout(cursorTimer); cursorTimer = null; stopAllMusic(); stopAllSfx(); if (previewContext){ previewContext.close().catch(() => {}); previewContext = null; } window.removeEventListener("keydown", onHistoryKey); histories.clear(); releaseUrls(); if (observer) observer.disconnect(); observer = null;
+    stopSlotDrag();
+    stopBookVideo();
     // 앨범 쪽 저장이 기다리는 중이면 닫기 전에 바로 보낸다(닫은 뒤에 타이머가 돌면 root 가 없다).
     if (bookSaveTimer){ clearTimeout(bookSaveTimer); bookSaveTimer = 0; persistMetadata(albumItem).catch(error => console.warn("앨범 쪽을 저장하지 못했습니다:", error)); }
     clearTimeout(bookTurnTimer); clearPrintLayer(); if (bookTurn) bookTurn.finish(bookTurn.commit); if (turnAudio){ turnAudio.close().catch(() => {}); turnAudio = null; }
