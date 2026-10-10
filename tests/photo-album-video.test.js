@@ -38,7 +38,7 @@ function videoProbe(mode, width = 1920, height = 1080){
 
 test("영상 가져오기는 첫 장면과 실제 가로세로를 저장하고 앨범에 빈 쪽 없이 넣는다", async () => {
   const { album, revoked, canvases, probes, timers } = videoProbe("ok", 720, 1280);
-  await album.importFiles([{ name:"세로.mp4", type:"video/mp4", size:1 }]);
+  await album.importFiles([Object.assign(new Blob(["clip"], { type:"video/mp4" }), { name:"세로.mp4" })]);
   const item = album.get("records")[0];
   assert.equal(item.type, "video");
   assert.equal(item.width, 720); assert.equal(item.height, 1280);
@@ -62,7 +62,7 @@ test("탐색 완료 이벤트가 없어도 제한 시간에 읽을 수 있는 �
 
 test("미리보기 실패 영상도 보관하고 쪽·목록·내보내기에서 동영상 표시로 나타난다", async () => {
   const { album, revoked, canvases } = videoProbe("error");
-  await album.importFiles([{ name:"호환되지않는.mov", type:"video/quicktime", size:1 }]);
+  await album.importFiles([Object.assign(new Blob(["clip"], { type:"video/quicktime" }), { name:"호환되지않는.mov" })]);
   const item = album.get("records")[0];
   assert.equal(item.type, "video"); assert.equal(item.thumbnail, null);
   assert.equal(album.get("albumItem").book.pages.length, 1);

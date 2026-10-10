@@ -21,6 +21,66 @@ function deletingAlbum(context = {}){
   return { album, confirmations, revoked, messages, status };
 }
 
+function headerDeleteButton(album){
+  let control;
+  const root = album.get("root"), originalQuery = root.querySelector;
+  album.sandbox.document = { createElement:() => ({ setAttribute(){} }) }; album.sandbox.window = {};
+  root.querySelector = selector => selector === ".pa-header-actions" ? { appendChild:button => { control = button; } } : selector === ".pa-delete-all" ? control : originalQuery(selector);
+  album.setupAlbumDeleteButton(); album.paintAlbumControls();
+  return control;
+}
+
+test("상단 전체 삭제 단추는 현재 앨범·필터·선택과 관계없이 보관 사진과 모든 앨범의 쪽을 삭제한다", async () => {
+  const { album, confirmations } = deletingAlbum();
+  const items = [photo("a"), photo("b"), photo("unassigned")]; album.useRecords(items);
+  const basic = { id:album.ALBUM_ID, type:"album", name:"기본 앨범", mediaIds:["a"], book:{ v:1, pages:[page("basic", ["a"])] } };
+  const family = { id:"family", type:"album", name:"가족", mediaIds:["b"], book:{ v:1, pages:[page("family", ["b"])] } };
+  album.set("albumItem", family).set("albums", [basic, family]).set("filter", "favorite");
+  album.setMediaSelecting(true); album.toggleMediaSelection("b");
+  const control = headerDeleteButton(album);
+  assert.equal(control.title, "사진첩 전체 삭제"); assert.equal(control.disabled, false);
+  await control.onclick();
+  assert.equal(confirmations.length, 1); assert.equal(confirmations[0][1], "전체 삭제");
+  assert.match(confirmations[0][0], /전체 사진과 모든 앨범의 사진·영상·쪽/);
+  assert.deepEqual(album.launcher.deleted(), ["a", "b", "unassigned"]);
+  assert.equal(basic.book.pages.length, 0); assert.equal(family.book.pages.length, 0);
+  assert.equal(basic.name, "기본 앨범"); assert.equal(family.name, "가족");
+});
+
+test("상단 전체 삭제 단추는 다른 앨범에 빈 쪽만 남아도 실행할 수 있고 정리 뒤 비활성화된다", async () => {
+  const { album } = deletingAlbum();
+  const basic = { id:album.ALBUM_ID, type:"album", mediaIds:[], book:{ v:1, pages:[] } };
+  const travel = { id:"travel", type:"album", mediaIds:[], book:{ v:1, pages:[{ ...page("empty", []), keepEmpty:true }] } };
+  album.useRecords([]).set("albumItem", basic).set("albums", [basic, travel]);
+  const control = headerDeleteButton(album); assert.equal(control.disabled, false);
+  await control.onclick();
+  assert.equal(travel.book.pages.length, 0);
+  assert.equal(control.disabled, true);
+});
+
+test("앨범 안 삭제 단추는 선택할 때만 나타나고 선택 없이 실행해도 전체 삭제하지 않는다", async () => {
+  const bars = [], element = () => ({ dataset:{}, children:[], setAttribute(){}, append(...items){ this.children.push(...items); },
+    querySelector(selector){ const action = selector.match(/data-media-action="([^"]+)"/); return this.children.find(item => item.dataset.mediaAction === action[1]); },
+    querySelectorAll:() => []
+  });
+  const { album, confirmations } = deletingAlbum({ document:{ createElement:element } });
+  album.useRecords([photo("a"), photo("b")]);
+  album.set("albumItem", { id:album.ALBUM_ID, type:"album", book:{ v:1, pages:[page("p", ["a", "b"])] } });
+  const root = album.get("root"), originalQuery = root.querySelector;
+  root.querySelector = selector => [".pa-list", ".pa-book-tray-list"].includes(selector) ? { before:bar => bars.push(bar) } : originalQuery(selector);
+  root.querySelectorAll = selector => selector === ".pa-media-actions" ? bars : [];
+  album.setupMediaActions(); root.querySelector = originalQuery;
+  const remove = bar => bar.querySelector('[data-media-action="delete"]');
+  assert.equal(bars.length, 2); assert.ok(bars.every(bar => remove(bar).hidden && remove(bar).disabled));
+  await remove(bars[0]).onclick(); assert.equal(confirmations.length, 0); assert.deepEqual(album.launcher.deleted(), []);
+  album.setMediaSelecting(true); album.toggleMediaSelection("a");
+  assert.ok(bars.every(bar => !remove(bar).hidden && !remove(bar).disabled));
+  await remove(bars[1]).onclick();
+  assert.deepEqual(album.launcher.deleted(), ["a"]);
+  assert.deepEqual(plain(album.get("records").map(item => item.id)), ["b"]);
+  album.setMediaSelecting(false); assert.ok(bars.every(bar => remove(bar).hidden));
+});
+
 test("여러 장 선택은 두 화면에서 이어지고, 전체 선택은 현재 필터만 바꾼다", () => {
   const { album } = deletingAlbum();
   album.useRecords([photo("a"), photo("b", { favorite:true }), photo("v", { type:"video" })]);
@@ -59,7 +119,7 @@ test("선택 삭제는 한 번 확인하고 모든 쪽·1장 보기·선택·캐
 
   assert.equal(confirmations.length, 1);
   assert.match(confirmations[0][0], /선택한 사진·영상 2개/);
-  assert.match(confirmations[0][0], /앨범 쪽과 1장 보기/);
+  assert.match(confirmations[0][0], /전체 사진.*모든 앨범/);
   assert.deepEqual(album.launcher.deleted(), ["a", "b", "unused"]);
   assert.deepEqual(plain(album.get("records").map(item => item.id)), ["keep"]);
   assert.deepEqual(plain(album.get("albumItem").book.pages.map(row => row.slots.map(slot => slot.media))), [["keep"]]);

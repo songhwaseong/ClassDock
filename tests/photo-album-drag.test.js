@@ -8,7 +8,7 @@ const { loadAlbum, plain } = require("./photo-album-harness");
 function dragAlbum(t, fromIndex = 0, options = {}){
   const listeners = new Map(), transfers = [];
   function node(className, rect){
-    const el = { className, dataset:{}, style:{}, children:[], parentNode:null,
+    const el = { className, dataset:{}, style:{ setProperty(name, value){ this[name] = value; }, removeProperty(name){ delete this[name]; } }, children:[], parentNode:null,
       appendChild(child){ if (child.parentNode) child.parentNode.children = child.parentNode.children.filter(row => row !== child); child.parentNode = this; this.children.push(child); return child; },
       closest(selector){ let current = this; while (current){ if (current.classList.contains(selector.slice(1))) return current; current = current.parentNode; } return null; },
       getBoundingClientRect:() => rect,
@@ -18,7 +18,8 @@ function dragAlbum(t, fromIndex = 0, options = {}){
     el.classList = {
       contains:name => classes().includes(name),
       add:(...names) => { el.className = [...new Set([...classes(), ...names])].join(" "); },
-      remove:(...names) => { el.className = classes().filter(name => !names.includes(name)).join(" "); }
+      remove:(...names) => { el.className = classes().filter(name => !names.includes(name)).join(" "); },
+      toggle:(name, on) => { if (on) el.classList.add(name); else el.classList.remove(name); }
     };
     if (options.moveBefore !== false) el.moveBefore = child => { transfers.push({ parent:el, child }); el.appendChild(child); };
     return el;

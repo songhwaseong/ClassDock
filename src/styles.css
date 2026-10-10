@@ -11322,6 +11322,18 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-header h2{margin:0;font-size:15px;line-height:1.2;letter-spacing:-.03em}
 .pa-header p,.pa-kicker{display:none}
 .pa-header-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.pa-albums{display:flex;align-items:center;flex-wrap:wrap;flex:none;gap:7px;padding:7px 12px;border-bottom:1px solid var(--pa-line);background:var(--pa-panel);font-size:11px}
+.pa-album-label{display:flex;align-items:center;gap:6px;font-weight:700}
+.pa-album-select{width:190px;max-width:45vw;padding:5px 7px;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-soft);color:var(--pa-text);font:inherit}
+.pa-album-manage,.pa-album-scope{display:flex;gap:4px}
+.photo-album .pa-albums button{padding:5px 8px;border:1px solid var(--pa-line);border-radius:7px;background:var(--pa-panel);color:var(--pa-text);font-size:11px;white-space:nowrap}
+.photo-album .pa-albums button:hover:not(:disabled){border-color:var(--pa-accent)}
+.photo-album .pa-albums [aria-pressed="true"]{border-color:var(--pa-accent);color:var(--pa-accent);background:var(--pa-soft)}
+.pa-album-info{margin-left:auto;color:var(--pa-muted);font-size:10px}
+.pa-viewing .pa-albums,.pa-book-reading .pa-albums{display:none}
+.pa-album-busy .pa-book,.pa-album-busy .pa-layout{pointer-events:none}
+.pa-album-select:focus-visible{outline:3px solid #75a7ff;outline-offset:2px}
+@media(max-width:650px){.pa-albums{padding:6px;gap:5px}.pa-album-info{flex-basis:100%;margin-left:0}.pa-album-select{width:145px}.photo-album .pa-albums button{padding:5px 6px;font-size:10px}}
 .pa-header-actions button,.pa-caption-actions button{padding:8px 12px;border:1px solid var(--pa-line);border-radius:8px;background:var(--pa-panel);color:var(--pa-text);white-space:nowrap;font-size:12px;font-weight:700}
 .pa-header-actions button{padding:4px 10px;border-radius:7px;font-size:11px}
 .photo-album .pa-header-actions .primary{box-shadow:0 2px 6px rgba(49,119,239,.2)}
@@ -11423,6 +11435,7 @@ a.diary-school-card-value{color:var(--accent)}
 .photo-album .pa-media-actions button:disabled{opacity:.45;cursor:default}
 .photo-album .pa-media-actions [data-media-action="delete"]{color:#cf5361}
 .pa-media-actions [data-media-action="all"]{grid-column:1/-1}
+.pa-media-actions [data-media-classify="remove"]{grid-column:1/-1}
 .pa-media-card{position:relative}
 .pa-media-check{position:absolute;right:4px;top:4px;display:none;place-items:center;box-sizing:border-box;width:20px;height:20px;border:2px solid var(--pa-accent);border-radius:5px;background:var(--pa-panel);color:transparent;font-size:13px;font-weight:800;line-height:1;pointer-events:none}
 .pa-media-selecting .pa-media-check{display:grid}
@@ -11779,10 +11792,15 @@ a.diary-school-card-value{color:var(--accent)}
 .photo-album .pa-mode-tab{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border:0;border-radius:6px;background:transparent;color:var(--pa-muted);font-size:11px;font-weight:700;white-space:nowrap}
 .photo-album .pa-mode-tab[aria-selected="true"]{background:var(--pa-panel);color:var(--pa-accent);box-shadow:0 1px 4px rgba(25,37,59,.12)}
 .pa-mode-tab svg{width:16px;height:16px}
-.pa-book{position:relative;display:none;flex:1;min-height:0;flex-direction:column;background:#ede6d6}
+.pa-book{position:relative;display:none;flex:1;min-height:0;flex-direction:column;background:var(--pa-book-background,#ede6d6)}
 .pa-book-mode .pa-book{display:flex}
 .pa-book-mode .pa-layout{display:none}
 .pa-book-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--pa-line);background:var(--pa-panel)}
+.pa-book-background-controls{display:flex;align-items:center;gap:6px;flex:none}
+.pa-book-background-controls label{display:flex;align-items:center;gap:5px;color:var(--pa-muted);font-size:11px;white-space:nowrap}
+.pa-book-background-controls input{width:28px;height:26px;padding:2px;border:1px solid var(--pa-line);border-radius:6px;background:var(--pa-panel);cursor:pointer}
+.photo-album .pa-book-background-controls button{padding:4px 7px;border:1px solid var(--pa-line);border-radius:6px;background:var(--pa-panel);color:var(--pa-muted);font-size:11px;white-space:nowrap}
+.photo-album .pa-book-background-controls button:hover:not(:disabled){border-color:var(--pa-accent);color:var(--pa-accent)}
 /* 쪽 번호는 아래 쪽 미리보기에 같은 정보가 있어 편집 중엔 감춘다(책 감상에선 미리보기가 없어 보인다). 요소는 남김. */
 .pa-book-where{display:none;min-width:110px;font-size:13px}
 .pa-book-reading .pa-book-where{display:block}
@@ -11925,8 +11943,8 @@ a.diary-school-card-value{color:var(--accent)}
 .pa-mini-page img{position:absolute;object-fit:cover;box-shadow:0 0 0 .5px rgba(0,0,0,.15)}
 .pa-book-thumb small{margin-top:2px;color:var(--pa-muted);font-size:10px;text-align:center;white-space:nowrap}
 .photo-album .pa-book-thumb-add{flex:none;width:52px;height:66px;border:1px dashed var(--pa-line);border-radius:8px;background:transparent;color:var(--pa-muted);font-weight:700}
-.pa-book-reading .pa-header,.pa-book-reading .pa-footer,.pa-book-reading .pa-book-tray,.pa-book-reading .pa-book-thumbs,.pa-book-reading .pa-book-tools{display:none}
-.pa-book-reading .pa-book{background:#2a2622}
+.pa-book-reading .pa-header,.pa-book-reading .pa-footer,.pa-book-reading .pa-book-tray,.pa-book-reading .pa-book-thumbs,.pa-book-reading .pa-book-tools,.pa-book-reading .pa-book-background-controls{display:none}
+.pa-book-reading .pa-book{background:var(--pa-book-background,#2a2622)}
 .pa-book-reading .pa-book-bar{position:absolute;top:10px;right:14px;z-index:5;padding:0;border:0;background:transparent;opacity:.35;transition:opacity .2s}
 .pa-book-reading .pa-book-bar:hover,.pa-book-reading .pa-book-bar:focus-within{opacity:1}
 .pa-book-reading .pa-book-where{color:#f4f1e6}
@@ -11983,8 +12001,8 @@ a.diary-school-card-value{color:var(--accent)}
   #paPrintLayer .pa-print-sheet:last-child{break-after:auto;page-break-after:auto}
   #paPrintLayer img{display:block;max-width:100%;max-height:100%;object-fit:contain}
 }
-/* 어두운 테마: 책상은 어둡게, 쪽(종이)은 고른 바탕 그대로 둔다 — 종이색이 곧 앨범 꾸미기라서. */
-[data-theme="dark"] .pa-book{background:#1d1a16}
+/* 어두운 테마: 고른 바깥 배경색은 유지하고 기본색일 때만 어둡게, 종이는 고른 바탕 그대로 둔다. */
+[data-theme="dark"] .pa-book{background:var(--pa-book-background,#1d1a16)}
 [data-theme="dark"] .pa-page.is-blank{background:rgba(251,246,234,.08)}
 [data-theme="dark"] .photo-album .pa-book-blank-add{border-color:#6b5f4c;color:#d8c9ad}
 @media(max-width:900px){.pa-book-tray{width:118px}.pa-book-tray-list{grid-template-columns:1fr}}

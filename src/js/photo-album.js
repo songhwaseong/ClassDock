@@ -371,9 +371,17 @@ const PhotoAlbum = (() => {
     const { blob, ...rest } = item;
     return { ...rest, mime:item.mime || (blob && blob.type) || "application/octet-stream" };
   }
+  const metadataWrites = new Map();
   async function persistMetadata(item){
-    if (!nativeStorage) return query("readwrite", store => store.put(item));
-    return nativeRequest("POST", "/photo-album-meta?id=" + encodeURIComponent(item.id), JSON.stringify(metadata(item)));
+    const native = nativeStorage, json = JSON.stringify(metadata(item));
+    const snapshot = native ? json : { ...JSON.parse(json), ...(item.blob ? { blob:item.blob } : {}) };
+    const previous = metadataWrites.get(item.id), run = () => native
+      ? nativeRequest("POST", "/photo-album-meta?id=" + encodeURIComponent(item.id), snapshot)
+      : query("readwrite", store => store.put(snapshot));
+    const write = previous ? previous.catch(() => {}).then(run) : run();
+    metadataWrites.set(item.id, write);
+    const release = () => { if (metadataWrites.get(item.id) === write) metadataWrites.delete(item.id); };
+    write.then(release, release); return write;
   }
   async function persistNew(item){
     if (!nativeStorage) return query("readwrite", store => store.put(item));
@@ -382,6 +390,7 @@ const PhotoAlbum = (() => {
     await persistMetadata(item);
   }
   async function deleteItem(item){
+    const pending = metadataWrites.get(item.id); if (pending) await pending.catch(() => {});
     if (!nativeStorage) return query("readwrite", store => store.delete(item.id));
     await nativeRequest("POST", "/photo-album-delete?id=" + encodeURIComponent(item.id));
     await query("readwrite", store => store.delete(item.id)).catch(() => {});
@@ -404,9 +413,210 @@ const PhotoAlbum = (() => {
   // 사진 음악 우선: 사진에 음악이 있으면 그 음악, 없으면 전체 음악. 전체 음악끼리 넘길 땐 같은 세션이라 끊기지 않고 이어진다.
   const ALBUM_ID = "c1a55d0c-a1b0-4a1b-8000-000000000001";
   let albumItem = { id:ALBUM_ID, type:"album", created:0 };
+  let albums = [], libraryView = false, albumBusy = false, importing = false, musicImporting = false;
+  const ACTIVE_ALBUM_KEY = "classdock.photoAlbum.activeAlbum", albumHistories = new Map();
+  const albumOperationBusy = () => albumBusy || importing || musicImporting || mediaDeleteBusy || bookExportBusy;
   function albumRecord(list){
     const found = list.find(record => record && record.type === "album" && record.id === ALBUM_ID);
     return found ? { ...found, id:ALBUM_ID, type:"album" } : { id:ALBUM_ID, type:"album", created:0 };
+  }
+  // 원본은 공용으로 보관하고, 앨범마다 소속 미디어 ID와 책·음악을 따로 저장한다.
+  const allAlbums = () => [albumItem, ...albums.filter(item => item.id !== albumItem.id)];
+  const albumMedia = (owner = albumItem) => { if (!Array.isArray(owner.mediaIds)) return records; const ids = new Set(owner.mediaIds); return records.filter(item => ids.has(item.id)); };
+  const visibleMedia = () => libraryView ? records : albumMedia();
+  const albumName = owner => owner.name || "기본 앨범";
+  const cleanBookBackground = value => typeof value === "string" && /^#[a-f0-9]{6}$/i.test(value) ? value.toLowerCase() : "";
+  const cleanAlbumName = value => String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  function albumNameError(value, exceptId){
+    const name = cleanAlbumName(value);
+    if (!name) return "앨범 이름을 입력해 주세요.";
+    if (name.length > 60) return "앨범 이름은 60자까지 입력할 수 있습니다.";
+    return allAlbums().some(item => item.id !== exceptId && albumName(item).toLocaleLowerCase() === name.toLocaleLowerCase()) ? "같은 이름의 앨범이 있습니다." : "";
+  }
+  async function initializeAlbums(list){
+    const known = new Set(records.map(item => item.id)), unique = new Map();
+    for (const raw of list){
+      if (!raw || raw.type !== "album" || typeof raw.id !== "string" || unique.has(raw.id)) continue;
+      unique.set(raw.id, { ...raw });
+    }
+    if (!unique.has(ALBUM_ID)) unique.set(ALBUM_ID, albumRecord(list));
+    albums = [...unique.values()].sort((a, b) => a.id === ALBUM_ID ? -1 : b.id === ALBUM_ID ? 1 : (a.created || 0) - (b.created || 0));
+    for (const owner of albums){
+      const before = JSON.stringify(owner);
+      owner.name = cleanAlbumName(owner.name).slice(0, 60) || (owner.id === ALBUM_ID ? "기본 앨범" : "이름 없는 앨범");
+      const background = cleanBookBackground(owner.bookBackground);
+      if (background) owner.bookBackground = background; else delete owner.bookBackground;
+      // 예전 고정 앨범은 쪽에서 뺀 사진도 포함해 모두 보존한다. 새 앨범의 빈 목록은 그대로 둔다.
+      const ids = Array.isArray(owner.mediaIds) ? owner.mediaIds : owner.id === ALBUM_ID ? records.map(item => item.id) : (owner.book && owner.book.pages || []).flatMap(page => page && page.slots || []).map(slot => slot.media);
+      owner.mediaIds = [...new Set(ids.filter(id => known.has(id)))]; owner.albumVersion = 2;
+      const first = !owner.book || !Array.isArray(owner.book.pages);
+      owner.book = first ? { v:1, pages:autoFillPages(albumMedia(owner)) } : normalizeBook(owner.book, owner);
+      owner.lastPage = Math.round(clampNum(owner.lastPage, 0, Math.max(0, owner.book.pages.length - 1), 0));
+      if (JSON.stringify(owner) !== before) await persistMetadata(owner);
+    }
+    let saved; try { saved = localStorage.getItem(ACTIVE_ALBUM_KEY); } catch { /* 기본 앨범 */ }
+    albumItem = albums.find(item => item.id === saved) || albums[0];
+    libraryView = false; albumHistories.clear(); bookPage = albumItem.lastPage; bookSpread = bookPage - bookPage % bookPerView();
+  }
+  async function flushBookSave(){
+    if (!bookSaveTimer) return;
+    clearTimeout(bookSaveTimer); bookSaveTimer = 0;
+    await persistMetadata(albumItem);
+  }
+  function refreshAlbumUi(){
+    if (!visibleMedia().some(item => item.id === selectedId)){ selectedId = visibleMedia()[0] && visibleMedia()[0].id; picked = new Set(); stopAllMusic(); stopAllSfx(); }
+    if (!root) return;
+    paintAlbumControls(); paintList(); paintStage(); paintBackgrounds(); paintStickers(); paintBook(); syncMediaSelection();
+  }
+  async function switchAlbum(id){
+    const next = allAlbums().find(item => item.id === id);
+    if (!next || next === albumItem || albumOperationBusy()) return;
+    albumBusy = true; paintAlbumControls();
+    try {
+      stopSlotDrag(); endTrayDrag(); if (bookTurn) bookTurn.finish(bookTurn.commit);
+      albumItem.lastPage = bookPage; await flushBookSave(); await persistMetadata(albumItem);
+      albumHistories.set(albumItem.id, { undo:bookHistory.undo.slice(), redo:bookHistory.redo.slice(), base:bookHistory.base });
+      stopBookVideo(); stopAllMusic(); stopAllSfx(); albumResume = null; musicEditTrack = null;
+      if (viewing) setViewing(false); if (bookReading) setBookReading(false);
+      if (closeAlbumMenu) closeAlbumMenu(); closeSaveMenu(); closeEffectPanel();
+      albumItem = next; libraryView = false; mediaPicked.clear(); picked.clear(); bookPick = null;
+      bookPage = Math.min(next.lastPage || 0, Math.max(0, bookOf().pages.length - 1)); bookSpread = bookPage - bookPage % bookPerView();
+      Object.assign(bookHistory, albumHistories.get(id) || { undo:[], redo:[], base:JSON.stringify(bookOf()) });
+      try { localStorage.setItem(ACTIVE_ALBUM_KEY, id); } catch { /* 이번 화면에만 */ }
+      refreshAlbumUi(); status(albumName(next) + "을 열었습니다.");
+    } catch(error){ console.error(error); notice("지금 앨범을 저장하지 못해 전환하지 않았습니다. 다시 시도해 주세요."); }
+    finally { albumBusy = false; paintAlbumControls(); syncMediaSelection(); }
+  }
+  async function createAlbum(name){
+    if (albumOperationBusy() || albumNameError(name)) return null;
+    const owner = { id:crypto.randomUUID(), type:"album", albumVersion:2, name:cleanAlbumName(name), created:Date.now(), mediaIds:[], book:{ v:1, pages:[] }, lastPage:0 };
+    albumBusy = true; paintAlbumControls();
+    try { await persistMetadata(owner); albums = allAlbums(); albums.push(owner); }
+    catch(error){ console.error(error); notice("앨범을 만들지 못했습니다."); return null; }
+    finally { albumBusy = false; paintAlbumControls(); }
+    await switchAlbum(owner.id); return owner;
+  }
+  async function renameAlbum(name){
+    if (albumOperationBusy() || albumNameError(name, albumItem.id)) return false;
+    albumBusy = true; paintAlbumControls(); const owner = albumItem, previous = owner.name;
+    try { owner.name = cleanAlbumName(name); await persistMetadata(owner); status("앨범 이름을 바꿨습니다."); return true; }
+    catch(error){ owner.name = previous; console.error(error); notice("앨범 이름을 저장하지 못했습니다."); return false; }
+    finally { albumBusy = false; paintAlbumControls(); }
+  }
+  async function deleteAlbum(){
+    if (albumItem.id === ALBUM_ID || albumOperationBusy()) return;
+    const owner = albumItem; albumBusy = true; paintAlbumControls();
+    try {
+      if (!await confirmDialog('"' + albumName(owner) + '" 앨범을 삭제할까요?\n이 앨범의 쪽·글·장식은 삭제됩니다. 사진·영상은 전체 사진과 다른 앨범에 남습니다.', "앨범 삭제", "취소")) return;
+      await flushBookSave();
+      // 기본 앨범에 먼저 전환해 저장 타이머와 재생이 삭제된 앨범을 다시 만들지 못하게 한다.
+      albumBusy = false; await switchAlbum(ALBUM_ID); albumBusy = true;
+      if (albumItem === owner) return;
+      await deleteItem(owner); albums = albums.filter(item => item.id !== owner.id); albumHistories.delete(owner.id);
+      for (const track of musicTracks(owner.music)) await dropAudioRecord(track.id);
+      notice("앨범을 삭제했습니다. 사진·영상은 전체 사진에 남아 있습니다.");
+    } catch(error){ console.error(error); notice("앨범을 삭제하지 못했습니다."); }
+    finally { albumBusy = false; refreshAlbumUi(); }
+  }
+  async function requestAlbumName(rename){
+    if (albumOperationBusy()) return;
+    const name = await askText({ title:rename ? "앨범 이름 변경" : "새 앨범", message:"가족, 친구, 여행처럼 알아보기 쉬운 이름을 지어 주세요.", placeholder:"예: 가족 앨범", value:rename ? albumName(albumItem) : "", okText:rename ? "변경" : "만들기", validate:value => albumNameError(value, rename ? albumItem.id : null) });
+    if (name !== null) await (rename ? renameAlbum(name) : createAlbum(name));
+  }
+  function paintAlbumControls(){
+    if (root) root.classList.toggle("pa-album-busy", albumOperationBusy());
+    paintBookBackground();
+    const remove = root && root.querySelector(".pa-delete-all"); if (remove) remove.disabled = albumOperationBusy() || (!records.length && !allAlbums().some(owner => owner.book && owner.book.pages.length));
+    const host = root && root.querySelector(".pa-albums"); if (!host) return;
+    const select = host.querySelector(".pa-album-select"); select.replaceChildren();
+    const list = allAlbums().sort((a, b) => a.id === ALBUM_ID ? -1 : b.id === ALBUM_ID ? 1 : (a.created || 0) - (b.created || 0));
+    for (const owner of list){ const option = document.createElement("option"); option.value = owner.id; option.textContent = albumName(owner) + " (" + albumMedia(owner).length + ")"; select.appendChild(option); }
+    select.value = albumItem.id;
+    const busy = albumOperationBusy();
+    host.querySelectorAll("button,select").forEach(el => { el.disabled = busy; });
+    host.querySelector(".pa-album-delete").disabled = busy || albumItem.id === ALBUM_ID;
+    host.querySelectorAll("[data-library]").forEach(el => el.setAttribute("aria-pressed", String((el.dataset.library === "all") === libraryView)));
+    const label = host.querySelector(".pa-album-info"); label.textContent = libraryView ? "전체 사진에서 골라 앨범에 추가하세요" : bookOf().pages.length + "쪽 · 사진·영상 " + albumMedia().length + "개";
+    const pick = root.querySelector(".pa-import"); if (pick){ pick.disabled = busy; pick.title = albumName(albumItem) + "에 사진·영상 가져오기"; }
+  }
+  function setupAlbumControls(){
+    const host = document.createElement("nav"); host.className = "pa-albums"; host.setAttribute("aria-label", "앨범 분류");
+    host.innerHTML = '<label class="pa-album-label">앨범 <select class="pa-album-select" aria-label="앨범 선택"></select></label><div class="pa-album-manage"><button type="button" class="pa-album-add">+ 새 앨범</button><button type="button" class="pa-album-rename">이름 변경</button><button type="button" class="pa-album-delete" title="앨범만 삭제합니다. 기본 앨범은 보관용으로 남습니다.">앨범 삭제</button></div><div class="pa-album-scope" role="group" aria-label="사진 목록 범위"><button type="button" data-library="album">앨범 사진</button><button type="button" data-library="all">전체 사진</button></div><span class="pa-album-info"></span>';
+    root.querySelector(".pa-header").after(host);
+    host.querySelector(".pa-album-select").onchange = event => switchAlbum(event.target.value);
+    host.querySelector(".pa-album-add").onclick = () => requestAlbumName(false);
+    host.querySelector(".pa-album-rename").onclick = () => requestAlbumName(true);
+    host.querySelector(".pa-album-delete").onclick = deleteAlbum;
+    host.querySelectorAll("[data-library]").forEach(el => { el.onclick = () => { if (albumOperationBusy()) return; libraryView = el.dataset.library === "all"; mediaPicked.clear(); refreshAlbumUi(); }; });
+    paintAlbumControls();
+  }
+  function setupAlbumDeleteButton(){
+    const remove = iconButton("delete", "사진첩 전체 삭제", () => removeMediaItems(records, { all:true }), "pa-head-ico pa-delete-all");
+    root.querySelector(".pa-header-actions").appendChild(remove);
+  }
+  function clearAlbumHistory(owner){
+    albumHistories.delete(owner.id);
+    if (owner === albumItem) Object.assign(bookHistory, { undo:[], redo:[], base:JSON.stringify(bookOf()) });
+  }
+  function detachAlbumMedia(owner, ids){
+    const removed = new Set(ids), members = albumMedia(owner).map(item => item.id);
+    owner.mediaIds = members.filter(id => !removed.has(id));
+    if (owner.book && Array.isArray(owner.book.pages)){
+      for (const page of owner.book.pages) page.slots = page.slots.filter(slot => !removed.has(slot.media));
+      owner.book.pages = owner.book.pages.filter(page => page.keepEmpty || page.slots.length || page.texts.length || (page.stickers || []).length);
+    }
+    clearAlbumHistory(owner);
+  }
+  function appendAlbumMedia(owner, items){
+    const ids = new Set(albumMedia(owner).map(item => item.id)), added = items.filter(item => !ids.has(item.id));
+    owner.mediaIds = [...new Set([...ids, ...items.map(item => item.id)])];
+    if (!owner.book) owner.book = { v:1, pages:[] };
+    let last = owner.book.pages[owner.book.pages.length - 1];
+    for (const item of added){
+      if (!last || last.slots.length >= BOOK_MAX_PER_PAGE){
+        if (owner.book.pages.length >= BOOK_MAX_PAGES) break;
+        last = { id:bookId(), paper:last ? last.paper : "cream", slots:[], texts:[], stickers:[] }; owner.book.pages.push(last);
+      }
+      last.slots.push({ id:bookId(), media:item.id }); layoutPage(last);
+    }
+    clearAlbumHistory(owner); return added.length;
+  }
+  async function classifyMedia(targetId, move = false){
+    const source = albumItem, target = allAlbums().find(owner => owner.id === targetId), items = records.filter(item => mediaPicked.has(item.id));
+    if (!target || !items.length || (move && target === source) || albumOperationBusy()) return;
+    albumBusy = true; paintAlbumControls(); syncMediaSelection();
+    try {
+      await flushBookSave();
+      const before = JSON.stringify(target), count = appendAlbumMedia(target, items);
+      try { await persistMetadata(target); } catch(error){ Object.assign(target, JSON.parse(before)); clearAlbumHistory(target); throw error; }
+      if (move){
+        const original = JSON.stringify(source); detachAlbumMedia(source, items.map(item => item.id));
+        try { await persistMetadata(source); }
+        catch(error){ Object.assign(source, JSON.parse(original)); clearAlbumHistory(source); notice("대상 앨범에 추가했지만 원래 앨범에서 빼지 못했습니다. 두 앨범에 보관되어 있습니다."); return; }
+      }
+      mediaPicked.clear(); bookPick = null;
+      notice(move ? albumName(target) + "으로 " + items.length + "개를 옮겼습니다." : albumName(target) + "에 " + count + "개를 추가했습니다." + (count < items.length ? " 이미 들어 있는 사진은 중복 추가하지 않았습니다." : ""));
+    } catch(error){ console.error(error); notice("사진 분류를 저장하지 못했습니다."); }
+    finally { albumBusy = false; refreshAlbumUi(); }
+  }
+  async function removeAlbumMedia(){
+    const owner = albumItem, ids = albumMedia().filter(item => mediaPicked.has(item.id)).map(item => item.id);
+    if (!ids.length || albumOperationBusy()) return;
+    albumBusy = true; paintAlbumControls(); syncMediaSelection();
+    try {
+      if (!await confirmDialog(albumName(owner) + "에서 " + ids.length + "개를 뺄까요?\n이 앨범의 쪽에서도 빠집니다. 사진·영상은 전체 사진과 다른 앨범에 남습니다.", "앨범에서 빼기", "취소")) return;
+      await flushBookSave(); const previous = JSON.stringify(owner); detachAlbumMedia(owner, ids);
+      try { await persistMetadata(owner); } catch(error){ Object.assign(owner, JSON.parse(previous)); clearAlbumHistory(owner); throw error; }
+      mediaPicked.clear(); bookPick = null; stopBookVideo(); notice("앨범에서 뺐습니다. 전체 사진에서 다시 추가할 수 있습니다.");
+    } catch(error){ console.error(error); notice("앨범에서 빼기를 저장하지 못했습니다."); }
+    finally { albumBusy = false; refreshAlbumUi(); }
+  }
+  function chooseMediaAlbum(event, move){
+    if (albumOperationBusy() || !mediaPicked.size) return;
+    if (closeAlbumMenu) closeAlbumMenu();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const entries = allAlbums().filter(owner => !move || owner !== albumItem).map(owner => ({ label:albumName(owner), action:() => classifyMedia(owner.id, move) }));
+    closeAlbumMenu = MNContextMenu.open(rect.left, rect.bottom, entries, { base:"text-context", autoFocus:true, onClose:() => { closeAlbumMenu = null; } });
   }
   const musicSource = item => musicOf(item) ? item : item && item.type === "image" && musicOf(albumItem) ? albumItem : null;
   // 고칠 때 예전 한 곡짜리를 목록 꼴로 바꿔 둔다.
@@ -744,7 +954,7 @@ const PhotoAlbum = (() => {
     else if (musicSession) stopMusic(cross !== null ? cross : musicFades(musicSession.item.music).o);
   }
   async function dropAudioRecord(id){
-    if (!id || [albumItem, ...records].some(item => musicTracks(item.music).some(track => track.id === id))) return;
+    if (!id || [...allAlbums(), ...records].some(item => musicTracks(item.music).some(track => track.id === id))) return;
     const record = audioById(id); if (!record) return;
     audioRecords = audioRecords.filter(other => other.id !== id);
     try { await deleteItem(record); } catch(error){ console.warn("배경음악 파일을 지우지 못했습니다:", error); }
@@ -753,20 +963,24 @@ const PhotoAlbum = (() => {
   async function importMusic(item, files){
     const list = (Array.isArray(files) ? files : [files]).filter(Boolean);
     if (!item || (item.type !== "image" && item !== albumItem) || !list.length) return;
-    let added = 0;
-    for (const file of list){
-      if (!/^audio\//.test(file.type) && !/\.(mp3|m4a|aac|wav|ogg|oga|flac|opus|webm)$/i.test(file.name)){ notice(`"${file.name}" 은(는) 음악 파일이 아닙니다(mp3·m4a·wav·ogg 등).`); continue; }
-      if (file.size > MUSIC_MAX_BYTES){ notice(`"${file.name}" 은(는) 50MB 를 넘어 넣을 수 없습니다.`); continue; }
-      const record = { id:crypto.randomUUID(), type:"audio", name:file.name, mime:file.type || "audio/mpeg", blob:file, created:Date.now() };
-      try { await persistNew(record); }
-      catch(error){ console.error(error); notice(`"${file.name}" 을(를) 저장하지 못했습니다.`); continue; }
-      audioRecords.push(record); ensureMusicDuration(record);
-      playlistMusic(item).tracks.push({ id:record.id, name:file.name });
-      added++;
-    }
-    if (!added) return;
-    await save(item); paintMusic();
-    status(musicTracks(item.music).length > 1 ? `${item === albumItem ? "전체 " : ""}배경음악 ${added}곡을 재생목록에 더했습니다 (모두 ${musicTracks(item.music).length}곡).` : item === albumItem ? "전체 배경음악을 넣었습니다. 음악이 없는 사진에서 흐릅니다." : "배경음악을 넣었습니다. ▶ 로 들어 보거나 감상 모드에서 들을 수 있습니다.");
+    if (musicImporting || albumBusy || mediaDeleteBusy || bookExportBusy) return;
+    musicImporting = true; paintAlbumControls(); syncMediaSelection();
+    try {
+      let added = 0;
+      for (const file of list){
+        if (!/^audio\//.test(file.type) && !/\.(mp3|m4a|aac|wav|ogg|oga|flac|opus|webm)$/i.test(file.name)){ notice(`"${file.name}" 은(는) 음악 파일이 아닙니다(mp3·m4a·wav·ogg 등).`); continue; }
+        if (file.size > MUSIC_MAX_BYTES){ notice(`"${file.name}" 은(는) 50MB 를 넘어 넣을 수 없습니다.`); continue; }
+        const record = { id:crypto.randomUUID(), type:"audio", name:file.name, mime:file.type || "audio/mpeg", blob:file, created:Date.now() };
+        try { await persistNew(record); }
+        catch(error){ console.error(error); notice(`"${file.name}" 을(를) 저장하지 못했습니다.`); continue; }
+        audioRecords.push(record); ensureMusicDuration(record);
+        playlistMusic(item).tracks.push({ id:record.id, name:file.name });
+        added++;
+      }
+      if (!added) return;
+      await save(item); paintMusic();
+      status(musicTracks(item.music).length > 1 ? `${item === albumItem ? "앨범 " : ""}배경음악 ${added}곡을 재생목록에 더했습니다 (모두 ${musicTracks(item.music).length}곡).` : item === albumItem ? "이 앨범의 배경음악을 넣었습니다. 음악이 없는 사진에서 흐릅니다." : "배경음악을 넣었습니다. ▶ 로 들어 보거나 감상 모드에서 들을 수 있습니다.");
+    } finally { musicImporting = false; paintAlbumControls(); syncMediaSelection(); }
   }
   async function removeTrack(item, id){
     const music = playlistMusic(item); if (!music.tracks.some(track => track.id === id)) return;
@@ -947,23 +1161,23 @@ const PhotoAlbum = (() => {
     if (!image) return;
     const album = musicScope === "album", owner = album ? albumItem : item;
     const head = document.createElement("div"); head.className = "pa-music-head";
-    const label = document.createElement("strong"); label.textContent = "♫ 배경음악"; label.title = "사진 음악이 먼저 나오고, 음악이 없는 사진에서는 전체 음악이 흐릅니다";
+    const label = document.createElement("strong"); label.textContent = "♫ 배경음악"; label.title = "사진 음악이 먼저 나오고, 음악이 없는 사진에서는 현재 앨범 음악이 흐릅니다";
     head.appendChild(label); host.appendChild(head);
-    // 이 사진 / 전체: 어느 쪽 음악을 고칠지. 음악이 들어 있는 쪽엔 ♪ 를 붙인다.
+    // 이 사진 / 이 앨범: 어느 쪽 음악을 고칠지. 음악이 들어 있는 쪽엔 ♪ 를 붙인다.
     const scope = document.createElement("div"); scope.className = "pa-order-switch pa-music-scope"; scope.setAttribute("role","group"); scope.setAttribute("aria-label","배경음악 적용 범위");
-    [["photo","이 사진",item,"이 사진에만 흐르는 음악(있으면 전체 음악보다 먼저 나옵니다)"],["album","전체",albumItem,"음악이 없는 모든 사진에 흐르는 음악. 사진을 넘겨도 끊기지 않고 이어집니다"]].forEach(([id,text,target,title]) => {
+    [["photo","이 사진",item,"이 사진에만 흐르는 음악(있으면 앨범 음악보다 먼저 나옵니다)"],["album","이 앨범",albumItem,"현재 앨범에서 음악이 없는 사진에 흐르는 음악. 사진을 넘겨도 끊기지 않고 이어집니다"]].forEach(([id,text,target,title]) => {
       const on = musicScope === id, choice = button(text + (musicOf(target) ? " ♪" : ""), () => { musicScope = id; musicEditTrack = null; paintMusic(); }, on ? "active" : "");
       choice.title = title; choice.setAttribute("aria-pressed", String(on)); scope.appendChild(choice);
     });
     host.appendChild(scope);
-    const playTitle = document.createElement("strong"); playTitle.className = "pa-play-title"; playTitle.textContent = album ? "재생 설정 · 전체" : "재생 설정";
+    const playTitle = document.createElement("strong"); playTitle.className = "pa-play-title"; playTitle.textContent = album ? "재생 설정 · 이 앨범" : "재생 설정";
     const music = musicOf(owner);
     if (!music){
       const [pick, input] = musicPicker(owner, "+ 음악 넣기", album ? "음악이 없는 사진에 흐를 음악을 고릅니다(여러 곡을 한꺼번에 골라 재생목록으로 만들 수 있어요)" : "감상 모드와 MP4 영상에 함께 나올 음악을 고릅니다(여러 곡을 한꺼번에 골라 재생목록으로 만들 수 있어요)");
       pick.classList.add("pa-music-add"); head.append(pick, input);
       const empty = document.createElement("p"); empty.className = "pa-music-empty";
-      empty.textContent = album ? "모든 사진에 흐를 전체 음악을 넣어 보세요. 음악이 없는 사진에서 흐르고, 사진을 넘겨도 끊기지 않고 이어집니다."
-        : musicOf(albumItem) ? "이 사진엔 따로 넣은 음악이 없어 전체 음악이 흐릅니다. 여기에 음악을 넣으면 이 사진에선 그 음악이 먼저 나옵니다."
+      empty.textContent = album ? "이 앨범에 흐를 음악을 넣어 보세요. 음악이 없는 사진에서 흐르고, 사진을 넘겨도 끊기지 않고 이어집니다."
+        : musicOf(albumItem) ? "이 사진엔 따로 넣은 음악이 없어 현재 앨범 음악이 흐릅니다. 여기에 음악을 넣으면 이 사진에선 그 음악이 먼저 나옵니다."
         : "이 사진에 흐를 음악을 넣어 보세요. 여러 곡을 한꺼번에 고르면 재생목록이 됩니다.";
       host.appendChild(empty);
       if (play) play.append(playTitle, crossfadeRow(), musicMoreToggle());
@@ -1018,7 +1232,7 @@ const PhotoAlbum = (() => {
         field.append(fadeLabel, slider, shown); play.appendChild(field);
       });
       play.appendChild(crossfadeRow());
-      const volumeField = document.createElement("label"); volumeField.className = "pa-sfx-fade pa-music-volume"; volumeField.title = album ? "전체 배경음악 소리 크기" : "이 사진 배경음악 전체 소리 크기";
+      const volumeField = document.createElement("label"); volumeField.className = "pa-sfx-fade pa-music-volume"; volumeField.title = album ? "이 앨범 배경음악 소리 크기" : "이 사진 배경음악 전체 소리 크기";
       const volumeLabel = document.createElement("span"); volumeLabel.textContent = "전체 볼륨";
       const volume = document.createElement("input"); volume.type = "range"; volume.min = 0; volume.max = 100; volume.value = Math.round(musicVolume(music)*100); volume.setAttribute("aria-label","배경음악 전체 볼륨");
       const volumeShown = document.createElement("span"); volumeShown.className = "pa-range-value"; volumeShown.textContent = volume.value + "%";
@@ -1029,7 +1243,7 @@ const PhotoAlbum = (() => {
     if (!more) return;
     // 세부 설정 칸
     const moreHead = document.createElement("div"); moreHead.className = "pa-more-head";
-    const moreTitle = document.createElement("strong"); moreTitle.textContent = album ? "♫ 전체 음악 세부 설정" : "♫ 음악 세부 설정";
+    const moreTitle = document.createElement("strong"); moreTitle.textContent = album ? "♫ 앨범 음악 세부 설정" : "♫ 음악 세부 설정";
     moreHead.appendChild(moreTitle);
     if (!single){ const hint = document.createElement("small"); hint.className = "pa-crossfade-note"; hint.textContent = "재생목록에서 곡 이름을 누르면 그 곡을 고칩니다"; moreHead.appendChild(hint); }
     more.appendChild(moreHead);
@@ -1604,7 +1818,7 @@ const PhotoAlbum = (() => {
   function onHistoryKey(event){
     if (!root || !root.isConnected || root.closest("[hidden]") || drawing || event.altKey) return;
     if (closeAlbumMenu) return;
-    if (mediaDeleteBusy) return;
+    if (albumOperationBusy()) return;
     if (mediaSelecting && event.target && event.target.closest && event.target.closest(".pa-media-card,.pa-book-tray-item,.pa-media-actions")){
       const key = String(event.key || "").toLowerCase(), mod = event.ctrlKey || event.metaKey;
       if (!mod && key === "escape"){ event.preventDefault(); setMediaSelecting(false); }
@@ -1654,20 +1868,20 @@ const PhotoAlbum = (() => {
     const host = root.querySelector(".pa-filters"); if (!host) return; host.replaceChildren();
     [["all","▦ 전체"],["image","▧ 사진"],["video","▷ 동영상"],["favorite","♡ 즐겨찾기"]].forEach(([id,label]) => host.appendChild(button(label, () => { filter = id; paintFilters(); paintList(); }, filter === id ? "active" : "")));
   }
-  const shownRecords = () => records.filter(item => filter === "all" || (filter === "favorite" ? item.favorite : item.type === filter));
+  const shownRecords = () => visibleMedia().filter(item => filter === "all" || (filter === "favorite" ? item.favorite : item.type === filter));
   // 두 화면의 목록은 같은 사진과 선택 상태를 쓴다. 장식 선택(picked)과는 따로 둔다.
   function setMediaSelecting(on){
-    if (mediaDeleteBusy) return;
+    if (albumOperationBusy()) return;
     mediaSelecting = on; mediaPicked.clear(); syncMediaSelection();
   }
   function toggleMediaSelection(id){
-    if (!mediaSelecting || mediaDeleteBusy || !records.some(item => item.id === id)) return;
+    if (!mediaSelecting || albumOperationBusy() || !visibleMedia().some(item => item.id === id)) return;
     if (mediaPicked.has(id)) mediaPicked.delete(id); else mediaPicked.add(id);
     syncMediaSelection();
   }
   function selectAllMedia(scope){
-    if (!mediaSelecting || mediaDeleteBusy) return;
-    const list = scope === "edit" ? shownRecords() : records, all = list.length && list.every(item => mediaPicked.has(item.id));
+    if (!mediaSelecting || albumOperationBusy()) return;
+    const list = scope === "edit" ? shownRecords() : visibleMedia(), all = list.length && list.every(item => mediaPicked.has(item.id));
     list.forEach(item => all ? mediaPicked.delete(item.id) : mediaPicked.add(item.id));
     syncMediaSelection();
   }
@@ -1679,34 +1893,39 @@ const PhotoAlbum = (() => {
     root.querySelectorAll(".pa-media-card,.pa-book-tray-item").forEach(card => {
       const item = known.get(card.dataset.mediaId); if (!item) return;
       const book = card.classList.contains("pa-book-tray-item");
-      card.classList.toggle("is-selected", mediaPicked.has(item.id)); card.disabled = mediaDeleteBusy;
+      card.classList.toggle("is-selected", mediaPicked.has(item.id)); card.disabled = albumOperationBusy();
       if (mediaSelecting) card.setAttribute("aria-pressed", String(mediaPicked.has(item.id))); else card.removeAttribute("aria-pressed");
-      const label = item.name + (mediaSelecting ? " · 삭제할 항목 선택" : book ? card.classList.contains("is-used") ? " · 끌어다 놓거나 눌러서 기존 사진을 옮기기" : " · 쪽으로 끌거나 눌러서 넣기" : "");
+      const label = item.name + (mediaSelecting ? " · 분류하거나 삭제할 항목 선택" : book ? card.classList.contains("is-used") ? " · 끌어다 놓거나 눌러서 기존 사진을 옮기기" : " · 쪽으로 끌거나 눌러서 넣기" : "");
       card.title = label; card.setAttribute("aria-label", label);
-      if (book) card.draggable = !mediaSelecting && !mediaDeleteBusy;
+      if (book) card.draggable = !mediaSelecting && !albumOperationBusy();
     });
     root.querySelectorAll(".pa-media-actions").forEach(bar => {
       const select = bar.querySelector('[data-media-action="select"]'), all = bar.querySelector('[data-media-action="all"]'), remove = bar.querySelector('[data-media-action="delete"]');
-      select.textContent = mediaSelecting ? "선택 끝" : "선택"; select.disabled = mediaDeleteBusy || !records.length; select.setAttribute("aria-pressed", String(mediaSelecting));
-      const list = bar.dataset.scope === "edit" ? shownRecords() : records;
-      all.hidden = !mediaSelecting; all.disabled = mediaDeleteBusy || !list.length;
+      const busy = albumOperationBusy();
+      select.textContent = mediaSelecting ? "선택 끝" : "선택"; select.disabled = busy || !visibleMedia().length; select.setAttribute("aria-pressed", String(mediaSelecting));
+      const list = bar.dataset.scope === "edit" ? shownRecords() : visibleMedia();
+      all.hidden = !mediaSelecting; all.disabled = busy || !list.length;
       all.textContent = list.length && list.every(item => mediaPicked.has(item.id)) ? "선택 해제" : "전체 선택";
-      all.title = bar.dataset.scope === "edit" ? "현재 필터의 사진·영상 선택 또는 해제" : "모든 사진·영상 선택 또는 해제";
-      remove.textContent = mediaDeleteBusy ? "삭제 중…" : mediaSelecting ? "선택 삭제 (" + mediaPicked.size + ")" : "전체 삭제";
-      remove.disabled = mediaDeleteBusy || !(mediaSelecting ? mediaPicked.size : records.length || (albumItem.book && albumItem.book.pages.length));
-      remove.title = mediaSelecting ? "선택한 사진·영상을 두 화면과 앨범 쪽에서 삭제" : "모든 사진·영상과 앨범 쪽·쪽 미리보기를 함께 삭제";
+      all.title = bar.dataset.scope === "edit" ? "현재 필터의 사진·영상 선택 또는 해제" : "현재 목록의 사진·영상 선택 또는 해제";
+      remove.hidden = !mediaSelecting; remove.textContent = mediaDeleteBusy ? "삭제 중…" : "사진첩 삭제 (" + mediaPicked.size + ")";
+      remove.disabled = busy || !mediaPicked.size;
+      remove.title = "선택한 사진·영상을 전체 사진과 모든 앨범에서 삭제";
+      bar.querySelectorAll("[data-media-classify]").forEach(el => { el.hidden = !mediaSelecting; el.disabled = busy || !mediaPicked.size || (el.dataset.mediaClassify === "remove" && !albumMedia().some(item => mediaPicked.has(item.id))) || (el.dataset.mediaClassify === "move" && allAlbums().length < 2); });
     });
-    const hint = root.querySelector(".pa-book-tray-hint"); if (hint) hint.textContent = mediaSelecting ? "사진을 골라 한꺼번에 삭제" : "끌거나 눌러 배치 · 기존 사진은 이동";
+    const hint = root.querySelector(".pa-book-tray-hint"); if (hint) hint.textContent = mediaSelecting ? "사진을 골라 앨범에 추가·이동·빼기" : "끌거나 눌러 배치 · 기존 사진은 이동";
   }
   function setupMediaActions(){
     mediaSelecting = false; mediaPicked.clear();
     [[".pa-book-tray-list", "book"], [".pa-list", "edit"]].forEach(([selector, scope]) => {
       const list = root.querySelector(selector); if (!list) return;
-      const bar = document.createElement("div"); bar.className = "pa-media-actions"; bar.dataset.scope = scope; bar.setAttribute("role", "group"); bar.setAttribute("aria-label", "사진·영상 삭제");
+      const bar = document.createElement("div"); bar.className = "pa-media-actions"; bar.dataset.scope = scope; bar.setAttribute("role", "group"); bar.setAttribute("aria-label", "사진·영상 분류와 삭제");
       const select = button("선택", () => setMediaSelecting(!mediaSelecting)); select.dataset.mediaAction = "select";
       const all = button("전체 선택", () => selectAllMedia(scope)); all.dataset.mediaAction = "all"; all.hidden = true;
-      const remove = button("전체 삭제", () => removeMediaItems(mediaSelecting ? records.filter(item => mediaPicked.has(item.id)) : records, { all:!mediaSelecting })); remove.dataset.mediaAction = "delete";
-      bar.append(select, remove, all); list.before(bar);
+      const remove = button("사진첩 삭제 (0)", () => removeMediaItems(records.filter(item => mediaPicked.has(item.id)))); remove.dataset.mediaAction = "delete"; remove.hidden = true;
+      const add = button("앨범에 추가", event => chooseMediaAlbum(event, false)); add.dataset.mediaClassify = "add";
+      const move = button("다른 앨범으로 이동", event => chooseMediaAlbum(event, true)); move.dataset.mediaClassify = "move";
+      const detach = button("앨범에서 빼기", removeAlbumMedia); detach.dataset.mediaClassify = "remove";
+      bar.append(select, remove, all, add, move, detach); list.before(bar);
     });
     syncMediaSelection();
   }
@@ -1762,7 +1981,7 @@ const PhotoAlbum = (() => {
     const host = root.querySelector(".pa-list"); if (!host) return; host.replaceChildren(); listUrls.forEach(url => URL.revokeObjectURL(url)); listUrls = [];
     const shown = shownRecords();
     root.querySelector(".pa-count").textContent = shown.length + "개";
-    if (!shown.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = records.length ? "이 항목에 미디어가 없습니다." : "사진·영상을 가져와 시작하세요."; host.appendChild(p); }
+    if (!shown.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = visibleMedia().length ? "이 항목에 미디어가 없습니다." : libraryView ? "사진·영상을 가져와 시작하세요." : "빈 앨범입니다. 가져오거나 전체 사진에서 선택해 추가하세요."; host.appendChild(p); }
     shown.forEach(item => {
       const card = button("", () => mediaSelecting ? toggleMediaSelection(item.id) : selectItem(item.id), "pa-media-card" + (selectedId === item.id ? " active" : ""));
       card.dataset.mediaId = item.id;
@@ -3062,21 +3281,21 @@ const PhotoAlbum = (() => {
       saveBtn.insertAdjacentHTML("beforeend", '<span class="pa-save-caret" aria-hidden="true">' + uiIconHtml("chevronDown", "▾") + '</span>');
       actions.appendChild(saveBtn); syncSaveButton(item);
     }
-    actions.appendChild(iconButton("delete", "삭제", () => removeMedia(item), "pa-ico pa-delete"));
+    actions.appendChild(iconButton("delete", "사진첩에서 삭제 (모든 앨범)", () => removeMedia(item), "pa-ico pa-delete"));
     caption.append(name,actions); host.appendChild(caption);
   }
   async function removeMedia(item){
     return removeMediaItems([item]);
   }
   async function removeMediaItems(items, options = {}){
-    if (mediaDeleteBusy) return;
+    if (albumOperationBusy()) return;
     const ids = new Set(items.filter(Boolean).map(item => item.id)), targets = records.filter(item => ids.has(item.id));
-    const pageCount = bookOf().pages.length;
+    const pageCount = allAlbums().reduce((sum, owner) => sum + (owner.book && owner.book.pages.length || 0), 0);
     if (!targets.length && !(options.all && pageCount)) return;
-    mediaDeleteBusy = true; syncMediaSelection();
+    mediaDeleteBusy = true; syncMediaSelection(); paintAlbumControls();
     try {
       const question = options.all ? targets.length ? "사진첩의 사진·영상 전체 " + targets.length + "개를 삭제할까요?" : "앨범에 남은 " + pageCount + "쪽을 모두 삭제할까요?" : targets.length === 1 ? "사진첩에서 이 항목을 삭제할까요?" : "선택한 사진·영상 " + targets.length + "개를 삭제할까요?";
-      const scope = options.all ? "앨범 쪽·쪽의 글과 장식·아래 쪽 미리보기도 함께 삭제됩니다." : "앨범 쪽과 1장 보기 목록에서도 삭제됩니다.";
+      const scope = options.all ? "전체 사진과 모든 앨범의 사진·영상·쪽·쪽의 글과 장식·아래 쪽 미리보기가 함께 삭제됩니다." : "전체 사진과 이 사진을 넣은 모든 앨범의 쪽에서도 삭제됩니다.";
       if (!await confirmDialog(question + "\n" + scope + "\n가져온 원본 파일은 그대로 두며, 삭제는 되돌릴 수 없습니다.", options.all ? "전체 삭제" : "삭제", "취소")) return;
       const deleted = [], failed = [];
       for (const item of targets){
@@ -3093,14 +3312,18 @@ const PhotoAlbum = (() => {
       let bookSaveFailed = false;
       const reset = options.all && !failed.length && !records.length;
       if (deleted.length || reset){
-        if (!records.some(item => item.id === selectedId)){ selectedId = records[0] && records[0].id; picked = new Set(); }
+        if (!visibleMedia().some(item => item.id === selectedId)){ selectedId = visibleMedia()[0] && visibleMedia()[0].id; picked = new Set(); }
         if (!records.length) mediaSelecting = false;
+        if (bookSaveTimer){ clearTimeout(bookSaveTimer); bookSaveTimer = 0; }
         if (reset) resetBook(); else removeFromBook(deleted.map(item => item.id));
-        // 쪽 저장을 끝낸 뒤 완료를 알린다. 재실행 시에도 두 화면에서 같은 항목이 빠진다.
-        if (bookSaveTimer){
-          clearTimeout(bookSaveTimer); bookSaveTimer = 0;
-          try { await persistMetadata(albumItem); } catch(error){ console.error(error); bookSaveFailed = true; }
+        if (bookSaveTimer){ clearTimeout(bookSaveTimer); bookSaveTimer = 0; }
+        for (const owner of allAlbums()){
+          detachAlbumMedia(owner, deleted.map(item => item.id));
+          if (reset && owner.book) owner.book.pages = [];
+          try { await persistMetadata(owner); } catch(error){ console.error(error); bookSaveFailed = true; }
         }
+        bookPage = Math.min(bookPage, Math.max(0, bookOf().pages.length - 1)); bookSpread = bookPage - bookPage % bookPerView();
+        bookPick = null; clearAlbumHistory(albumItem);
         const tracks = new Set(deleted.flatMap(item => musicTracks(item.music).map(track => track.id)));
         for (const id of tracks) await dropAudioRecord(id);
       }
@@ -3109,7 +3332,7 @@ const PhotoAlbum = (() => {
     } catch(error){ console.error(error); notice("삭제 처리 중 오류가 발생했습니다. 남은 항목을 확인해 주세요."); }
     finally {
       mediaDeleteBusy = false;
-      if (root){ paintList(); paintStage(); paintBackgrounds(); paintAdjust(); paintBook(); syncMediaSelection(); }
+      if (root){ paintList(); paintStage(); paintBackgrounds(); paintAdjust(); paintBook(); syncMediaSelection(); paintAlbumControls(); }
     }
   }
   async function dimensions(blob){ const image = await createImageBitmap(blob); const size = { width:image.width, height:image.height }; image.close(); return size; }
@@ -3161,27 +3384,73 @@ const PhotoAlbum = (() => {
     if (/\.(?:mp3|m4a|aac|wav|ogg|oga|flac|opus)$/.test(name)) return "audio";
     return null;
   }
+  // 원본 내용으로 비교한다. 이름·수정 날짜·꾸미기가 달라도 같은 파일이면 보관 항목을 공유한다.
+  async function mediaSourceHash(blob){
+    if (!crypto.subtle || typeof crypto.subtle.digest !== "function") throw new Error("photo-album-duplicate-check-unavailable");
+    const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+    return "sha256:" + Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+  }
+  async function mediaImportIndex(){
+    const index = new Map(), members = new Set(albumMedia().map(item => item.id));
+    for (let at = 0; at < records.length; at++){
+      const item = records[at];
+      if (!/^sha256:[a-f0-9]{64}$/.test(item.sourceHash || "")){
+        status("기존 사진·영상의 중복 확인 중… " + (at + 1) + "/" + records.length);
+        // 비교할 때 읽은 원본은 캐시에 쌓지 않는다. 큰 영상들도 하나씩 읽고 해제한다.
+        const blob = item.blob || (nativeStorage ? await (await nativeRequest("GET", "/photo-album-file?id=" + encodeURIComponent(item.id))).blob() : null);
+        if (!blob) throw new Error("photo-album-source-missing");
+        item.sourceHash = await mediaSourceHash(blob);
+        try { await persistMetadata(item); }
+        catch(error){ console.warn("중복 확인 정보를 저장하지 못했습니다:", error); }
+      }
+      const previous = index.get(item.sourceHash);
+      // 이미 있던 중복 항목들은 그대로 두며, 현재 앨범에 속한 항목을 우선 사용한다.
+      if (!previous || (!members.has(previous.id) && members.has(item.id))) index.set(item.sourceHash, item);
+    }
+    return index;
+  }
   // 사진·영상은 사진첩에 더하고, 음악 파일은 지금 고른 사진의 배경음악 재생목록에 더한다
   // (고른 사진이 없으면 이번에 함께 가져온 첫 사진에).
   async function importFiles(fileList){
+    if (albumOperationBusy()) return;
     const all = Array.from(fileList || []).map(file => ({ file, type:droppedMediaType(file) })).filter(entry => entry.type);
     const songs = all.filter(entry => entry.type === "audio").map(entry => entry.file), files = all.filter(entry => entry.type !== "audio");
     if (!all.length){ notice("사진·영상·음악 파일을 선택해 주세요."); return; }
-    if (!files.length){ await importSongs(songs, null); return; }
-    status(files.length + "개 파일을 가져오는 중…"); let count = 0; const added = [];
-    for (const {file,type} of files){
-      const item = { id:crypto.randomUUID(), name:file.name, type, mime:file.type, blob:file, favorite:false, background:"white", stickers:[], created:Date.now() + count };
-      try { if (type === "image"){ Object.assign(item,await dimensions(file)); item.thumbnail = await imageThumbnail(file); }
-        else item.thumbnail = await videoThumbnail(file, item);
-        await persistNew(item); records.unshift(item); added.push(item); if (!selectedId) selectedId = item.id; count++;
-      } catch(error){ console.error(error); notice(error && error.message === "photo-album-file-too-large"
-        ? file.name + " 파일은 256MB를 넘어 가져올 수 없습니다."
-        : file.name + " 파일을 가져오지 못했습니다."); }
-    }
-    paintList(); paintStage(); paintBackgrounds(); paintAdjust();
-    if (added.length) appendToBook(added);   // 앨범 책: 마지막 쪽에 자리가 있으면 거기, 없으면 새 쪽에
-    status(count + "개 파일을 저장했습니다." + (added.length ? " 앨범 마지막 쪽에도 넣었습니다." : "") + (added.some(item => item.type === "video" && !item.thumbnail) ? " 미리보기 없는 영상도 ▶ 단추로 열 수 있습니다." : ""));
-    if (songs.length) await importSongs(songs, records.find(item => item.type === "image" && files.some(entry => entry.file === item.blob)));
+    importing = true; paintAlbumControls(); syncMediaSelection();
+    try {
+      if (!files.length){ await importSongs(songs, null); return; }
+      let index;
+      try { index = await mediaImportIndex(); }
+      catch(error){ console.error(error); notice("기존 사진·영상의 중복 확인을 완료하지 못해 가져오기를 중단했습니다. 다시 시도해 주세요."); return; }
+      let count = 0, reused = 0, skipped = 0, failed = 0;
+      const added = [], imported = [], members = new Set(albumMedia().map(item => item.id));
+      for (const {file,type} of files){
+        status("사진·영상 중복 확인 및 가져오기… " + (count + reused + skipped + failed + 1) + "/" + files.length);
+        try {
+          if (nativeStorage && file.size > 256 * 1024 * 1024) throw new Error("photo-album-file-too-large");
+          const sourceHash = await mediaSourceHash(file), existing = index.get(sourceHash);
+          if (existing){
+            imported.push(existing); if (!selectedId) selectedId = existing.id;
+            if (members.has(existing.id)) skipped++;
+            else { members.add(existing.id); added.push(existing); reused++; }
+            continue;
+          }
+          const item = { id:crypto.randomUUID(), name:file.name, type, mime:file.type, blob:file, sourceHash, favorite:false, background:"white", stickers:[], created:Date.now() + count };
+          if (type === "image"){ Object.assign(item,await dimensions(file)); item.thumbnail = await imageThumbnail(file); }
+          else item.thumbnail = await videoThumbnail(file, item);
+          await persistNew(item); records.unshift(item); index.set(sourceHash, item); members.add(item.id); added.push(item); imported.push(item); if (!selectedId) selectedId = item.id; count++;
+        } catch(error){ failed++; console.error(error); notice(error && error.message === "photo-album-file-too-large"
+          ? file.name + " 파일은 256MB를 넘어 가져올 수 없습니다."
+          : error && error.message === "photo-album-duplicate-check-unavailable" ? "파일의 중복 확인을 지원하지 않는 환경입니다. 앱에서 다시 시도해 주세요."
+          : file.name + " 파일을 가져오지 못했습니다."); }
+      }
+      if (added.length) appendToBook(added);   // 앨범 책: 마지막 쪽에 자리가 있으면 거기, 없으면 새 쪽에
+      await flushBookSave();
+      paintList(); paintStage(); paintBackgrounds(); paintAdjust();
+      status(count + "개 파일을 새로 저장했습니다." + (reused ? " 기존 사진·영상 " + reused + "개를 " + albumName(albumItem) + "에 추가했습니다." : "") + (skipped ? " 이미 앨범에 있는 중복 " + skipped + "개는 건너뛰었습니다." : "") + (failed ? " " + failed + "개는 가져오지 못했습니다." : "") + (added.length ? " " + albumName(albumItem) + " 마지막 쪽에도 넣었습니다." : "") + (added.some(item => item.type === "video" && !item.thumbnail) ? " 미리보기 없는 영상도 ▶ 단추로 열 수 있습니다." : ""));
+      if (songs.length) await importSongs(songs, imported.find(item => item.type === "image"));
+    } catch(error){ console.error(error); notice("앨범 정보를 저장하지 못했습니다. 가져온 파일은 전체 사진에서 확인할 수 있습니다."); }
+    finally { importing = false; if (root){ paintAlbumControls(); syncMediaSelection(); } }
   }
   async function importSongs(songs, fallback){
     const current = selected(), target = musicScope === "album" && current && current.type === "image" ? albumItem : current && current.type === "image" ? current : fallback;
@@ -3448,8 +3717,8 @@ const PhotoAlbum = (() => {
     const hit = composed.get(item.id);
     return hit && hit.aspect ? hit.aspect : 9/16;
   }
-  function normalizeBook(raw){
-    const known = new Set(records.map(row => row.id)), pages = [];
+  function normalizeBook(raw, owner = albumItem){
+    const known = new Set(albumMedia(owner).map(row => row.id)), pages = [];
     for (const page of (raw && Array.isArray(raw.pages) ? raw.pages : []).slice(0, BOOK_MAX_PAGES)){
       if (!page || typeof page !== "object") continue;
       const slots = (Array.isArray(page.slots) ? page.slots : []).filter(slot => slot && known.has(slot.media)).map(slot => ({
@@ -3510,6 +3779,7 @@ const PhotoAlbum = (() => {
   function appendToBook(items){
     if (!items.length) return;
     const book = bookOf(), list = items.filter(item => item && (item.type === "image" || item.type === "video")).sort((a, b) => (a.created || 0) - (b.created || 0));
+    if (Array.isArray(albumItem.mediaIds)) albumItem.mediaIds = [...new Set([...albumItem.mediaIds, ...list.map(item => item.id)])];
     pruneEmptyBookPages();
     let last = book.pages[book.pages.length - 1];
     for (const item of list){
@@ -3551,8 +3821,8 @@ const PhotoAlbum = (() => {
     const first = !albumItem.book || !Array.isArray(albumItem.book.pages);
     albumItem.book = normalizeBook(albumItem.book);
     const pruned = pruneEmptyBookPages();
-    if (first && records.length){
-      albumItem.book.pages = autoFillPages(records);
+    if (first && albumMedia().length){
+      albumItem.book.pages = autoFillPages(albumMedia());
       try { await persistMetadata(albumItem); } catch(error){ console.warn("앨범 쪽을 저장하지 못했습니다:", error); }
     }
     else if (pruned){ try { await persistMetadata(albumItem); } catch(error){ console.warn("빈 앨범 쪽을 정리해 저장하지 못했습니다:", error); } }
@@ -3565,13 +3835,16 @@ const PhotoAlbum = (() => {
       bookHistory.redo = [];
     }
     bookHistory.base = now;
+    albumItem.lastPage = bookPage;
     clearTimeout(bookSaveTimer);
+    const owner = albumItem;
     bookSaveTimer = setTimeout(async () => {
       bookSaveTimer = 0;
-      try { await persistMetadata(albumItem); status("앨범을 저장했습니다."); }
+      try { await persistMetadata(owner); status("앨범을 저장했습니다."); }
       catch(error){ console.error(error); notice("앨범 쪽을 저장하지 못했습니다."); }
     }, 350);
     paintBook();
+    paintAlbumControls();
   }
   function stepBookHistory(direction){
     const from = direction < 0 ? bookHistory.undo : bookHistory.redo, to = direction < 0 ? bookHistory.redo : bookHistory.undo;
@@ -3739,6 +4012,7 @@ const PhotoAlbum = (() => {
   function paintBook(){
     stopSlotDrag();
     if (!root) return;
+    paintBookBackground();
     const host = root.querySelector(".pa-book"); if (!host) return;
     if (albumMode !== "book"){ return; }
     const pages = bookOf().pages, per = bookPerView();
@@ -4025,6 +4299,7 @@ const PhotoAlbum = (() => {
     const previous = placedMediaSlot(page, media), spot = landingSlot(page, media, at);
     endTrayDrag();
     if (!page.slots.includes(previous) && page.slots.length >= BOOK_MAX_SLOTS_PER_PAGE){ notice("한 쪽에는 사진·영상을 " + BOOK_MAX_SLOTS_PER_PAGE + "개까지 놓을 수 있습니다."); return; }
+    if (Array.isArray(albumItem.mediaIds) && !albumItem.mediaIds.includes(media.id)) albumItem.mediaIds.push(media.id);
     const slot = previous || { id:bookId(), media:media.id };
     if (previous) for (const row of bookOf().pages) row.slots = row.slots.filter(item => item.id !== previous.id);
     Object.assign(slot, spot);
@@ -4338,6 +4613,42 @@ const PhotoAlbum = (() => {
   }
 
   /* ----- 쪽 바탕·사진 칸(트레이)·쪽 미리보기 ----- */
+  function paintBookBackground(){
+    if (!root) return;
+    const color = cleanBookBackground(albumItem.bookBackground);
+    if (root.style){
+      if (color) root.style.setProperty("--pa-book-background", color);
+      else root.style.removeProperty("--pa-book-background");
+    }
+    const host = root.querySelector(".pa-book-background-controls"); if (!host) return;
+    const dark = typeof document !== "undefined" && document.documentElement && document.documentElement.dataset.theme === "dark";
+    const input = host.querySelector("input"); input.value = color || (dark ? "#1d1a16" : bookReading ? "#2a2622" : "#ede6d6"); input.disabled = albumOperationBusy();
+    host.querySelector("button").disabled = albumOperationBusy() || !color;
+  }
+  async function setBookBackground(value){
+    const color = cleanBookBackground(value);
+    if (albumOperationBusy() || (value !== "" && !color)){ paintBookBackground(); return false; }
+    const owner = albumItem, previous = owner.bookBackground;
+    if ((previous || "") === color){ paintBookBackground(); return true; }
+    albumBusy = true; paintAlbumControls();
+    try {
+      await flushBookSave();
+      if (color) owner.bookBackground = color; else delete owner.bookBackground;
+      paintBookBackground(); await persistMetadata(owner);
+      status(color ? "바깥 배경색을 저장했습니다." : "바깥 배경을 기본색으로 되돌렸습니다."); return true;
+    } catch(error){
+      if (previous === undefined) delete owner.bookBackground; else owner.bookBackground = previous;
+      console.error(error); notice("바깥 배경색을 저장하지 못해 이전 색으로 돌아갔습니다."); return false;
+    } finally { albumBusy = false; paintAlbumControls(); }
+  }
+  function setupBookBackground(){
+    const host = document.createElement("div"); host.className = "pa-book-background-controls";
+    const label = document.createElement("label"); label.textContent = "바깥 배경색";
+    const input = document.createElement("input"); input.type = "color"; input.title = "앨범 바깥 배경색 고르기"; input.setAttribute("aria-label", "앨범 바깥 배경색");
+    input.onchange = () => setBookBackground(input.value); label.appendChild(input);
+    const reset = button("기본색", () => setBookBackground("")); reset.title = "바깥 배경을 기본색으로 되돌리기";
+    host.append(label, reset); root.querySelector(".pa-book-bar").prepend(host); paintBookBackground();
+  }
   function paintBookPaper(){
     const host = root.querySelector(".pa-book-papers"); if (!host) return; host.replaceChildren();
     const page = bookOf().pages[bookPage];
@@ -4351,11 +4662,12 @@ const PhotoAlbum = (() => {
     const host = root.querySelector(".pa-book-tray-list"); if (!host) return; host.replaceChildren();
     const used = new Map();
     bookOf().pages.forEach((page, at) => page.slots.forEach(slot => { if (!used.has(slot.media)) used.set(slot.media, at); }));
-    const count = root.querySelector(".pa-book-tray-count"); if (count) count.textContent = String(records.length);
+    const list = visibleMedia();
+    const count = root.querySelector(".pa-book-tray-count"); if (count) count.textContent = String(list.length);
     // 탭은 그림만이라 개수는 작은 숫자로 두고, 이름(title·aria-label)에 "사진 N개" 로 함께 적는다.
-    const mediaTab = root.querySelector('.pa-book-tray-tab[data-tray="media"]'); if (mediaTab){ const name = "사진 " + records.length + "개"; mediaTab.title = name; mediaTab.setAttribute("aria-label", name); }
-    if (!records.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = "사진·영상을 가져와 시작하세요."; host.appendChild(p); syncMediaSelection(); return; }
-    for (const item of records){
+    const mediaTab = root.querySelector('.pa-book-tray-tab[data-tray="media"]'); if (mediaTab){ const name = "사진 " + list.length + "개"; mediaTab.title = name; mediaTab.setAttribute("aria-label", name); }
+    if (!list.length){ const p = document.createElement("p"); p.className = "pa-list-empty"; p.textContent = libraryView ? "사진·영상을 가져와 시작하세요." : "빈 앨범입니다. 가져오거나 전체 사진에서 선택해 추가하세요."; host.appendChild(p); syncMediaSelection(); return; }
+    for (const item of list){
       const card = button("", () => { if (mediaSelecting){ toggleMediaSelection(item.id); return; } const pages = bookOf().pages; if (!pages.length) addPage(); placeMedia(Math.min(bookPage, bookOf().pages.length - 1), item, null); }, "pa-book-tray-item");
       card.dataset.mediaId = item.id;
       card.draggable = true; card.title = item.name + (used.has(item.id) ? " · 끌어다 놓거나 눌러서 기존 사진을 옮기기" : " · 쪽으로 끌어다 놓거나 눌러서 지금 쪽에 넣기");
@@ -4529,12 +4841,13 @@ const PhotoAlbum = (() => {
     const pages = bookOf().pages; if (!pages.length){ notice("저장할 쪽이 없습니다."); return; }
     const indexes = which === "spread" ? [bookSpread, bookSpread + 1].filter(at => at < pages.length) : [Math.min(bookPage, pages.length - 1)];
     bookExportBusy = true; status("쪽 그림을 만드는 중…");
+    paintAlbumControls(); syncMediaSelection();
     try {
       const blob = await canvasBlob(await renderPages(indexes, 1800));
-      const name = "앨범-" + (indexes.length === 2 ? (indexes[0] + 1) + "-" + (indexes[1] + 1) : String(indexes[0] + 1)) + "쪽.png";
+      const name = albumName(albumItem).replace(/[<>:"/\\|?*]/g, "_") + "-" + (indexes.length === 2 ? (indexes[0] + 1) + "-" + (indexes[1] + 1) : String(indexes[0] + 1)) + "쪽.png";
       downloadBlob(blob, name); notice(name + " 을(를) 저장했습니다.");
     } catch(error){ console.error(error); notice("쪽 그림을 만들지 못했습니다."); }
-    finally { bookExportBusy = false; }
+    finally { bookExportBusy = false; paintAlbumControls(); syncMediaSelection(); }
   }
   function clearPrintLayer(){
     const old = document.getElementById("paPrintLayer");
@@ -4546,6 +4859,7 @@ const PhotoAlbum = (() => {
     const pages = bookOf().pages; if (!pages.length){ notice("인쇄할 쪽이 없습니다."); return; }
     const indexes = which === "spread" ? [bookSpread, bookSpread + 1].filter(at => at < pages.length) : pages.map((_, at) => at);
     bookExportBusy = true; clearPrintLayer();
+    paintAlbumControls(); syncMediaSelection();
     const layer = document.createElement("div"); layer.id = "paPrintLayer"; layer.setAttribute("aria-hidden", "true");
     try {
       for (let at = 0; at < indexes.length; at++){
@@ -4566,7 +4880,7 @@ const PhotoAlbum = (() => {
       // 다음 인쇄, 사진첩 닫기에서 걷는다. 화면에서는 층이 늘 감춰져 있어 남아도 보이지 않는다.
       window.print();
     } catch(error){ console.error(error); clearPrintLayer(); notice("인쇄할 쪽을 만들지 못했습니다."); }
-    finally { bookExportBusy = false; }
+    finally { bookExportBusy = false; paintAlbumControls(); syncMediaSelection(); }
   }
   function openBookSaveMenu(anchor){
     const pages = bookOf().pages, rect = anchor.getBoundingClientRect(), hasSpread = bookPerView() === 2 && pages[bookSpread + 1];
@@ -4867,6 +5181,7 @@ const PhotoAlbum = (() => {
   }
   function setupBook(){
     const host = root.querySelector(".pa-book"); if (!host) return;
+    setupBookBackground();
     root.querySelectorAll(".pa-mode-tab").forEach(tab => { tab.onclick = () => setAlbumMode(tab.dataset.mode); });
     host.querySelector(".pa-book-text").onclick = addBookText;
     host.querySelector(".pa-book-relayout").onclick = relayoutPage;
@@ -4957,12 +5272,13 @@ const PhotoAlbum = (() => {
       if (surface) surface.classList.remove("pa-drop-target");
     };
     observer = new ResizeObserver(fitArtboard); observer.observe(root.querySelector(".pa-stage"));
-    setupToolTabs(); setupPaneSplitters(); setupMediaActions();
+    setupToolTabs(); setupPaneSplitters(); setupMediaActions(); setupAlbumDeleteButton(); setupAlbumControls();
     paintFilters(); paintList(); paintBackgrounds(); paintStickers(); paintStage();
     bookReading = false; bookPick = null; setupBook();
   }
   async function mount(host){
     try {
+      let albumList;
       nativeStorage = typeof workspaceBackendAvailable === "function" && await workspaceBackendAvailable();
       if (nativeStorage){
         const response = await nativeRequest("GET", "/photo-album-list");
@@ -4970,7 +5286,7 @@ const PhotoAlbum = (() => {
         if (!Array.isArray(listed)) throw new Error("사진첩 목록 형식이 잘못됐습니다.");
         customArts = listed.map(normalizeArt).filter(Boolean).sort((a, b) => a.created - b.created);
         audioRecords = listed.filter(item => item && typeof item.id === "string" && item.type === "audio");
-        albumItem = albumRecord(listed);
+        albumList = listed;
         records = listed.filter(item => item && typeof item.id === "string" && (item.type === "image" || item.type === "video"))
           .map(item => ({ ...item, stickers:Array.isArray(item.stickers) ? item.stickers : [] }));
         // 이전 버전의 같은 접속 주소에 남은 사진은 한 번만 앱 저장소로 옮긴다.
@@ -4993,7 +5309,7 @@ const PhotoAlbum = (() => {
         const stored = await query("readonly", store => store.getAll());
         customArts = stored.map(normalizeArt).filter(Boolean).sort((a, b) => a.created - b.created);
         audioRecords = stored.filter(item => item && item.type === "audio");
-        albumItem = albumRecord(stored);
+        albumList = stored;
         records = stored.filter(item => item && (item.type === "image" || item.type === "video"));
       }
       for (const item of records){
@@ -5004,6 +5320,7 @@ const PhotoAlbum = (() => {
         catch(error){ item.stickers = previous; console.warn("철회된 사진첩 장식 기록을 지우지 못했습니다:",error); }
       }
       records.sort((a,b) => b.created-a.created);
+      await initializeAlbums(albumList);
       await ensureBook();
     } catch(error){
       console.error("사진첩 저장소를 열지 못했습니다:", error);
@@ -5011,7 +5328,7 @@ const PhotoAlbum = (() => {
       return;
     }
     if (!host.isConnected) return;
-    if (!records.some(row => row.id === selectedId)) selectedId = records[0] && records[0].id;
+    if (!albumMedia().some(row => row.id === selectedId)) selectedId = albumMedia()[0] && albumMedia()[0].id;
     makeUi(host); applyMotionSetting();
     window.addEventListener("keydown", onHistoryKey);
   }
@@ -5019,7 +5336,9 @@ const PhotoAlbum = (() => {
     stopSlotDrag();
     stopBookVideo();
     // 앨범 쪽 저장이 기다리는 중이면 닫기 전에 바로 보낸다(닫은 뒤에 타이머가 돌면 root 가 없다).
-    if (bookSaveTimer){ clearTimeout(bookSaveTimer); bookSaveTimer = 0; persistMetadata(albumItem).catch(error => console.warn("앨범 쪽을 저장하지 못했습니다:", error)); }
+    albumItem.lastPage = bookPage;
+    clearTimeout(bookSaveTimer); bookSaveTimer = 0;
+    persistMetadata(albumItem).catch(error => console.warn("앨범 쪽을 저장하지 못했습니다:", error));
     clearTimeout(bookTurnTimer); clearPrintLayer(); if (bookTurn) bookTurn.finish(bookTurn.commit); if (turnAudio){ turnAudio.close().catch(() => {}); turnAudio = null; }
     if (bookObserver) bookObserver.disconnect(); bookObserver = null; bookReading = false; bookPick = null; releaseComposed();
     root = null; }

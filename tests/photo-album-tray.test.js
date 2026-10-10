@@ -7,7 +7,7 @@ const { loadAlbum, plain } = require("./photo-album-harness");
 // 화면 없이 트레이의 드래그 이벤트부터 배치·복제·취소·되돌리기까지 검사한다.
 function trayAlbum(t){
   function element(tag){
-    const node = { tag, className:"", dataset:{}, style:{}, children:[], listeners:{}, attributes:{}, isConnected:true,
+    const node = { tag, className:"", dataset:{}, style:{ setProperty(name, value){ this[name] = value; }, removeProperty(name){ delete this[name]; } }, children:[], listeners:{}, attributes:{}, isConnected:true,
       setAttribute(name, value){ this.attributes[name] = value; },
       removeAttribute(name){ delete this.attributes[name]; },
       appendChild(child){ child.remove(); child.parentNode = this; this.children.push(child); return child; },

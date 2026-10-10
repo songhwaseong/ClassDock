@@ -6,6 +6,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { webcrypto } = require("node:crypto");
 
 const ROOT = path.join(__dirname, "..");
 const ALBUM_SOURCE = path.join(ROOT, "src", "js", "photo-album.js");
@@ -32,7 +33,7 @@ function fakeLauncher(){
   const requests = [];
   const fetch = async (route, options = {}) => {
     requests.push({ route, method:options.method || "GET" });
-    return { ok:true, status:200, json:async () => [], blob:async () => ({ size:1, type:"application/octet-stream" }) };
+    return { ok:true, status:200, json:async () => [], blob:async () => new Blob(["stored:" + route], { type:"application/octet-stream" }) };
   };
   const deleted = () => requests.filter(request => request.route.startsWith("/photo-album-delete?id=")).map(request => decodeURIComponent(request.route.split("id=")[1]));
   return { fetch, requests, deleted };
@@ -47,7 +48,8 @@ function loadAlbum(options = {}){
   let ids = 0;
   const launcher = fakeLauncher();
   const sandbox = {
-    crypto:{ randomUUID:() => "id" + (++ids) },
+    crypto:{ randomUUID:() => "id" + (++ids), subtle:webcrypto.subtle },
+    Blob,
     localStorage:memoryStorage(),
     Intl, setTimeout, clearTimeout, setInterval, clearInterval,
     performance:{ now:() => 0 },
