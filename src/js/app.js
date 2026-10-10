@@ -1228,6 +1228,155 @@ function wire(){
   });
   refreshSubwayKeyStatus();
 
+  /* ── 서울 열린데이터광장 일반 인증키(지도 '돌발·통제') ──
+     지하철 실시간 키와 발급처는 같지만 종류가 달라 칸을 따로 둔다. 규칙은 지하철 키와 같다. */
+  const seoulOpenKeyInput = byId("settingSeoulOpenKey");
+  const seoulOpenRemember = byId("settingSeoulOpenRemember");
+  const seoulOpenRememberWrap = byId("settingSeoulOpenRememberWrap");
+  const seoulOpenStatusText = byId("settingSeoulOpenStatus");
+  const seoulOpenTest = byId("settingSeoulOpenTest");
+  const seoulOpenClear = byId("settingSeoulOpenClear");
+  let seoulOpenKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const setSeoulOpenStatus = (text, kind) => {
+    seoulOpenStatusText.textContent = typeof window.t === "function" ? window.t(text) : text;
+    seoulOpenStatusText.classList.toggle("ok", kind === "ok");
+    seoulOpenStatusText.classList.toggle("bad", kind === "bad");
+  };
+  const syncSeoulOpenFields = () => {
+    const available = seoulOpenKeyStatus.available;
+    connKeyBadge("settingSeoulOpenBadge", seoulOpenKeyStatus);
+    seoulOpenKeyInput.disabled = !available;
+    seoulOpenTest.disabled = !available;
+    seoulOpenClear.disabled = !available || !seoulOpenKeyStatus.hasKey;
+    seoulOpenRemember.disabled = !available || !seoulOpenKeyStatus.persistentSupported;
+    seoulOpenRememberWrap.hidden = !seoulOpenKeyStatus.persistentSupported;
+    seoulOpenRemember.checked = !!seoulOpenKeyStatus.remembered;
+    seoulOpenKeyInput.placeholder = seoulOpenKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "인증키 입력";
+  };
+  const refreshSeoulOpenKeyStatus = async (message, kind) => {
+    seoulOpenKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    try {
+      const response = await fetch("/seoul-open-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      seoulOpenKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      if (message) setSeoulOpenStatus(message, kind);
+      else if (seoulOpenKeyStatus.hasKey) setSeoulOpenStatus(seoulOpenKeyStatus.remembered
+        ? "서울 일반 인증키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "서울 일반 인증키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setSeoulOpenStatus("인증키가 없어 지도의 '돌발·통제'를 쓸 수 없습니다.", "");
+    } catch(_){ setSeoulOpenStatus("서울 일반 인증키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncSeoulOpenFields();
+  };
+  seoulOpenTest.addEventListener("click", async () => {
+    const key = seoulOpenKeyInput.value.trim();
+    if (!key){ setSeoulOpenStatus("저장할 서울 열린데이터광장 일반 인증키를 입력해 주세요.", "bad"); seoulOpenKeyInput.focus(); return; }
+    seoulOpenTest.disabled = true; seoulOpenClear.disabled = true;
+    setSeoulOpenStatus("서울 열린데이터광장 연결을 시험하는 중…", "");
+    try {
+      const response = await fetch("/seoul-open-key?remember=" + (seoulOpenRemember.checked ? "1" : "0"), {
+        method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+        body:key, cache:"no-store"
+      });
+      if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+      seoulOpenKeyInput.value = "";
+      await refreshSeoulOpenKeyStatus("서울 열린데이터광장 연결에 성공했고 키를 저장했습니다.", "ok");
+    } catch(error){
+      const reason = error && error.message;
+      setSeoulOpenStatus(reason === "seoul-key-save-failed"
+        ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
+        : reason === "seoul-key-invalid" ? "인증키를 확인하지 못했습니다. 지하철 실시간 키가 아닌 '일반 인증키'인지 확인해 주세요."
+        : "서울 열린데이터광장에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시험해 주세요.", "bad");
+      syncSeoulOpenFields();
+    }
+  });
+  seoulOpenClear.addEventListener("click", async () => {
+    seoulOpenClear.disabled = true;
+    try {
+      const response = await fetch("/seoul-open-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      seoulOpenKeyInput.value = "";
+      await refreshSeoulOpenKeyStatus("서울 일반 인증키를 지웠습니다.", "ok");
+    } catch(_){ setSeoulOpenStatus("인증키를 지우지 못했습니다.", "bad"); syncSeoulOpenFields(); }
+  });
+  refreshSeoulOpenKeyStatus();
+
+  /* ── 한국도로공사 고속도로 공공데이터 인증키(지도 '휴게소') ──
+     data.ex.co.kr 에서 따로 받는 키다(공공데이터포털 키로는 안 된다). 규칙은 다른 키 칸과 같다. */
+  const expresswayKeyInput = byId("settingExpresswayKey");
+  const expresswayRemember = byId("settingExpresswayRemember");
+  const expresswayRememberWrap = byId("settingExpresswayRememberWrap");
+  const expresswayStatusText = byId("settingExpresswayStatus");
+  const expresswayTest = byId("settingExpresswayTest");
+  const expresswayClear = byId("settingExpresswayClear");
+  let expresswayKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+  const setExpresswayStatus = (text, kind) => {
+    expresswayStatusText.textContent = typeof window.t === "function" ? window.t(text) : text;
+    expresswayStatusText.classList.toggle("ok", kind === "ok");
+    expresswayStatusText.classList.toggle("bad", kind === "bad");
+  };
+  const syncExpresswayFields = () => {
+    const available = expresswayKeyStatus.available;
+    connKeyBadge("settingExpresswayBadge", expresswayKeyStatus);
+    expresswayKeyInput.disabled = !available;
+    expresswayTest.disabled = !available;
+    expresswayClear.disabled = !available || !expresswayKeyStatus.hasKey;
+    expresswayRemember.disabled = !available || !expresswayKeyStatus.persistentSupported;
+    expresswayRememberWrap.hidden = !expresswayKeyStatus.persistentSupported;
+    expresswayRemember.checked = !!expresswayKeyStatus.remembered;
+    expresswayKeyInput.placeholder = expresswayKeyStatus.hasKey ? "저장된 키가 있습니다 — 바꿀 때만 입력" : "인증키 입력";
+  };
+  const refreshExpresswayKeyStatus = async (message, kind) => {
+    expresswayKeyStatus = { available:false, hasKey:false, remembered:false, persistentSupported:false };
+    try {
+      const response = await fetch("/expressway-key-status", { headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const status = await response.json();
+      expresswayKeyStatus = { available:true, hasKey:!!status.hasKey, remembered:!!status.remembered,
+        persistentSupported:status.persistentSupported !== false };
+      if (message) setExpresswayStatus(message, kind);
+      else if (expresswayKeyStatus.hasKey) setExpresswayStatus(expresswayKeyStatus.remembered
+        ? "고속도로 공공데이터 키가 이 Windows 사용자 계정에 암호화되어 있습니다."
+        : "고속도로 공공데이터 키를 이번 실행 동안 기억하고 있습니다.", "ok");
+      else setExpresswayStatus("인증키가 없어 지도의 '휴게소'를 쓸 수 없습니다.", "");
+    } catch(_){ setExpresswayStatus("고속도로 공공데이터 키 설정은 ClassDock.exe에서 사용할 수 있습니다.", "bad"); }
+    syncExpresswayFields();
+  };
+  expresswayTest.addEventListener("click", async () => {
+    const key = expresswayKeyInput.value.trim();
+    if (!key){ setExpresswayStatus("저장할 고속도로 공공데이터 인증키를 입력해 주세요.", "bad"); expresswayKeyInput.focus(); return; }
+    expresswayTest.disabled = true; expresswayClear.disabled = true;
+    setExpresswayStatus("고속도로 공공데이터 포털 연결을 시험하는 중…", "");
+    try {
+      const response = await fetch("/expressway-key?remember=" + (expresswayRemember.checked ? "1" : "0"), {
+        method:"POST", headers:{ "X-ClassDock-Action":"1", "Content-Type":"text/plain;charset=utf-8" },
+        body:key, cache:"no-store"
+      });
+      if (!response.ok) throw new Error((await response.text()) || "HTTP " + response.status);
+      expresswayKeyInput.value = "";
+      await refreshExpresswayKeyStatus("고속도로 공공데이터 포털 연결에 성공했고 키를 저장했습니다.", "ok");
+    } catch(error){
+      const reason = error && error.message;
+      setExpresswayStatus(reason === "expressway-key-save-failed"
+        ? "키 연결에는 성공했지만 암호화 저장에 실패했습니다."
+        : reason === "expressway-key-invalid" ? "인증키를 확인하지 못했습니다. data.ex.co.kr 에서 받은 키인지 확인해 주세요."
+        : reason === "expressway-quota" ? "이 키의 호출 한도를 다 썼습니다. 잠시 뒤 다시 시험해 주세요."
+        : "고속도로 공공데이터 포털에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시험해 주세요.", "bad");
+      syncExpresswayFields();
+    }
+  });
+  expresswayClear.addEventListener("click", async () => {
+    expresswayClear.disabled = true;
+    try {
+      const response = await fetch("/expressway-key", { method:"DELETE", headers:{ "X-ClassDock-Action":"1" }, cache:"no-store" });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      expresswayKeyInput.value = "";
+      await refreshExpresswayKeyStatus("고속도로 공공데이터 키를 지웠습니다.", "ok");
+    } catch(_){ setExpresswayStatus("인증키를 지우지 못했습니다.", "bad"); syncExpresswayFields(); }
+  });
+  refreshExpresswayKeyStatus();
+
   /* ── 공공데이터포털 일반 인증키 ── 내부 ID·엔드포인트의 tago 이름은 기존 설치와 호환하려고 유지한다. */
   const tagoKeyInput = byId("settingTagoKey");
   const tagoRemember = byId("settingTagoRemember");

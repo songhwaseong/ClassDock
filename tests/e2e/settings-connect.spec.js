@@ -20,7 +20,7 @@ test("연결 탭은 서비스를 접힌 한 줄로 보여 주고 배지로 키 �
   const panel = page.locator('[data-settings-panel="connect"]');
   await expect(panel).toBeVisible();
   const items = panel.locator("details.conn-item");
-  await expect(items).toHaveCount(6);
+  await expect(items).toHaveCount(8);
   await expect(panel.locator("details.conn-item[open]")).toHaveCount(0);
   await expect(page.locator("#settingSubwayKey")).toBeHidden();
 

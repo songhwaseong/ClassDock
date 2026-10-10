@@ -108,6 +108,8 @@
     "protection-zones.js",
     "parking-fees.js",
     "ev-chargers.js",
+    "road-incidents.js",
+    "rest-areas.js",
     "map-viewer.js",
     "timeline.js",
     "concept-doc.js",
@@ -304,6 +306,8 @@
         "protection-zones.js",
         "parking-fees.js",
         "ev-chargers.js",
+        "road-incidents.js",
+        "rest-areas.js",
         "map-viewer.js",
         "timeline.js",
         "concept-doc.js",
@@ -514,6 +518,8 @@
       "protection-zones.js",
       "parking-fees.js",
       "ev-chargers.js",
+      "road-incidents.js",
+      "rest-areas.js",
       "nearby-transit.js",
       "kosis-choro.js"
     ],
@@ -809,6 +815,9 @@
       "kosis-api.js"
     ],
     "protection-zones.js": [
+      "korea-coords.js"
+    ],
+    "road-incidents.js": [
       "korea-coords.js"
     ],
     "trip.js": [

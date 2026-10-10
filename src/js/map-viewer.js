@@ -4903,22 +4903,26 @@ function openMapDriveSettings(config){
     optimize:modal.querySelector(".map-drive-optimize").checked,
     compare:modal.querySelector(".map-drive-compare").checked
   });
+  // 경유지 칸을 비워 둔 채로도 길을 찾을 수 있게, 출발지·도착지만 정해지면 빈 경유지는 건너뛴다.
+  const filledStops = () => draft.filter(Boolean);
   const syncLocations = () => {
-    const ready = draft.length >= 2 && draft.every(Boolean);
+    const filled = filledStops();
+    const ready = draft.length >= 2 && !!draft[0] && !!draft[draft.length - 1];
+    const skipped = draft.length - filled.length;
     const max = readDepart() ? MAP_DRIVE_FUTURE_MAX_MARKERS : MAP_DRIVE_MAX_MARKERS;
-    ordered = ready ? mapDriveOrderedItems(draft, readOptions(), readDepart()) : [];
+    ordered = ready ? mapDriveOrderedItems(filled, readOptions(), readDepart()) : [];
     straight = mapLineLengthMeters(ordered.map(stop => [stop.lat, stop.lng]));
-    apply.disabled = busy || comparing || !ready || draft.length > max;
+    apply.disabled = busy || comparing || !ready || filled.length > max;
     modal.querySelector(".map-drive-add-stop").disabled = busy || draft.length >= max;
     modal.querySelector(".map-drive-load-markers").disabled = busy || !loadMarkers.length;
     modal.querySelector(".map-drive-swap-stops").disabled = busy;
     if (!ready) routeText.textContent = mapT("출발지와 도착지를 검색하거나 기존 표시에서 선택해 주세요.");
-    else if (draft.length > max) routeText.textContent = mapTf("현재 출발 시각 설정에서는 장소 {max}곳까지 사용할 수 있어요. 경유지를 줄여 주세요.", { max });
+    else if (filled.length > max) routeText.textContent = mapTf("현재 출발 시각 설정에서는 장소 {max}곳까지 사용할 수 있어요. 경유지를 줄여 주세요.", { max });
     else routeText.textContent = mapTf("{start} → {end} · 경유지 {count}개", {
       start:ordered[0].label || mapT("출발지"), end:ordered[ordered.length - 1].label || mapT("도착지"), count:Math.max(0, ordered.length - 2)
-    });
-    destOrigin = ready ? draft[readOptions().reverse ? draft.length - 1 : 0] : null;
-    destTargets = ready ? (readOptions().reverse ? draft.slice().reverse() : draft).slice(1, 1 + MAP_DRIVE_DEST_MAX) : [];
+    }) + (skipped ? " · " + mapTf("빈 경유지 {count}개는 건너뛰어요", { count:skipped }) : "");
+    destOrigin = ready ? filled[readOptions().reverse ? filled.length - 1 : 0] : null;
+    destTargets = ready ? (readOptions().reverse ? filled.slice().reverse() : filled).slice(1, 1 + MAP_DRIVE_DEST_MAX) : [];
     destSub.textContent = ready
       ? mapTf("{origin}에서 다른 장소 {count}곳까지 차로 걸리는 거리·시간을 한 번에 비교해요(직선 10km 안, 최대 30곳).", { origin:destOrigin.label || mapT("출발지"), count:destTargets.length })
       : mapT("출발지와 비교할 장소를 먼저 선택해 주세요.");
@@ -5029,7 +5033,7 @@ function openMapDriveSettings(config){
     close();
   };
   apply.addEventListener("click", async () => {
-    if (busy || comparing || draft.some(stop => !stop)) return;
+    if (busy || comparing || draft.length < 2 || !draft[0] || !draft[draft.length - 1]) return;
     const depart = readDepart();
     if (!departAt.disabled){
       const at = mapDriveDepartDate(depart);
@@ -5040,7 +5044,7 @@ function openMapDriveSettings(config){
       }
     }
     const max = depart ? MAP_DRIVE_FUTURE_MAX_MARKERS : MAP_DRIVE_MAX_MARKERS;
-    if (draft.length > max) { syncLocations(); return; }
+    if (filledStops().length > max) { syncLocations(); return; }
     const atRevision = revision;
     busy = true;
     syncLocations();
@@ -5885,6 +5889,8 @@ const MAP_TOOL_ICONS = {
   tourism: '<path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><path d="m12 5 1.2 2.4 2.7.4-2 1.9.5 2.7-2.4-1.3-2.4 1.3.5-2.7-2-1.9 2.7-.4z"/>',
   protectionZones: '<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/>',
   evChargers: '<path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/><path d="m13 9-3 3h3l-2 3"/>',
+  roadIncidents: '<path d="M10.2 3.5h3.6L18 19H6z"/><path d="M8.4 11h7.2M7.3 15h9.4M3.5 20.5h17"/>',
+  restAreas: '<path d="M6 3v7a2 2 0 0 0 4 0V3M8 10v11"/><path d="M17 21V3c-2.2 1-3.5 3.6-3.5 8H17"/>',
   parkingFees: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 18V7h4a3 3 0 0 1 0 6H9"/>',
   ship: '<path d="M12 10.2V14M12 2v3"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M19.4 20A11.6 11.6 0 0 0 21 14l-8.2-3.6a2 2 0 0 0-1.6 0L3 14a11.6 11.6 0 0 0 2.8 7.8"/><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/>',
   train: '<rect x="5" y="3" width="14" height="15" rx="4"/><path d="M5 10h14M9 3v7M15 3v7M8 21l2-3M16 21l-2-3"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>',
@@ -7413,6 +7419,16 @@ async function mountMapEditor(doc){
     movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   const evChargers = typeof MNEvChargers !== "undefined" ? MNEvChargers.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
     getDistricts:mapProtectionDistricts, movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // 서울시 실시간 돌발정보(공사·사고·행사 통제). 서울 열린데이터광장 일반 인증키를 쓴다.
+  const roadIncidents = typeof MNRoadIncidents !== "undefined" ? MNRoadIncidents.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
+  // 고속도로 휴게소(한국도로공사 키). 위치 목록에 없는 새 휴게소는 카카오 키가 있으면 키워드 검색으로 찾는다.
+  const restAreas = typeof MNRestAreas !== "undefined" ? MNRestAreas.mount({ map, stage, toolRow:toolChips, doc, t:mapT,
+    findPlace:async query => {
+      const access = await mapKakaoSearchAccess();
+      return access.available && access.hasKey ? mapFetchGeocode(query, "kakao-keyword") : null;
+    },
+    movePanel:(panel, handle) => mapMakePanelMovable(panel, handle, stage, doc) }) : null;
   // 주변 교통 자동 표시(지하철역은 내장 좌표, 버스 정류장은 같은 공공데이터포털 키). 버스 창·지하철 도착 창을 빌려 쓴다.
   const nearbyTransit = typeof MNNearbyTransit === "undefined" ? null : MNNearbyTransit.mount({ map, stage, toolRow:toolChips, doc, t:mapT, bus:jejuBus,
     subwayColors:MAP_SUBWAY_COLORS, say:setStatus,
@@ -10055,7 +10071,7 @@ async function mountMapEditor(doc){
     if (button) contextMirror(button);
   }
   contextGroup("날씨·생활");
-  for (const selector of [".map-toolvis-weather", ".map-toolvis-wind", ".map-toolvis-market", ".map-toolvis-air-quality", ".map-toolvis-tourism", ".map-toolvis-protection-zones", ".map-toolvis-parking-fees", ".map-toolvis-ev-chargers"]){
+  for (const selector of [".map-toolvis-weather", ".map-toolvis-wind", ".map-toolvis-market", ".map-toolvis-air-quality", ".map-toolvis-tourism", ".map-toolvis-protection-zones", ".map-toolvis-parking-fees", ".map-toolvis-ev-chargers", ".map-toolvis-road-incidents", ".map-toolvis-rest-areas"]){
     const button = toolChips.querySelector(selector);
     if (button) contextMirror(button);
   }
@@ -10287,7 +10303,7 @@ async function mountMapEditor(doc){
       }
       radiusExport.hidden = false;
     }
-    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), trains && trains.captureNote(), weather && weather.captureNote(), wind && wind.captureNote(), markets && markets.captureNote(), airQuality && airQuality.captureNote(), tourism && tourism.captureNote(), protectionZones && protectionZones.captureNote(), parkingFees && parkingFees.captureNote(), evChargers && evChargers.captureNote()].filter(Boolean).join(" · "), labels); }
+    try { return await mapCaptureDataUrl(stage, [mapAttributionText(model), jejuBus && jejuBus.captureNote(), flights && flights.captureNote(), ships && ships.captureNote(), trains && trains.captureNote(), weather && weather.captureNote(), wind && wind.captureNote(), markets && markets.captureNote(), airQuality && airQuality.captureNote(), tourism && tourism.captureNote(), protectionZones && protectionZones.captureNote(), parkingFees && parkingFees.captureNote(), evChargers && evChargers.captureNote(), roadIncidents && roadIncidents.captureNote(), restAreas && restAreas.captureNote()].filter(Boolean).join(" · "), labels); }
     finally { radiusExport.hidden = true; }
   };
 

@@ -324,6 +324,8 @@ const TOGGLEABLE_TOOLS = Object.freeze([
   { id:"mapProtectionZones", label:"보호구역", cls:"map-toolvis-protection-zones", target:"map" },
   { id:"mapParkingFees", label:"주차요금", cls:"map-toolvis-parking-fees", target:"map" },
   { id:"mapEvChargers", label:"전기차 충전", cls:"map-toolvis-ev-chargers", target:"map" },
+  { id:"mapRoadIncidents", label:"돌발·통제", cls:"map-toolvis-road-incidents", target:"map" },
+  { id:"mapRestAreas", label:"휴게소", cls:"map-toolvis-rest-areas", target:"map" },
   { id:"mapTransit", label:"주변 교통", cls:"map-toolvis-transit", target:"map" },
   // 악보 — 제목·도구 보이기·되돌리기·저장은 항상 남긴다. 여러 버튼이 한 기능이면 한 항목으로 묶는다.
   { id:"musicTempo", label:"빠르기(템포)", cls:"music-toolvis-tempo", target:"music" },

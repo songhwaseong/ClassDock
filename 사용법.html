@@ -1565,6 +1565,24 @@ cd myOffice</code></pre>
   <li><strong>전체 경계 보기</strong>는 선택한 갈래의 모든 경계를 한 화면에 보여 줍니다. <strong>닫기</strong>는 창만 닫고, <strong>지도에서 지우기</strong>는 경계를 지웁니다. 설정에서 단추를 따로 숨길 수 있습니다. 임시 경계는 <strong>.map</strong> 파일에 저장하지 않으며 지도 그림에는 표시·조회 지역·갈래·출처가 함께 남습니다.</li>
 </ul>
 
+<p><strong>서울 돌발·통제</strong> — 지도 도구막대의 <strong>돌발·통제</strong>를 누릅니다. 서울시가 실시간으로 올리는 <strong>공사·사고·행사 통제</strong> 지점을 지도에 찍습니다. <a href="https://data.seoul.go.kr/">서울 열린데이터광장</a>의 <strong>일반 인증키</strong>(무료, 신청 즉시 발급)를 <strong>설정 → 연결 → 서울 열린데이터(일반)</strong>에 넣어 두어야 하며, 지하철 실시간 인증키와는 다른 키입니다. Windows <strong>ClassDock.exe</strong>와 인터넷 연결이 필요합니다.</p>
+
+<ul>
+  <li>점 색은 갈래입니다: <strong>주황=공사</strong>, <strong>빨강=사고·고장</strong>, <strong>보라=행사·집회</strong>, <strong>파랑=기상·재난</strong>, <strong>회색=기타</strong>. <strong>굵은 검은 테두리</strong>는 전면 통제, <strong>흐린 점선 점</strong>은 아직 시작 전인 예정 통제입니다. 창의 체크로 갈래와 <strong>예정된 통제도 보기</strong>를 켜고 끕니다(다시 조회하지 않음).</li>
+  <li>점에 마우스를 올리면 <strong>제목·갈래·장소·통제 내용·해제 예정 시각</strong>이, 클릭하면 서울시가 적은 <strong>일시·장소·통제</strong> 전문과 통제 기간이 나옵니다. 목록은 <strong>화면 안의 지점</strong>을 전면 통제·가까운 순으로 40곳까지 보여 주며, 누르면 그 자리로 이동합니다. <strong>서울 전체 보기</strong>는 모든 지점을 한 화면에 담습니다.</li>
+  <li>서울 전체 목록을 한 번에 받고, 켜 둔 동안 <strong>5분마다</strong> 조용히 새로 받습니다. <strong>자료 갱신</strong>으로 바로 받을 수 있습니다. 갱신에 실패하면 앞서 받은 표시를 그대로 두고 이유를 알립니다. 위치 좌표가 없는 기록은 빼고 그 수를 알려 줍니다.</li>
+  <li>실제 현장과 다를 수 있으니 안내 표지를 따라 주세요. 임시 표시는 <strong>.map</strong> 파일에 저장하지 않으며 지도 그림에는 출처와 받은 시각이 함께 남습니다.</li>
+</ul>
+
+<p><strong>고속도로 휴게소</strong> — 지도 도구막대의 <strong>휴게소</strong>를 누릅니다. 전국 고속도로 <strong>휴게소·쉼터</strong>를 지도에 찍고 <strong>대표 음식·편의시설·주유 가격</strong>을 보여 줍니다. <a href="https://data.ex.co.kr/">고속도로 공공데이터 포털</a>에서 무료로 받는 인증키를 <strong>설정 → 연결 → 한국도로공사(고속도로)</strong>에 넣어 두어야 하며, 공공데이터포털(data.go.kr) 키와는 다른 키입니다. Windows <strong>ClassDock.exe</strong>와 인터넷 연결이 필요합니다.</p>
+
+<ul>
+  <li>점 색은 <strong>초록=휴게소</strong>, <strong>회색=쉼터</strong>입니다. 창의 체크로 갈래와 <strong>화물차 휴게소만</strong>을, 목록 상자로 <strong>노선</strong>을 고릅니다(다시 조회하지 않음).</li>
+  <li>점에 마우스를 올리면 <strong>노선·방향·브랜드·편의시설·휘발유/경유/LPG 가격</strong>이, 클릭하면 주소·전화와 함께 <strong>대표 음식</strong>(대표·추천·프리미엄 표시와 가격)과 휴게소 테마가 나옵니다. 목록은 <strong>화면 안의 휴게소</strong>를 가까운 순으로 40곳까지 보여 주며, 누르면 그 자리로 이동합니다. <strong>전국 보기</strong>는 고른 휴게소를 모두 한 화면에 담습니다.</li>
+  <li>도로공사 위치 목록에 없는 새 휴게소는 <strong>카카오 장소 검색 좌표</strong>로 채웁니다(말풍선에 표시). 그 뒤에 생긴 휴게소는 카카오 REST API 키가 있으면 찾아 보고, 못 찾으면 빼고 그 수를 알려 줍니다.</li>
+  <li>휴게소 목록은 <strong>이레</strong> 기억하고, 주유 가격은 켜 둔 동안 <strong>30분마다</strong> 조용히 새로 받습니다. <strong>자료 갱신</strong>으로 바로 받을 수 있으며, 실패하면 앞서 받은 표시를 그대로 둡니다. 임시 표시는 <strong>.map</strong> 파일에 저장하지 않으며 지도 그림에는 출처와 받은 시각이 함께 남습니다.</li>
+</ul>
+
 <p><strong>사용 가능한 전기차 충전기</strong> — 지도 도구막대의 <strong>전기차 충전</strong>을 누릅니다. <a href="https://www.data.go.kr/data/15076352/openapi.do">한국환경공단 전기자동차 충전소 정보</a>를 활용신청한 뒤 기존 <strong>설정 → 연결 → 공공데이터포털</strong> 인증키로 사용합니다. Windows <strong>ClassDock.exe</strong>와 인터넷 연결이 필요합니다.</p>
 
 <ul>

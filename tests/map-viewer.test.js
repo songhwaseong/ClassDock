@@ -2581,7 +2581,10 @@ test("자동차 길찾기는 설정한 순서에서 표시 32개(출발 시각�
   assert.equal(api.mapDriveOrderedItems(items, {}, "209901010830").length, 7);
   const source = fs.readFileSync(path.join(__dirname, "../src/js/map-viewer.js"), "utf8");
   assert.match(source, /const points = mapDriveOrderedItems\(allPoints, settings, driveDepart\)/);
-  assert.match(source, /if \(draft\.length > max\) \{ syncLocations\(\); return; \}/);
+  assert.match(source, /if \(filledStops\(\)\.length > max\) \{ syncLocations\(\); return; \}/);
+  // 빈 경유지 칸은 건너뛴다 — 출발지·도착지만 정해지면 길찾기를 막지 않는다.
+  assert.match(source, /const ready = draft\.length >= 2 && !!draft\[0\] && !!draft\[draft\.length - 1\];/);
+  assert.match(source, /ordered = ready \? mapDriveOrderedItems\(filled, /);
   assert.match(source, /driveTrafficLayers[\s\S]*?mapDriveTrafficInfo\(road\.trafficState\)/);
   assert.match(source, /onSaveRoute:[\s\S]*?mapSampleRoutePoints\(route\.points\)[\s\S]*?addShapeLayer\(shape\)/);
   // 표시를 끌어 옮기는 동안에는 묻지 않는다(하루 무료 몫을 드래그 한 번에 다 쓰지 않게).

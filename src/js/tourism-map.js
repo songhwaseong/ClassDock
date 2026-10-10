@@ -163,7 +163,7 @@ const MNTourism = (() => {
     if (movePanel) movePanel(panel, heading);
     const pane = map.createPane("mapTourismPane"); pane.style.zIndex = "625"; pane.style.pointerEvents = "none";
     const renderer = L.svg({ pane:"mapTourismPane", padding:.3 }), layer = L.layerGroup(), capability = new AbortController(), markerOf = new Map();
-    let mode = "nearby", data = null, shown = false, destroyed = false, abort = null, detailAbort = null, generation = 0, detailGeneration = 0, selected = null, listTimer = 0, lastWeekAttempt = "";
+    let mode = "nearby", data = null, shown = false, destroyed = false, abort = null, detailAbort = null, generation = 0, detailGeneration = 0, selected = null, lit = null, listTimer = 0, lastWeekAttempt = "";
     const period = p => p.start && p.end ? dayLabel(p.start) + " ~ " + dayLabel(p.end) : "";
     const festivalState = p => p.end < week().today ? t("행사 종료") : p.start > week().today ? t("개최 예정") : t("진행 중");
     const distance = p => p.lat == null ? Infinity : map.getCenter().distanceTo([p.lat, p.lng]);
@@ -175,20 +175,30 @@ const MNTourism = (() => {
       toggle.classList.toggle("is-on", shown); toggle.setAttribute("aria-pressed", String(shown));
       toggle.setAttribute("aria-expanded", String(!panel.hidden));
     }
+    const markerStyle = (p, on) => ({ radius:(p.type === "15" ? 7 : 6) + (on ? 3 : 0), weight:on ? 3 : 2, color:on ? "#ffd43b" : "#fff" });
+    // 지도 위 작은 창 대신 고른 점만 키워 오른쪽 상세와 짝을 보여 준다.
+    function highlight(p){
+      if (lit){ lit.marker.setStyle(markerStyle(lit.p, false)); lit = null; }
+      const marker = p && markerOf.get(p.id); if (!marker) return;
+      marker.setStyle(markerStyle(p, true)); marker.bringToFront(); lit = { marker, p };
+    }
     function row(box, label, value){
       const clean = plain(value); if (!clean) return;
       const n = el("div", "map-tour-detail-row"), content = el("span"); content.textContent = clean; content.setAttribute("data-i18n-ignore", "");
       n.append(el("span", "map-tour-detail-key", label), content); box.append(n);
     }
+    function closeDetails(){ selected = null; highlight(null); detailGeneration++; if (detailAbort) detailAbort.abort(); detailAbort = null; detailBox.hidden = true; }
     function detailHeader(p){
       detailBox.replaceChildren(); detailBox.hidden = false;
       const top = el("div", "map-tour-detail-heading"), name = el("strong"), hide = button("닫기"); name.textContent = p.title; name.setAttribute("data-i18n-ignore", "");
-      hide.addEventListener("click", () => { selected = null; detailGeneration++; if (detailAbort) detailAbort.abort(); detailAbort = null; detailBox.hidden = true; });
+      hide.addEventListener("click", closeDetails);
       top.append(name, hide); detailBox.append(top); row(detailBox, "주소", p.address); row(detailBox, "일정", period(p));
       if (p.type === "15") row(detailBox, "상태", festivalState(p)); row(detailBox, "전화", p.tel);
     }
     async function openDetails(p){
-      selected = p; panel.hidden = false; controls(); detailHeader(p);
+      selected = p; panel.hidden = false; controls(); detailHeader(p); highlight(p);
+      // 목록을 내려 둔 채 고르면 위쪽 상세 칸이 가려지므로 창만 끌어올린다.
+      if (panel.scrollTop > detailBox.offsetTop) panel.scrollTop = Math.max(0, detailBox.offsetTop - 8);
       const pending = el("p", "map-weather-status", "상세 정보를 받는 중…"); detailBox.append(pending);
       if (detailAbort) detailAbort.abort(); const controller = new AbortController(); detailAbort = controller; const seq = ++detailGeneration;
       try {
@@ -244,11 +254,6 @@ const MNTourism = (() => {
       body.append(credit); box.append(body);
       return box;
     }
-    function popupOf(p){
-      const box = el("div", "map-tour-popup"), name = el("strong", "map-tour-popup-name"); name.textContent = p.title; name.setAttribute("data-i18n-ignore", ""); box.append(name);
-      row(box, "주소", p.address); row(box, "일정", period(p)); if (p.type === "15") row(box, "상태", festivalState(p));
-      const more = button("상세보기"); more.addEventListener("click", () => openDetails(p)); box.append(more); return box;
-    }
     function renderList(){
       listTimer = 0; list.replaceChildren(); if (!shown || !data){ summary.textContent = ""; return; }
       const all = data.places, bounds = map.getBounds(), visible = all.filter(p => p.lat != null && bounds.contains([p.lat, p.lng])).length;
@@ -262,7 +267,7 @@ const MNTourism = (() => {
         name.textContent = p.title; name.setAttribute("data-i18n-ignore", ""); go.style.borderLeftColor = p.type === "15" ? "#8b4ec6" : "#1684a0";
         meta.textContent = distanceLabel(p) + (p.type === "15" ? " · " + festivalState(p) + "\n" + period(p) : " · " + p.address); meta.setAttribute("data-i18n-ignore", "");
         go.append(name, meta); go.addEventListener("click", () => {
-          if (p.lat != null){ map.setView([p.lat, p.lng], Math.max(14, map.getZoom())); const marker = markerOf.get(p.id); if (marker) marker.openPopup(); }
+          if (p.lat != null) map.setView([p.lat, p.lng], Math.max(14, map.getZoom()));
           openDetails(p);
         }); item.append(go); list.append(item);
       }
@@ -270,15 +275,17 @@ const MNTourism = (() => {
       if (all.length > 50) list.append(el("li", "map-tour-empty", "가까운 50곳을 보여 줍니다. 지도를 옮기면 목록이 바뀝니다."));
     }
     function draw(){
-      layer.clearLayers(); markerOf.clear();
+      layer.clearLayers(); markerOf.clear(); lit = null;
       if (!shown || !data){ map.removeLayer(layer); map.removeLayer(renderer); renderList(); controls(); return; }
       for (const p of data.places){
         if (p.lat == null) continue;
-        const marker = L.circleMarker([p.lat, p.lng], { pane:"mapTourismPane", renderer, radius:p.type === "15" ? 7 : 6, weight:2, color:"#fff", fillColor:p.type === "15" ? "#8b4ec6" : "#1684a0", fillOpacity:.9 })
-          .bindTooltip(() => tooltipOf(p), { direction:"top", offset:[0, -6], className:"map-tour-tooltip" }).bindPopup(() => popupOf(p)).addTo(layer);
-        marker.on("click", () => openDetails(p)); markerOf.set(p.id, marker);
+        // 작은 창이 없으므로 클릭이 지도 클릭(장소 찍기 등)으로 번지지 않게 막는다.
+        const marker = L.circleMarker([p.lat, p.lng], { pane:"mapTourismPane", renderer, ...markerStyle(p, false), fillColor:p.type === "15" ? "#8b4ec6" : "#1684a0", fillOpacity:.9, bubblingMouseEvents:false })
+          .bindTooltip(() => tooltipOf(p), { direction:"top", offset:[0, -6], className:"map-tour-tooltip" }).addTo(layer);
+        // 상세를 보고 있는 점을 다시 누르면 닫는다(목록 클릭은 늘 연다).
+        marker.on("click", () => selected && selected.id === p.id && !detailBox.hidden ? closeDetails() : openDetails(p)); markerOf.set(p.id, marker);
       }
-      layer.addTo(map); renderList(); controls();
+      if (selected) highlight(selected); layer.addTo(map); renderList(); controls();
     }
     async function show(refreshing = false){
       const center = map.getCenter(), dates = week();

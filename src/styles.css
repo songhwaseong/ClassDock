@@ -4992,6 +4992,8 @@ html[data-theme="dark"] .ssh-security-note{background:rgba(59,130,246,.14)}
   html.hide-tool-mapProtectionZones .map-toolvis-protection-zones,
   html.hide-tool-mapParkingFees .map-toolvis-parking-fees,
   html.hide-tool-mapEvChargers .map-toolvis-ev-chargers,
+  html.hide-tool-mapRoadIncidents .map-toolvis-road-incidents,
+  html.hide-tool-mapRestAreas .map-toolvis-rest-areas,
   html.hide-tool-mapTransit .map-toolvis-transit,
   html.hide-tool-musicTempo .music-toolvis-tempo,
   html.hide-tool-musicTime .music-toolvis-time,
@@ -9785,11 +9787,14 @@ html[data-theme="dark"] .map-train-time{color:#93c5fd}
 .map-zone-go-name{font-weight:700;overflow-wrap:anywhere}
 .map-zone-go-meta{margin-top:3px;font-size:11px;opacity:.8;overflow-wrap:anywhere}
 .map-zone-empty{padding:8px;font-size:12px;color:var(--muted)}
-.map-zone-card{max-width:270px;padding-left:9px;border-left:4px solid var(--zone-color,#147fa8);font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+/* 폭을 정해 둔다. 이름표는 폭 0인 층에 떠 있고, 팝업은 내용 폭을 재서 창 폭을 정하는데
+   overflow-wrap:anywhere 인 카드는 잴 때 거의 0이 되어 둘 다 한 글자씩 줄이 바뀐다(돌발·통제 카드도 이 틀을 쓴다). */
+.map-zone-card{width:280px;max-width:calc(100vw - 64px);box-sizing:border-box;padding-left:9px;border-left:4px solid var(--zone-color,#147fa8);font-size:12px;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
 .map-zone-card>strong{display:block;margin-bottom:6px;font-size:15px;font-weight:800}
 .map-zone-card p{margin:5px 0}
 .map-zone-badge{display:inline-block;padding:2px 7px;border:1px solid var(--zone-color,#147fa8);border-radius:99px;color:var(--zone-color,#147fa8);font-size:11px;font-weight:700}
 .map-zone-key{opacity:.75}
+.map-zone-tooltip .map-zone-card{width:260px}
 .leaflet-tooltip.map-zone-tooltip{padding:10px 12px;border:1px solid #dce4e9;border-radius:10px;background:#fff;color:#24323f;box-shadow:0 5px 16px #172e4322;white-space:normal}
 .leaflet-tooltip-top.map-zone-tooltip:before{border-top-color:#fff}
 .leaflet-tooltip-bottom.map-zone-tooltip:before{border-bottom-color:#fff}
@@ -9837,9 +9842,40 @@ html[data-theme="dark"] .map-train-time{color:#93c5fd}
 .map-ev-card p{margin:6px 0}.map-ev-key{display:inline-block;margin-right:6px;opacity:.75}
 .map-ev-charger{margin-top:9px;padding-top:9px;border-top:1px solid #dce4e9}.map-ev-charger>strong{font-size:12px}
 .map-ev-popup .leaflet-popup-content{overscroll-behavior:contain}
+.map-ev-tooltip .map-ev-card{width:260px;max-width:calc(100vw - 64px)}   /* 이름표 폭은 돌발·통제·보호구역과 맞춘다 */
 .leaflet-tooltip.map-ev-tooltip{padding:12px;border:1px solid #dce4e9;border-radius:11px;background:#fff;color:#24323f;box-shadow:0 5px 16px #172e4322;white-space:normal}
 .leaflet-tooltip-top.map-ev-tooltip:before{border-top-color:#fff}
 .leaflet-tooltip-bottom.map-ev-tooltip:before{border-bottom-color:#fff}
+/* 서울 돌발·통제 — 보호구역 패널·카드 틀을 같이 쓰고 갈래 색만 --zone-color 로 바꾼다. */
+.map-incident-panel{width:400px;max-width:calc(100% - 24px)}
+.map-incident-panel[hidden]{display:none}
+.map-incident-count{font-variant-numeric:tabular-nums;opacity:.7}
+.map-incident-upcoming{flex-basis:100%}
+.map-incident-badges{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-bottom:6px}
+.map-incident-kind{font-size:11px;opacity:.75}
+.map-incident-full{padding:2px 7px;border-radius:99px;background:#1f2937;color:#fff;font-size:11px;font-weight:700}
+.map-incident-phase{padding:2px 7px;border:1px dashed currentColor;border-radius:99px;font-size:11px;opacity:.8}
+.map-incident-card p{white-space:pre-line}
+.map-incident-until{font-weight:700;color:var(--zone-color,#d97706)}
+/* 고속도로 휴게소 — 보호구역 패널·카드 틀을 같이 쓴다. 음식은 연 뒤에 채우므로 높이 제한은 여기서 둔다. */
+.map-rest-panel{width:400px;max-width:calc(100% - 24px)}
+.map-rest-panel[hidden]{display:none}
+.map-rest-count{font-variant-numeric:tabular-nums;opacity:.7}
+.map-rest-route{max-width:150px}
+.map-rest-badges{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-bottom:6px}
+.map-rest-where{font-size:11px;opacity:.75}
+.map-rest-flag{padding:2px 7px;border:1px solid currentColor;border-radius:99px;font-size:11px;opacity:.8}
+.map-rest-popup .leaflet-popup-content{max-height:420px;overflow-y:auto;overscroll-behavior:contain}
+.map-rest-tooltip .map-zone-card{width:260px}
+.map-rest-section{margin-top:9px;padding-top:9px;border-top:1px solid #dce4e9}
+.map-rest-section>strong{display:block;margin-bottom:4px;font-size:12px}
+.map-rest-foods{margin:0;padding:0;list-style:none}
+.map-rest-foods li{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;padding:2px 0}
+.map-rest-food{font-weight:600}
+.map-rest-tag{padding:0 6px;border-radius:99px;background:var(--zone-color,#15803d);color:#fff;font-size:10px;font-weight:700}
+.map-rest-price{margin-left:auto;font-variant-numeric:tabular-nums;opacity:.8}
+.map-rest-theme{display:flex;flex-direction:column;gap:2px;white-space:pre-line}
+.map-rest-muted{font-size:11px;opacity:.7}
 /* 관광·축제 — 관광은 청록색, 축제는 보라색. */
 .map-tour-panel[hidden],.map-tour-filters[hidden],.map-tour-details[hidden],.map-tour-search[hidden]{display:none}
 .map-tour-modes{display:flex;gap:6px;margin:6px 0 10px}
@@ -9862,9 +9898,6 @@ html[data-theme="dark"] .map-train-time{color:#93c5fd}
 .map-tour-detail-row>span:last-child{min-width:0}
 .map-tour-overview{white-space:pre-line;line-height:1.6;overflow-wrap:anywhere}
 .map-tour-homepage{display:inline-block;margin:4px 0}
-.map-tour-popup{font:12px/1.5 sans-serif;min-width:200px;max-width:280px}
-.map-tour-popup-name{display:block;font-size:14px;margin-bottom:6px;overflow-wrap:anywhere}
-.map-tour-popup .map-btn{margin-top:7px}
 .leaflet-tooltip.map-tour-tooltip{padding:0;border:1px solid #d8dee5;border-radius:12px;background:#fff;color:#243341;box-shadow:0 4px 18px #1523332b;white-space:normal;pointer-events:none}
 .map-tour-tooltip.leaflet-tooltip-top:before{border-top-color:#fff}
 .map-tour-tip{--tour-accent:#1684a0;--tour-tint:#ecf6f8;width:270px;max-width:calc(100vw - 48px);font:12px/1.45 "Malgun Gothic",system-ui,sans-serif;overflow-wrap:anywhere}

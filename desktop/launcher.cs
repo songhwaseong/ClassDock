@@ -994,6 +994,8 @@ class ClassDockLauncher
             if (path.StartsWith("/map-search-provider", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/exchange-rate-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/subway-key", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/seoul-open-key", StringComparison.Ordinal)) return true;
+            if (path.StartsWith("/expressway-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/jeju-bus-catalog", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/tago-key", StringComparison.Ordinal)) return true;
             if (path.StartsWith("/kosis-key", StringComparison.Ordinal)) return true;
@@ -1051,12 +1053,16 @@ class ClassDockLauncher
             if (path == "/can-proxy-world-wind" || path.StartsWith("/world-wind-", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-subway" || path == "/subway-key-status") return true;
             if (path.StartsWith("/subway-position?", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-seoul-open" || path == "/seoul-open-key-status" || path.StartsWith("/road-incidents?", StringComparison.Ordinal)) return true;
+            if (path == "/can-proxy-expressway" || path == "/expressway-key-status" || path.StartsWith("/rest-areas?", StringComparison.Ordinal)) return true;
             if (path == "/tago-key-status") return true;
             if (path == "/can-proxy-kosis" || path == "/kosis-key-status" || path.StartsWith("/kosis?", StringComparison.Ordinal)) return true;
             if (path == "/can-proxy-neis" || path == "/neis-key-status" || path.StartsWith("/neis?", StringComparison.Ordinal)) return true;
         }
         if (method == "DELETE" && (path == "/map-search-key" || path == "/exchange-rate-key")) return true;
         if (method == "DELETE" && path == "/subway-key") return true;
+        if (method == "DELETE" && path == "/seoul-open-key") return true;
+        if (method == "DELETE" && path == "/expressway-key") return true;
         if (method == "DELETE" && path == "/tago-key") return true;
         if (method == "DELETE" && path == "/kosis-key") return true;
         if (method == "DELETE" && path == "/neis-key") return true;
@@ -3805,6 +3811,121 @@ class ClassDockLauncher
                     WriteResponse(stream, subwayKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
                         Encoding.UTF8.GetBytes(subwayKeyCleared ? "ok" : "subway-key-clear-failed"));
                 }
+                else if (method == "GET" && path == "/can-proxy-seoul-open")
+                {
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path.StartsWith("/road-incidents?", StringComparison.Ordinal))
+                {
+                    string incidentKind = (QueryValue(path, "kind") ?? "").Trim();
+                    int incidentPage;
+                    if ((incidentKind != "info" && incidentKind != "main" && incidentKind != "sub")
+                        || !int.TryParse((QueryValue(path, "page") ?? "1").Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out incidentPage)
+                        || incidentPage < 1 || incidentPage > SeoulOpenMaxPages)
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("seoul-bad-request"));
+                        return;
+                    }
+                    // 갱신 단추는 3분 묶음을 건너뛴다(코드표는 그대로 둔다).
+                    bool incidentForce = QueryValue(path, "refresh") == "1" && incidentKind == "info";
+                    byte[] incidentData; DateTime incidentAt; bool incidentStale; string incidentError;
+                    if (TryRoadIncidents(incidentKind, incidentPage, incidentForce, out incidentData, out incidentAt, out incidentStale, out incidentError))
+                        WriteResponse(stream, "200 OK", "application/xml; charset=utf-8", incidentData,
+                            "X-ClassDock-Fetched-At: " + incidentAt.ToString("o", CultureInfo.InvariantCulture) + "\r\n"
+                            + (incidentStale ? "X-ClassDock-Stale: 1\r\n" : ""));
+                    else
+                        WriteResponse(stream, incidentError == "seoul-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
+                            "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(incidentError));
+                }
+                else if (method == "GET" && path == "/seoul-open-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(SeoulOpenKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/seoul-open-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string seoulKeyError;
+                    bool seoulKeySaved = TrySetSeoulOpenKey(Encoding.UTF8.GetString(body ?? new byte[0]),
+                        QueryValue(path, "remember") == "1", out seoulKeyError);
+                    WriteResponse(stream, seoulKeySaved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(seoulKeySaved ? "ok" : seoulKeyError));
+                }
+                else if (method == "DELETE" && path == "/seoul-open-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool seoulKeyCleared = ClearSeoulOpenKey();
+                    WriteResponse(stream, seoulKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(seoulKeyCleared ? "ok" : "seoul-key-clear-failed"));
+                }
+                else if (method == "GET" && path == "/can-proxy-expressway")
+                {
+                    WriteResponse(stream, "200 OK", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("yes"));
+                }
+                else if (method == "GET" && path.StartsWith("/rest-areas?", StringComparison.Ordinal))
+                {
+                    string restKind = (QueryValue(path, "kind") ?? "").Trim();
+                    string restCode = (QueryValue(path, "code") ?? "").Trim();
+                    int restPage, restRows;
+                    if (!ValidRestAreaQuery(restKind, QueryValue(path, "page"), QueryValue(path, "rows"), restCode, out restPage, out restRows))
+                    {
+                        WriteResponse(stream, "400 Bad Request", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("expressway-bad-request"));
+                        return;
+                    }
+                    byte[] restData; DateTime restAt; bool restStale; string restError;
+                    if (TryRestAreas(restKind, restPage, restRows, restCode, QueryValue(path, "refresh") == "1", out restData, out restAt, out restStale, out restError))
+                        WriteResponse(stream, "200 OK", "application/json; charset=utf-8", restData,
+                            "X-ClassDock-Fetched-At: " + restAt.ToString("o", CultureInfo.InvariantCulture) + "\r\n"
+                            + (restStale ? "X-ClassDock-Stale: 1\r\n" : ""));
+                    else
+                        WriteResponse(stream, restError == "expressway-key-required" ? "428 Precondition Required" : "502 Bad Gateway",
+                            "text/plain; charset=utf-8", Encoding.UTF8.GetBytes(restError));
+                }
+                else if (method == "GET" && path == "/expressway-key-status")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    WriteResponse(stream, "200 OK", "application/json; charset=utf-8", Encoding.UTF8.GetBytes(ExpresswayKeyStatusJson()));
+                }
+                else if (method == "POST" && path.StartsWith("/expressway-key", StringComparison.Ordinal))
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    string expresswayKeyError;
+                    bool expresswayKeySaved = TrySetExpresswayKey(Encoding.UTF8.GetString(body ?? new byte[0]),
+                        QueryValue(path, "remember") == "1", out expresswayKeyError);
+                    WriteResponse(stream, expresswayKeySaved ? "200 OK" : "400 Bad Request", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(expresswayKeySaved ? "ok" : expresswayKeyError));
+                }
+                else if (method == "DELETE" && path == "/expressway-key")
+                {
+                    if (!HasLocalActionHeader(headers))
+                    {
+                        WriteResponse(stream, "403 Forbidden", "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("action-header-required"));
+                        return;
+                    }
+                    bool expresswayKeyCleared = ClearExpresswayKey();
+                    WriteResponse(stream, expresswayKeyCleared ? "200 OK" : "500 Internal Server Error", "text/plain; charset=utf-8",
+                        Encoding.UTF8.GetBytes(expresswayKeyCleared ? "ok" : "expressway-key-clear-failed"));
+                }
                 else if (method == "GET" && path == "/can-proxy-rates")
                 {
                     // 환율 창이 "이 런처가 환율을 대신 받아 주는가" 를 묻는 자리. 타일 프록시와 다른 능력이라
@@ -5882,6 +6003,413 @@ class ClassDockLauncher
         if (stored != null && DateTime.UtcNow - stored.AtUtc < SubwayStaleMaxAge)
         {
             data = stored.Data; cached = true; error = "";
+            return true;
+        }
+        error = fetchError;
+        return false;
+    }
+
+    /* ===== 서울 열린데이터광장 일반 인증키 · 서울시 실시간 돌발정보 =====
+       지하철 실시간 키(swopenapi)와는 종류가 다른 키다 — openapi.seoul.go.kr:8088 은 '일반 인증키' 만 받는다.
+       돌발정보(AccInfo)는 JSON 을 거절하고(ERROR-301) XML 로만 준다. 뜻풀이는 화면(road-incidents.js) 한 곳에서 한다.
+         info = AccInfo(돌발 목록, 1,000줄씩)   main = AccMainCode(유형 이름)   sub = AccSubCode(세부 유형 이름)
+       이 API 도 오류를 HTTP 200 본문의 <CODE> 로 알린다. INFO-000 정상 · INFO-200 자료 없음 · INFO-100 키 오류. */
+    const string SeoulOpenEndpoint = "http://openapi.seoul.go.kr:8088/";
+    const int SeoulOpenPageRows = 1000;          // 이 API 가 한 번에 주는 최대 줄 수
+    const int SeoulOpenMaxPages = 5;
+    const long SeoulOpenMaxBytes = 4 * 1024 * 1024;
+    static readonly TimeSpan RoadIncidentCacheMaxAge = TimeSpan.FromMinutes(3);
+    static readonly TimeSpan RoadIncidentStaleMaxAge = TimeSpan.FromMinutes(30);
+    static readonly TimeSpan RoadIncidentCodeMaxAge = TimeSpan.FromDays(1);
+    static readonly object SeoulOpenCacheLock = new object();
+    static readonly Dictionary<string, SubwayCacheEntry> SeoulOpenCache = new Dictionary<string, SubwayCacheEntry>();
+
+    static readonly object SeoulOpenKeyLock = new object();
+    static readonly byte[] SeoulOpenKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.SeoulOpenKey.v1");
+    static readonly string SeoulOpenKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "seoul-open-key.bin");
+    static bool SeoulOpenKeyLoaded;
+    static string SeoulOpenKey = "";
+
+    static string CurrentSeoulOpenKey()
+    {
+        lock (SeoulOpenKeyLock)
+        {
+            if (!SeoulOpenKeyLoaded)
+            {
+                SeoulOpenKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(SeoulOpenKeyFile))
+                    {
+                        byte[] plain = ProtectedData.Unprotect(File.ReadAllBytes(SeoulOpenKeyFile), SeoulOpenKeyEntropy, DataProtectionScope.CurrentUser);
+                        string key = Encoding.UTF8.GetString(plain).Trim();
+                        if (ValidSubwayKey(key)) SeoulOpenKey = key;   // 같은 발급처라 글자 규칙이 같다
+                    }
+                }
+                catch { SeoulOpenKey = ""; }
+            }
+            return SeoulOpenKey;
+        }
+    }
+    static bool SeoulOpenKeyRemembered()
+    {
+        try { return File.Exists(SeoulOpenKeyFile) && CurrentSeoulOpenKey().Length > 0; }
+        catch { return false; }
+    }
+    static string SeoulOpenKeyStatusJson()
+    {
+        return "{\"hasKey\":" + (CurrentSeoulOpenKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (SeoulOpenKeyRemembered() ? "true" : "false")
+            + ",\"persistentSupported\":true}";
+    }
+    static bool SaveProtectedSeoulOpenKey(string key)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(SeoulOpenKeyFile));
+            byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), SeoulOpenKeyEntropy, DataProtectionScope.CurrentUser);
+            string temp = SeoulOpenKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            File.WriteAllBytes(temp, encrypted);
+            if (File.Exists(SeoulOpenKeyFile)) File.Delete(SeoulOpenKeyFile);
+            File.Move(temp, SeoulOpenKeyFile);
+            return true;
+        }
+        catch { return false; }
+    }
+    static bool ClearSeoulOpenKey()
+    {
+        lock (SeoulOpenKeyLock)
+        {
+            SeoulOpenKeyLoaded = true;
+            SeoulOpenKey = "";
+            try { if (File.Exists(SeoulOpenKeyFile)) File.Delete(SeoulOpenKeyFile); }
+            catch { return false; }
+        }
+        lock (SeoulOpenCacheLock) SeoulOpenCache.Clear();
+        return true;
+    }
+    static bool TrySetSeoulOpenKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "seoul-key-invalid";
+        if (!ValidSubwayKey(key)) return false;
+        // 시험 조회는 가장 작은 유형 코드표 한 줄로 건다. 지하철 실시간 키를 넣으면 여기서 INFO-100 이 온다.
+        byte[] probe; string fetchError;
+        if (!TryFetchSeoulOpen("AccMainCode", 1, 1, key, out probe, out fetchError)) { error = fetchError; return false; }
+        string previous = CurrentSeoulOpenKey();
+        lock (SeoulOpenKeyLock)
+        {
+            if (remember)
+            {
+                if (!SaveProtectedSeoulOpenKey(key)) { SeoulOpenKey = previous; error = "seoul-key-save-failed"; return false; }
+            }
+            else
+            {
+                try { if (File.Exists(SeoulOpenKeyFile)) File.Delete(SeoulOpenKeyFile); }
+                catch { SeoulOpenKey = previous; error = "seoul-key-save-failed"; return false; }
+            }
+            SeoulOpenKeyLoaded = true;
+            SeoulOpenKey = key;
+        }
+        lock (SeoulOpenCacheLock) SeoulOpenCache.Clear();   // 앞 키로 받은 것을 새 키 결과처럼 내주지 않는다
+        error = "";
+        return true;
+    }
+
+    static string SeoulOpenResultCode(byte[] data)
+    {
+        string text = Encoding.UTF8.GetString(data ?? new byte[0]);
+        System.Text.RegularExpressions.Match match = System.Text.RegularExpressions.Regex.Match(text, "<CODE>\\s*([A-Z]+-\\d+)\\s*</CODE>");
+        return match.Success ? match.Groups[1].Value : "";
+    }
+
+    static bool TryFetchSeoulOpen(string service, int start, int end, string key, out byte[] data, out string error)
+    {
+        data = null; error = "seoul-failed";
+        try
+        {
+            string url = SeoulOpenEndpoint + Uri.EscapeDataString(key) + "/xml/" + service + "/"
+                + start.ToString(CultureInfo.InvariantCulture) + "/" + end.ToString(CultureInfo.InvariantCulture) + "/";
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";
+            request.Accept = "application/xml";
+            request.Timeout = 15000;
+            request.ReadWriteTimeout = 15000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream body = response.GetResponseStream())
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                byte[] chunk = new byte[8192];
+                int read; long total = 0;
+                while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    total += read;
+                    if (total > SeoulOpenMaxBytes) { error = "seoul-too-large"; return false; }
+                    buffer.Write(chunk, 0, read);
+                }
+                data = buffer.ToArray();
+            }
+            string code = SeoulOpenResultCode(data);
+            if (code == "INFO-000" || code == "INFO-200") { error = ""; return true; }
+            data = null;
+            error = code == "INFO-100" ? "seoul-key-invalid" : "seoul-failed";
+            return false;
+        }
+        catch { data = null; return false; }
+    }
+
+    /* 캐시 → 새로 받기 → 실패하면 30분 안쪽 앞 자료(stale 표시). 코드표는 하루 묶어 둔다.
+       여러 화면이 같은 서울 전역 목록을 보므로 키는 kind·page 뿐이다. */
+    static bool TryRoadIncidents(string kind, int page, bool force, out byte[] data, out DateTime fetchedAtUtc, out bool stale, out string error)
+    {
+        data = null; fetchedAtUtc = DateTime.UtcNow; stale = false; error = "seoul-failed";
+        string key = CurrentSeoulOpenKey();
+        if (key.Length == 0) { error = "seoul-key-required"; return false; }
+        string service = kind == "main" ? "AccMainCode" : kind == "sub" ? "AccSubCode" : "AccInfo";
+        TimeSpan maxAge = kind == "info" ? RoadIncidentCacheMaxAge : RoadIncidentCodeMaxAge;
+        string cacheKey = kind + ":" + page.ToString(CultureInfo.InvariantCulture);
+        SubwayCacheEntry stored = null;
+        lock (SeoulOpenCacheLock) SeoulOpenCache.TryGetValue(cacheKey, out stored);
+        if (stored != null && !force && DateTime.UtcNow - stored.AtUtc < maxAge)
+        {
+            data = stored.Data; fetchedAtUtc = stored.AtUtc; error = "";
+            return true;
+        }
+        byte[] fetched; string fetchError;
+        if (TryFetchSeoulOpen(service, (page - 1) * SeoulOpenPageRows + 1, page * SeoulOpenPageRows, key, out fetched, out fetchError))
+        {
+            DateTime now = DateTime.UtcNow;
+            lock (SeoulOpenCacheLock) SeoulOpenCache[cacheKey] = new SubwayCacheEntry(fetched, now);
+            data = fetched; fetchedAtUtc = now; error = "";
+            return true;
+        }
+        if (stored != null && fetchError != "seoul-key-invalid" && DateTime.UtcNow - stored.AtUtc < (kind == "info" ? RoadIncidentStaleMaxAge : RoadIncidentCodeMaxAge + RoadIncidentCodeMaxAge))
+        {
+            data = stored.Data; fetchedAtUtc = stored.AtUtc; stale = true; error = "";
+            return true;
+        }
+        error = fetchError;
+        return false;
+    }
+
+    /* ===== 한국도로공사 고속도로 공공데이터 포털(data.ex.co.kr) · 고속도로 휴게소 =====
+       공공데이터포털 키와는 다른 키다(data.go.kr 에는 'LINK' 로만 올라와 있어 거기서 활용신청이 안 된다).
+       응답은 {count, list, pageNo, numOfRows, pageSize, message, code} 꼴이고 오류도 HTTP 200 본문의 code 로 알린다.
+         code "SUCCESS" 정상 · "ERROR" + "인증키가 유효하지 않습니다." 키 오류 · "ERROR" + "인증키콜수제한" 호출 한도
+       2026-10-10 실제 키로 확인한 것:
+         - numOfRows 를 얼마로 주든 한 번에 99줄까지만 온다.
+         - 편의시설 목록(conveniServiceArea)의 145번째 줄은 늘 서버 오류를 낸다(HTTP 200). Accept 가 JSON 이면
+           code 없는 {"exception":{… NumberFormatException …}} 을, 아니면 HTML 오류 화면을 준다. 그 줄이 든 쪽이
+           통째로 실패하므로 이런 답은 'expressway-bad-page' 로 알리고, 화면이 쪽을 잘게 쪼개 다시 묻는다
+           (99 → 11 → 1줄. 99 = 9×11 이라 쪽 경계가 맞는다).
+         - curl 기본 User-Agent 는 방화벽이 'Request Blocked' 로 막는다. 아래 식별 User-Agent 는 통과한다.
+       뜻풀이·합치기는 화면(rest-areas.js) 한 곳에서 한다. */
+    const string ExpresswayEndpoint = "https://data.ex.co.kr/openapi/";
+    const long ExpresswayMaxBytes = 2 * 1024 * 1024;
+    const int ExpresswayMaxRow = 3000;          // 쪽 × 줄 수 상한(음식 목록이 7천 줄이라 그 전체는 받지 않는다)
+    static readonly TimeSpan RestAreaListMaxAge = TimeSpan.FromDays(1);
+    static readonly TimeSpan RestAreaGasMaxAge = TimeSpan.FromMinutes(30);
+    static readonly TimeSpan RestAreaStaleMaxAge = TimeSpan.FromDays(7);
+    static readonly object ExpresswayCacheLock = new object();
+    static readonly Dictionary<string, SubwayCacheEntry> ExpresswayCache = new Dictionary<string, SubwayCacheEntry>();
+
+    static readonly object ExpresswayKeyLock = new object();
+    static readonly byte[] ExpresswayKeyEntropy = Encoding.UTF8.GetBytes("ClassDock.ExpresswayKey.v1");
+    static readonly string ExpresswayKeyFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ClassDock", "expressway-key.bin");
+    static bool ExpresswayKeyLoaded;
+    static string ExpresswayKey = "";
+
+    // 발급 키는 숫자 10자리였다. 앞으로 꼴이 바뀌어도 받게 영숫자 6~64자로 둔다.
+    static bool ValidExpresswayKey(string value)
+    {
+        string key = (value ?? "").Trim();
+        if (key.Length < 6 || key.Length > 64) return false;
+        foreach (char ch in key)
+            if (!(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z')) return false;
+        return true;
+    }
+    static string CurrentExpresswayKey()
+    {
+        lock (ExpresswayKeyLock)
+        {
+            if (!ExpresswayKeyLoaded)
+            {
+                ExpresswayKeyLoaded = true;
+                try
+                {
+                    if (File.Exists(ExpresswayKeyFile))
+                    {
+                        byte[] plain = ProtectedData.Unprotect(File.ReadAllBytes(ExpresswayKeyFile), ExpresswayKeyEntropy, DataProtectionScope.CurrentUser);
+                        string key = Encoding.UTF8.GetString(plain).Trim();
+                        if (ValidExpresswayKey(key)) ExpresswayKey = key;
+                    }
+                }
+                catch { ExpresswayKey = ""; }
+            }
+            return ExpresswayKey;
+        }
+    }
+    static bool ExpresswayKeyRemembered()
+    {
+        try { return File.Exists(ExpresswayKeyFile) && CurrentExpresswayKey().Length > 0; }
+        catch { return false; }
+    }
+    static string ExpresswayKeyStatusJson()
+    {
+        return "{\"hasKey\":" + (CurrentExpresswayKey().Length > 0 ? "true" : "false")
+            + ",\"remembered\":" + (ExpresswayKeyRemembered() ? "true" : "false")
+            + ",\"persistentSupported\":true}";
+    }
+    static bool SaveProtectedExpresswayKey(string key)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ExpresswayKeyFile));
+            byte[] encrypted = ProtectedData.Protect(Encoding.UTF8.GetBytes(key), ExpresswayKeyEntropy, DataProtectionScope.CurrentUser);
+            string temp = ExpresswayKeyFile + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".tmp";
+            File.WriteAllBytes(temp, encrypted);
+            if (File.Exists(ExpresswayKeyFile)) File.Delete(ExpresswayKeyFile);
+            File.Move(temp, ExpresswayKeyFile);
+            return true;
+        }
+        catch { return false; }
+    }
+    static bool ClearExpresswayKey()
+    {
+        lock (ExpresswayKeyLock)
+        {
+            ExpresswayKeyLoaded = true;
+            ExpresswayKey = "";
+            try { if (File.Exists(ExpresswayKeyFile)) File.Delete(ExpresswayKeyFile); }
+            catch { return false; }
+        }
+        lock (ExpresswayCacheLock) ExpresswayCache.Clear();
+        return true;
+    }
+    static bool TrySetExpresswayKey(string value, bool remember, out string error)
+    {
+        string key = (value ?? "").Trim();
+        error = "expressway-key-invalid";
+        if (!ValidExpresswayKey(key)) return false;
+        // 시험 조회는 휴게소 위치 한 줄로 건다.
+        byte[] probe; string fetchError;
+        if (!TryFetchExpressway("loc", 1, 1, "", key, out probe, out fetchError)) { error = fetchError; return false; }
+        string previous = CurrentExpresswayKey();
+        lock (ExpresswayKeyLock)
+        {
+            if (remember)
+            {
+                if (!SaveProtectedExpresswayKey(key)) { ExpresswayKey = previous; error = "expressway-key-save-failed"; return false; }
+            }
+            else
+            {
+                try { if (File.Exists(ExpresswayKeyFile)) File.Delete(ExpresswayKeyFile); }
+                catch { ExpresswayKey = previous; error = "expressway-key-save-failed"; return false; }
+            }
+            ExpresswayKeyLoaded = true;
+            ExpresswayKey = key;
+        }
+        lock (ExpresswayCacheLock) ExpresswayCache.Clear();   // 앞 키로 받은 것을 새 키 결과처럼 내주지 않는다
+        error = "";
+        return true;
+    }
+
+    /* 정해 둔 조회만 받는다. code 는 휴게소 표준 코드(숫자 6자리)이고 음식·테마에만 쓴다. */
+    static bool ValidRestAreaQuery(string kind, string pageText, string rowsText, string code, out int page, out int rows)
+    {
+        page = 0; rows = 0;
+        if (kind != "loc" && kind != "conveni" && kind != "gas" && kind != "food" && kind != "theme") return false;
+        if (!int.TryParse((pageText ?? "1").Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out page) || page < 1) return false;
+        if (!int.TryParse((rowsText ?? "99").Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out rows) || (rows != 1 && rows != 11 && rows != 99)) return false;
+        if ((long)page * rows > ExpresswayMaxRow) return false;
+        bool keyed = kind == "food" || kind == "theme";
+        if (keyed != (code.Length > 0)) return false;
+        if (keyed && !System.Text.RegularExpressions.Regex.IsMatch(code, "^[0-9]{6}$")) return false;
+        return true;
+    }
+
+    static bool TryFetchExpressway(string kind, int page, int rows, string code, string key, out byte[] data, out string error)
+    {
+        data = null; error = "expressway-failed";
+        string service = kind == "loc" ? "locationinfo/locationinfoRest"
+            : kind == "conveni" ? "business/conveniServiceArea"
+            : kind == "gas" ? "business/curStateStation"
+            : kind == "food" ? "restinfo/restBestfoodList" : "restinfo/restThemeList";
+        try
+        {
+            string url = ExpresswayEndpoint + service + "?key=" + Uri.EscapeDataString(key) + "&type=json"
+                + "&numOfRows=" + rows.ToString(CultureInfo.InvariantCulture) + "&pageNo=" + page.ToString(CultureInfo.InvariantCulture)
+                + (code.Length > 0 ? "&stdRestCd=" + code : "");
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = "ClassDock/1.0 (local classroom app; https://github.com/songhwaseong/ClassDock)";
+            request.Accept = "application/json";
+            request.Timeout = 15000;
+            request.ReadWriteTimeout = 15000;
+            using (WebResponse response = request.GetResponse())
+            using (Stream body = response.GetResponseStream())
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                byte[] chunk = new byte[8192];
+                int read; long total = 0;
+                while ((read = body.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    total += read;
+                    if (total > ExpresswayMaxBytes) { error = "expressway-too-large"; return false; }
+                    buffer.Write(chunk, 0, read);
+                }
+                data = buffer.ToArray();
+            }
+            string text = Encoding.UTF8.GetString(data).TrimStart();
+            if (!text.StartsWith("{", StringComparison.Ordinal)) { data = null; error = "expressway-bad-page"; return false; }
+            if (System.Text.RegularExpressions.Regex.IsMatch(text, "\"code\"\\s*:\\s*\"SUCCESS\"")) { error = ""; return true; }
+            if (!System.Text.RegularExpressions.Regex.IsMatch(text, "\"code\"\\s*:\\s*\"")) { data = null; error = "expressway-bad-page"; return false; }
+            data = null;
+            error = text.Contains("유효하지") ? "expressway-key-invalid" : text.Contains("콜수") ? "expressway-quota" : "expressway-failed";
+            return false;
+        }
+        catch (WebException ex)
+        {
+            // 서버 오류 화면이 HTTP 500 으로 올 때도 같은 뜻(그 쪽만 망가짐)으로 알린다.
+            HttpWebResponse failed = ex.Response as HttpWebResponse;
+            if (failed != null && (int)failed.StatusCode >= 500) error = "expressway-bad-page";
+            data = null; return false;
+        }
+        catch { data = null; return false; }
+    }
+
+    /* 캐시 → 새로 받기 → 실패하면 이레 안쪽 앞 자료(stale 표시). 주유 가격만 30분, 나머지는 하루 묶어 둔다.
+       쪽이 망가진 것(bad-page)과 키 오류는 앞 자료로 덮지 않는다 — 화면이 쪼개 묻거나 안내해야 한다. */
+    static bool TryRestAreas(string kind, int page, int rows, string code, bool force, out byte[] data, out DateTime fetchedAtUtc, out bool stale, out string error)
+    {
+        data = null; fetchedAtUtc = DateTime.UtcNow; stale = false; error = "expressway-failed";
+        string key = CurrentExpresswayKey();
+        if (key.Length == 0) { error = "expressway-key-required"; return false; }
+        TimeSpan maxAge = kind == "gas" ? RestAreaGasMaxAge : RestAreaListMaxAge;
+        string cacheKey = kind + ":" + page.ToString(CultureInfo.InvariantCulture) + ":" + rows.ToString(CultureInfo.InvariantCulture) + ":" + code;
+        SubwayCacheEntry stored = null;
+        lock (ExpresswayCacheLock) ExpresswayCache.TryGetValue(cacheKey, out stored);
+        if (stored != null && !force && DateTime.UtcNow - stored.AtUtc < maxAge)
+        {
+            data = stored.Data; fetchedAtUtc = stored.AtUtc; error = "";
+            return true;
+        }
+        byte[] fetched; string fetchError;
+        if (TryFetchExpressway(kind, page, rows, code, key, out fetched, out fetchError))
+        {
+            DateTime now = DateTime.UtcNow;
+            lock (ExpresswayCacheLock)
+            {
+                if (ExpresswayCache.Count > 600) ExpresswayCache.Clear();   // 음식·테마는 누른 휴게소마다 하나씩 쌓인다
+                ExpresswayCache[cacheKey] = new SubwayCacheEntry(fetched, now);
+            }
+            data = fetched; fetchedAtUtc = now; error = "";
+            return true;
+        }
+        if (stored != null && fetchError != "expressway-key-invalid" && fetchError != "expressway-bad-page" && DateTime.UtcNow - stored.AtUtc < RestAreaStaleMaxAge)
+        {
+            data = stored.Data; fetchedAtUtc = stored.AtUtc; stale = true; error = "";
             return true;
         }
         error = fetchError;

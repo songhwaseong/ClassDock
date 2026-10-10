@@ -213,6 +213,8 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
     protectionZones:{captureNote:()=>"protection zones snapshot"},
     parkingFees:{captureNote:()=>"parking fees snapshot"},
     evChargers:{captureNote:()=>"ev chargers snapshot"},
+    roadIncidents:{captureNote:()=>"road incidents snapshot"},
+    restAreas:{captureNote:()=>"rest areas snapshot"},
     mapCaptureDataUrl:async(stage,attribution,labels)=>{
       assert.equal(busFrozen,true); assert.match(attribution,/bus snapshot/);
       assert.equal(windFrozen,true); assert.match(attribution,/wind snapshot/);
@@ -220,6 +222,8 @@ test("공용 출력 경로는 반경 요약을 담고 성공·실패 모두 출�
       assert.match(attribution,/protection zones snapshot/);
       assert.match(attribution,/parking fees snapshot/);
       assert.match(attribution,/ev chargers snapshot/);
+      assert.match(attribution,/road incidents snapshot/);
+      assert.match(attribution,/rest areas snapshot/);
       assert.match(attribution,/KTX station snapshot/);
       assert.ok(labels.some(label=>label.text==="부산역"));
       const summary=vm.runInContext("radiusExport",context);

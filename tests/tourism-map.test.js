@@ -37,8 +37,9 @@ function harness(fetch = defaultFetch){
       bindTooltip(fn){ this.tip = () => { if (this.currentTip) this.currentTip.isConnected = false; const card = fn(); card.isConnected = true; this.currentTip = card; return card; }; return this; },
       // Leaflet의 update()는 내용 함수를 다시 호출하고 setLatLng()는 현재 내용의 위치만 바꾼다.
       getTooltip(){ return { update:() => { this.positionUpdates++; this.tip(); }, getLatLng:() => this.point,
-        setLatLng:point => { this.positionUpdates++; this.positionPoint = point; }, getElement:() => ({ contains:n => n === this.currentTip }) }; }, bindPopup(fn){ this.popup = fn; return this; },
-      addTo(g){ g.items.push(this); return this; }, on(k, fn){ this.events[k] = fn; return this; }, openPopup(){ this.opened = true; } }) };
+        setLatLng:point => { this.positionUpdates++; this.positionPoint = point; }, getElement:() => ({ contains:n => n === this.currentTip }) }; },
+      setStyle(style){ Object.assign(this.options, style); }, bringToFront(){ this.front = true; },
+      addTo(g){ g.items.push(this); return this; }, on(k, fn){ this.events[k] = fn; return this; } }) };
   const map = { createPane:() => node("pane"), getZoom:() => 8, setView(point, zoom){ views.push([point, zoom]); }, fitBounds(points, options){ fits.push({ points, options }); }, closePopup(){},
     getCenter:() => ({ ...center, distanceTo:([lat, lng]) => Math.hypot(lat - center.lat, lng - center.lng) * 111000 }), getBounds:() => ({ contains:inView }),
     removeLayer(g){ g.onMap = false; removed.push(g); }, on(k, fn){ listeners.set(k, fn); }, off(k){ listeners.delete(k); } };
@@ -153,9 +154,16 @@ test("관광 점·가까운 목록·상세·축제 일정·누락 위치·출처
   assert.deepEqual(Array.from(h.group.items[0].point), [37.5665, 126.978]);
   assert.match(h.calls[1].url, /lat=37\.5665&lng=126\.9780&radius=5000&type=12&page=1/);
   h.find("map-tour-list").children[0].children[0].click(); await settle();
-  assert.equal(h.views[0][1], 14); assert.equal(h.group.items[0].opened, true);
+  assert.equal(h.views[0][1], 14); assert.equal(h.group.items[0].popup, undefined);
+  assert.equal(h.group.items[0].options.radius, 9); assert.equal(h.group.items[0].options.bubblingMouseEvents, false);
   assert.match(textOf(h.find("map-tour-details")), /관광지 101.*09:00~18:00.*두 번째 줄/s);
   assert.equal(h.find("map-tour-homepage").href, "https://example.org/visit");
+  h.group.items[1].events.click(); await settle();
+  assert.equal(h.group.items[0].options.radius, 6); assert.equal(h.group.items[1].options.radius, 9); assert.match(textOf(h.find("map-tour-details")), /먼 관광지/);
+  h.find("map-tour-details").children[0].children[1].click(); assert.equal(h.group.items[1].options.radius, 6);
+  h.group.items[0].events.click(); await settle(); assert.equal(h.find("map-tour-details").hidden, false);
+  h.group.items[0].events.click(); assert.equal(h.find("map-tour-details").hidden, true); assert.equal(h.group.items[0].options.radius, 6);
+  h.group.items[0].events.click(); await settle(); assert.equal(h.find("map-tour-details").hidden, false); assert.equal(h.group.items[0].options.radius, 9);
   h.find("map-tour-festivals").click(); await settle();
   assert.equal(h.group.items.length, 2); assert.ok(h.group.items.every(m => m.options.fillColor === "#8b4ec6"));
   assert.match(h.find("map-tour-summary").textContent, /2026\.10\.05.*2026\.10\.11.*3곳.*위치 미등록 1곳/);

@@ -724,6 +724,24 @@
             <div class="settings-row"><span id="settingSubwayStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingSubwayTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingSubwayClear" type="button">키 지우기</button></span></div>
           </div>
         </details>
+        <details class="conn-item" name="settings-conn" data-conn="SeoulOpen">
+          <summary><span class="conn-name">서울 열린데이터(일반)</span><span class="conn-badge" id="settingSeoulOpenBadge" aria-live="polite">확인 중</span></summary>
+          <div class="conn-body map-search-settings" id="settingSeoulOpenKeyWrap">
+            <p class="conn-hint">지도 문서의 '돌발·통제'(서울시 실시간 공사·사고·행사 통제)에 필요합니다. 서울 열린데이터광장(data.seoul.go.kr)에서 무료로 발급받는 일반 인증키이며, 지하철 실시간 인증키와는 다른 키입니다.</p>
+            <label class="settings-row"><span>서울 열린데이터광장 일반 인증키</span><input type="password" id="settingSeoulOpenKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="서울 열린데이터광장 일반 인증키"></label>
+            <label class="settings-check" id="settingSeoulOpenRememberWrap"><input type="checkbox" id="settingSeoulOpenRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+            <div class="settings-row"><span id="settingSeoulOpenStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingSeoulOpenTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingSeoulOpenClear" type="button">키 지우기</button></span></div>
+          </div>
+        </details>
+        <details class="conn-item" name="settings-conn" data-conn="Expressway">
+          <summary><span class="conn-name">한국도로공사(고속도로)</span><span class="conn-badge" id="settingExpresswayBadge" aria-live="polite">확인 중</span></summary>
+          <div class="conn-body map-search-settings" id="settingExpresswayKeyWrap">
+            <p class="conn-hint">지도 문서의 '휴게소'(고속도로 휴게소 위치·대표 음식·편의시설·주유 가격)에 필요합니다. 한국도로공사 고속도로 공공데이터 포털(data.ex.co.kr)에 가입해 무료로 발급받는 키이며, 공공데이터포털(data.go.kr) 키와는 다른 키입니다.</p>
+            <label class="settings-row"><span>고속도로 공공데이터 인증키</span><input type="password" id="settingExpresswayKey" class="pw-input map-search-key-input" autocomplete="off" spellcheck="false" placeholder="인증키 입력" aria-label="고속도로 공공데이터 인증키"></label>
+            <label class="settings-check" id="settingExpresswayRememberWrap"><input type="checkbox" id="settingExpresswayRemember"><span>이 Windows 사용자 계정에 암호화하여 기억</span></label>
+            <div class="settings-row"><span id="settingExpresswayStatus" class="conn-status" aria-live="polite">키 상태 확인 중…</span><span class="settings-inline-actions"><button class="btn" id="settingExpresswayTest" type="button">키 저장·연결 시험</button><button class="btn" id="settingExpresswayClear" type="button">키 지우기</button></span></div>
+          </div>
+        </details>
         <details class="conn-item" name="settings-conn" data-conn="Tago">
           <summary><span class="conn-name">공공데이터포털</span><span class="conn-badge" id="settingTagoBadge" aria-live="polite">확인 중</span></summary>
           <div class="conn-body map-search-settings" id="settingTagoKeyWrap">
@@ -1146,6 +1164,8 @@ window.FileReaderJS = window.FileReaderJS || {
 <script src="src/js/protection-zones.js"></script>
 <script src="src/js/parking-fees.js"></script>
 <script src="src/js/ev-chargers.js"></script>
+<script src="src/js/road-incidents.js"></script>
+<script src="src/js/rest-areas.js"></script>
 <script src="src/js/map-viewer.js"></script>
 <script src="src/js/timeline.js"></script>
 <script src="src/js/concept-doc.js"></script>
